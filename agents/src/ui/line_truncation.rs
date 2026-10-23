@@ -183,17 +183,27 @@ pub(super) fn abbreviate_paths(
         .iter()
         .map(|range| display_width(&text[range.clone()]))
         .sum();
+    let tail_width = display_width(&text[ranges.last().map_or(text.len(), |range| range.end)..]);
     let width = display_width(text).saturating_sub(source_width)
         + paths.iter().map(|path| display_width(path)).sum::<usize>();
     let mut overflow = width.saturating_sub(max_width);
+    // Prose after the last path shrinks a path only down to its file name.
+    let mut path_overflow = width.saturating_sub(tail_width).saturating_sub(max_width);
     for path in paths.iter_mut().rev() {
         if overflow == 0 {
             break;
         }
         let width = display_width(path);
+        let name_width = display_width(path.rsplit('/').next().unwrap_or(path)).min(width);
         // Keep an ellipsis when surrounding prose alone exceeds the row width.
-        let shrunk = abbreviate_path(path, width.saturating_sub(overflow).max(1), None);
-        overflow = overflow.saturating_sub(width.saturating_sub(display_width(&shrunk)));
+        let target = width
+            .saturating_sub(path_overflow)
+            .max(1)
+            .min(width.saturating_sub(overflow).max(name_width));
+        let shrunk = abbreviate_path(path, target, None);
+        let saved = width.saturating_sub(display_width(&shrunk));
+        overflow = overflow.saturating_sub(saved);
+        path_overflow = path_overflow.saturating_sub(saved);
         *path = shrunk;
     }
     let mut fitted = String::new();
@@ -401,6 +411,21 @@ mod tests {
                 "width {width}"
             );
         }
+    }
+
+    #[test]
+    fn suffix_paths_keep_the_name_for_prose_after_the_last_path() {
+        let text = "Reopened /private/jobs/tmp/sed.md. Then a long tail of prose follows here";
+        let cwd = Path::new("/nonexistent");
+        let ranges = crate::ui::paths::text_paths(text, cwd);
+        assert_eq!(
+            abbreviate_paths(text, &ranges, 40, cwd),
+            "Reopened sed.md. Then a long tail of prose follows here"
+        );
+        assert_eq!(
+            abbreviate_paths(text, &ranges, 12, cwd),
+            "Reopened se…. Then a long tail of prose follows here"
+        );
     }
 
     #[test]
