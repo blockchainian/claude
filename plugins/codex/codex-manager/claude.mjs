@@ -58,6 +58,7 @@ async function answerTo(store, threadId, event, cancelled) {
 
 async function callTool({ name, arguments: args = {}, _meta: meta = {} }, cancelled) {
   if (!TOOLS.some((tool) => tool.name === name)) return failed(`unknown tool: ${name}`);
+  if (typeof args.text !== "string" || !args.text.trim()) return failed(`${name} takes its message as the text argument, a non-empty string; got ${JSON.stringify(Object.keys(args))}.`);
   const store = supervisorStore(meta.threadId);
   if (!store) return failed("No Claude session is supervising this thread. Proceed on your own judgment.");
   const event = { turnId: meta["x-codex-turn-metadata"]?.turn_id, callId: meta.callId ?? crypto.randomUUID(), text: args.text ?? "" };
