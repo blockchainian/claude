@@ -92,6 +92,9 @@ impl View {
 
     /// Panel interactions, editors and attention requests share this activation entry point.
     pub(super) fn set_active_panel(&mut self, panel: Panel) {
+        if panel != Panel::EventDetail {
+            self.exit_image_zoom();
+        }
         if panel != self.active_panel
             && self.searching
             && let Some(action) = self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))

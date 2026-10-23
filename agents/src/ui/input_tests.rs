@@ -228,7 +228,7 @@ fn image_mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
         kind,
         column,
         row,
-        modifiers: KeyModifiers::CONTROL,
+        modifiers: KeyModifiers::NONE,
     }
 }
 
@@ -270,59 +270,33 @@ fn drawn_image(view: &View) -> crate::event::ImageBlock {
     image
 }
 
-#[test]
-fn control_image_mouse_outside_image_does_not_scroll_focus_or_select() {
-    let (_directory, mut view) = image_fixture();
-    drawn_image(&view);
-    let list = view.viewport.borrow().list;
-    let panel = view.active_panel;
-    let selected = view.selected;
-    let offset = view.event_detail.scroll.borrow().offset;
-    for kind in [
-        MouseEventKind::ScrollUp,
-        MouseEventKind::ScrollDown,
-        MouseEventKind::Down(MouseButton::Left),
-        MouseEventKind::Drag(MouseButton::Left),
-        MouseEventKind::Up(MouseButton::Left),
-    ] {
-        assert_eq!(
-            view.handle_mouse(image_mouse(kind, list.x + 1, list.y + 1)),
-            None
-        );
-        assert_eq!(view.selected, selected);
-        assert_eq!(view.active_panel, panel);
-        assert_eq!(view.event_detail.scroll.borrow().offset, offset);
-        assert!(view.mouse_press.is_none());
-        assert!(view.mouse_panel.is_none());
-        assert!(view.pending_click.is_none());
-        assert!(view.last_copy_click.is_none());
-        assert!(view.event_detail.scroll.borrow().zooms.is_empty());
-    }
+fn enter_image_zoom(view: &mut View) {
+    view.handle_mouse(image_mouse(MouseEventKind::Down(MouseButton::Left), 30, 12));
+    view.handle_mouse(image_mouse(MouseEventKind::Up(MouseButton::Left), 30, 12));
 }
 
 #[test]
-fn control_image_click_resets_only_hit_image_and_invalidates_layout() {
+fn image_zoom_click_enters_then_resets_and_invalidates_layout() {
     let (_directory, mut view) = image_fixture();
     drawn_image(&view);
+    enter_image_zoom(&mut view);
+    assert_eq!(view.active_panel, Panel::EventDetail);
     let zoom = super::super::inline_images::Zoom {
         level: 3,
         left: 0.2,
     };
-    view.event_detail
-        .scroll
-        .borrow_mut()
-        .zooms
-        .extend([(1, zoom), (2, zoom)]);
+    view.event_detail.scroll.borrow_mut().zooms.insert(2, zoom);
+    enter_image_zoom(&mut view);
     assert_eq!(
-        view.handle_mouse(image_mouse(MouseEventKind::Down(MouseButton::Left), 30, 12)),
-        None
-    );
-    let detail = view.event_detail.scroll.borrow();
-    assert_eq!(
-        detail.zooms[&2],
+        view.event_detail
+            .scroll
+            .borrow()
+            .zooms
+            .get(&2)
+            .copied()
+            .unwrap_or_default(),
         super::super::inline_images::Zoom::default()
     );
-    assert_eq!(detail.zooms[&1], zoom);
     assert!(view.viewport.borrow().event_detail_layout.is_none());
     assert!(view.pending_click.is_none());
     assert!(view.last_copy_click.is_none());
@@ -330,9 +304,95 @@ fn control_image_click_resets_only_hit_image_and_invalidates_layout() {
 }
 
 #[test]
-fn control_image_wheel_without_decodable_size_does_nothing() {
+fn image_zoom_escape_consumes_key_and_resets() {
     let (_directory, mut view) = image_fixture();
     drawn_image(&view);
+    enter_image_zoom(&mut view);
+    let selected = view.event_list.cursor;
+    view.event_detail.scroll.borrow_mut().zooms.insert(
+        2,
+        super::super::inline_images::Zoom {
+            level: 3,
+            left: 0.2,
+        },
+    );
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        None
+    );
+    assert_eq!(view.active_panel, Panel::EventDetail);
+    assert_eq!(view.event_list.cursor, selected);
+    assert!(
+        view.event_detail
+            .scroll
+            .borrow()
+            .zooms
+            .values()
+            .all(|zoom| *zoom == super::super::inline_images::Zoom::default())
+    );
+    view.handle_mouse(image_mouse(MouseEventKind::ScrollUp, 30, 12));
+    assert!(
+        view.event_detail
+            .scroll
+            .borrow()
+            .zooms
+            .values()
+            .all(|zoom| *zoom == super::super::inline_images::Zoom::default())
+    );
+}
+
+#[test]
+fn image_zoom_leaving_focus_resets() {
+    let (_directory, mut view) = image_fixture();
+    drawn_image(&view);
+    enter_image_zoom(&mut view);
+    view.event_detail.scroll.borrow_mut().zooms.insert(
+        2,
+        super::super::inline_images::Zoom {
+            level: 3,
+            left: 0.2,
+        },
+    );
+    view.set_active_panel(Panel::EventList);
+    assert!(
+        view.event_detail
+            .scroll
+            .borrow()
+            .zooms
+            .values()
+            .all(|zoom| *zoom == super::super::inline_images::Zoom::default())
+    );
+    assert!(view.viewport.borrow().event_detail_layout.is_none());
+}
+
+#[test]
+fn image_zoom_switching_event_resets_before_render() {
+    let (_directory, mut view) = image_fixture();
+    drawn_image(&view);
+    enter_image_zoom(&mut view);
+    view.event_detail.scroll.borrow_mut().zooms.insert(
+        2,
+        super::super::inline_images::Zoom {
+            level: 3,
+            left: 0.2,
+        },
+    );
+    view.select_event(Some(1));
+    assert!(
+        view.event_detail
+            .scroll
+            .borrow()
+            .zooms
+            .values()
+            .all(|zoom| *zoom == super::super::inline_images::Zoom::default())
+    );
+}
+
+#[test]
+fn image_zoom_wheel_without_decodable_size_does_nothing() {
+    let (_directory, mut view) = image_fixture();
+    drawn_image(&view);
+    enter_image_zoom(&mut view);
     view.inline_images
         .replace(Some(super::super::inline_images::InlineImages::new(None)));
     view.viewport.borrow_mut().event_detail_images[0]
@@ -347,9 +407,10 @@ fn control_image_wheel_without_decodable_size_does_nothing() {
 }
 
 #[test]
-fn control_image_wheel_anchors_pointer() {
+fn image_zoom_wheel_anchors_pointer() {
     let (_directory, mut view) = image_fixture();
     let image = drawn_image(&view);
+    enter_image_zoom(&mut view);
     view.inline_images
         .replace(Some(super::super::inline_images::InlineImages::new(Some(
             (10, 20),
@@ -398,9 +459,10 @@ fn ordinary_image_wheel_keeps_panel_dispatch() {
 }
 
 #[test]
-fn control_image_wheel_merges_reports_until_next_frame() {
+fn image_zoom_wheel_merges_reports_until_next_frame() {
     let (_directory, mut view) = image_fixture();
     drawn_image(&view);
+    enter_image_zoom(&mut view);
     view.inline_images
         .replace(Some(super::super::inline_images::InlineImages::new(Some(
             (10, 20),
@@ -429,7 +491,7 @@ fn control_image_wheel_merges_reports_until_next_frame() {
 }
 
 #[test]
-fn control_image_click_does_not_join_normal_click_state() {
+fn image_zoom_click_does_not_join_normal_click_state() {
     let (_directory, mut view) = image_fixture();
     drawn_image(&view);
     let original = view.last_copy_click.clone();
@@ -445,4 +507,128 @@ fn control_image_click_does_not_join_normal_click_state() {
     assert!(view.pending_click.is_none());
     assert!(view.mouse_press.is_none());
     assert!(view.mouse_panel.is_none());
+}
+
+#[test]
+fn image_zoom_control_wheel_does_not_zoom() {
+    let (_directory, mut view) = image_fixture();
+    drawn_image(&view);
+    view.inline_images
+        .replace(Some(super::super::inline_images::InlineImages::new(Some(
+            (10, 20),
+        ))));
+    enter_image_zoom(&mut view);
+    view.handle_mouse(MouseEvent {
+        modifiers: KeyModifiers::CONTROL,
+        ..image_mouse(MouseEventKind::ScrollUp, 30, 12)
+    });
+    assert!(view.event_detail.scroll.borrow().zooms.is_empty());
+}
+
+#[test]
+fn image_zoom_wheel_over_other_image_scrolls_details() {
+    let (_directory, mut view) = image_fixture();
+    let image = drawn_image(&view);
+    enter_image_zoom(&mut view);
+    view.event_detail.scroll.borrow_mut().offset = 15;
+    view.viewport
+        .borrow_mut()
+        .event_detail_images
+        .push(super::super::event_detail::DrawnImage {
+            index: 3,
+            image,
+            area: Rect::new(20, 30, 40, 2),
+            first_row: 0,
+        });
+    view.handle_mouse(image_mouse(MouseEventKind::ScrollUp, 30, 30));
+    assert!(view.event_detail.scroll.borrow().zooms.is_empty());
+    assert!(view.event_detail.scroll.borrow().offset < 15);
+}
+
+#[test]
+fn image_zoom_keyboard_scroll_preserves_mode() {
+    let (_directory, mut view) = image_fixture();
+    drawn_image(&view);
+    enter_image_zoom(&mut view);
+    for key in [
+        KeyCode::Up,
+        KeyCode::Down,
+        KeyCode::PageUp,
+        KeyCode::PageDown,
+    ] {
+        view.handle_key(KeyEvent::new(key, KeyModifiers::NONE));
+        assert_eq!(view.event_detail.scroll.borrow().zoom_image, Some(2));
+    }
+}
+
+#[test]
+fn image_zoom_clicking_another_image_resets_previous() {
+    let (_directory, mut view) = image_fixture();
+    let image = drawn_image(&view);
+    enter_image_zoom(&mut view);
+    view.event_detail.scroll.borrow_mut().zooms.insert(
+        2,
+        super::super::inline_images::Zoom {
+            level: 3,
+            left: 0.2,
+        },
+    );
+    view.viewport
+        .borrow_mut()
+        .event_detail_images
+        .push(super::super::event_detail::DrawnImage {
+            index: 3,
+            image,
+            area: Rect::new(20, 30, 40, 2),
+            first_row: 0,
+        });
+    view.handle_mouse(image_mouse(MouseEventKind::Down(MouseButton::Left), 30, 30));
+    assert_eq!(view.event_detail.scroll.borrow().zoom_image, Some(3));
+    assert!(view.event_detail.scroll.borrow().zooms.is_empty());
+}
+
+#[test]
+fn image_zoom_control_click_does_not_reset() {
+    let (_directory, mut view) = image_fixture();
+    drawn_image(&view);
+    enter_image_zoom(&mut view);
+    let zoom = super::super::inline_images::Zoom {
+        level: 3,
+        left: 0.2,
+    };
+    view.event_detail.scroll.borrow_mut().zooms.insert(2, zoom);
+    assert!(!view.image_zoom_mouse(MouseEvent {
+        modifiers: KeyModifiers::CONTROL,
+        ..image_mouse(MouseEventKind::Down(MouseButton::Left), 30, 12)
+    }));
+    assert_eq!(view.event_detail.scroll.borrow().zooms.get(&2), Some(&zoom));
+}
+
+#[test]
+fn image_zoom_switching_tasks_does_not_park_zoom_mode() {
+    let (_directory, mut view) = image_fixture();
+    let original = view.selected_row().unwrap().clone();
+    let mut other = original.clone();
+    other.id.id = "image-other".into();
+    let other_id = other.id.clone();
+    view.set_sessions(vec![original.clone(), other], false);
+    drawn_image(&view);
+    enter_image_zoom(&mut view);
+    view.event_detail.scroll.borrow_mut().zooms.insert(
+        2,
+        super::super::inline_images::Zoom {
+            level: 3,
+            left: 0.2,
+        },
+    );
+    let other = view.rows.iter().position(|row| row.id == other_id).unwrap();
+    view.set_selected(other);
+    let original = view
+        .rows
+        .iter()
+        .position(|row| row.id == original.id)
+        .unwrap();
+    view.set_selected(original);
+    assert_eq!(view.event_detail.scroll.borrow().zoom_image, None);
+    assert!(view.event_detail.scroll.borrow().zooms.is_empty());
 }

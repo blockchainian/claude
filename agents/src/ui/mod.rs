@@ -1266,6 +1266,7 @@ impl View {
             self.show_questions();
             return;
         }
+        self.exit_image_zoom();
         self.park_event_list();
         let task_list_focused = self.active_panel == Panel::TaskList;
         let restores_task = self.has_parked_focus(selected.as_ref());

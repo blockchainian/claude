@@ -799,6 +799,7 @@ impl View {
                 .min(last)
         });
         if self.event_list.cursor != index || background {
+            self.exit_image_zoom();
             self.cancel_event_detail_selection();
             self.event_list.cursor = index;
             self.event_detail.search.clear();
@@ -3038,7 +3039,7 @@ mod panel_detail_tests {
     }
 
     #[test]
-    fn inline_image_zoom_returns_with_its_event() {
+    fn inline_image_zoom_resets_when_switching_events() {
         let (mut first, _, _) = image_section();
         first.source = Some("image-first".into());
         let mut second = first.clone();
@@ -3075,12 +3076,9 @@ mod panel_detail_tests {
             .zooms
             .insert(0, second_zoom);
         render(&first, &mut buffer);
-        assert_eq!(view.event_detail.scroll.borrow().zooms.get(&0), Some(&zoom));
+        assert!(view.event_detail.scroll.borrow().zooms.is_empty());
         render(&second, &mut buffer);
-        assert_eq!(
-            view.event_detail.scroll.borrow().zooms.get(&0),
-            Some(&second_zoom)
-        );
+        assert!(view.event_detail.scroll.borrow().zooms.is_empty());
     }
 
     #[test]

@@ -91,25 +91,22 @@ pub(super) struct EventDetailScroll {
     pub saved: std::collections::HashMap<u64, super::SectionScroll>,
     /// The zoom of each image in the selected event, by its order among the event's images.
     pub zooms: std::collections::HashMap<usize, super::inline_images::Zoom>,
-    saved_zooms: std::collections::HashMap<
-        u64,
-        std::collections::HashMap<usize, super::inline_images::Zoom>,
-    >,
+    /// The image whose unmodified wheel reports change its zoom.
+    pub(super) zoom_image: Option<usize>,
+    /// Swallows the release and drag after a click on an image.
+    pub(super) image_pressed: bool,
     zoom_key: Option<u64>,
     pub(super) zoomed_this_frame: bool,
 }
 
 impl EventDetailScroll {
-    /// Switch image zooms with the same identity used for saved section scrolls.
+    /// Reset image interaction when the selected event changes.
     pub(super) fn switch_zooms(&mut self, key: u64) {
-        if self.zoom_key == Some(key) {
-            return;
+        if self.zoom_key != Some(key) {
+            self.zoom_key = Some(key);
+            self.zoom_image = None;
+            self.zooms.clear();
         }
-        if let Some(previous) = self.zoom_key.replace(key) {
-            self.saved_zooms
-                .insert(previous, std::mem::take(&mut self.zooms));
-        }
-        self.zooms = self.saved_zooms.remove(&key).unwrap_or_default();
     }
 }
 
@@ -125,6 +122,17 @@ pub(super) struct DrawnImage {
 }
 
 impl super::View {
+    /// Leave image zoom mode and invalidate the fitted image layout.
+    pub(super) fn exit_image_zoom(&self) -> bool {
+        let mut detail = self.event_detail.scroll.borrow_mut();
+        if detail.zoom_image.take().is_none() {
+            return false;
+        }
+        detail.zooms.clear();
+        self.viewport.borrow_mut().event_detail_layout = None;
+        true
+    }
+
     /// Allows one image zoom step in the next batch of input before a draw.
     pub(crate) fn begin_image_frame(&self) {
         self.event_detail.scroll.borrow_mut().zoomed_this_frame = false;

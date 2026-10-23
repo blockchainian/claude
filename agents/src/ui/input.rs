@@ -296,8 +296,7 @@ impl View {
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
-        if mouse.modifiers.contains(KeyModifiers::CONTROL) {
-            self.zoom_event_image(mouse);
+        if self.image_zoom_mouse(mouse) {
             return None;
         }
         if let Some(action) = self.hint_mouse(mouse) {
@@ -311,19 +310,63 @@ impl View {
         self.finish_panel_action(action)
     }
 
+    fn image_zoom_mouse(&mut self, mouse: MouseEvent) -> bool {
+        if self.event_detail.scroll.borrow().image_pressed {
+            match mouse.kind {
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.event_detail.scroll.borrow_mut().image_pressed = false;
+                    return true;
+                }
+                MouseEventKind::Drag(MouseButton::Left) => return true,
+                _ => {}
+            }
+        }
+        if !mouse.modifiers.is_empty() {
+            return false;
+        }
+        let image = self
+            .viewport
+            .borrow()
+            .event_detail_images
+            .iter()
+            .find(|image| image.area.contains((mouse.column, mouse.row).into()))
+            .map(|image| image.index);
+        let Some(index) = image else {
+            return false;
+        };
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            self.set_active_panel(Panel::EventDetail);
+            let was_active = self.event_detail.scroll.borrow().zoom_image == Some(index);
+            self.exit_image_zoom();
+            let mut detail = self.event_detail.scroll.borrow_mut();
+            if !was_active {
+                detail.zoom_image = Some(index);
+            }
+            detail.image_pressed = true;
+            self.mouse_press = None;
+            self.mouse_panel = None;
+            self.pending_click = None;
+            self.last_copy_click = None;
+            self.last_event_detail_click = None;
+            self.text_selection.borrow_mut().take();
+            return true;
+        }
+        if matches!(
+            mouse.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        ) && self.event_detail.scroll.borrow().zoom_image == Some(index)
+        {
+            self.zoom_event_image(mouse);
+            return true;
+        }
+        false
+    }
+
     fn zoom_event_image(&mut self, mouse: MouseEvent) {
         use super::inline_images::Zoom;
 
-        let reset = mouse.kind == MouseEventKind::Down(MouseButton::Left);
-        let wheel = matches!(
-            mouse.kind,
-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-        );
-        if !reset && !wheel {
-            return;
-        }
         let mut detail = self.event_detail.scroll.borrow_mut();
-        if wheel && detail.zoomed_this_frame {
+        if detail.zoomed_this_frame {
             return;
         }
         let mut viewport = self.viewport.borrow_mut();
@@ -336,19 +379,15 @@ impl View {
         };
         let index = drawn.index;
         let zoom = detail.zooms.get(&index).copied().unwrap_or_default();
-        let mut next = if reset {
-            Zoom::default()
-        } else {
-            Zoom {
-                level: if mouse.kind == MouseEventKind::ScrollUp {
-                    zoom.level.saturating_add(1)
-                } else {
-                    zoom.level.saturating_sub(1)
-                },
-                left: zoom.left,
-            }
+        let mut next = Zoom {
+            level: if mouse.kind == MouseEventKind::ScrollUp {
+                zoom.level.saturating_add(1)
+            } else {
+                zoom.level.saturating_sub(1)
+            },
+            left: zoom.left,
         };
-        if !reset && next.level == zoom.level {
+        if next.level == zoom.level {
             return;
         }
         let sizes = viewport.event_detail_columns.and_then(|columns| {
@@ -363,12 +402,10 @@ impl View {
             ))
         });
         if let Some((width, before, after)) = sizes {
-            if !reset {
-                let x = f32::from(mouse.column - drawn.area.x);
-                let fraction = zoom.left + x / f32::from(before.0);
-                let max_left = f32::from(after.0.saturating_sub(width)) / f32::from(after.0);
-                next.left = (fraction - x / f32::from(after.0)).clamp(0.0, max_left);
-            }
+            let x = f32::from(mouse.column - drawn.area.x);
+            let fraction = zoom.left + x / f32::from(before.0);
+            let max_left = f32::from(after.0.saturating_sub(width)) / f32::from(after.0);
+            next.left = (fraction - x / f32::from(after.0)).clamp(0.0, max_left);
             let row = usize::from(drawn.first_row) + usize::from(mouse.row - drawn.area.y);
             let next_row = (row as f64 * f64::from(after.1) / f64::from(before.1)).round() as usize;
             detail.offset = if next_row >= row {
@@ -376,13 +413,11 @@ impl View {
             } else {
                 detail.offset.saturating_sub(row - next_row)
             };
-        } else if !reset {
+        } else {
             return;
         }
         detail.zooms.insert(index, next);
-        if wheel {
-            detail.zoomed_this_frame = true;
-        }
+        detail.zoomed_this_frame = true;
         viewport.event_detail_layout = None;
     }
 
@@ -1592,6 +1627,9 @@ impl View {
     fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {
         let key = line_edit::normalize_key(key);
         if key.kind == KeyEventKind::Release {
+            return None;
+        }
+        if key.code == KeyCode::Esc && self.exit_image_zoom() {
             return None;
         }
         if let Some(prefix) = self.window_prefix.take() {
