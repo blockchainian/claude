@@ -523,6 +523,13 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         ..DEFAULT_RULE
     },
     ToolRule {
+        name: "codex-manager reply",
+        title: &[Pick::Field(Source::Input, "/threadId")],
+        input: Some((Pick::Field(Source::Input, "/text"), Format::Text)),
+        output: Some((Pick::With(codex_attention_output), Format::Text)),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
         name: "codex-manager list",
         output: Some((Pick::With(codex_thread_table), Format::Text)),
         ..DEFAULT_RULE
@@ -1180,6 +1187,24 @@ fn codex_thread_table(data: &ToolData<'_>) -> Option<Body> {
     }]))
 }
 
+/// One bullet per waiting request, without its `thread … (ask …): ` prefix.
+fn codex_attention_output(data: &ToolData<'_>) -> Option<Body> {
+    let result = data.result?;
+    if result.error {
+        return None;
+    }
+    let bullets: Vec<String> = result.structured["attention"]
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(|line| {
+            let text = line.split_once(": ").map_or(line, |(_, text)| text);
+            format!("• {}", text.trim().replace('\n', "\n  "))
+        })
+        .collect();
+    (!bullets.is_empty()).then(|| Body::Sections(vec![text_section("output", &bullets.join("\n"))]))
+}
+
 pub(crate) fn code_section(label: &str, lang: &str, text: &str) -> Section {
     Section::Code {
         label: label.to_owned(),
@@ -1808,6 +1833,52 @@ mod tests {
         assert_eq!(rows[2], r"| 规则\:拆逗号 | completed |");
         assert_eq!(rows.last().unwrap(), &"| 框架补三处 | inProgress |");
         assert_eq!(rows.len(), 11);
+    }
+
+    #[test]
+    fn codex_manager_reply_shows_thread_text_and_attention_bullets() {
+        let records: Vec<serde_json::Value> =
+            include_str!("../../tests/fixtures/claude-manager-reply.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let call = &records[0]["message"]["content"][0];
+        let content = &records[1]["message"]["content"][0]["content"];
+        let result = super::ToolResult {
+            source: None,
+            content: content.clone(),
+            structured: serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap(),
+            error: false,
+        };
+        let presentation = super::presentation(
+            call["name"].as_str().unwrap(),
+            &super::ToolData {
+                input: &call["input"],
+                result: Some(&result),
+            },
+        );
+        assert_eq!(
+            presentation.title.as_deref(),
+            call["input"]["threadId"].as_str()
+        );
+        let [crate::event::Section::Prose { text, markdown: false }] = presentation.input.as_slice()
+        else {
+            panic!("expected the reply text, got {:?}", presentation.input);
+        };
+        assert_eq!(text, call["input"]["text"].as_str().unwrap());
+        let Some(super::Body::Sections(output)) = presentation.output else {
+            panic!("expected visible body")
+        };
+        let [crate::event::Section::Text { text, .. }] = output.as_slice() else {
+            panic!("expected one text section, got {output:?}");
+        };
+        let attention = result.structured["attention"].as_array().unwrap();
+        let bullets: Vec<&str> = text.lines().filter(|line| line.starts_with("• ")).collect();
+        assert_eq!(bullets.len(), attention.len());
+        let first = attention[0].as_str().unwrap();
+        let (_, request) = first.split_once(": ").unwrap();
+        assert!(bullets[0].starts_with(&format!("• {}", request.lines().next().unwrap())));
+        assert!(!text.contains("is waiting for reply"));
     }
 
     #[test]
