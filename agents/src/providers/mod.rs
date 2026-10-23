@@ -285,7 +285,11 @@ pub trait Provider: Send {
     fn send(&self, _session: &Session, _input: SessionInput) -> Option<SessionAction> {
         None
     }
-    fn create(&self, _request: &crate::tasks::NewTask) -> Option<io::Result<CreateJob>> {
+    fn create(
+        &self,
+        _request: &crate::tasks::NewTask,
+        _created: Box<dyn Fn(String) + Send>,
+    ) -> Option<io::Result<CreateJob>> {
         None
     }
     /// Builds a background request without performing network or credential I/O.

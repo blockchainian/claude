@@ -370,6 +370,28 @@ fn created_job(output: &std::process::Output) -> io::Result<String> {
     Ok(id.to_owned())
 }
 
+fn finish_creation(
+    output: std::process::Output,
+    request: crate::tasks::NewTask,
+    settings: &Path,
+    created: &dyn Fn(String),
+) -> io::Result<std::process::Output> {
+    let job_id = created_job(&output)?;
+    created(job_id.clone());
+    if !request.images.is_empty() {
+        attach::send(
+            &job_id,
+            &request.cwd,
+            settings,
+            SessionInput::PromptWithImages {
+                text: request.prompt,
+                images: request.images,
+            },
+        )?;
+    }
+    Ok(output)
+}
+
 impl ClaudeProvider {
     fn terminal_question_pending(&self, session: &Session) -> bool {
         self.ask_user_question
@@ -1018,25 +1040,14 @@ impl Provider for ClaudeProvider {
     fn create(
         &self,
         request: &crate::tasks::NewTask,
+        created: Box<dyn Fn(String) + Send>,
     ) -> Option<io::Result<crate::providers::CreateJob>> {
         let mut command = Self::create_command(request);
         let request = request.clone();
         let settings = self.config_dir.join("settings.json");
         Some(Ok(Box::new(move || {
             let output = command.output()?;
-            if !request.images.is_empty() {
-                let job_id = created_job(&output)?;
-                attach::send(
-                    &job_id,
-                    &request.cwd,
-                    &settings,
-                    SessionInput::PromptWithImages {
-                        text: request.prompt,
-                        images: request.images,
-                    },
-                )?;
-            }
-            Ok(output)
+            finish_creation(output, request, &settings, &created)
         })))
     }
 

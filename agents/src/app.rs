@@ -62,6 +62,10 @@ enum Input {
         provider: ProviderId,
         result: io::Result<std::process::Output>,
     },
+    JobCreated {
+        draft_key: DraftKey,
+        job: String,
+    },
     /// A new task's worktree, with the task request to create in it.
     WorktreeCreated {
         draft_key: DraftKey,
@@ -528,6 +532,10 @@ impl App {
                 } => {
                     self.finish_event_load(token, reader, result);
                 }
+                Input::JobCreated { draft_key, job } => {
+                    self.view.draft_job_created(draft_key, job);
+                    schedule.changed(Instant::now());
+                }
                 Input::Created {
                     draft_key,
                     provider,
@@ -535,6 +543,9 @@ impl App {
                 } => {
                     let result =
                         result.and_then(|output| self.hub.provider(provider).created_job(&output));
+                    if let Err(error) = &result {
+                        self.view.show_error(error.to_string());
+                    }
                     self.view.draft_created(draft_key, result);
                     schedule.changed(Instant::now());
                 }
@@ -1189,10 +1200,16 @@ impl App {
         provider: ProviderId,
         request: crate::tasks::NewTask,
     ) {
+        let created_sender = self.sender.clone();
         let job = self
             .hub
             .provider(provider)
-            .create(&request)
+            .create(
+                &request,
+                Box::new(move |job| {
+                    let _ = created_sender.send(Input::JobCreated { draft_key, job });
+                }),
+            )
             .unwrap_or_else(|| Err(io::Error::other("Provider cannot create tasks")));
         let job = match job {
             Ok(job) => job,

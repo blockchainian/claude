@@ -7,6 +7,36 @@ use std::process::{ExitStatus, Output};
 const BACKGROUND_OUTPUT: &str = "backgrounded · d887474c\n  claude agents             list sessions\n  claude attach d887474c    open in this terminal\n  claude logs d887474c      show recent output\n  claude stop d887474c      stop this session\n\n";
 
 #[test]
+fn image_creation_reports_the_job_before_sending_attachments() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = Output {
+        status: ExitStatus::from_raw(0),
+        stdout: include_bytes!("../../../tests/fixtures/claude-background-idle.txt").to_vec(),
+        stderr: Vec::new(),
+    };
+    let reported = std::cell::RefCell::new(None);
+    let request = NewTask {
+        cwd: directory.path().into(),
+        name: None,
+        model: None,
+        effort: None,
+        prompt: "reply ok".into(),
+        images: vec![directory.path().join("missing.png")],
+    };
+    let error = finish_creation(
+        output,
+        request,
+        &directory.path().join("settings.json"),
+        &|id| {
+            *reported.borrow_mut() = Some(id);
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    assert_eq!(reported.into_inner().as_deref(), Some("6f03db53"));
+}
+
+#[test]
 fn create_uses_task_directory_and_optional_model_effort_before_prompt() {
     let directory = tempfile::tempdir().unwrap();
     let mut request = NewTask {

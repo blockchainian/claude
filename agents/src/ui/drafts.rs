@@ -24,6 +24,7 @@ pub(super) struct Draft {
     pub repository_confirmed: bool,
     pub continue_after_directory: bool,
     pub job: Option<String>,
+    recover_job: bool,
     pub working: bool,
     pub error: Option<String>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -211,6 +212,7 @@ impl View {
             repository_confirmed: false,
             continue_after_directory: false,
             job: None,
+            recover_job: false,
             working: false,
             error: None,
             updated_at: chrono::Utc::now(),
@@ -254,9 +256,22 @@ impl View {
                 };
                 input.editor.clear();
             }
-            Err(error) => draft.error = Some(error.to_string()),
+            Err(error) => {
+                draft.job = None;
+                draft.error = Some(error.to_string());
+            }
         }
         self.draft_changed(id);
+        self.reconcile_drafts();
+    }
+
+    pub(crate) fn draft_job_created(&mut self, id: DraftKey, job: String) {
+        let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) else {
+            return;
+        };
+        draft.job = Some(job);
+        self.draft_changed(id);
+        self.reconcile_drafts();
     }
 
     pub(crate) fn draft_directory_changed(&mut self, id: DraftKey, cwd: PathBuf, branch: String) {
@@ -464,6 +479,9 @@ impl View {
                 .iter_mut()
                 .find(|draft| draft.id == *draft_id)
                 .expect("arrived draft exists");
+            if draft.working {
+                draft.input.editor.clear();
+            }
             let draft_key = draft_controls::TaskKey::Draft(*draft_id);
             let session_key = draft_controls::TaskKey::Session(session.clone());
             if selected_draft == Some(*draft_id) {
@@ -579,6 +597,7 @@ impl View {
                 continue_after_directory: false,
                 working: false,
                 job: value.job.clone(),
+                recover_job: value.job.is_some(),
                 error,
                 updated_at: value.updated_at,
             });
@@ -589,7 +608,7 @@ impl View {
     pub(crate) fn repair_draft_jobs(&mut self) {
         self.reconcile_drafts();
         for draft in &mut self.drafts {
-            if draft.job.take().is_some() {
+            if std::mem::take(&mut draft.recover_job) && draft.job.take().is_some() {
                 draft.error = Some("Creation was interrupted".into());
                 self.drafts_dirty = true;
             }
@@ -850,7 +869,7 @@ mod recovery_tests {
 
     #[test]
     fn failed_draft_keeps_submitted_text_and_images() {
-        for parked in [false, true] {
+        for (parked, reported) in [(false, false), (true, false), (false, true), (true, true)] {
             let dir = tempfile::tempdir().unwrap();
             let mut view = View::default();
             let draft = submitted(&mut view, dir.path());
@@ -860,12 +879,16 @@ mod recovery_tests {
             if parked {
                 named(&mut view, dir.path(), "Other");
             }
+            if reported {
+                view.draft_job_created(draft, "30eaab0c".into());
+            }
             view.draft_created(draft, Err(io::Error::other("creation failed")));
             view.select_draft(draft);
             assert_eq!(view.active_panel, Panel::EventDetail);
             assert_eq!(view.input_box.editor.text(), text);
             assert_eq!(view.input_box.editor.image_paths(), images);
             assert!(!view.selected_draft().unwrap().working);
+            assert!(view.selected_draft().unwrap().job.is_none());
         }
     }
 
@@ -966,6 +989,77 @@ mod recovery_tests {
         assert!(view.stored_drafts().is_empty());
         assert_eq!(view.take_drafts_action(), Some(Action::PersistDrafts));
     }
+    #[test]
+    fn startup_recovery_keeps_jobs_created_before_the_first_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        for provider in [ProviderId::Claude, ProviderId::Codex] {
+            let mut view = View::default();
+            view.set_drafts(&[]);
+            let id = submitted(&mut view, dir.path());
+            view.drafts[0].setup.provider = provider;
+            view.draft_created(id, Ok("9bb5f95b".into()));
+            view.set_sessions(Vec::new(), false);
+            assert_eq!(view.drafts[0].job.as_deref(), Some("9bb5f95b"));
+            assert!(view.drafts[0].error.is_none());
+
+            let mut row = background_session("9bb5f95b-56e9-4d5c-b425-2448de438cbb", "9bb5f95b");
+            row.id.provider = provider;
+            let key = row.id.clone();
+            view.set_sessions(vec![row], false);
+            assert_eq!(view.rows.len(), 1);
+            assert!(view.drafts.is_empty());
+            assert_eq!(view.selected_id(), Some(&key));
+        }
+    }
+
+    fn background_session(id: &str, job: &str) -> Session {
+        let mut row = session();
+        row.id.id = id.into();
+        row.status = SessionStatus::Working;
+        row.background_job = Some(crate::model::BackgroundJob {
+            id: job.into(),
+            needs: None,
+            awaits_prompt: false,
+        });
+        row
+    }
+
+    #[test]
+    fn job_notification_reconciles_a_session_already_in_the_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut view = View::default();
+        let id = submitted(&mut view, dir.path());
+        let row = background_session("30eaab0c-9be5-4854-a2b7-f7a8795ce742", "30eaab0c");
+        let key = row.id.clone();
+        view.set_sessions(vec![row], false);
+        assert_eq!(view.rows.len(), 2);
+        view.draft_created(id, Ok("30eaab0c".into()));
+        assert_eq!(view.rows.len(), 1);
+        assert!(view.drafts.is_empty());
+        assert_eq!(view.selected_id(), Some(&key));
+        assert!(view.input_box.editor.is_empty());
+    }
+
+    #[test]
+    fn job_notification_hands_off_the_draft_before_image_delivery_finishes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut view = View::default();
+        let id = submitted(&mut view, dir.path());
+        view.draft_job_created(id, "30eaab0c".into());
+        assert!(view.selected_draft().unwrap().working);
+        assert!(!view.input_box.editor.is_empty());
+        let row = background_session("30eaab0c-9be5-4854-a2b7-f7a8795ce742", "30eaab0c");
+        let key = row.id.clone();
+        view.set_sessions(vec![row], false);
+        assert_eq!(view.rows.len(), 1);
+        assert!(view.drafts.is_empty());
+        assert_eq!(view.selected_id(), Some(&key));
+        assert!(view.input_box.editor.is_empty());
+        view.handle_paste("next prompt");
+        view.draft_created(id, Ok("30eaab0c".into()));
+        assert_eq!(view.input_box.editor.text(), "next prompt");
+    }
+
     #[test]
     fn load_repairs_missing_directory_branch_and_interrupted_jobs() {
         let dir = tempfile::tempdir().unwrap();
