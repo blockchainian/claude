@@ -1380,6 +1380,7 @@ impl View {
         }
     }
 
+    /// Up, down and page keys in the event detail change events at its boundaries like the wheel.
     fn navigate_event_detail(&mut self, panel: Panel, code: KeyCode) {
         if panel == Panel::EventDetail {
             if self.shown_terminal().is_some() {
@@ -1387,32 +1388,39 @@ impl View {
             }
             self.prepare_event_detail_scroll();
         }
-        let viewport = &mut *self.viewport.borrow_mut();
-        let mut detail = self.event_detail.scroll.borrow_mut();
-        let page = if panel == Panel::TaskDetails {
-            viewport.task_details.height
-        } else {
-            viewport.event_text.area.height
-        };
-        let state = if panel == Panel::TaskDetails {
-            &mut viewport.task_details_scroll
-        } else {
-            &mut detail.state
-        };
         let forward = matches!(code, KeyCode::Down | KeyCode::PageDown | KeyCode::End);
-        let row = state.content_top;
-        if matches!(code, KeyCode::Home | KeyCode::End) {
-            while state.scroll_window(forward, row) {}
-        } else {
+        let edge = matches!(code, KeyCode::Home | KeyCode::End);
+        let (row, rows) = {
+            let viewport = &mut *self.viewport.borrow_mut();
+            let mut detail = self.event_detail.scroll.borrow_mut();
+            let page = if panel == Panel::TaskDetails {
+                viewport.task_details.height
+            } else {
+                viewport.event_text.area.height
+            };
+            let state = if panel == Panel::TaskDetails {
+                &mut viewport.task_details_scroll
+            } else {
+                &mut detail.state
+            };
+            let row = state.content_top;
             let rows = if matches!(code, KeyCode::PageUp | KeyCode::PageDown) {
                 usize::from(page.max(1))
             } else {
                 1
             };
-            state.scroll_rows(forward, row, rows);
-        }
-        if panel == Panel::EventDetail {
-            detail.offset = detail.state.position();
+            if edge {
+                while state.scroll_window(forward, row) {}
+            } else if panel == Panel::TaskDetails {
+                state.scroll_rows(forward, row, rows);
+            }
+            if panel == Panel::EventDetail {
+                detail.offset = detail.state.position();
+            }
+            (row, rows)
+        };
+        if panel == Panel::EventDetail && !edge {
+            self.scroll_content_rows(forward, true, row, rows, true);
         }
     }
 

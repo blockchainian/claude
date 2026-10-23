@@ -119,6 +119,11 @@ fn active_panel_detail_boundaries_do_not_navigate_lists() {
                 let bottom = task_details_position(&view, panel);
                 assert!(bottom > 0);
                 view.handle_key(forward);
+                // Like the wheel, the event detail's step keys leave for the next event.
+                if panel == Panel::EventDetail && forward.code != KeyCode::End {
+                    assert_eq!(view.event_list.cursor, event.map(|e| e + 1));
+                    continue;
+                }
                 assert_eq!(task_details_position(&view, panel), bottom);
                 assert_lists_unchanged(&view, selected, event, scroll);
                 key(&mut view, KeyCode::Home);
@@ -133,7 +138,7 @@ fn active_panel_detail_boundaries_do_not_navigate_lists() {
 }
 
 #[test]
-fn active_panel_short_event_detail_does_not_change_event() {
+fn active_panel_short_event_detail_steps_between_events() {
     for width in [100, 200] {
         for (forward, backward) in navigation_pairs() {
             let (mut view, now) = panel_fixture(width);
@@ -149,6 +154,10 @@ fn active_panel_short_event_detail_does_not_change_event() {
             let event = view.event_list.cursor;
             let scroll = view.event_list.scroll.get();
             view.handle_key(forward);
+            if forward.code != KeyCode::End {
+                assert_eq!(view.event_list.cursor, event.map(|e| e + 1));
+                event_screen(&view, width, 45, now);
+            }
             view.handle_key(backward);
             assert_lists_unchanged(&view, selected, event, scroll);
         }

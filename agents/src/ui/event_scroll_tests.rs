@@ -186,6 +186,33 @@ fn event_scroll_keyboard_uses_list_bindings_inside_event_detail() {
     assert_ne!(panel(&view, now), initial);
 }
 
+#[test]
+fn event_scroll_keyboard_changes_event_at_boundaries_like_the_wheel() {
+    for (down, up) in [
+        (KeyCode::Char('j'), KeyCode::Char('k')),
+        (KeyCode::PageDown, KeyCode::PageUp),
+    ] {
+        let (mut view, now) = fixture(false);
+        panel(&view, now);
+        view.handle_key(KeyEvent::new(down, KeyModifiers::NONE));
+        assert_eq!(view.event_list.cursor, Some(2), "{down:?}");
+        panel(&view, now);
+        view.handle_key(KeyEvent::new(up, KeyModifiers::NONE));
+        assert_eq!(view.event_list.cursor, Some(1), "{up:?}");
+
+        let (mut view, now) = fixture(true);
+        panel(&view, now);
+        for _ in 0..60 {
+            view.handle_key(KeyEvent::new(down, KeyModifiers::NONE));
+            panel(&view, now);
+            if view.event_list.cursor == Some(2) {
+                break;
+            }
+        }
+        assert_eq!(view.event_list.cursor, Some(2), "{down:?}");
+    }
+}
+
 fn tool_fixture() -> (View, DateTime<Utc>) {
     let (mut view, now) = fixture(true);
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
