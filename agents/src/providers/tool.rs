@@ -384,11 +384,6 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         ..DEFAULT_RULE
     },
     ToolRule {
-        name: "SendUserFile",
-        subject: Some(Subject::Field("caption")),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
         name: "apply_patch",
         subject: Some(Subject::Field("paths")),
         input: Some((Input::Field(""), Format::Text)),
@@ -1612,18 +1607,6 @@ mod tests {
         assert_eq!(rows[2], r"| 规则\:拆逗号 | completed |");
         assert_eq!(rows.last().unwrap(), &"| 框架补三处 | inProgress |");
         assert_eq!(rows.len(), 11);
-    }
-
-    #[test]
-    fn send_user_file_caption_is_the_subject() {
-        let input = serde_json::json!({
-            "caption": "放大的那几列",
-            "files": ["/tmp/crop.png"],
-            "status": "normal",
-        });
-        let (_, subject, sections) = super::presentation("SendUserFile", &input);
-        assert_eq!(subject.as_deref(), Some("放大的那几列"));
-        assert!(!format!("{sections:?}").contains("caption"));
     }
 
     #[test]
