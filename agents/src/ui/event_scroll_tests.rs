@@ -594,87 +594,43 @@ fn column_of(row: &str, needle: &str) -> Option<usize> {
 }
 
 #[test]
-fn event_detail_footer_shows_the_scrolled_off_title() {
-    for width in [100, 160] {
+fn event_detail_top_edge_shows_only_a_scrolled_off_title() {
+    for width in [90, 120, 160] {
         let (mut view, _) = fixture(true);
         let rows = screen_rows(&view, width, 40);
-        let footer = rows.last().unwrap().clone();
-        let event_detail_y = usize::from(view.viewport.borrow().event_detail.y);
-        let title = rows[event_detail_y + 1]
-            .trim()
-            .split("  ")
-            .next()
-            .unwrap()
-            .to_owned();
-        assert!(!title.is_empty(), "{}", rows.join("\n"));
-        assert!(!footer.contains(&title), "title on screen: {footer}");
-        let title_x = column_of(&rows[event_detail_y + 1], &title).unwrap();
-        let time_x = view
-            .viewport
-            .borrow()
-            .event_detail_columns
-            .map(|columns| usize::from(columns.time.x))
-            .unwrap();
-
+        let y = usize::from(view.viewport.borrow().output_borders[0].y);
+        assert!(!rows[y].contains("Assistant"));
         event_detail_wheel(&mut view, true);
         let rows = screen_rows(&view, width, 40);
-        let scrolled = rows.last().unwrap();
-        assert!(
-            !rows[event_detail_y + 1].contains(&title),
-            "{}",
-            rows.join("\n")
+        assert_eq!(
+            column_of(&rows[y], "Assistant"),
+            Some((usize::from(width) - 11) / 2 + 1)
         );
-        assert!(
-            scrolled.starts_with(footer.trim_end()),
-            "hints stay: {scrolled}"
-        );
-        let x = column_of(scrolled, &title).unwrap_or_else(|| panic!("{scrolled}"));
-        if super::render::ScreenLayout::for_width(width) == super::render::ScreenLayout::Large {
-            assert_eq!(
-                x, title_x,
-                "large layouts center the footer title: {scrolled}"
-            );
-        } else {
-            assert_eq!(
-                x + title.width() + 2,
-                time_x,
-                "medium and small layouts end it before the time column: {scrolled}"
-            );
-        }
-        assert!(scrolled[..].chars().skip(time_x).all(|c| c == ' '));
-
+        assert!(!rows.last().unwrap().contains("Assistant"));
         event_detail_wheel(&mut view, false);
         let rows = screen_rows(&view, width, 40);
-        assert!(
-            !rows.last().unwrap().contains(&title),
-            "title back on screen"
-        );
+        assert!(!rows[y].contains("Assistant"));
     }
 }
 
 #[test]
-fn footer_feedback_takes_the_right_and_a_medium_title_yields_to_it() {
+fn footer_feedback_preserves_the_section_title_on_its_edge() {
     for width in [100, 160] {
         let (mut view, _) = fixture(true);
-        let hints = screen_rows(&view, width, 40).last().unwrap().clone();
-        let hints = hints.trim_end();
+        screen_rows(&view, width, 40);
         event_detail_wheel(&mut view, true);
-        let titled = screen_rows(&view, width, 40).last().unwrap().clone();
+        let titled = screen_rows(&view, width, 40);
+        let y = usize::from(view.viewport.borrow().output_borders[0].y);
+        assert!(titled[y].contains("Assistant"));
         view.show_copied("Copied message".into(), std::time::Instant::now());
-        let footer = screen_rows(&view, width, 40).last().unwrap().clone();
-        assert!(footer.trim_end().ends_with("Copied message"), "{footer}");
-        let title = titled[hints.len()..].trim();
-        assert!(!title.is_empty(), "{titled}");
-        if super::render::ScreenLayout::for_width(width) == super::render::ScreenLayout::Large {
-            assert!(footer.contains(title), "large keeps the middle: {footer}");
-        } else {
-            assert!(!footer.contains(title), "medium has no middle: {footer}");
-        }
+        let rows = screen_rows(&view, width, 40);
+        assert!(rows.last().unwrap().trim_end().ends_with("Copied message"));
+        assert_eq!(rows[y], titled[y]);
     }
 }
 
 #[test]
-fn event_detail_footer_shows_the_title_of_the_section_on_the_top_row() {
+fn event_detail_top_edge_tracks_the_section_on_the_top_row() {
     let (mut view, _) = tool_fixture();
     let mut events = view.event_panel.clone();
     events[0].calls[0].input = vec![crate::event::Section::Text {
@@ -698,7 +654,7 @@ fn event_detail_footer_shows_the_title_of_the_section_on_the_top_row() {
         event_detail_wheel(&mut view, true);
         let rows = screen_rows(&view, 100, 40);
         let detail = rows[event_detail_y + 1..rows.len() - 1].join("\n");
-        let footer = rows.last().unwrap().clone();
+        let footer = rows[usize::from(view.viewport.borrow().output_borders[0].y)].clone();
         if detail.contains("Second tool") {
             assert!(!footer.contains("Second tool"), "{footer}");
         } else {
@@ -717,19 +673,20 @@ fn event_detail_footer_shows_the_title_of_the_section_on_the_top_row() {
 }
 
 #[test]
-fn event_detail_footer_title_is_muted() {
+fn event_detail_top_edge_title_is_muted() {
     let (mut view, _) = fixture(true);
     screen_rows(&view, 100, 40);
     event_detail_wheel(&mut view, true);
     let area = Rect::new(0, 0, 100, 40);
     let mut buffer = Buffer::empty(area);
     view.render(area, &mut buffer);
+    let y = view.viewport.borrow().output_borders[0].y;
     let footer = (0..100)
-        .map(|x| buffer[(x, 39)].symbol())
+        .map(|x| buffer[(x, y)].symbol())
         .collect::<String>();
     let x = column_of(&footer, "Assistant").unwrap_or_else(|| panic!("{footer}")) as u16;
     for x in x..x + "Assistant".len() as u16 {
-        let cell = &buffer[(x, 39)];
+        let cell = &buffer[(x, y)];
         assert!(
             cell.modifier.contains(ratatui::style::Modifier::DIM),
             "{cell:?}"
@@ -742,7 +699,7 @@ fn event_detail_footer_title_is_muted() {
     }
 }
 
-fn recorded_tool_footer(forward: bool) {
+fn recorded_tool_edge(forward: bool) {
     for width in [200, 149, 120, 100] {
         let (mut view, _) = fixture(false);
         let path =
@@ -772,51 +729,30 @@ fn recorded_tool_footer(forward: bool) {
         }
         event_detail_wheel(&mut view, forward);
         let rows = screen_rows(&view, width, 30);
-        let footer = rows.last().unwrap();
         let viewport = view.viewport.borrow();
-        assert!(
-            view.event_detail.scroll.borrow().offset > 0,
-            "title must be offscreen: {rows:?}"
-        );
-        let columns = viewport.event_detail_columns.unwrap();
-        let centered =
-            super::centering::centered_x(columns.panel, columns.text, title.width() as u16);
-        let start = 1 + view.center_footer_hints().width() as u16 + 2;
-        let expected = if super::render::ScreenLayout::for_width(width)
-            == super::render::ScreenLayout::Large
-            && centered >= start
-        {
-            centered
-        } else {
-            columns.text.right() - title.width() as u16
-        };
+        let footer = &rows[usize::from(viewport.output_borders[0].y)];
+        assert!(view.event_detail.scroll.borrow().offset > 0, "{rows:?}");
         let compact = footer.replace(' ', "");
         assert!(compact.contains(&title.replace(' ', "")), "{footer}");
         let first = title.chars().next().unwrap().to_string();
         let x = column_of(footer, &first).unwrap();
-        assert_eq!(x, usize::from(expected), "{footer}");
-        assert!(
-            x + title.width() <= usize::from(columns.text.right()),
+        assert_eq!(
+            x,
+            (usize::from(width) - title.width() - 2) / 2 + 1,
             "{footer}"
         );
-        assert!(
-            footer
-                .chars()
-                .skip(usize::from(columns.time.x))
-                .all(|c| c == ' '),
-            "{footer}"
-        );
+        assert!(!rows.last().unwrap().contains(&title));
     }
 }
 
 #[test]
-fn event_detail_recorded_footer_scrolling_down() {
-    recorded_tool_footer(true);
+fn event_detail_recorded_top_edge_scrolling_down() {
+    recorded_tool_edge(true);
 }
 
 #[test]
-fn event_detail_recorded_footer_scrolling_up() {
-    recorded_tool_footer(false);
+fn event_detail_recorded_top_edge_scrolling_up() {
+    recorded_tool_edge(false);
 }
 
 #[test]

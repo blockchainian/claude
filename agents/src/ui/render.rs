@@ -672,10 +672,15 @@ impl View {
         self.render_footer(
             inset(layout.footer),
             layout.kind == ScreenLayout::Large,
-            footer_title,
+            None,
             buf,
         );
         self.render_frame_labels(navigation_layout, layout, area, buf, now);
+        if !layout.event_detail.is_empty()
+            && let Some((title, _)) = footer_title
+        {
+            render_section_edge(title, layout.event_detail_top_rule, buf);
+        }
         let mut separators = vec![];
         if layout.kind != ScreenLayout::Small && !layout.gap.is_empty() && layout.gap.width > 1 {
             separators.push((
@@ -2210,6 +2215,24 @@ fn join_separators(separators: &[(u16, u16, u16)], area: Rect, buf: &mut Buffer)
             }
         }
     }
+}
+
+/// Centers a muted section title on its owner's frame edge.
+fn render_section_edge(title: Line<'static>, edge: Rect, buf: &mut Buffer) {
+    if edge.width < 4 || edge.is_empty() {
+        return;
+    }
+    let title = truncate_line_with_ellipsis_if_overflow(
+        Line::from(title.to_string()),
+        usize::from(edge.width - 4),
+    );
+    let mut header = Line::from(" ");
+    header.spans.extend(title.spans);
+    header.spans.push(" ".into());
+    let width = header.width() as u16;
+    let label = Rect::new(edge.x + (edge.width - width) / 2, edge.y, width, 1);
+    Clear.render(label, buf);
+    line(header.dim(), label, buf);
 }
 
 fn centered_rule_label(title: Line<'_>, rule: Rect) -> (Line<'_>, Rect) {

@@ -505,7 +505,7 @@ impl View {
             })
             .collect::<Vec<_>>();
         let times = layout.times.clone();
-        // The section on the top row keeps its title in the footer once the title scrolls off.
+        // The section on the top row keeps its title on the top edge once its title scrolls off.
         viewport.event_detail_footer_title = visible_rows.first().and_then(|&top| {
             layout
                 .titles
