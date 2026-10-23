@@ -2,7 +2,7 @@
 
 #[path = "app_transcript.rs"]
 mod transcript_cache;
-use transcript_cache::{ActivityCache, FileStamp, UsageCache};
+use transcript_cache::{FileStamp, UsageCache};
 
 use crate::model::Action;
 use crate::model::{DraftKey, Session, SessionStatus};
@@ -164,8 +164,6 @@ pub struct App {
     transcript_parsed_bytes: u64,
     /// Visible token usage, refreshed independently of paints.
     usage: UsageCache,
-    /// When each recently active transcript's turns ran.
-    activity: ActivityCache,
 }
 
 #[derive(PartialEq, Eq)]
@@ -272,7 +270,6 @@ impl App {
             transcript_has_older: false,
             transcript_parsed_bytes: 0,
             usage: UsageCache::default(),
-            activity: ActivityCache::default(),
         }
     }
 
@@ -397,7 +394,6 @@ impl App {
             let area = frame.area();
             self.refresh_event(self.view.event_count(area));
             self.refresh_usage(self.view.usage_width(area), now);
-            self.refresh_activity(area.width, now);
             self.view.render_at(area, frame.buffer_mut(), now);
             cursor = self.view.cursor_pos(area);
         })?;
@@ -924,13 +920,6 @@ impl App {
         } else {
             self.full_transcript_stamp = None;
             self.transcript_stamp = Some(stamp);
-        }
-    }
-
-    /// Updates file inputs on session changes and polling ticks, and bins when time moves.
-    fn refresh_activity(&mut self, width: u16, now: chrono::DateTime<chrono::Utc>) {
-        if let Some(bins) = self.activity.update(&self.sessions, width, now) {
-            self.view.set_activity(bins);
         }
     }
 

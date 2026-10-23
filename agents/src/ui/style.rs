@@ -140,7 +140,7 @@ pub(super) fn time_style() -> Style {
     Style::default().dim()
 }
 
-/// The braille dots in the usage chart and activity strip.
+/// The other active tasks' braille dots in the usage chart.
 pub(super) fn timeline_style(use_colors: bool) -> Style {
     if use_colors {
         Style::default().fg(crate::theme::inline_code_color())

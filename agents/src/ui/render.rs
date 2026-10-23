@@ -857,15 +857,9 @@ impl View {
                 &occupied,
                 buf,
             );
-            if !small {
-                self.render_activity_strip(at(baseline.list, layout.prompt_top_rule.y), buf, now);
-            }
         }
         if !title.is_empty() && baseline.task_details.width > 0 {
             self.render_title_rule(title, buf);
-        }
-        if small && !layout.gap.is_empty() {
-            self.render_activity_strip(layout.gap, buf, now);
         }
         // A whole status label yields on overlap, including its surrounding spaces.
         let mut x = status.x;

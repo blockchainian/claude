@@ -988,8 +988,8 @@ fn large_border_labels_stay_in_their_columns() {
         assert!(
             segment(&buffer, tasks.clone(), middle)
                 .chars()
-                .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c)),
-            "activity missing on middle border:\n{}",
+                .all(|c| c == '─'),
+            "task list middle border must remain a rule:\n{}",
             rendered.join("\n")
         );
         let bottom = segment(&buffer, task_details.clone(), middle);

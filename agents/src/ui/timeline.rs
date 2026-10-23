@@ -1,4 +1,4 @@
-//! The time axis the usage chart and the activity strip share: each cell holds two bins, its left
+//! The usage chart's time axis: each cell holds two bins, its left
 //! and right braille dot columns, and the right edge of an area is the bin holding now.
 
 use super::View;
@@ -26,7 +26,7 @@ pub(crate) fn timeline_seconds(width: u16) -> i64 {
 impl View {
     /// Time until the timeline moves to its next bin, while it shows anything.
     pub(crate) fn timeline_redraw_in(&self, now: DateTime<Utc>) -> Option<std::time::Duration> {
-        if self.activity.is_empty() && !self.shows_usage() {
+        if !self.shows_usage() {
             return None;
         }
         let next = (bin_of(now) + 1) * BIN_SECONDS * 1000;

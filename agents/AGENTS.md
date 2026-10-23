@@ -13,7 +13,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 - src/processes.rs -- running processes and their open files, read through libproc
 - src/event.rs -- task events and filters
 - src/usage.rs -- a transcript's token usage in time bins, for the usage chart
-- src/activity.rs -- when a transcript's turns ran, for the activity strip
+- src/activity.rs -- transcript turn membership for the event list
 - src/jsonl.rs -- a growing transcript read by complete lines, forward or backward
 - src/tasks.rs -- task worktrees, environment files and workspace trust
 - src/ui/ -- rendering, prompt input, drafts and the task event panels

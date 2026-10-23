@@ -488,11 +488,6 @@ fn panel_zoom_collapsed_panels_keep_frame_labels() {
         ] {
             for commands in ["", "|", "_", "|_", "_|"] {
                 let (mut view, now) = event_fixture();
-                view.set_activity(
-                    (0..400)
-                        .map(|age| crate::usage::bin_of(now) - age)
-                        .collect(),
-                );
                 event_screen(&view, width, 110, now);
                 view.set_active_panel(panel);
                 for command in commands.chars() {
@@ -507,10 +502,10 @@ fn panel_zoom_collapsed_panels_keep_frame_labels() {
                     assert_eq!(layout.prompt.y, layout.header.bottom(), "{context}");
                 }
                 assert!(
-                    rows[usize::from(layout.prompt_top_rule.y)]
+                    !rows[usize::from(layout.prompt_top_rule.y)]
                         .chars()
                         .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c)),
-                    "{context}: activity must remain on the frame rule: {screen}"
+                    "{context}: frame rule must have no braille dots: {screen}"
                 );
             }
         }

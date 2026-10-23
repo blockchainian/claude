@@ -33,11 +33,6 @@ fn fixture() -> (tempfile::TempDir, View, DateTime<Utc>) {
     });
     view.event_list.filter = crate::event::EventFilter::Message;
     view.event_list.sort = EventSort::Duration;
-    view.set_activity(
-        (0..400)
-            .map(|age| crate::usage::bin_of(now) - age)
-            .collect(),
-    );
     (dir, view, now)
 }
 
@@ -172,23 +167,13 @@ fn frame_labels_keep_their_columns_through_every_zoom() {
                             );
                         }
                     }
-                    let dots: Vec<_> = (original.list.x..original.list.right())
-                        .filter(|x| {
-                            baseline[(*x, original.prompt_top_rule.y)]
+                    for y in [layout.prompt_top_rule.y, original.prompt_top_rule.y] {
+                        assert!((area.x..area.right()).all(|x| {
+                            !actual[(x, y)]
                                 .symbol()
                                 .chars()
                                 .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
-                        })
-                        .collect();
-                    assert!(!dots.is_empty());
-                    for x in dots {
-                        if actual[(x, layout.prompt_top_rule.y)].symbol()
-                            != baseline[(x, original.prompt_top_rule.y)].symbol()
-                        {
-                            failures
-                                .push(format!("{width} {panel:?} {commands}: activity column {x}"));
-                            break;
-                        }
+                        }));
                     }
                 }
             }
@@ -344,14 +329,14 @@ fn small_layout_labels_belong_to_the_three_task_edges() {
         .map(|x| cell_text(buf[(x, middle)].symbol()))
         .collect::<String>();
     assert!(
-        middle_text
+        !middle_text
             .chars()
             .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c)),
         "{middle_text}"
     );
     assert!(
-        !middle_text.contains("─"),
-        "timeline should span the entire edge: {middle_text}"
+        middle_text.contains("─"),
+        "gap keeps its rule: {middle_text}"
     );
     for cell in &buf.content {
         assert!(

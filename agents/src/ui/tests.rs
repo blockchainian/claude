@@ -3968,12 +3968,11 @@ mod task_details_header {
         );
     }
     #[test]
-    fn borders_keep_title_status_elapsed_activity_and_event_jump_separate() {
+    fn borders_keep_title_status_elapsed_and_event_jump_separate() {
         let (mut view, now) = event_fixture();
         view.select_fixture_event(Some(view.event_panel[6].clone()));
         view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
         view.event_list.unseen.set(1);
-        view.set_activity([crate::usage::bin_of(now)].into());
         for width in [112, 200] {
             for with_event in [true, false] {
                 view.rows[view.selected].transcript =
@@ -4033,9 +4032,9 @@ mod task_details_header {
                 assert!(!bottom_text.contains("3h 12m"));
                 assert!(!label(&buf, top).contains("Task log example"));
                 if !layout.event_panel.is_empty() {
-                    let strip = &buf[(layout.list.right() - 1, bottom)];
+                    let rule = &buf[(layout.list.right() - 1, bottom)];
                     assert!(
-                        cell_text(strip.symbol())
+                        !cell_text(rule.symbol())
                             .chars()
                             .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
                     );
@@ -9933,7 +9932,6 @@ fn usage_chart_uses_assistant_color_for_selected_usage() {
         )]
         .into(),
     );
-    view.set_activity([bin].into());
     let area = Rect::new(0, 0, 100, 25);
 
     for use_colors in [true, false] {
@@ -9943,14 +9941,11 @@ fn usage_chart_uses_assistant_color_for_selected_usage() {
         let layout = view.center_layout(area);
         let x = layout.list.right() - 1;
         let chart = &buf[(x, layout.list.bottom() - 1)];
-        let strip = &buf[(x, layout.prompt.y - 1)];
-        for cell in [chart, strip] {
-            assert!(
-                cell_text(cell.symbol())
-                    .chars()
-                    .all(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
-            );
-        }
+        assert!(
+            cell_text(chart.symbol())
+                .chars()
+                .all(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
+        );
         assert_eq!(
             chart.fg,
             if use_colors {
@@ -9959,12 +9954,6 @@ fn usage_chart_uses_assistant_color_for_selected_usage() {
                 Color::Reset
             },
             "use_colors={use_colors}"
-        );
-        assert_eq!(
-            strip.fg,
-            super::style::timeline_style(use_colors)
-                .fg
-                .unwrap_or(Color::Reset)
         );
     }
 }
@@ -10066,25 +10055,21 @@ fn usage_chart_shows_total_usage_without_a_selected_task() {
 }
 
 #[test]
-fn activity_strip_dots_the_event_rule_where_a_task_worked_in_the_inline_code_color() {
-    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
-    let (mut view, now) = event_fixture();
-    view.use_colors = true;
+fn task_rule_has_no_activity_dots_without_usage() {
+    let (view, now) = event_fixture();
     let area = Rect::new(0, 0, 100, 25);
     let layout = view.center_layout(area);
-    let (y, right) = (layout.prompt.y - 1, layout.list.right() - 1);
-    let [left_bin, right_bin] = super::timeline::cell_bins(layout.list, right, now);
-    // The newest cell's both bins, then a gap, then a cell's left bin only.
-    view.set_activity([left_bin, right_bin, left_bin - 4].into());
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
-    let cell = |x: u16| &buf[(x, y)];
-    assert_eq!(cell(right).symbol(), "⠒");
-    assert_eq!(cell(right).fg, crate::theme::inline_code_color());
-    assert!(!cell(right).modifier.contains(ratatui::style::Modifier::DIM));
-    assert_eq!(cell(right - 1).symbol(), "─");
-    assert_eq!(cell(right - 2).symbol(), "⠂");
-    assert!(view.timeline_redraw_in(now).is_some());
+    for x in layout.list.x..layout.list.right() {
+        assert!(
+            !buf[(x, layout.prompt_top_rule.y)]
+                .symbol()
+                .chars()
+                .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
+        );
+    }
+    assert!(view.timeline_redraw_in(now).is_none());
 }
 
 #[path = "click_event_tests.rs"]

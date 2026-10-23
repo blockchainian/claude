@@ -1,5 +1,4 @@
 //! Command center adapted from OpenAI Codex's TUI (Apache-2.0).
-mod activity_strip;
 pub(crate) mod commits;
 mod draft_controls;
 #[cfg(test)]
@@ -348,8 +347,6 @@ pub struct View {
     other_usage: std::collections::BTreeMap<i64, crate::usage::Bin>,
     /// How many times taller than wide one terminal cell looks.
     cell_aspect: f64,
-    /// The timeline bins some task worked in.
-    activity: std::collections::BTreeSet<i64>,
 }
 
 /// Cell height over width assumed when the terminal reports no pixels.
@@ -471,7 +468,6 @@ impl View {
             other_usage: Default::default(),
             context_usage: None,
             cell_aspect: DEFAULT_CELL_ASPECT,
-            activity: std::collections::BTreeSet::new(),
         }
     }
 
