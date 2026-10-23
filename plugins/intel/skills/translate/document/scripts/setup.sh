@@ -1,5 +1,5 @@
 #!/bin/bash
-# ABOUTME: Idempotent auto-setup for translate-pdf: runs the translate-epub skill's setup (poppler, uv, codex, Chrome),
+# ABOUTME: Idempotent auto-setup for translate: runs the translate-epub skill's setup (poppler, uv, codex, Chrome),
 # ABOUTME: then installs readable.mjs's Node packages (Readability, jsdom) beside it when missing.
 
 set -euo pipefail

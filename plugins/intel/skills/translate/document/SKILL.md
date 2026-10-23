@@ -1,17 +1,17 @@
 ---
-name: translate-pdf
+name: translate
 description: >
   Translate an English document we print ourselves, a web page (course reading, lab handout, blog post), a Markdown
   note or a plain-text transcript, into a Chinese PDF in the translate-epub skill's book look: same page size, dark theme, Baskerville/Songti body,
   黑体 bold, boxed code, Mermaid diagrams, MathJax math, bookmarks. Code, identifiers, math and diagram labels stay
   English; prose, headings, captions and exercise text are translated through `codex exec`. Translating from the
-  source keeps structure, code blocks, exercises and images exact. Use for "/translate-pdf <url or .md>", "把这个网页
+  source keeps structure, code blocks, exercises and images exact. Use for "/translate <url or .md>", "把这个网页
   翻译成中文 PDF", "translate these course pages", or to re-render after editing a translation. NOT for a PDF that only
   exists as a PDF (papers, slides, scans: use translate-paper, translate-presentation or translate-scan), and NOT for an
   EPUB book (use translate-epub).
 ---
 
-# Translate PDF
+# Translate
 
 ## Skill directory
 
@@ -27,7 +27,7 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment |
-| `INTEL_STATE_DIR` | State root; work dirs go under `translate-pdf/`; default `~/.local/state/intel` | Optional | `~/.config/intel/.env` |
+| `INTEL_STATE_DIR` | State root; work dirs go under `translate-document/`; default `~/.local/state/intel` | Optional | `~/.config/intel/.env` |
 | `ISP_PROXY_URL` | Proxy for a page fetch that gets HTTP 429 | Optional | `~/.config/intel/.env` |
 
 ## Setup
@@ -70,7 +70,7 @@ A 10k-word page takes about a minute: eight codex calls of about 1,500 words run
 - `--drop-heading TEXT` removes each section whose heading contains TEXT, such as a login-only tutor section.
 - `--skip-bookmark TEXT` drops outline entries titled TEXT, such as the "阅读练习" heading every exercise block
   repeats.
-- `--work DIR` sets the work dir (default `$INTEL_STATE_DIR/translate-pdf/<name>`).
+- `--work DIR` sets the work dir (default `$INTEL_STATE_DIR/translate-document/<name>`).
 
 ## How it works
 

@@ -8,7 +8,7 @@ description: >
   translates each section, and its render.py typesets the result. Use for "/translate-paper <paper.pdf>",
   "把这篇论文翻译成中文", "translate these lecture notes", or a batch of course PDFs.
   NOT for scanned or handwritten PDFs without a text layer (use translate-scan), slides (use translate-presentation),
-  EPUB books (use translate-epub), or web pages (use translate-pdf).
+  EPUB books (use translate-epub), or web pages (use translate).
 ---
 
 # Translate papers
