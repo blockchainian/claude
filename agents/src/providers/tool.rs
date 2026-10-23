@@ -517,6 +517,7 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         name: "codex-manager start",
         title: &[Pick::Field(Source::Input, "/name")],
         input: Some((Pick::Field(Source::Input, "/prompt"), Format::Markdown)),
+        output: Some((Pick::Field(Source::Result, "/threadId"), Format::Text)),
         attention: true,
         ..DEFAULT_RULE
     },
@@ -1911,6 +1912,37 @@ mod tests {
             );
             assert!(text.contains(&heading));
         }
+    }
+
+    #[test]
+    fn codex_manager_start_shows_only_the_thread_id() {
+        let records: Vec<serde_json::Value> =
+            include_str!("../../tests/fixtures/claude-manager-start-result.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let call = &records[0]["message"]["content"][0];
+        let content = &records[1]["message"]["content"][0]["content"];
+        let result = super::ToolResult {
+            source: None,
+            content: content.clone(),
+            structured: serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap(),
+            error: false,
+        };
+        let presentation = super::presentation(
+            call["name"].as_str().unwrap(),
+            &super::ToolData {
+                input: &call["input"],
+                result: Some(&result),
+            },
+        );
+        let Some(super::Body::Sections(output)) = presentation.output else {
+            panic!("expected visible body")
+        };
+        let [crate::event::Section::Text { text, .. }] = output.as_slice() else {
+            panic!("expected only the thread id, got {output:?}");
+        };
+        assert_eq!(text, result.structured["threadId"].as_str().unwrap());
     }
 
     #[test]

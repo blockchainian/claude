@@ -3189,8 +3189,8 @@ mod panel_detail_tests {
             .into_iter()
             .find(|event| event.calls.len() > 1)
             .unwrap();
-        let panel = Rect::new(0, 0, 200, 12);
-        let mut buffer = Buffer::empty(Rect::new(0, 0, 201, 12));
+        let panel = Rect::new(0, 0, 200, 8);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 201, 8));
         let view = View::new(Grouping::Project, false);
         view.render_event_detail_content(
             &event,
@@ -3211,6 +3211,7 @@ mod panel_detail_tests {
         );
         let viewport = view.viewport.borrow();
         let layout = viewport.event_detail_layout.as_ref().unwrap();
+        assert!(layout.lines.len() > 8, "the detail must overflow the panel to scroll");
         let mut expected = Buffer::empty(buffer.area);
         layout.lines[0].clone().render(
             super::super::render::row(layout.columns.text, EVENT_TOP, 1),
