@@ -119,7 +119,10 @@ async function consume(response, metrics, allowIncomplete) {
 }
 
 /** A file-backed ChatGPT Responses client. Endpoint and timing overrides support local tests.
- * respond({ model, effort, instructions, input, schema?, validate?, recoverIncomplete? }) returns { output, usage }.
+ * respond({ model, effort, instructions, input, serviceTier?, schema?, validate?, recoverIncomplete? }) returns { output, usage }.
+ * input accepts native Responses input items, including image messages.
+ * reasoningContext, verbosity and responsesLite optionally select the CLI request format.
+ * Omit instructions when instructions are already carried by developer input messages.
  * With schema, output is parsed JSON; validate(output) may throw to request a retry.
  * recoverIncomplete(text) may recover output-limit replies; validate also receives { incomplete }.
  * log receives timing, queue, session and safe response metadata for each HTTP attempt.
@@ -394,10 +397,20 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     finally { if (refreshes.get(authPath) === promise) refreshes.delete(authPath); }
   }
 
-  async function run({ model, effort, instructions, input, schema, validate, recoverIncomplete, telemetry = {} }) {
-    const body = { model, reasoning: { effort }, instructions, input, tools: [], tool_choice: 'auto',
-      parallel_tool_calls: false, store: false, stream: true, include: [],
-      ...(schema === undefined ? {} : { text: { format: { type: 'json_schema', name: 'codex_output_schema', strict: true, schema } } }) };
+  async function run({ model, effort, instructions, input, serviceTier, reasoningContext, verbosity, responsesLite = false, schema, validate, recoverIncomplete, telemetry = {} }) {
+    if (!(typeof input === 'string'
+      || Array.isArray(input) && input.every(item => item !== null && typeof item === 'object' && !Array.isArray(item))))
+      throw new Error('Invalid Responses input.');
+    if (serviceTier !== undefined && (typeof serviceTier !== 'string' || !serviceTier.trim()))
+      throw new Error('Invalid service tier.');
+    const text = { ...(verbosity === undefined ? {} : { verbosity }),
+      ...(schema === undefined ? {} : { format: { type: 'json_schema', name: 'codex_output_schema', strict: true, schema } }) };
+    const body = { model, reasoning: { effort, ...(reasoningContext === undefined ? {} : { context: reasoningContext }) },
+      instructions, input, ...(responsesLite ? {} : { tools: [] }), tool_choice: 'auto',
+      parallel_tool_calls: false, store: false, stream: true,
+      include: responsesLite ? ['reasoning.encrypted_content'] : [],
+      ...(serviceTier === undefined ? {} : { service_tier: serviceTier }),
+      ...(Object.keys(text).length ? { text } : {}) };
     let recovered = false, httpAttempt = 0, previousFailure = null;
     let queuedAt = telemetry.queued_at ?? Date.now();
     const context = () => ({ file: telemetry.file, batch_id: telemetry.batch_id, batch_ids: telemetry.batch_ids,
@@ -417,7 +430,8 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
             try {
               response = await send(endpoint, body, metrics, { Authorization: `Bearer ${auth.tokens.access_token}`,
                 'ChatGPT-Account-ID': auth.tokens.account_id, originator: 'codex_cli_rs',
-                Accept: 'text/event-stream', 'User-Agent': 'codex-responses-client' });
+                Accept: 'text/event-stream', 'User-Agent': 'codex-responses-client',
+                ...(responsesLite ? { 'x-openai-internal-codex-responses-lite': 'true' } : {}) });
               if (response.status === 401) { response.body.close(constants.NGHTTP2_CANCEL); return { unauthorized: true }; }
               if (!response.ok) {
                 let error;

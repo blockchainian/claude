@@ -15,7 +15,9 @@ description: >
 ## Skill directory
 
 Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The scripts import from
-the sibling `translate-epub`, `translate-paper` and `fetch-x-mentions` skills, so keep the whole intel plugin installed.
+the sibling `translate-epub`, `translate-paper` and `fetch-x-mentions` skills by relative paths.
+OCR, proofreading and translation use the shared Codex Responses client from
+`unminify/scripts/codex-api-client.mjs` with the existing Codex login, so keep the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
@@ -28,7 +30,7 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 | `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment |
 | `INTEL_STATE_DIR` | Work dirs go under `translate-scan/`; default `~/.local/state/intel` | Optional | `~/.config/intel/.env` |
 | `INTEL_OUTPUT_DIR` | Finished PDFs go under `translate/` unless `--out-dir`; default `~/Documents` | Optional | `~/.config/intel/.env` |
-| `INTEL_DATA_DIR` | The compiled Vision helper and codex scratch dirs; default `~/.local/share/intel` | Optional | `~/.config/intel/.env` |
+| `INTEL_DATA_DIR` | The compiled Vision helper; default `~/.local/share/intel` | Optional | `~/.config/intel/.env` |
 
 ## Setup
 
@@ -52,7 +54,7 @@ Each file runs through six steps in its work dir `<INTEL_STATE_DIR>/translate-sc
 a rerun resumes at the first step without output.
 
 1. `pdftoppm` renders the pages: 300 dpi for printed scans, 200 dpi for handwriting.
-2. `ocr.mjs` sends each page image in one codex call (gpt-6-luna, effort low, 12 in flight) and gets the page back
+2. `ocr.mjs` sends each page image in one Codex Responses request (gpt-6-luna, effort low, 12 in flight) and gets the page back
    as Markdown. A figure comes back as a `[FIGURE x0,y0,x1,y1]` box followed by a bold caption; a printed page that
    opens mid-paragraph starts with `<<CONT>>`. A page with an unclosed formula is read again, up to three times.
 3. `ocr.mjs --proofread` and `proof.mjs` check the words: macOS Vision reads the page independently, and every spot

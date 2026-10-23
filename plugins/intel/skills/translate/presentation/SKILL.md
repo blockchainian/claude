@@ -4,7 +4,7 @@ description: >
   Translate an English lecture slide deck PDF (Keynote, PowerPoint or Google Slides export with a text layer) into a
   Chinese PDF page for page: the same pages, figures and layout, the translate-epub skill's dark theme (page #000409, ink
   #6e7f7a, 黑体), each prose text box replaced in place by fitted Chinese, screenshots and diagrams recoloured, photos
-  kept. Text inside figures, code and names stay English. Translation goes through `codex exec`. Use for
+  kept. Text inside figures, code and names stay English. Translation goes through the Codex Responses client. Use for
   "/translate-presentation <deck.pdf>", "把这份幻灯片翻译成中文", "translate these lecture slides", or a batch of decks.
   NOT for decks whose pages are pictures with no text layer (scans or rasterised slides: they need OCR boxes first),
   NOT for papers or notes (translate-paper), and NOT for EPUB books (translate).
@@ -16,7 +16,8 @@ description: >
 
 Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The scripts import from the
 sibling `translate-epub` skill (theme helpers in `render.py`, `runCodex` in `translate.mjs`), which imports from
-`fetch-x-mentions`, so keep the whole intel plugin installed.
+`fetch-x-mentions`. Imports use relative paths; `runCodex` calls the shared
+`unminify/scripts/codex-api-client.mjs` directly with the existing Codex login, so keep the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"

@@ -188,7 +188,7 @@ def blockify(md):
 def join_pages(pages):
     """Concatenates the pages' blocks; a page's <<CONT>> block continues the last body paragraph of the pages
     before it (not a table or legend placed above it on its own page), rejoining a word hyphenated across the
-    page break."""
+    page break. A title on a later page starts a section inside the document."""
     blocks = []
     for md in pages:
         if OCW_PAGE_RE.search(md):
@@ -209,6 +209,8 @@ def join_pages(pages):
                     prev = blocks[at]
                     blocks[at] = prev[:-1] + b if re.search(r"[a-z]-$", prev) and b[:1].islower() else f"{prev} {b}"
                     continue
+            if page_start and b.startswith("# "):
+                b = "#" + b
             if not PUBLISHER_RE.match(b):
                 blocks.append(b if b.startswith(("```", "|")) else links(b))
     return blocks

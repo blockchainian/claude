@@ -1,17 +1,17 @@
 #!/usr/bin/env node
-// ABOUTME: Transcribes each page image of a scanned or handwritten PDF into Markdown with one codex exec call per
+// ABOUTME: Transcribes each page image of a scanned or handwritten PDF into Markdown with one Responses call per
 // ABOUTME: page (the image attached), many pages in flight; optionally a proofreading call per page. Resumable.
 //
 // Usage: ocr.mjs <work dir> [--mode typeset|handwritten|slide] [--proofread] [--jobs 12] [--model M] [--effort low]
 // Reads <work>/pages/p-NN.png (any zero padding); writes <work>/ocr/NN.md, and with --proofread <work>/proof/NN.md: the draft with
 // each spot where an independent macOS Vision OCR disagrees with it re-read blind from a crop (log in
 // proof/NN.edits.txt).
-import { spawn } from "node:child_process";
+import { prepareImage } from "./images.mjs";
+import { imageInput, requestCodex } from "../../epub/scripts/codex.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadEnvFile, tmpDir } from "../../../fetch-x-mentions/scripts/env.mjs";
-import { codexHome, OFF } from "../../epub/scripts/translate.mjs";
+import { loadEnvFile } from "../../../fetch-x-mentions/scripts/env.mjs";
 import { applyReadings, cropSpots, disagreements, proofPrompt, READINGS_SCHEMA } from "./proof.mjs";
 import { visionLines } from "./vision.mjs";
 
@@ -53,50 +53,13 @@ ${COMMON}`,
 ${COMMON}`,
 };
 
-function runProcess(cmd, args, input, env, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { env, stdio: ["pipe", "pipe", "pipe"] });
-    const out = [], err = [];
-    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-    child.stdout.on("data", (d) => out.push(d));
-    child.stderr.on("data", (d) => err.push(d));
-    child.on("error", (e) => { clearTimeout(timer); reject(e); });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") });
-    });
-    child.stdin.end(input);
-  });
-}
-
-/** One no-tool codex exec call with one or more images attached, its answer optionally held to a JSON schema;
- * returns the final message. */
-export async function codexWithImage(prompt, images, { model, effort, serviceTier = "priority", tries = 2, timeout = 900, schema = null }) {
-  const dir = fs.mkdtempSync(path.join(tmpDir("translate-scan"), "codex-"));
-  // The scratch dir holds a copy of the Codex login, so it goes as soon as the call ends.
-  try {
-    const instructions = path.join(dir, "instructions.md");
-    fs.writeFileSync(instructions, "You transcribe page images exactly. Do not run commands or touch files.\n");
-    const home = codexHome(dir, model, effort, instructions, serviceTier);
-    const last = path.join(dir, "last.txt");
-    const args = ["exec", "--ignore-rules", "--skip-git-repo-check", "--ephemeral", "-C", dir, "-s", "read-only"];
-    for (const f of OFF) args.push("--disable", f);
-    for (const img of [images].flat()) args.push("-i", img);
-    if (schema) {
-      fs.writeFileSync(path.join(dir, "schema.json"), JSON.stringify(schema));
-      args.push("--output-schema", path.join(dir, "schema.json"));
-    }
-    args.push("--json", "-o", last, "-");
-    let err = "";
-    for (let i = 0; i < tries; i++) {
-      const r = await runProcess("codex", args, prompt, { ...process.env, CODEX_HOME: home }, timeout * 1000);
-      if (r.code === 0 && fs.existsSync(last)) return fs.readFileSync(last, "utf8").trim() + "\n";
-      err = `codex exec exited ${r.code}: ${r.stderr.slice(-1500)}`;
-    }
-    throw new Error(err);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+/** One tool-free Responses call with images prepared at the CLI high-detail resolution. */
+export async function codexWithImage(prompt, images, { model, effort, serviceTier = "priority", timeout = 900, schema = null, events = null }) {
+  const paths = [images].flat();
+  const bytes = await Promise.all(paths.map(prepareImage));
+  const [answer] = await requestCodex(imageInput(prompt, paths, bytes), model, effort, serviceTier,
+    { events, timeout, schema, rules: "You transcribe page images exactly. Do not run commands or touch files.\n" });
+  return answer.trim() + "\n";
 }
 
 /** True when every \\( has its \\) and every \\[ its \\], in order: an unclosed formula turns the rest of the
@@ -152,6 +115,7 @@ export async function ocrPages(opt) {
   const pages = fs.readdirSync(pagesDir).filter((f) => /^p-\d+\.png$/.test(f)).sort();
   for (const d of ["ocr", "proof"]) fs.mkdirSync(path.join(opt.work, d), { recursive: true });
   let failed = 0;
+  const timings = [];
   await pool(pages, opt.jobs, async (f) => {
     const n = f.match(/\d+/)[0].padStart(2, "0");
     const image = path.join(pagesDir, f);
@@ -160,14 +124,17 @@ export async function ocrPages(opt) {
     const t0 = Date.now();
     try {
       if (!fs.existsSync(draft) || !mathBalanced(fs.readFileSync(draft, "utf8"))) {
+        const started_at = Date.now();
         let md = "";
-        for (let i = 0; i < 3 && !mathBalanced(md || "\\("); i++) md = await codexWithImage(PROMPTS[opt.mode], image, opt);
+        for (let i = 0; i < 3 && !mathBalanced(md || "\\("); i++) md = await codexWithImage(PROMPTS[opt.mode], image, { ...opt, events: path.join(opt.work, "ocr", `${n}.events.jsonl`) });
         if (!mathBalanced(md)) throw new Error("unbalanced math delimiters after 3 tries");
         fs.writeFileSync(draft, md);
         fs.rmSync(proof, { force: true });
+        timings.push({ phase: "ocr", page: n, started_at, ended_at: Date.now() });
         console.log(`ocr ${n} ${Math.round((Date.now() - t0) / 1000)}s`);
       }
       if (opt.proofread && !fs.existsSync(proof)) {
+        const started_at = Date.now();
         const md = fs.readFileSync(draft, "utf8");
         const lines = visionLines(image);
         const spots = disagreements(md, lines);
@@ -176,11 +143,12 @@ export async function ocrPages(opt) {
           const crops = path.join(opt.work, "proof", `${n}-spots`);
           fs.mkdirSync(crops, { recursive: true });
           const images = cropSpots(image, lines, spots, crops);
-          const answer = await codexWithImage(proofPrompt(spots), images, { ...opt, effort: opt.proofEffort, schema: READINGS_SCHEMA });
+          const answer = await codexWithImage(proofPrompt(spots), images, { ...opt, effort: opt.proofEffort, schema: READINGS_SCHEMA, events: path.join(opt.work, "proof", `${n}.events.jsonl`) });
           [fixed, log] = applyReadings(md, spots, answer);
         }
         fs.writeFileSync(path.join(opt.work, "proof", `${n}.edits.txt`), log);
         fs.writeFileSync(proof, fixed);
+        timings.push({ phase: "proof", page: n, started_at, ended_at: Date.now() });
         console.log(`proof ${n}: ${spots.length} spots, ${(log.match(/^fixed/gm) || []).length} fixed, ${Math.round((Date.now() - t0) / 1000)}s`);
       }
     } catch (e) {
@@ -188,6 +156,7 @@ export async function ocrPages(opt) {
       console.log(`FAILED ${n}: ${e.message}`);
     }
   });
+  if (timings.length) fs.appendFileSync(path.join(opt.work, "phase-timings.jsonl"), timings.map(t => JSON.stringify(t)).join("\n") + "\n");
   console.log(`done: ${pages.length} pages, ${failed} failed`);
   return failed;
 }

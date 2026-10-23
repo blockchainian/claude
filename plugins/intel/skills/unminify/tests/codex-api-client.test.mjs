@@ -187,6 +187,49 @@ test('SSE completion, usage, request shape and safe per-attempt metrics', async 
   for (const secret of Object.values(f.auth.tokens).filter(v => typeof v === 'string')) assert(!serialized.includes(secret));
 });
 
+test('image messages, schema, reasoning effort and service tier reach the Responses endpoint', async t => {
+  let received;
+  const f = await fixture(t, (req, res, body) => {
+    received = body;
+    send(res, completion('{"text":"hello"}'));
+  });
+  const imageInput = [{ type: 'message', role: 'user', content: [
+    { type: 'input_text', text: 'Read this page.' },
+    { type: 'input_image', image_url: 'data:image/png;base64,iVBORw0KGgo=', detail: 'high' },
+  ] }];
+  const schema = { type: 'object', properties: { text: { type: 'string' } },
+    required: ['text'], additionalProperties: false };
+  const result = await f.client().respond({ ...request, input: imageInput, schema,
+    effort: 'medium', serviceTier: 'priority' });
+  assert.deepEqual(result, { output: { text: 'hello' }, usage });
+  assert.deepEqual(received.input, imageInput);
+  assert.deepEqual(received.reasoning, { effort: 'medium' });
+  assert.equal(received.service_tier, 'priority');
+  assert.deepEqual(received.text, { format: { type: 'json_schema', name: 'codex_output_schema', strict: true, schema } });
+});
+
+test('string input remains unchanged and omitted service tier stays omitted', async t => {
+  let received;
+  const f = await fixture(t, (req, res, body) => { received = body; send(res); });
+  const client = f.client();
+  for (const input of ['Translate this paragraph.', '', []]) {
+    await client.respond({ ...request, input });
+    assert.deepEqual(received.input, input);
+    assert.equal(Object.hasOwn(received, 'service_tier'), false);
+  }
+});
+
+test('invalid input and service tier fail before sending a request', async t => {
+  let calls = 0;
+  const f = await fixture(t, (req, res) => { calls++; send(res); });
+  const client = f.client();
+  for (const input of [undefined, null, {}, 7, [null], ['text']])
+    await assert.rejects(client.respond({ ...request, input }), /Invalid Responses input/);
+  for (const serviceTier of [null, '', 7])
+    await assert.rejects(client.respond({ ...request, serviceTier }), /Invalid service tier/);
+  assert.equal(calls, 0);
+});
+
 test('SSE item events, multiline data and split UTF-8 bytes', async t => {
   const f = await fixture(t, async (req, res) => {
     const complete = completion(); delete complete.response.output;
@@ -567,4 +610,21 @@ test('attempt telemetry measures queue, headers, retry, pause and refresh withou
   const serialized = JSON.stringify([f.logs, events]);
   for (const secret of [...Object.values(f.auth.tokens).filter(v => typeof v === 'string'), 'hello', 'Return text.'])
     assert(!serialized.includes(secret));
+});
+
+test('Responses Lite keeps developer instructions, reasoning context and verbosity on the wire', async t => {
+  let received, lite;
+  const f = await fixture(t, (req, res, body) => {
+    received = body; lite = req.headers['x-openai-internal-codex-responses-lite']; send(res);
+  });
+  const messages = [{ role: 'developer', content: [{ type: 'input_text', text: 'Read exactly.' }] }, ...input];
+  await f.client().respond({ ...request, instructions: undefined, input: messages,
+    reasoningContext: 'all_turns', verbosity: 'low', responsesLite: true, serviceTier: 'priority' });
+  assert.equal(lite, 'true');
+  assert.equal(Object.hasOwn(received, 'instructions'), false);
+  assert.deepEqual(received.input, messages);
+  assert.deepEqual(received.reasoning, { effort: 'low', context: 'all_turns' });
+  assert.deepEqual(received.text, { verbosity: 'low' });
+  assert.equal(Object.hasOwn(received, 'tools'), false);
+  assert.deepEqual(received.include, ['reasoning.encrypted_content']);
 });
