@@ -27,23 +27,8 @@ pub fn ownership(
     assert_eq!(solution.in_gap.len(), solution.cuts.0.len());
     assert_eq!(solution.outcomes.len(), shapes.len());
 
-    // An earlier reachable position cannot exclude a later nondecreasing path.
-    // Walk every cut, including uncertain ones, to select one complete path.
-    let mut previous = 0;
-    let cuts: Vec<_> = solution
-        .cuts
-        .0
-        .iter()
-        .map(|positions| {
-            let position = positions
-                .iter()
-                .find(|&at| at >= previous)
-                .expect("feasible cuts must contain a complete ordered path");
-            assert!(position <= lines.len());
-            previous = position;
-            position
-        })
-        .collect();
+    let cuts = &solution.earliest;
+    assert_eq!(cuts.len(), solution.cuts.0.len());
     assert_eq!(cuts.first(), Some(&0));
     assert_eq!(cuts.last(), Some(&lines.len()));
 
@@ -163,7 +148,12 @@ mod tests {
         set
     }
 
-    fn solution(shapes: &[OutputShape], cuts: &[&[usize]], len: usize) -> Solution {
+    fn solution(
+        shapes: &[OutputShape],
+        cuts: &[&[usize]],
+        len: usize,
+        earliest: &[usize],
+    ) -> Solution {
         Solution {
             cuts: FeasibleCuts(cuts.iter().map(|indices| set(indices, len + 1)).collect()),
             outcomes: shapes
@@ -176,6 +166,7 @@ mod tests {
                 })
                 .collect(),
             in_gap: vec![false; cuts.len()],
+            earliest: earliest.to_vec(),
         }
     }
 
@@ -196,7 +187,7 @@ mod tests {
         let text = "use std::io;\nimport os\n";
         let lines = lines(text);
         let shapes = [shape(vec![file("a.rs")]), shape(vec![file("b.py")])];
-        let solution = solution(&shapes, &[&[0], &[1], &[2]], lines.len());
+        let solution = solution(&shapes, &[&[0], &[1], &[2]], lines.len(), &[0, 1, 2]);
         assert_eq!(
             ownership(&shapes, &solution, &lines, text),
             Ownership(vec![(0..1, Owner::Command(0)), (1..2, Owner::Command(1)),])
@@ -213,7 +204,12 @@ mod tests {
             shape(vec![Kind::Plain]),
             shape(vec![file("b.py")]),
         ];
-        let solution = solution(&shapes, &[&[0], &[1, 2, 3], &[2, 3], &[4]], lines.len());
+        let solution = solution(
+            &shapes,
+            &[&[0], &[1, 2, 3], &[2, 3], &[4]],
+            lines.len(),
+            &[0, 1, 2, 4],
+        );
         assert_eq!(
             ownership(&shapes, &solution, &lines, text),
             Ownership(vec![
@@ -225,12 +221,56 @@ mod tests {
     }
 
     #[test]
+    fn blank_floating_cuts_use_solver_complete_solution() {
+        // head -n 2 a.rs; printf '\n\n\n' (or no output); head -n 3 b.py
+        let text = "fn main() {}\n\n\n\nimport os\n";
+        let lines = lines(text);
+        let mut shapes = [
+            shape(vec![file("a.rs")]),
+            shape(vec![Kind::Plain, Kind::Plain]),
+            shape(vec![file("b.py")]),
+        ];
+        shapes[0].outcomes[0].lines = LineRange {
+            min: 1,
+            max: Some(2),
+        };
+        shapes[1].outcomes[0].lines = LineRange {
+            min: 0,
+            max: Some(0),
+        };
+        shapes[1].outcomes[1].lines = LineRange {
+            min: 3,
+            max: Some(3),
+        };
+        shapes[2].outcomes[0].lines = LineRange {
+            min: 1,
+            max: Some(3),
+        };
+        let solution = solution(
+            &shapes,
+            &[&[0], &[1, 2], &[2, 4], &[5]],
+            lines.len(),
+            &[0, 1, 4, 5],
+        );
+        // The complete solutions are (0, 1, 4, 5) and (0, 2, 2, 5).
+        // Choosing the cut minima would assign one line to a zero-or-three-line command.
+        assert_eq!(
+            ownership(&shapes, &solution, &lines, text),
+            Ownership(vec![
+                (0..1, Owner::Command(0)),
+                (1..4, Owner::Command(1)),
+                (4..5, Owner::Command(2)),
+            ])
+        );
+    }
+
+    #[test]
     fn adjacent_sed_outputs_with_same_language_form_block() {
         // sed -n '/fn /,$p' a.rs; sed -n '/fn /,$p' b.rs
         let text = "fn a() {}\nfn b() {}\nfn c() {}\n";
         let lines = lines(text);
         let shapes = [shape(vec![file("a.rs")]), shape(vec![file("b.rs")])];
-        let solution = solution(&shapes, &[&[0], &[1, 2], &[3]], lines.len());
+        let solution = solution(&shapes, &[&[0], &[1, 2], &[3]], lines.len(), &[0, 1, 3]);
         assert_eq!(
             ownership(&shapes, &solution, &lines, text),
             Ownership(vec![(0..3, Owner::Block(0..2))])
@@ -251,7 +291,7 @@ mod tests {
             Kind::Plain,
         ] {
             let shapes = [shape(vec![file("a.rs")]), shape(vec![kind])];
-            let solution = solution(&shapes, &[&[0], &[1, 2], &[3]], lines.len());
+            let solution = solution(&shapes, &[&[0], &[1, 2], &[3]], lines.len(), &[0, 1, 3]);
             assert_eq!(
                 ownership(&shapes, &solution, &lines, text),
                 Ownership(vec![(0..3, Owner::Plain)])
@@ -265,7 +305,7 @@ mod tests {
         let text = "cat: a.rs: No such file or directory\n";
         let lines = lines(text);
         let shapes = [shape(vec![file("a.rs"), Kind::Plain])];
-        let mut solution = solution(&shapes, &[&[0], &[1]], lines.len());
+        let mut solution = solution(&shapes, &[&[0], &[1]], lines.len(), &[0, 1]);
         assert_eq!(
             ownership(&shapes, &solution, &lines, text),
             Ownership(vec![(0..1, Owner::Plain)])
@@ -283,7 +323,7 @@ mod tests {
         let mut lines = lines(text);
         lines.insert(1, Line::Gap { hidden: Some(20) });
         let shapes = [shape(vec![file("a.rs")]), shape(vec![file("b.py")])];
-        let solution = solution(&shapes, &[&[0], &[3], &[4]], lines.len());
+        let solution = solution(&shapes, &[&[0], &[3], &[4]], lines.len(), &[0, 3, 4]);
         let actual = ownership(&shapes, &solution, &lines, text);
         assert_eq!(
             actual,
@@ -310,7 +350,7 @@ mod tests {
         let mut lines = lines(text);
         lines.insert(1, Line::Gap { hidden: None });
         let shapes = [shape(vec![file("a.rs")]), shape(vec![file("b.py")])];
-        let mut solution = solution(&shapes, &[&[0], &[1], &[3]], lines.len());
+        let mut solution = solution(&shapes, &[&[0], &[1], &[3]], lines.len(), &[0, 1, 3]);
         solution.in_gap[1] = true;
         assert_eq!(
             ownership(&shapes, &solution, &lines, text),
@@ -321,7 +361,7 @@ mod tests {
     #[test]
     fn empty_output_has_no_ranges() {
         let shapes = [shape(vec![Kind::Plain])];
-        let solution = solution(&shapes, &[&[0], &[0]], 0);
+        let solution = solution(&shapes, &[&[0], &[0]], 0, &[0, 0]);
         assert_eq!(ownership(&shapes, &solution, &[], ""), Ownership(vec![]));
     }
 }
