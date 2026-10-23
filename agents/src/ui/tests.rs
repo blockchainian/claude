@@ -9959,73 +9959,133 @@ fn usage_chart_uses_assistant_color_for_selected_usage() {
 }
 
 #[test]
-fn usage_chart_stacks_heights_and_colors_each_cell_by_its_dot_majority() {
+fn usage_chart_stacks_cells_at_rounded_boundaries_and_preserves_both_segments() {
     use crate::usage::Bin;
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let (mut view, now) = event_fixture();
     view.cell_aspect = 1.0;
-    let area = Rect::new(0, 0, 8, 2);
+    let area = Rect::new(0, 0, 8, 4);
     let [left, right] = super::timeline::cell_bins(area, 7, now);
-    for (lower_left, lower_right, color) in [
-        (3, 3, crate::theme::inline_code_color()),
-        (2, 2, Color::Yellow),
-        (1, 1, Color::Yellow),
-        (4, 1, crate::theme::inline_code_color()),
-    ] {
+    for (tokens, others, blue_rows) in [(16, 10, 3), (16, 9, 2), (1600, 1599, 3), (1600, 1, 1)] {
         view.set_usage_totals(
-            [left, right]
-                .map(|bin| {
-                    (
-                        bin,
-                        Bin {
-                            input: 8,
-                            output: 0,
-                        },
-                    )
-                })
-                .into(),
-            [(left, lower_left), (right, lower_right)]
+            [(left, tokens / 2), (right, tokens / 2)]
                 .map(|(bin, input)| (bin, Bin { input, output: 0 }))
                 .into(),
+            [
+                (left, others.min(tokens / 2)),
+                (right, others.saturating_sub(tokens / 2)),
+            ]
+            .map(|(bin, input)| (bin, Bin { input, output: 0 }))
+            .into(),
         );
         for use_colors in [true, false] {
             view.use_colors = use_colors;
             let mut buf = Buffer::empty(area);
             view.render_usage_chart(area, &mut buf, now);
-            for y in 0..2 {
-                assert_eq!(buf[(7, y)].symbol(), "⣿");
+            for y in 0..4 {
+                assert_eq!(
+                    buf[(7, y)].symbol(),
+                    "⣿",
+                    "both columns fill the same height"
+                );
                 assert_eq!(
                     buf[(7, y)].fg,
                     if !use_colors {
                         Color::Reset
-                    } else if y == 1 {
-                        color
+                    } else if y >= 4 - blue_rows {
+                        crate::theme::inline_code_color()
                     } else {
                         Color::Yellow
                     },
-                    "lower=({lower_left}, {lower_right}), y={y}, use_colors={use_colors}"
+                    "tokens={tokens}, others={others}, y={y}, use_colors={use_colors}"
                 );
             }
         }
     }
+}
+
+#[test]
+fn usage_chart_combines_bin_pairs_and_keeps_its_outline_when_selection_changes() {
+    use crate::usage::Bin;
+    let (mut view, now) = event_fixture();
+    view.cell_aspect = 1.0;
+    let area = Rect::new(0, 0, 8, 4);
+    let [left, right] = super::timeline::cell_bins(area, 7, now);
+    let totals = [(left, 8), (right, 4), (left - 1, 1), (left - 2, 3)]
+        .map(|(bin, input)| (bin, Bin { input, output: 0 }));
+    let mut outlines = Vec::new();
+    for others in [0_u64, 1, 4, 12] {
+        view.set_usage_totals(
+            totals.into(),
+            [(left, others.min(8)), (right, others.saturating_sub(8))]
+                .map(|(bin, input)| (bin, Bin { input, output: 0 }))
+                .into(),
+        );
+        let mut buf = Buffer::empty(area);
+        view.render_usage_chart(area, &mut buf, now);
+        assert_eq!(buf[(7, 0)].symbol(), "⣿");
+        assert_eq!(buf[(6, 2)].symbol(), "⣤");
+        assert_eq!(buf[(6, 3)].symbol(), "⣿");
+        for cell in &buf.content {
+            if let Some(ch) = cell
+                .symbol()
+                .chars()
+                .next()
+                .filter(|ch| ('\u{2800}'..='\u{28ff}').contains(ch))
+            {
+                let bits = ch as u32 - 0x2800;
+                for (left_bit, right_bit) in
+                    [(0x40, 0x80), (0x04, 0x20), (0x02, 0x10), (0x01, 0x08)]
+                {
+                    assert_eq!(
+                        bits & left_bit != 0,
+                        bits & right_bit != 0,
+                        "{}",
+                        cell.symbol()
+                    );
+                }
+            }
+        }
+        outlines.push(
+            buf.content
+                .iter()
+                .map(|cell| cell.symbol().to_owned())
+                .collect::<Vec<_>>(),
+        );
+    }
+    assert!(outlines.windows(2).all(|pair| pair[0] == pair[1]));
+}
+
+#[test]
+fn usage_chart_keeps_paired_heights_and_colors_when_time_advances_five_seconds() {
+    use crate::usage::Bin;
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let (mut view, _) = event_fixture();
+    view.cell_aspect = 1.0;
+    let now = chrono::DateTime::from_timestamp(1000, 0).unwrap();
+    let area = Rect::new(0, 0, 8, 4);
+    let [left, right] = super::timeline::cell_bins(area, 7, now);
     view.set_usage_totals(
-        [(left, 8), (right, 4), (left - 1, 1)]
+        [(left, 8), (right, 4), (left - 1, 1), (left - 2, 3)]
             .map(|(bin, input)| (bin, Bin { input, output: 0 }))
             .into(),
-        [(
-            right,
-            Bin {
-                input: 2,
-                output: 0,
-            },
-        )]
-        .into(),
+        [(left, 8), (left - 1, 1)]
+            .map(|(bin, input)| (bin, Bin { input, output: 0 }))
+            .into(),
     );
-    let mut buf = Buffer::empty(area);
-    view.render_usage_chart(area, &mut buf, now);
-    assert_eq!(buf[(7, 0)].symbol(), "⡇");
-    assert_eq!(buf[(7, 1)].symbol(), "⣿");
-    assert_eq!(buf[(6, 1)].symbol(), "⢀");
+    let render = |at| {
+        let mut buf = Buffer::empty(area);
+        view.render_usage_chart(area, &mut buf, at);
+        buf
+    };
+    let first = render(now);
+    assert_eq!(first, render(now + Duration::seconds(5)));
+    let moved = render(now + Duration::seconds(10));
+    for y in 0..area.height {
+        for x in 1..area.width {
+            assert_eq!(first[(x, y)], moved[(x - 1, y)]);
+        }
+    }
 }
 
 #[test]

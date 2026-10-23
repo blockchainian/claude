@@ -35,6 +35,19 @@ fn capture(probe: &tmux::Tmux, output: &std::path::Path, name: &str) -> Capture 
     (ansi, dots)
 }
 
+fn assert_matching_dot_columns(dots: &[Dot]) {
+    for (x, y, text, _) in dots {
+        let bits = text.chars().next().unwrap() as u32 - 0x2800;
+        for (left, right) in [(0x40, 0x80), (0x04, 0x20), (0x02, 0x10), (0x01, 0x08)] {
+            assert_eq!(
+                bits & left != 0,
+                bits & right != 0,
+                "unequal dot columns at ({x}, {y}): {text}"
+            );
+        }
+    }
+}
+
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_usage_chart_stacks_active_tasks_and_preserves_search_layout() {
@@ -60,7 +73,7 @@ fn terminal_usage_chart_stacks_active_tasks_and_preserves_search_layout() {
         let now = chrono::Utc::now();
         for (id, name, tokens) in [
             ("4165651d-b9e3-458d-8612-f8114e312363", "Stack alpha", 2000),
-            ("5165651d-b9e3-458d-8612-f8114e312363", "Stack beta", 3000),
+            ("5165651d-b9e3-458d-8612-f8114e312363", "Stack beta", 6000),
         ] {
             let mut lines: Vec<_> = include_str!("fixtures/transcript.jsonl")
                 .lines()
@@ -162,6 +175,7 @@ fn terminal_usage_chart_stacks_active_tasks_and_preserves_search_layout() {
                 .is_some_and(|row| row.contains("[48;5;233m"))
                 && dots.iter().any(|cell| cell.3 == vt100::Color::Idx(3))
         });
+        assert_matching_dot_columns(&before);
         assert!(
             before.iter().any(|upper| upper.3 == vt100::Color::Idx(3)
                 && before.iter().any(|lower| {
@@ -181,6 +195,7 @@ fn terminal_usage_chart_stacks_active_tasks_and_preserves_search_layout() {
         let (_, switched) = wait("switched", &|_, dots| {
             shape(dots) == shape(&before) && dots != before.as_slice()
         });
+        assert_matching_dot_columns(&switched);
         assert_eq!(shape(&before), shape(&switched));
         probe.run(&["send-keys", "-t", "probe", "/"]);
         let (_, search) = wait("search", &|text, _| text.contains("Search"));
@@ -228,7 +243,7 @@ fn terminal_usage_chart_stacks_active_tasks_and_preserves_search_layout() {
                 }
             }
         }
-        serde_json::json!({"verdict":"pass","active_tasks":2,"stack_colors":true,"selection_preserves_total_shape":true,"search_roundtrip":true,"rules_without_dots":[70,200]})
+        serde_json::json!({"verdict":"pass","active_tasks":2,"stack_colors":true,"selection_preserves_total_shape":true,"matching_dot_columns":true,"search_roundtrip":true,"rules_without_dots":[70,200]})
     });
     let verdict = match &outcome {
         Ok(value) => value.clone(),

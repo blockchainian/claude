@@ -170,7 +170,7 @@ fn usage_sums_active_children_and_only_the_selected_inactive_session() {
         bins.values().map(|bin| bin.input + bin.output).sum::<u64>()
     };
     assert_eq!(sum(&total), expected * 2);
-    assert_eq!(sum(&others), expected);
+    assert_eq!(sum(&others), 0);
     assert_eq!(usage.files.len(), 2);
     let selected = app.sessions[2].id.clone();
     let (total, others) = usage
@@ -213,4 +213,115 @@ fn usage_aggregation_excludes_bins_left_of_the_visible_cell_pair() {
             .0
             .is_empty()
     );
+}
+
+#[test]
+fn usage_selection_includes_active_descendants_and_tracks_parent_changes() {
+    let (dir, mut app) = super::tests::fixture();
+    let records = include_str!("../tests/fixtures/transcript.jsonl");
+    let mut full = crate::usage::Series::default();
+    full.update(
+        app.sessions[0].transcript.as_ref().unwrap(),
+        ProviderId::Claude,
+    )
+    .unwrap();
+    let last = *full.bins.last_key_value().unwrap().0;
+    let now = chrono::DateTime::from_timestamp(last * crate::usage::BIN_SECONDS, 0).unwrap();
+    let parent = app.sessions[0].id.clone();
+    app.sessions[0].status = SessionStatus::Working;
+    for (name, parent_name, status) in [
+        ("child", None, SessionStatus::Working),
+        ("grandchild", Some("child"), SessionStatus::Ready),
+        ("inactive-child", None, SessionStatus::Inactive),
+        (
+            "active-grandchild",
+            Some("inactive-child"),
+            SessionStatus::NeedsInput,
+        ),
+        ("other", Some("unrelated"), SessionStatus::New),
+    ] {
+        let mut session = app.sessions[0].clone();
+        session.id.id = name.into();
+        let mut ancestor = parent.clone();
+        if let Some(name) = parent_name {
+            ancestor.id = name.into();
+        }
+        session.parent = Some(ancestor);
+        session.status = status;
+        let path = dir.path().join(format!("{name}.jsonl"));
+        std::fs::write(&path, records).unwrap();
+        session.transcript = Some(path);
+        app.sessions.push(session);
+    }
+    let sum = |bins: &std::collections::BTreeMap<i64, crate::usage::Bin>| {
+        bins.values().map(|bin| bin.input + bin.output).sum::<u64>()
+    };
+    let mut cache = transcript_cache::UsageCache::default();
+    let (total, others) = cache
+        .update(&app.sessions, Some(&parent), 120, now)
+        .unwrap();
+    let first = last - last.rem_euclid(2) + 2
+        - crate::ui::timeline_seconds(120) / crate::usage::BIN_SECONDS;
+    let unit: u64 = full
+        .bins
+        .range(first..=last)
+        .map(|(_, bin)| bin.input + bin.output)
+        .sum();
+    assert!(unit > 0);
+    assert_eq!(sum(&total), unit * 5);
+    assert_eq!(
+        sum(&others),
+        unit,
+        "active descendants belong to the selected stack"
+    );
+    let reads = cache.reads;
+    let aggregates = cache.aggregates;
+    let selections = cache.selections;
+    cache.checked = Some(Instant::now() - POLLING_INTERVAL);
+    assert!(
+        cache
+            .update(&app.sessions, Some(&parent), 120, now)
+            .is_none()
+    );
+    assert_eq!(cache.selections, selections);
+    let stats = cache.stats;
+    let child = app.sessions[1].id.clone();
+    let (child_total, others) = cache.update(&app.sessions, Some(&child), 120, now).unwrap();
+    assert_eq!(child_total, total);
+    assert_eq!(sum(&others), unit * 3);
+    assert_eq!(cache.reads, reads);
+    assert_eq!(cache.stats, stats);
+    assert_eq!(cache.aggregates, aggregates);
+    assert_eq!(cache.selections, selections + 1);
+    assert!(
+        cache
+            .update(&app.sessions, Some(&child), 120, now)
+            .is_none()
+    );
+    assert_eq!(cache.selections, selections + 1);
+    app.sessions[2].parent = Some(parent.clone());
+    let (reparented_total, others) = cache.update(&app.sessions, Some(&child), 120, now).unwrap();
+    assert_eq!(reparented_total, total);
+    assert_eq!(sum(&others), unit * 4);
+    assert_eq!(cache.reads, reads);
+    app.sessions[2].status = SessionStatus::Inactive;
+    let (total, others) = cache
+        .update(&app.sessions, Some(&parent), 120, now)
+        .unwrap();
+    assert_eq!(sum(&total), unit * 4);
+    assert_eq!(sum(&others), unit);
+    app.sessions[0].status = SessionStatus::Inactive;
+    let (total, others) = cache
+        .update(&app.sessions, Some(&parent), 120, now)
+        .unwrap();
+    assert_eq!(sum(&total), unit * 4);
+    assert_eq!(sum(&others), unit);
+    let selections = cache.selections;
+    cache.update(
+        &app.sessions,
+        Some(&parent),
+        120,
+        now + chrono::Duration::seconds(crate::usage::BIN_SECONDS),
+    );
+    assert_eq!(cache.selections, selections);
 }

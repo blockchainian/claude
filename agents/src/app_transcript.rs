@@ -1,7 +1,7 @@
 //! File inputs shared by the selected transcript and the usage chart.
 
 use super::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::fs::MetadataExt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,6 +29,7 @@ impl FileStamp {
 #[derive(PartialEq, Eq)]
 struct UsageInput {
     session: SessionKey,
+    parent: Option<SessionKey>,
     path: Option<PathBuf>,
     status: SessionStatus,
     updated: chrono::DateTime<chrono::Utc>,
@@ -37,6 +38,7 @@ struct UsageInput {
 impl UsageInput {
     fn matches(&self, session: &Session) -> bool {
         self.session == session.id
+            && self.parent == session.parent
             && self.path == session.transcript
             && self.status == session.status
             && self.updated == session.updated_at
@@ -58,11 +60,14 @@ pub(super) struct UsageCache {
     pub checked: Option<Instant>,
     frame: Option<(u16, i64)>,
     selected: Option<SessionKey>,
+    selected_sessions: HashSet<SessionKey>,
     active: UsageBins,
     #[cfg(test)]
     pub reads: usize,
     #[cfg(test)]
     pub aggregates: usize,
+    #[cfg(test)]
+    pub selections: usize,
     #[cfg(test)]
     pub stats: usize,
 }
@@ -111,11 +116,33 @@ impl UsageCache {
                 .iter()
                 .map(|session| UsageInput {
                     session: session.id.clone(),
+                    parent: session.parent.clone(),
                     path: session.transcript.clone(),
                     status: session.status,
                     updated: session.updated_at,
                 })
                 .collect();
+        }
+        if inputs_changed || selection_changed {
+            #[cfg(test)]
+            {
+                self.selections += 1;
+            }
+            let mut children: HashMap<&SessionKey, Vec<&SessionKey>> = HashMap::new();
+            for input in &self.inputs {
+                if let Some(parent) = &input.parent {
+                    children.entry(parent).or_default().push(&input.session);
+                }
+            }
+            self.selected_sessions.clear();
+            let mut pending: Vec<_> = selected.into_iter().collect();
+            while let Some(session) = pending.pop() {
+                if self.selected_sessions.insert(session.clone())
+                    && let Some(descendants) = children.get(session)
+                {
+                    pending.extend(descendants.iter().copied());
+                }
+            }
         }
         self.files.retain(|path, _| {
             sessions.iter().any(|session| {
@@ -212,14 +239,17 @@ impl UsageCache {
         // These maps contain at most the visible dot columns, independent of transcript size.
         let mut total = self.active.clone();
         let mut others = self.active.clone();
-        if let Some(session) = sessions
-            .iter()
-            .find(|session| Some(&session.id) == selected)
-            && let Some(file) = session
+        for session in sessions.iter().filter(|session| {
+            self.selected_sessions.contains(&session.id)
+                && (session.status != SessionStatus::Inactive || Some(&session.id) == selected)
+        }) {
+            let Some(file) = session
                 .transcript
                 .as_ref()
                 .and_then(|path| self.files.get_mut(path))
-        {
+            else {
+                continue;
+            };
             file.series.bins.retain(|bin, _| *bin >= first);
             if first <= frame.1 {
                 for (&bin, usage) in file.series.bins.range(first..=frame.1) {

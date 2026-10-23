@@ -342,7 +342,7 @@ pub struct View {
     task_uis: HashMap<draft_controls::TaskKey, TaskUi>,
     /// The context percentage of the task the app read last.
     context_usage: Option<(SessionKey, u64)>,
-    /// Visible token bins of all participating tasks and of tasks other than the selection.
+    /// Visible token bins of all participating tasks and of tasks outside the selected family.
     usage: std::collections::BTreeMap<i64, crate::usage::Bin>,
     other_usage: std::collections::BTreeMap<i64, crate::usage::Bin>,
     /// How many times taller than wide one terminal cell looks.

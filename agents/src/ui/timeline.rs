@@ -1,15 +1,15 @@
-//! The usage chart's time axis: each cell holds two bins, its left
-//! and right braille dot columns, and the right edge of an area is the bin holding now.
+//! The usage chart's time axis: each cell combines two bins, and the right edge of an area
+//! contains the bin holding now.
 
 use super::View;
 use crate::usage::{BIN_SECONDS, bin_of};
 use chrono::{DateTime, Utc};
 use ratatui::layout::Rect;
 
-/// Bins one cell holds, one per dot column.
+/// Bins one cell combines.
 pub(super) const CELL_BINS: i64 = 2;
 
-/// The left and right bins of the cell at `x` in `area`, whose last cell holds `now`. Cells cover
+/// The two bins of the cell at `x` in `area`, whose last cell holds `now`. Cells cover
 /// fixed bin pairs, so a cell keeps its bins as time passes.
 pub(super) fn cell_bins(area: Rect, x: u16, now: DateTime<Utc>) -> [i64; 2] {
     let now = bin_of(now);

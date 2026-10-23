@@ -1,5 +1,5 @@
-//! Active tasks' stacked token usage, drawn in braille behind the task list: each dot column is one
-//! bin, rising from the list's bottom as high as the bin's tokens, and the list's rows cover it.
+//! Active tasks' stacked token usage, drawn in braille behind the task list: each cell combines
+//! two bins, rising from the list's bottom as high as their tokens, and the list's rows cover it.
 //! The chart looks at most half as tall as it is wide, so a tall list keeps it to its bottom part.
 
 use super::View;
@@ -15,11 +15,11 @@ use std::collections::BTreeMap;
 /// Dot rows one cell holds.
 const CELL_DOTS: u16 = 4;
 
-/// The percentile of bin totals that fills the chart.
+/// The percentile of cell totals that fills the chart.
 const TOP_PERCENTILE: usize = 95;
 
-/// The braille bits of a cell's left and right dot columns, bottom to top.
-const DOT_BITS: [[u8; 4]; 2] = [[0x40, 0x04, 0x02, 0x01], [0x80, 0x20, 0x10, 0x08]];
+/// The braille bits of each dot row, bottom to top.
+const DOT_BITS: [u8; 4] = [0xc0, 0x24, 0x12, 0x09];
 
 impl View {
     pub(crate) fn set_context_usage(&mut self, id: &SessionKey, percent: Option<u64>) {
@@ -60,38 +60,42 @@ impl View {
         if !self.shows_usage() {
             return;
         }
-        let max = chart_top(self.usage.values().map(total).collect());
+        let columns: Vec<_> = (area.left()..area.right())
+            .map(|x| {
+                let bins = cell_bins(area, x, now);
+                let tokens = |usage: &BTreeMap<i64, Bin>| {
+                    bins.iter()
+                        .map(|bin| usage.get(bin).map_or(0, total))
+                        .sum::<u64>()
+                };
+                (tokens(&self.usage), tokens(&self.other_usage))
+            })
+            .collect();
+        let max = chart_top(
+            columns
+                .iter()
+                .map(|&(tokens, _)| tokens)
+                .filter(|&tokens| tokens > 0)
+                .collect(),
+        );
         let height = chart_rows(area, self.cell_aspect) * CELL_DOTS;
-        let dots = |bin: i64| {
-            let all = self.usage.get(&bin).map_or(0, total);
-            let others = self.other_usage.get(&bin).map_or(0, total);
-            (
-                dot_height(all, max, height),
-                dot_height(others, max, height),
-            )
-        };
+        let heights: Vec<_> = columns
+            .into_iter()
+            .map(|(tokens, others)| stack_heights(tokens, others, max, height))
+            .collect();
         let content_bottom = (area.top()..area.bottom())
             .rev()
             .find(|&y| (area.left()..area.right()).any(|x| !is_blank(&buf[(x, y)])))
             .map_or(area.top(), |y| y + 1);
         for y in content_bottom..area.bottom() {
             let floor = (area.bottom() - 1 - y) * CELL_DOTS;
-            for x in area.left()..area.right() {
-                let mut bits = 0;
-                let mut other_dots = 0;
-                let mut selected_dots = 0;
-                for (&bin, column) in cell_bins(area, x, now).iter().zip(DOT_BITS) {
-                    let (all, others) = dots(bin);
-                    let filled = usize::from(all.saturating_sub(floor).min(CELL_DOTS));
-                    let lower = usize::from(others.saturating_sub(floor).min(CELL_DOTS));
-                    bits |= column[..filled].iter().fold(0, |bits, bit| bits | bit);
-                    other_dots += lower;
-                    selected_dots += filled - lower;
-                }
+            for (x, &(all, others)) in (area.left()..area.right()).zip(&heights) {
+                let filled = usize::from(all.saturating_sub(floor).min(CELL_DOTS));
+                let bits = DOT_BITS[..filled].iter().fold(0, |bits, bit| bits | bit);
                 if bits != 0 {
                     let symbol =
                         char::from_u32(0x2800 + u32::from(bits)).expect("usage chart braille cell");
-                    let style = if self.use_colors && selected_dots >= other_dots {
+                    let style = if self.use_colors && floor >= others {
                         super::style::assistant_style()
                     } else {
                         super::style::timeline_style(self.use_colors)
@@ -107,6 +111,28 @@ fn total(usage: &Bin) -> u64 {
     usage.input + usage.output
 }
 
+/// Total dot rows and other tasks' dot rows, with the color boundary on a cell edge.
+fn stack_heights(tokens: u64, others: u64, max: u64, height: u16) -> (u16, u16) {
+    let selected = tokens
+        .checked_sub(others)
+        .expect("usage chart other tasks exceed total");
+    let all = dot_height(tokens, max, height);
+    if max == 0 || height == 0 {
+        return (all, 0);
+    }
+    let numerator = u128::from(others) * u128::from(height);
+    let denominator = u128::from(max) * u128::from(CELL_DOTS);
+    let cells = (numerator + denominator / 2) / denominator;
+    let mut lower = (cells * u128::from(CELL_DOTS)).min(u128::from(all)) as u16;
+    if selected > 0 {
+        lower = lower.min(all.saturating_sub(1) / CELL_DOTS * CELL_DOTS);
+    }
+    if others > 0 && lower == 0 && all > CELL_DOTS {
+        lower = CELL_DOTS;
+    }
+    (all, lower)
+}
+
 /// A cell nothing has drawn on since the frame was cleared.
 fn is_blank(cell: &ratatui::buffer::Cell) -> bool {
     cell.symbol() == " " && cell.bg == Color::Reset
@@ -119,7 +145,7 @@ fn chart_rows(area: Rect, cell_aspect: f64) -> u16 {
     area.height.min(half_width)
 }
 
-/// The tokens that fill the chart: the 95th percentile of the bins' totals, so a few outsized bins
+/// The tokens that fill the chart: the 95th percentile of the cells' totals, so a few outsized cells
 /// fill it and cut off rather than flatten the rest.
 fn chart_top(mut totals: Vec<u64>) -> u64 {
     if totals.is_empty() {

@@ -117,7 +117,7 @@ pub(super) fn event_styles(kind: &crate::event::Kind) -> (Style, Style) {
     (body.bold(), body)
 }
 
-/// The assistant event body and the selected task's token dots.
+/// The assistant event body and token dots for the selected task and its descendants.
 pub(super) fn assistant_style() -> Style {
     Style::default().fg(Color::Yellow)
 }
