@@ -101,11 +101,7 @@ fn assert_summary_surface(event: &crate::event::Event, width: u16, child: bool) 
                 rendered.join("\n")
             )
         });
-    let indent = if child {
-        0
-    } else {
-        (usize::from(width) - line.width()) / 2
-    };
+    let indent = (usize::from(width) - line.width()) / 2;
     for x in 0..line.width().min(usize::from(width)) {
         let got = &actual[((indent + x) as u16, y as u16)];
         let want = &expected[(x as u16, 0)];
