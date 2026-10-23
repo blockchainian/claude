@@ -2285,7 +2285,12 @@ fn render_background_box(
     title.render(row(box_area, 0, 1), buf);
     let output = output
         .into_iter()
-        .map(|line| truncate_line_to_width(line, usize::from(box_area.width)).centered())
+        .map(|line| {
+            let mut line = truncate_line_to_width(line, usize::from(box_area.width));
+            let left = usize::from(box_area.width).saturating_sub(line.width()) / 2;
+            line.spans.insert(0, Span::raw(" ".repeat(left)));
+            line.left_aligned()
+        })
         .collect::<Vec<_>>();
     Paragraph::new(output).render(
         Rect { y: box_area.y + 1, height: box_area.height.saturating_sub(1), ..box_area },
@@ -2488,15 +2493,15 @@ mod background_title_tests {
 
     #[test]
     fn background_output_rows_share_title_center() {
-        for width in [160, 120, 90] {
+        for (width, title) in [160, 120, 90].into_iter().flat_map(|w| ["后台命令", "Working child"].map(|t| (w, t))) {
             let area = Rect::new(7, 3, width, 5);
             let long = "中文输出".repeat(80);
             let output = ["python3, git status", "已推送，开始干净安装。", long.as_str()];
             let mut buf = Buffer::empty(area);
-            render_background_box("后台命令", SessionStatus::Working, Some("35s"),
+            render_background_box(title, SessionStatus::Working, Some("35s"),
                 output.iter().map(|s| Line::from(s.to_string())).collect(), area, 2, &mut buf);
             let title_start = (area.x..area.right()).find(|&x| buf[(x, area.y)].symbol() == "●").unwrap();
-            let title_center = 2 * title_start + "● 后台命令".width() as u16;
+            let title_center = 2 * title_start + format!("● {title}").width() as u16;
             for (index, source) in output.iter().enumerate() {
                 let y = area.y + 1 + index as u16;
                 let expected = truncate_line_to_width(Line::from(source.to_string()), width as usize);
