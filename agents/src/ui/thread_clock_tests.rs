@@ -40,8 +40,6 @@ fn child_box_clock_matches_its_own_prompt_for_both_providers() {
             assert!(
                 title
                     .trim_end()
-                    .strip_suffix('╶')
-                    .unwrap()
                     .ends_with(expected),
                 "{provider:?} {status:?}: {title}"
             );

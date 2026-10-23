@@ -4494,13 +4494,13 @@ fn task_details_background_includes_only_working_subagents() {
         .iter()
         .map(|cell| cell_text(cell.symbol()))
         .collect::<String>();
-    assert!(text.contains("──────────── Worker command ──────── 0s╶"));
+    assert!(text.contains("● Worker command"));
     assert!(text.contains("Nested agent"));
     assert!(!text.contains("Review files"));
 }
 
 #[test]
-fn background_box_dims_title_rule_but_not_output() {
+fn background_box_dims_title_but_not_indicator_or_output() {
     use ratatui::style::Modifier;
     use std::io::Write;
     let mut output = tempfile::NamedTempFile::new().unwrap();
@@ -4517,12 +4517,12 @@ fn background_box_dims_title_rule_but_not_output() {
     let mut buf = Buffer::empty(area);
     view.render_task_details(area, &mut buf, Utc::now());
     let top = (0..20)
-        .find(|y| buf[(0, *y)].symbol() == "─")
-        .expect("box top border");
-    assert!(buf[(0, top)].modifier.contains(Modifier::DIM));
-    assert!(buf[(30, top)].modifier.contains(Modifier::DIM));
-    assert_eq!(cell_text(buf[(15, top)].symbol()), "R");
-    assert!(buf[(15, top)].modifier.contains(Modifier::DIM));
+        .find(|y| buf[(14, *y)].symbol() == "●")
+        .expect("background indicator");
+    assert!(!buf[(14, top)].modifier.contains(Modifier::DIM));
+    assert_eq!(buf[(14, top)].fg, View::status_indicator(SessionStatus::Working).style.fg.unwrap());
+    assert_eq!(cell_text(buf[(16, top)].symbol()), "R");
+    assert!(buf[(16, top)].modifier.contains(Modifier::DIM));
     let (tool_view, _) = open_tool_fixture();
     let mut event = tool_view.event_panel[7].clone();
     event.calls[0].title = "Run checks".into();
@@ -4535,7 +4535,7 @@ fn background_box_dims_title_rule_but_not_output() {
     let title_x = (0..40)
         .find(|x| cell_text(title_buf[(*x, 0)].symbol()) == "R")
         .unwrap();
-    assert_eq!(title_buf[(0, 0)].modifier, buf[(0, top)].modifier);
+    assert!(title_buf[(0, 0)].modifier.contains(Modifier::DIM));
     assert_eq!(
         title_buf[(title_x, 0)].fg,
         detail.sections[0].title.title_style.fg.unwrap()
@@ -5292,12 +5292,12 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
         assert!(
             text(y, left + 1, right)
                 .trim_end()
-                .ends_with(if width < 150 { "25s╶─" } else { "25s╶" })
+                .ends_with("25s")
         );
         assert_eq!(
             text(y, left + 1, right).trim_end().chars().count() as u16,
-            right - left - 1,
-            "background rule at {width}"
+            right - left - 2 - u16::from(width < 150),
+            "background time at {width}"
         );
         // Wrapped bodies, selections and links stay inside the same content bounds.
         for y in 3..view.center_layout(area).task_details.bottom() {
@@ -11746,12 +11746,12 @@ fn selector_hides_task_details_rules_through_panel_padding() {
             view.render_at(area, &mut buffer, now);
             let details = view.center_layout(area).task_details;
             let rules: Vec<_> = (details.y..details.bottom())
-                .filter(|&y| buffer[(details.right(), y)].symbol() == "─")
+                .filter(|&y| (details.x..details.right()).any(|x| buffer[(x, y)].symbol() == "●"))
                 .collect();
             if width < 150 {
                 assert!(
                     !rules.is_empty(),
-                    "fixture must draw a background rule at {width}"
+                    "fixture must draw a background indicator at {width}"
                 );
             }
             let values = vec![

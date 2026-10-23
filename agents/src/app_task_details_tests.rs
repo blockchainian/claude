@@ -148,7 +148,7 @@ fn app_task_details_groups_and_project_links_follow_panel_rules() {
                 row_text(buffer, background_y, time_right - 5, time_right),
                 "1h 0m"
             );
-            assert_eq!(cell_text(buffer, time_right, background_y), "╶");
+            assert_eq!(cell_text(buffer, time_right, background_y), " ");
             for x in pr_x..pr_x + 3 {
                 assert_eq!(click_link(&mut app, MouseEvent {
                     kind: MouseEventKind::Down(MouseButton::Left), column: x, row: status_y, modifiers: KeyModifiers::NONE,

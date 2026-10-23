@@ -1,7 +1,6 @@
 use super::formatting::{format_duration, format_relative_time, tail_lines};
 use super::line_truncation::{truncate_line_to_width, truncate_line_with_ellipsis_if_overflow};
 use super::*;
-use ratatui::widgets::{Block, Borders};
 
 pub(super) fn row(area: Rect, offset: u16, height: u16) -> Rect {
     let offset = offset.min(area.height);
@@ -1743,7 +1742,7 @@ impl View {
                 Some((screen_row(start)..screen_row(end), text.to_owned(), label))
             })
             .collect();
-        // Background rules continue through the padding cell beside the panel.
+        // Include the padding cell beside the panel in the content buffer.
         let content_width = area.width + u16::from(area.right() < buf.area.right());
         let content_area = Rect::new(0, 0, content_width, total as u16);
         let mut content = Buffer::empty(content_area);
@@ -1842,6 +1841,7 @@ impl View {
                     });
                     Some(render_background_box(
                         child.display_title(),
+                        child.status,
                         elapsed.as_deref(),
                         body.into_iter().collect(),
                         item_area,
@@ -2226,7 +2226,7 @@ fn subagent_line(
 }
 
 /// A running background command: its description and elapsed time on the top
-/// rule, the last output line below it when there is one.
+/// row, the last output line below it when there is one.
 fn render_background(
     task: &crate::model::BackgroundTask,
     output: Vec<String>,
@@ -2239,6 +2239,7 @@ fn render_background(
     let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
     render_background_box(
         &task.description,
+        SessionStatus::Working,
         Some(&elapsed),
         output
             .into_iter()
@@ -2258,49 +2259,38 @@ fn render_background(
 
 fn render_background_box(
     description: &str,
+    status: SessionStatus,
     elapsed: Option<&str>,
     output: Vec<Line<'static>>,
     box_area: Rect,
     right_padding: usize,
     buf: &mut Buffer,
 ) -> Vec<std::ops::Range<u16>> {
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .border_style(Style::default().dim());
-    let inner = block.inner(box_area);
-    block.render(box_area, buf);
-    let title = super::title_rule::centered_title_rule(
+    let title = super::title_rule::centered_title(
         description,
+        View::status_indicator(status),
         usize::from(box_area.width),
         elapsed,
         right_padding,
     );
-    // The first and last spans draw rules; the middle spans contain the title.
     let mut columns = Vec::new();
-    if title.spans.len() >= 4 {
-        let start = title.spans[0].width() as u16;
-        let end = (title.width() - title.spans.last().unwrap().width()).saturating_sub(1) as u16;
-        columns.push(start..end);
-        if let Some(elapsed) = elapsed {
-            let last = title.spans.last().unwrap();
-            let suffix = format!("{elapsed}╶{}", "─".repeat(right_padding));
-            if last.content.ends_with(&suffix) {
-                let end = box_area.width.saturating_sub(right_padding as u16);
-                columns.push(end - elapsed.width() as u16..end);
-            }
+    let mut x = box_area.x;
+    for span in &title.spans {
+        let end = x + span.width() as u16;
+        if !span.content.trim().is_empty() {
+            columns.push(x..end);
         }
+        x = end;
     }
-    let title_area = Rect {
-        width: box_area.width.saturating_add(1),
-        ..row(box_area, 0, 1)
-    }
-    .intersection(buf.area);
-    title.render(title_area, buf);
-    Paragraph::new(output).render(inner, buf);
+    title.render(row(box_area, 0, 1), buf);
+    Paragraph::new(output).render(
+        Rect { y: box_area.y + 1, height: box_area.height.saturating_sub(1), ..box_area },
+        buf,
+    );
     columns
 }
 
-/// Rows a background task takes: its titled rule and the output lines below.
+/// Rows a background task takes: its title and the output lines below.
 fn box_height(lines: usize) -> usize {
     1 + lines
 }
@@ -2477,12 +2467,28 @@ mod background_title_tests {
     }
 
     #[test]
+    fn background_child_status_uses_task_list_glyph_and_color() {
+        assert_ne!(View::status_indicator(SessionStatus::Working).content,
+            View::status_indicator(SessionStatus::Ready).content);
+        for status in [SessionStatus::Working, SessionStatus::Ready] {
+            let area = Rect::new(0, 0, 40, 2);
+            let mut buf = Buffer::empty(area);
+            render_background_box("Child", status, Some("35s"), vec![], area, 0, &mut buf);
+            let expected = View::status_indicator(status);
+            let cell = buf.content.iter().find(|cell| cell.symbol() == expected.content).unwrap();
+            assert_eq!(cell.fg, expected.style.fg.unwrap());
+            assert!(!cell.modifier.contains(ratatui::style::Modifier::DIM));
+            assert!(!buf.content.iter().any(|cell| cell.symbol().chars().any(|c| ('\u{2500}'..='\u{257f}').contains(&c))));
+        }
+    }
+
+    #[test]
     fn background_titles_are_centered_with_optional_time_and_cjk() {
         for (title, left, right) in [("Check files", 13, 14), ("中文答题卡住", 13, 13)] {
             for time in [None, Some("35s")] {
                 let area = Rect::new(0, 0, 40, 2);
                 let mut buf = Buffer::empty(area);
-                render_background_box(title, time, vec![Line::from("output")], area, 0, &mut buf);
+                render_background_box(title, SessionStatus::Working, time, vec![Line::from("output")], area, 0, &mut buf);
                 let text: String = buf.content[..40]
                     .iter()
                     .enumerate()
@@ -2493,9 +2499,9 @@ mod background_title_tests {
                 assert_eq!(
                     text,
                     format!(
-                        "{} {title} {}{suffix}",
-                        "─".repeat(left),
-                        "─".repeat(right - suffix.width())
+                        "{}● {title}{}{suffix}",
+                        " ".repeat(left),
+                        " ".repeat(right - suffix.width())
                     ),
                     "{title} {time:?}"
                 );

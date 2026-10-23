@@ -124,7 +124,7 @@ fn section_times_align_with_frame_labels_in_large_medium_small() {
 }
 
 #[test]
-fn background_times_and_rule_tails_align_in_large_medium_small() {
+fn background_times_align_in_large_medium_small() {
     for width in [160, 120, 90] {
         let (view, buf) = frame(width);
         let layout = view.center_layout(buf.area);
@@ -145,16 +145,9 @@ fn background_times_and_rule_tails_align_in_large_medium_small() {
             expected,
             "{width} background"
         );
-        assert_eq!(buf[(expected + 1, y)].symbol(), "╶", "{width}");
-        assert_eq!(
-            buf[(expected + 2, y)].symbol(),
-            if layout.kind == ScreenLayout::Large {
-                "│"
-            } else {
-                "─"
-            },
-            "{width}"
-        );
+        assert_eq!(buf[(expected + 1, y)].symbol(), " ", "{width}");
+        let title = text(&buf, Rect { y, height: 1, ..layout.task_details });
+        assert!(!title.chars().any(|c| ('\u{2500}'..='\u{257f}').contains(&c)), "{title}");
         let (_, event_time) = super::super::event_list::event_row_areas(layout.event_panel);
         assert_eq!(event_time.right() - 1, width - 3);
     }
@@ -199,5 +192,43 @@ fn task_list_time_and_status_columns_in_large_medium_small() {
         )
         .0;
         assert_eq!(status_end, expected - 15, "{width} status spacing");
+    }
+}
+
+#[test]
+fn background_indicators_match_task_list_for_commands_and_child_states() {
+    assert_ne!(View::status_indicator(SessionStatus::Working).content,
+        View::status_indicator(SessionStatus::Ready).content);
+    for width in [160, 120, 90] {
+        let (mut view, _) = frame(width);
+        let parent = view.rows[view.selected].id.clone();
+        let now = view.rows[view.selected].updated_at + Duration::seconds(45);
+        for (id, title, status) in [
+            ("busy-child", "Busy child", SessionStatus::Working),
+        ] {
+            let mut child = session(id, title, status, 0);
+            child.parent = Some(parent.clone());
+            child.started_at = Some(now - Duration::seconds(66));
+            view.rows.push(child);
+        }
+        let area = Rect::new(0, 0, width, 60);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let layout = view.center_layout(area);
+        let expected_end = label_end(&view, &buf);
+        for (title, status) in [
+            ("Check background", SessionStatus::Working),
+            ("Busy child", SessionStatus::Working),
+        ] {
+            let (end, y) = end_of(&buf, layout.task_details, title);
+            let x = end + 1 - title.width() as u16 - 2;
+            let expected = View::status_indicator(status);
+            assert_eq!(buf[(x, y)].symbol(), expected.content);
+            assert_eq!(buf[(x, y)].fg, expected.style.fg.unwrap());
+            assert_eq!(buf[(x + 1, y)].symbol(), " ");
+            let line = text(&buf, Rect { y, height: 1, ..layout.task_details });
+            assert!(!line.chars().any(|c| ('\u{2500}'..='\u{257f}').contains(&c)), "{line}");
+            assert_eq!(end_of(&buf, Rect { y, height: 1, ..layout.task_details }, "1m 6s").0, expected_end);
+        }
     }
 }

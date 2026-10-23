@@ -21,7 +21,12 @@ fn visible_titles(view: &View) -> Vec<String> {
 }
 
 fn click_dot(view: &mut View, title: &str) {
-    let rendered = subagent_rows::screen(view, 120, 30);
+    let list = view.center_layout(Rect::new(0, 0, 120, 30)).list;
+    let rendered = subagent_rows::screen(view, 120, 30)
+        .lines()
+        .map(|line| line.chars().take(usize::from(list.right())).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
     let label = ["●", "✚"]
         .map(|symbol| format!("{symbol} {title}"))
         .into_iter()

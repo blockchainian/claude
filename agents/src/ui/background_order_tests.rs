@@ -154,8 +154,6 @@ fn background_children_keep_start_order_through_provider_refreshes() {
                 assert!(
                     rows[position]
                         .trim_end()
-                        .strip_suffix('╶')
-                        .unwrap()
                         .ends_with(&format_duration(
                             (now - chrono::DateTime::from_timestamp_millis(*start).unwrap())
                                 .num_seconds()

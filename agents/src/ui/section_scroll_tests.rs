@@ -60,7 +60,7 @@ mod task_details_budget {
         );
         assert!(
             rows.iter()
-                .any(|line| line.starts_with("─") && line.contains("Check 4")),
+                .any(|line| line.trim_start().starts_with("● Check 4")),
             "{rows:?}"
         );
         assert!(!rows.iter().any(|line| line.contains("Check 5")));
