@@ -453,7 +453,7 @@ fn cat_heredoc(source: &str, mut index: usize, end: usize) -> Option<Script<'_>>
         }
         match bytes.get(index) {
             Some(b'>') if extension.is_none() => {
-                index += 1;
+                index += if bytes.get(index + 1) == Some(&b'>') { 2 } else { 1 };
                 let path = argument(source, &mut index)?;
                 let literal = &source[path.clone()];
                 let quote = path.start.checked_sub(1).map(|i| bytes[i]);

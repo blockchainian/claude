@@ -850,6 +850,11 @@ mod tests {
             ),
             ("cat <<EOF > a.rs\nlet x = 42;\nEOF", "let x = 42;\n", "rs"),
             (
+                "cat >> a.test.mjs <<'EOF'\nconst x = 42;\nEOF",
+                "const x = 42;\n",
+                "mjs",
+            ),
+            (
                 "cat > 'some file.py' <<EOF\nimport json\nEOF",
                 "import json\n",
                 "py",
@@ -867,7 +872,6 @@ mod tests {
             "python3 script.py -c 'import json'",
             "python3 script.py <<EOF\nimport json\nEOF",
             "cat <<EOF\nimport json\nEOF",
-            "cat >> foo.py <<EOF\nimport json\nEOF",
             "cat > foo.unknownext <<EOF\nimport json\nEOF",
             "tee foo.py <<EOF\nimport json\nEOF",
             "cat > $file.py <<EOF\nimport json\nEOF",
