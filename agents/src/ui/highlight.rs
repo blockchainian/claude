@@ -429,31 +429,49 @@ pub(super) fn diff_lines(text: &str, lang: &str, width: usize) -> Vec<Line<'stat
     let deleted = diff_style("markup.deleted");
     let inserted = diff_style("markup.inserted");
     let foreground = with_theme(|theme| theme.settings.foreground.and_then(terminal_color));
+    let header = scope_style("meta.diff.header");
     let syntax = !exceeds_limits(text) && find_syntax(lang).is_some();
-    let rows: Vec<_> = text.lines().collect();
+    // A file header runs from a `diff` line, or a leading `---` line, up to the first hunk, so
+    // its `---` and `+++` lines are not changed code.
+    let mut in_header = text.starts_with("--- ");
+    let rows: Vec<_> = text
+        .lines()
+        .map(|row| {
+            if row.starts_with("diff ") {
+                in_header = true;
+            } else if row.starts_with("@@") {
+                in_header = false;
+            }
+            (row, in_header)
+        })
+        .collect();
     let width = rows
         .iter()
-        .map(|row| Line::from(*row).width())
+        .map(|(row, _)| Line::from(*row).width())
         .max()
         .unwrap_or(0)
         .min(width);
-    rows.split_inclusive(|line| line.starts_with("@@"))
+    rows.split_inclusive(|(line, _)| line.starts_with("@@"))
         .flat_map(|hunk| {
             let code = |skip| {
                 let source: String = hunk
                     .iter()
-                    .filter(|line| {
-                        matches!(line.as_bytes().first(), Some(b'+' | b'-' | b' '))
+                    .filter(|(line, in_header)| {
+                        !in_header
+                            && matches!(line.as_bytes().first(), Some(b'+' | b'-' | b' '))
                             && !line.starts_with(skip)
                     })
-                    .map(|line| format!("{}\n", &line[1..]))
+                    .map(|(line, _)| format!("{}\n", &line[1..]))
                     .collect();
                 code_lines(&source, lang).into_iter()
             };
             let mut before = syntax.then(|| code('+'));
             let mut after = syntax.then(|| code('-'));
             hunk.iter()
-                .map(|source| {
+                .map(|&(source, in_header)| {
+                    if in_header {
+                        return Line::from(Span::styled(source.to_owned(), header));
+                    }
                     let marker = source.as_bytes().first().copied();
                     let style = match marker {
                         Some(b'-') => deleted,
@@ -462,7 +480,7 @@ pub(super) fn diff_lines(text: &str, lang: &str, width: usize) -> Vec<Line<'stat
                     };
                     if !matches!(marker, Some(b'+' | b'-' | b' ')) {
                         return Line::from(Span::styled(
-                            (*source).to_owned(),
+                            source.to_owned(),
                             if source.starts_with("@@") {
                                 Style::new().dim()
                             } else {
@@ -969,6 +987,37 @@ mod tests {
             }
             for line in [&lines[0], &lines[3]] {
                 assert!(line.spans.iter().all(|span| span.style.bg.is_none()));
+            }
+        }
+    }
+
+    #[test]
+    fn diff_file_headers_use_the_header_color_without_background() {
+        for light in [false, true] {
+            use_theme(light, None).unwrap();
+            let header = scope_style("meta.diff.header").fg;
+            let source = "diff --git a/x.rs b/x.rs\nindex 1..2 100644\n--- a/x.rs\n+++ b/x.rs\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/y.rs b/y.rs\n--- a/y.rs\n+++ b/y.rs\n@@ -1 +1 @@\n-c\n+d";
+            let lines = diff_lines(source, "rs", 30);
+            for index in [0, 1, 2, 3, 7, 8, 9] {
+                assert_eq!(
+                    lines[index].width(),
+                    Line::from(source.lines().nth(index).unwrap()).width()
+                );
+                assert!(
+                    lines[index]
+                        .spans
+                        .iter()
+                        .all(|span| span.style.bg.is_none() && span.style.fg == header),
+                    "{index}"
+                );
+            }
+            for index in [5, 6, 11, 12] {
+                assert!(
+                    lines[index]
+                        .spans
+                        .iter()
+                        .all(|span| span.style.bg.is_some())
+                );
             }
         }
     }
