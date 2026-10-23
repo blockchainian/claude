@@ -425,6 +425,7 @@ impl App {
             send_commands(&self.view.take_image_commands())
         })?;
         self.terminal_drawn();
+        self.view.begin_image_frame();
         if let Some(position) = cursor {
             terminal.set_cursor_position(position)?;
             terminal.show_cursor()?;
