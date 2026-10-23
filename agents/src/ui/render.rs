@@ -1748,6 +1748,7 @@ impl View {
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
         let mut drawn_links = Vec::new();
+        let mut background_titles = Vec::new();
         for ((((item, mapped), links), id), indent) in items
             .into_iter()
             .zip(text_rows)
@@ -1850,6 +1851,13 @@ impl View {
                     ))
                 }
             };
+            if title_columns.is_some()
+                && offset >= scroll
+                && offset < scroll + available
+                && !(budget.is_none() && total - scroll > available && offset + 1 == scroll + available)
+            {
+                background_titles.push(area.y + (offset - scroll) as u16);
+            }
             if fallback {
                 let mut source = String::new();
                 let mut rows = Vec::new();
@@ -1924,6 +1932,36 @@ impl View {
         for y in 0..available.min(total - scroll) {
             for x in 0..content_width {
                 buf[(area.x + x, area.y + y as u16)] = content[(x, (scroll + y) as u16)].clone();
+            }
+        }
+        // The panel padding and its adjacent separator belong to the frame,
+        // outside the title's layout and text-selection columns.
+        if area.x > buf.area.x && area.right() < buf.area.right() {
+            for y in background_titles {
+                let left = area.x.saturating_sub(2).max(buf.area.x);
+                let right_border = area.right() + 1 < buf.area.right()
+                    && buf[(area.right() + 1, y)].symbol() == "│";
+                let right = area.right() + u16::from(right_border);
+                let left_joint = if buf[(left, y)].symbol() == "│" {
+                    "├"
+                } else {
+                    "─"
+                };
+                for (outer, inner, joint, cap) in [
+                    (left, left + 1, left_joint, "╴"),
+                    (right, right - 1, if right_border { "┤" } else { "─" }, "╶"),
+                ] {
+                    // Very narrow panels may use the padding for title content.
+                    if buf[(inner, y)].symbol() == " "
+                        && matches!(buf[(outer, y)].symbol(), " " | "│")
+                    {
+                        for (x, symbol) in [(outer, joint), (inner, cap)] {
+                            buf[(x, y)]
+                                .set_symbol(symbol)
+                                .set_style(Style::default().dim());
+                        }
+                    }
+                }
             }
         }
         if budget.is_none() && total - scroll > available && available > 0 {

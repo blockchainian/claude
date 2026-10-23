@@ -5291,11 +5291,11 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
             .unwrap();
         assert!(
             text(y, left + 1, right)
-                .trim_end()
+                .trim_end_matches([' ', '╶', '─'])
                 .ends_with("25s")
         );
         assert_eq!(
-            text(y, left + 1, right).trim_end().chars().count() as u16,
+            text(y, left + 1, right).trim_end_matches([' ', '╶', '─']).chars().count() as u16,
             right - left - 2 - u16::from(width < 150),
             "background time at {width}"
         );
@@ -5304,7 +5304,8 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
             for x in [left + 1, right - 1] {
                 let background_tail = x == right - 1 && ["╶", "─"].contains(&buf[(x, y)].symbol());
                 assert!(
-                    buf[(x, y)].symbol() == " " || background_tail,
+                    buf[(x, y)].symbol() == " " || background_tail
+                        || x == left + 1 && buf[(x, y)].symbol() == "╴",
                     "padding ({x}, {y}) at {width}"
                 );
             }
@@ -11792,6 +11793,83 @@ fn selector_hides_task_details_rules_through_panel_padding() {
                 );
             }
             assert!(view.viewport.borrow().task_details_text.rows.is_empty());
+        }
+    }
+}
+
+#[test]
+fn background_title_joints_preserve_every_existing_column() {
+    for (width, joints) in [
+        (160, [40, 41, 80, 81]),
+        (120, [60, 61, 118, 119]),
+        (90, [0, 1, 88, 89]),
+    ] {
+        let (mut view, now) = column_padding_fixture();
+        let mut child = session("joint-child", "Working child", SessionStatus::Working, 0);
+        child.cwd = view.rows[view.selected].cwd.clone();
+        child.parent = Some(view.rows[view.selected].id.clone());
+        child.started_at = Some(now - Duration::seconds(65));
+        child.last_message = Some("Child output".into());
+        let parent_id = view.rows[view.selected].id.clone();
+        let mut rows = view.rows.clone();
+        rows.push(child);
+        view.set_sessions(rows, false);
+        view.selected = view
+            .rows
+            .iter()
+            .position(|row| row.id == parent_id)
+            .unwrap();
+        let area = Rect::new(0, 0, width, 60);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let details = view.center_layout(area).task_details;
+        let title_rows: Vec<_> = (details.y..details.bottom())
+            .filter(|&y| {
+                let text: String = (details.x..details.right())
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect();
+                text.contains("Working child") || text.contains("Run checks")
+            })
+            .collect();
+        assert_eq!(
+            title_rows.len(),
+            2,
+            "width {width}: {}",
+            buf.content
+                .chunks(width as usize)
+                .map(|r| r.iter().map(|c| c.symbol()).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "tests/ui_snapshots/background_title_baseline_{width}.txt"
+        ));
+        let baseline: Vec<String> =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        for y in 0..area.height {
+            for x in 0..width {
+                let joint = title_rows
+                    .contains(&y)
+                    .then(|| joints.iter().position(|&column| column == x))
+                    .flatten();
+                let expected = joint.map(|index| {
+                    [
+                        if width == 90 { "─" } else { "├" },
+                        "╴",
+                        "╶",
+                        if width == 160 { "┤" } else { "─" },
+                    ][index]
+                });
+                assert_eq!(
+                    buf[(x, y)].symbol(),
+                    expected.unwrap_or(&baseline[usize::from(y * width + x)]),
+                    "width {width}, ({x},{y})"
+                );
+                if expected.is_some() {
+                    assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
+                    assert_eq!(buf[(x, y)].fg, Color::Reset);
+                }
+            }
         }
     }
 }

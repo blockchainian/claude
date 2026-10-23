@@ -145,9 +145,9 @@ fn background_times_align_in_large_medium_small() {
             expected,
             "{width} background"
         );
-        assert_eq!(buf[(expected + 1, y)].symbol(), " ", "{width}");
-        let title = text(&buf, Rect { y, height: 1, ..layout.task_details });
-        assert!(!title.chars().any(|c| ('\u{2500}'..='\u{257f}').contains(&c)), "{title}");
+        assert_eq!(buf[(expected + 1, y)].symbol(), "╶", "{width}");
+        let cap = layout.task_details.x.saturating_sub(2).max(buf.area.x) + 1;
+        assert_eq!(buf[(cap, y)].symbol(), "╴", "{width}");
         let (_, event_time) = super::super::event_list::event_row_areas(layout.event_panel);
         assert_eq!(event_time.right() - 1, width - 3);
     }
@@ -226,8 +226,8 @@ fn background_indicators_match_task_list_for_commands_and_child_states() {
             assert_eq!(buf[(x, y)].symbol(), expected.content);
             assert_eq!(buf[(x, y)].fg, expected.style.fg.unwrap());
             assert_eq!(buf[(x + 1, y)].symbol(), " ");
-            let line = text(&buf, Rect { y, height: 1, ..layout.task_details });
-            assert!(!line.chars().any(|c| ('\u{2500}'..='\u{257f}').contains(&c)), "{line}");
+            let cap = layout.task_details.x.saturating_sub(2).max(buf.area.x) + 1;
+            assert_eq!(buf[(cap, y)].symbol(), "╴", "{width}");
             assert_eq!(end_of(&buf, Rect { y, height: 1, ..layout.task_details }, "1m 6s").0, expected_end);
         }
     }
