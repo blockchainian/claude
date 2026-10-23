@@ -6,6 +6,18 @@ use crate::providers::{SessionInput, SessionKey, TerminalCommand, TerminalInput}
 use crate::session_terminal::SessionTerminal;
 
 impl App {
+    pub(super) fn refresh_cell_pixels(&mut self) {
+        match crate::terminal::cell_pixels() {
+            Ok(cell_pixels) if cell_pixels != self.terminal_report.cell_pixels => {
+                self.terminal_report.cell_pixels = cell_pixels;
+                self.view
+                    .set_inline_images(self.terminal_report.supports_images, cell_pixels);
+            }
+            Ok(_) => {}
+            Err(error) => self.view.show_error(error.to_string()),
+        }
+    }
+
     pub(super) fn open_terminal(&mut self, id: SessionKey) {
         self.restore_terminal(id);
         self.view.focus_terminal();

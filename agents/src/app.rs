@@ -11,11 +11,11 @@ use crate::providers::{ProviderId, SessionAction, SessionInput, SessionKey};
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
 use crate::sessions::Hub;
 use crate::state::Preferences;
-use crate::terminal_background;
+use crate::terminal;
 use crate::ui::View;
 use crossterm::event::Event;
 use crossterm::event::Theme;
-use crossterm::terminal;
+use crossterm::terminal as crossterm_terminal;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::ffi::OsStr;
@@ -151,6 +151,7 @@ pub struct App {
     /// Set when the user chose to hand the terminal to a provider process; the dashboard
     /// returns once it exits.
     launch: Option<Command>,
+    terminal_report: terminal::Report,
     /// The session program running in the event detail panel.
     terminal: Option<crate::session_terminal::SessionTerminal>,
     /// The task whose terminal opens once that task's previous client has closed.
@@ -262,6 +263,7 @@ impl App {
             clipboard: crate::clipboard::Clipboard::new(),
             sessions: Vec::new(),
             launch: None,
+            terminal_report: terminal::Report::default(),
             terminal: None,
             terminal_task: None,
             waiting_terminal: None,
@@ -281,10 +283,16 @@ impl App {
         loop {
             let mut terminal = enter_terminal()?;
             // Raw mode is on, so the terminal's reply reaches us instead of the screen.
-            let background = terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
-                .ok()
-                .flatten();
-            self.apply_background(background.is_some_and(terminal_background::is_light));
+            self.terminal_report = terminal::query(terminal::DEFAULT_TIMEOUT).unwrap_or_default();
+            self.apply_background(
+                self.terminal_report
+                    .background
+                    .is_some_and(terminal::is_light),
+            );
+            self.view.set_inline_images(
+                self.terminal_report.supports_images,
+                self.terminal_report.cell_pixels,
+            );
             let result = self.event_loop(&mut terminal);
             self.close_terminal();
             leave_terminal(terminal)?;
@@ -372,13 +380,16 @@ impl App {
                 Ok(false) => {}
                 Err(error) => self.view.show_error(error.to_string()),
             }
-            self.draw(terminal)?;
+            self.draw_frame(terminal, chrono::Utc::now(), |commands| {
+                terminal::send_image_commands(&mut io::stdout().lock(), commands)
+            })?;
             if self.wait_for_input(&mut watcher, &mut schedule, selection_tick)? {
                 return Ok(());
             }
         }
     }
 
+    #[cfg(test)]
     fn draw<B: ratatui::backend::Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
@@ -386,20 +397,32 @@ impl App {
         self.draw_at(terminal, chrono::Utc::now())
     }
 
+    #[cfg(test)]
     fn draw_at<B: ratatui::backend::Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), B::Error> {
+        self.draw_frame(terminal, now, |_| Ok(()))
+    }
+
+    fn draw_frame<B: ratatui::backend::Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        now: chrono::DateTime<chrono::Utc>,
+        send_commands: impl FnOnce(&[u8]) -> Result<(), B::Error>,
+    ) -> Result<(), B::Error> {
         // Keep the drawing cursor hidden until the frame's input cursor is in place.
         terminal.hide_cursor()?;
         let mut cursor = None;
-        terminal.draw(|frame| {
+        terminal.try_draw(|frame| {
             let area = frame.area();
             self.refresh_event(self.view.event_count(area));
             self.refresh_usage(self.view.usage_width(area), now);
             self.view.render_at(area, frame.buffer_mut(), now);
             cursor = self.view.cursor_pos(area);
+            // try_draw flushes cells only after this callback returns successfully.
+            send_commands(&self.view.take_image_commands())
         })?;
         self.terminal_drawn();
         if let Some(position) = cursor {
@@ -616,6 +639,7 @@ impl App {
             Event::Mouse(mouse) => self.view.handle_mouse(mouse),
             Event::Paste(text) => return self.paste(&text),
             Event::Resize(width, height) => {
+                self.refresh_cell_pixels();
                 self.view.resize(width, height);
                 return false;
             }
@@ -1685,11 +1709,11 @@ mod keyboard;
 mod session_terminal;
 
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
-    terminal::enable_raw_mode()?;
+    crossterm_terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
     crossterm::execute!(
         stdout,
-        terminal::EnterAlternateScreen,
+        crossterm_terminal::EnterAlternateScreen,
         crossterm::event::EnableBracketedPaste,
         crossterm::event::PushKeyboardEnhancementFlags(
             crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
@@ -1708,8 +1732,11 @@ fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::R
         crossterm::event::DisableBracketedPaste,
         MouseReports::Disable
     );
-    terminal::disable_raw_mode()?;
-    crossterm::execute!(terminal.backend_mut(), terminal::LeaveAlternateScreen)?;
+    crossterm_terminal::disable_raw_mode()?;
+    crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm_terminal::LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     reports
 }

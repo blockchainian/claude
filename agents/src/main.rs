@@ -16,7 +16,7 @@ mod session_terminal;
 mod sessions;
 mod state;
 mod tasks;
-mod terminal_background;
+mod terminal;
 mod theme;
 mod ui;
 mod usage;

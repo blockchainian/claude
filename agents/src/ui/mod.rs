@@ -477,6 +477,23 @@ impl View {
         }
     }
 
+    pub(crate) fn set_inline_images(
+        &mut self,
+        supports_images: bool,
+        cell_pixels: Option<(u16, u16)>,
+    ) {
+        *self.inline_images.get_mut() =
+            supports_images.then(|| inline_images::InlineImages::new(cell_pixels));
+        self.viewport.get_mut().event_detail_layout = None;
+    }
+
+    pub(crate) fn take_image_commands(&self) -> Vec<u8> {
+        self.inline_images
+            .borrow_mut()
+            .as_mut()
+            .map_or_else(Vec::new, |images| images.take_commands())
+    }
+
     /// Takes the terminal's cell height over width, or a common one when the terminal reports
     /// no pixels.
     pub(crate) fn set_cell_aspect(&mut self, aspect: Option<f64>) {
