@@ -734,3 +734,112 @@ fn tab_pins_persist_independently_and_only_active_pins_expire() {
     assert_eq!(pins.active, [second.clone()]);
     assert_eq!(pins.inactive, [second]);
 }
+
+// Isolate the clipboard environment from tests running in other threads.
+fn paste_clipboard_directory() -> Option<PathBuf> {
+    let thread = std::thread::current();
+    let name = thread.name().unwrap();
+    if std::env::var("AGENTS_PASTE_TEST").as_deref() == Ok(name) {
+        return Some(std::env::var_os("AGENTS_CLIPBOARD_DIR").unwrap().into());
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", name, "--nocapture"])
+        .env("AGENTS_PASTE_TEST", name)
+        .env("AGENTS_CLIPBOARD_DIR", directory.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    None
+}
+
+#[test]
+fn stray_paste_from_task_and_event_lists_focuses_prompt() {
+    for event_list in [false, true] {
+        let (_directory, mut app, _, _) = registry_app("bg");
+        if event_list {
+            let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(240, 40)).unwrap();
+            app.draw(&mut terminal).unwrap();
+            let buffer = terminal.backend().buffer();
+            let (column, row) = (0..40)
+                .find_map(|y| {
+                    (120..235).find_map(|x| {
+                        let text: String = (x..240).map(|x| buffer[(x, y)].symbol()).collect();
+                        text.starts_with("Stop hook").then_some((x, y))
+                    })
+                })
+                .expect("event list fixture row");
+            for kind in [
+                MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Up(MouseButton::Left),
+            ] {
+                app.handle_event(Event::Mouse(MouseEvent {
+                    kind,
+                    column,
+                    row,
+                    modifiers: KeyModifiers::NONE,
+                }));
+            }
+        }
+        app.handle_event(Event::Paste("dictation paste".into()));
+        assert!(app.view.pasting_prompt(), "paste must focus the prompt");
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('!'),
+            KeyModifiers::NONE,
+        )));
+        assert!(screen(&mut app).contains("dictation paste!"));
+    }
+}
+
+#[test]
+fn stray_paste_under_help_is_copied_without_entering_help() {
+    let Some(clipboard) = paste_clipboard_directory() else {
+        return;
+    };
+    let (_directory, mut app, _, _) = registry_app("bg");
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('?'),
+        KeyModifiers::NONE,
+    )));
+    app.handle_event(Event::Paste("must-not-enter-help".into()));
+    assert_eq!(
+        fs::read_to_string(clipboard.join("text")).unwrap(),
+        "must-not-enter-help"
+    );
+    assert!(!screen(&mut app).contains("must-not-enter-help"));
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+    assert!(!screen(&mut app).contains("must-not-enter-help"));
+}
+
+#[test]
+fn stray_paste_to_disabled_task_is_copied() {
+    let Some(clipboard) = paste_clipboard_directory() else {
+        return;
+    };
+    let (_directory, mut app, _, _) = registry_app("interactive");
+    app.handle_event(Event::Paste("disabled dictation".into()));
+    assert_eq!(
+        fs::read_to_string(clipboard.join("text")).unwrap(),
+        "disabled dictation"
+    );
+    assert!(!app.view.pasting_prompt());
+    assert!(!screen(&mut app).contains("disabled dictation"));
+    assert!(screen(&mut app).contains("Pasted text copied to the clipboard"));
+}
+
+#[test]
+fn stray_paste_image_path_becomes_an_attachment() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let image = directory.path().join("paste image.png");
+    fs::write(&image, crate::images::fixture_png()).unwrap();
+    app.handle_event(Event::Paste(format!("'{}'", image.display())));
+    assert!(app.view.pasting_prompt());
+    let rendered = screen(&mut app);
+    assert!(rendered.contains("[Image #1]"), "{rendered}");
+    assert!(!rendered.contains("paste image.png"));
+}

@@ -101,15 +101,15 @@ fn dashboard_newline_control_j() {
 
 #[test]
 fn dashboard_newline_paste_cr() {
-    dashboard_newline(|view| view.handle_paste("first line\rsecond line"));
+    dashboard_newline(|view| assert!(view.handle_paste("first line\rsecond line")));
 }
 
 #[test]
 fn dashboard_newline_paste_crlf() {
-    dashboard_newline(|view| view.handle_paste("first line\r\nsecond line"));
+    dashboard_newline(|view| assert!(view.handle_paste("first line\r\nsecond line")));
 }
 
 #[test]
 fn dashboard_newline_paste_lf() {
-    dashboard_newline(|view| view.handle_paste("first line\nsecond line"));
+    dashboard_newline(|view| assert!(view.handle_paste("first line\nsecond line")));
 }

@@ -639,14 +639,27 @@ impl App {
         if let Some(action) = self.view.terminal_paste(text) {
             return self.handle_action(Some(action));
         }
-        if self.view.pasting_prompt() {
-            match crate::images::ImageAttachment::from_paste(text) {
-                Ok(Some(image)) => self.view.attach_image(image),
-                Ok(None) => self.view.handle_paste(text),
-                Err(error) => self.view.show_error(error.to_string()),
+        if !self.view.pasting_prompt() {
+            if self.view.handle_paste(text) {
+                return false;
             }
-        } else {
-            self.view.handle_paste(text);
+            if !self.view.prepare_paste_prompt() {
+                match self.clipboard.copy(text) {
+                    Ok(()) => self
+                        .view
+                        .show_info("Pasted text copied to the clipboard".into()),
+                    Err(error) => self.view.show_error(format!("Cannot copy: {error}")),
+                }
+                return false;
+            }
+            return self.paste(text);
+        }
+        match crate::images::ImageAttachment::from_paste(text) {
+            Ok(Some(image)) => self.view.attach_image(image),
+            Ok(None) => {
+                self.view.handle_paste(text);
+            }
+            Err(error) => self.view.show_error(error.to_string()),
         }
         false
     }

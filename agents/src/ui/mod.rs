@@ -484,6 +484,7 @@ impl View {
     pub(crate) fn pasting_prompt(&self) -> bool {
         self.confirm_dialog.is_none()
             && !self.help
+            && !self.frozen_draft()
             && self.prompt_focused()
             && !self.input_box.searching_history()
             && self.input_disabled().is_none()
@@ -512,12 +513,12 @@ impl View {
         (self.title_editing() && self.selector.is_none()).then_some(&self.rename)
     }
 
-    pub(crate) fn handle_paste(&mut self, text: &str) {
+    pub(crate) fn handle_paste(&mut self, text: &str) -> bool {
         if self.frozen_draft() {
-            return;
+            return false;
         }
         if self.confirm_dialog.is_some() || self.help {
-            return;
+            return false;
         }
         let task_details_active = self.active_panel == Panel::TaskDetails;
         if let Some(editor) = self
@@ -527,13 +528,13 @@ impl View {
             .and_then(Selector::active_editor)
         {
             editor.insert(text);
-            return;
+            return true;
         }
         if self.selector.is_some() && task_details_active {
-            return;
+            return false;
         }
         if !self.searching && !self.task_search_editing() && self.question_paste(text) {
-            return;
+            return true;
         }
         if task_details_active && self.title_editor().is_some() {
             self.rename.insert(text);
@@ -554,7 +555,22 @@ impl View {
                 .copied()
                 .unwrap_or(usize::MAX);
             self.select(selected);
+        } else {
+            return false;
         }
+        true
+    }
+
+    pub(crate) fn prepare_paste_prompt(&mut self) -> bool {
+        if self.help
+            || self.confirm_dialog.is_some()
+            || self.frozen_draft()
+            || self.input_disabled().is_some()
+        {
+            return false;
+        }
+        self.prepare_prompt();
+        true
     }
 
     fn input_label(&self) -> String {
