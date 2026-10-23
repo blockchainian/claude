@@ -4540,8 +4540,8 @@ fn background_box_dims_title_but_not_indicator_or_output() {
         title_buf[(title_x, 0)].fg,
         detail.sections[0].title.title_style.fg.unwrap()
     );
-    assert_eq!(cell_text(buf[(0, top + 1)].symbol()), "t");
-    assert!(!buf[(0, top + 1)].modifier.contains(Modifier::DIM));
+    assert_eq!(cell_text(buf[(18, top + 1)].symbol()), "t");
+    assert!(!buf[(18, top + 1)].modifier.contains(Modifier::DIM));
 }
 
 #[test]

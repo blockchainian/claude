@@ -2283,6 +2283,10 @@ fn render_background_box(
         x = end;
     }
     title.render(row(box_area, 0, 1), buf);
+    let output = output
+        .into_iter()
+        .map(|line| truncate_line_to_width(line, usize::from(box_area.width)).centered())
+        .collect::<Vec<_>>();
     Paragraph::new(output).render(
         Rect { y: box_area.y + 1, height: box_area.height.saturating_sub(1), ..box_area },
         buf,
@@ -2483,6 +2487,34 @@ mod background_title_tests {
     }
 
     #[test]
+    fn background_output_rows_share_title_center() {
+        for width in [160, 120, 90] {
+            let area = Rect::new(7, 3, width, 5);
+            let long = "中文输出".repeat(80);
+            let output = ["python3, git status", "已推送，开始干净安装。", long.as_str()];
+            let mut buf = Buffer::empty(area);
+            render_background_box("后台命令", SessionStatus::Working, Some("35s"),
+                output.iter().map(|s| Line::from(s.to_string())).collect(), area, 2, &mut buf);
+            let title_start = (area.x..area.right()).find(|&x| buf[(x, area.y)].symbol() == "●").unwrap();
+            let title_center = 2 * title_start + "● 后台命令".width() as u16;
+            for (index, source) in output.iter().enumerate() {
+                let y = area.y + 1 + index as u16;
+                let expected = truncate_line_to_width(Line::from(source.to_string()), width as usize);
+                let expected_text = expected.to_string();
+                let start = (area.x..area.right()).find(|&x| buf[(x, y)].symbol() != " ").unwrap();
+                let end = start + expected_text.width() as u16;
+                let left = start - area.x;
+                let right = area.right().saturating_sub(end);
+                assert!(left.abs_diff(right) <= 1, "width {width}, row {index}: {left} vs {right}");
+                assert!(title_center.abs_diff(start + end) <= 1, "width {width}, row {index}: title center differs");
+                let actual: String = (start..end).filter(|&x| x == start || buf[(x - 1, y)].symbol().width() < 2)
+                    .map(|x| buf[(x, y)].symbol()).collect();
+                assert_eq!(actual, expected_text);
+            }
+        }
+    }
+
+    #[test]
     fn background_titles_are_centered_with_optional_time_and_cjk() {
         for (title, left, right) in [("Check files", 13, 14), ("中文答题卡住", 13, 13)] {
             for time in [None, Some("35s")] {
@@ -2505,7 +2537,7 @@ mod background_title_tests {
                     ),
                     "{title} {time:?}"
                 );
-                assert_eq!(buf[(0, 1)].symbol(), "o");
+                assert_eq!(buf[(17, 1)].symbol(), "o");
             }
         }
     }
