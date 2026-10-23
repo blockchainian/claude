@@ -1269,7 +1269,7 @@ fn codex_attention_section(data: &ToolData<'_>) -> Option<Section> {
     let entries: Vec<Value> = result.structured["attention"]
         .as_array()?
         .iter()
-        .map(|entry| serde_json::json!({ "Thread": entry["threadId"], "Attention": entry["text"] }))
+        .map(|entry| serde_json::json!({ "Attention": entry["text"], "Thread": entry["threadId"] }))
         .collect();
     Some(Section::Markdown {
         label: "attention".into(),
@@ -1950,15 +1950,15 @@ mod tests {
         assert_eq!(reply, call["input"]["reply"].as_str().unwrap());
         let attention = result.structured["attention"].as_array().unwrap();
         let rows: Vec<&str> = text.lines().collect();
-        assert_eq!(rows[..2], ["| Thread | Attention |", "| --- | --- |"]);
+        assert_eq!(rows[..2], ["| Attention | Thread |", "| --- | --- |"]);
         assert_eq!(rows.len(), 2 + attention.len());
         for (row, entry) in rows[2..].iter().zip(attention) {
             assert_eq!(
                 *row,
                 format!(
                     "| {} | {} |",
-                    super::table_cell(entry["threadId"].as_str().unwrap()),
-                    super::table_cell(entry["text"].as_str().unwrap())
+                    super::table_cell(entry["text"].as_str().unwrap()),
+                    super::table_cell(entry["threadId"].as_str().unwrap())
                 )
             );
         }
