@@ -2098,22 +2098,19 @@ fn join_separators(separators: &[(u16, u16, u16)], area: Rect, buf: &mut Buffer)
     }
 }
 
-/// Centers a muted section title on its owner's frame edge.
+/// Centers a section title on its owner's frame edge, preserving its panel style.
 fn render_section_edge(title: Line<'static>, edge: Rect, buf: &mut Buffer) {
     if edge.width < 4 || edge.is_empty() {
         return;
     }
-    let title = truncate_line_with_ellipsis_if_overflow(
-        Line::from(title.to_string()),
-        usize::from(edge.width - 4),
-    );
+    let title = truncate_line_with_ellipsis_if_overflow(title, usize::from(edge.width - 4));
     let mut header = Line::from(" ");
     header.spans.extend(title.spans);
     header.spans.push(" ".into());
     let width = header.width() as u16;
     let label = Rect::new(edge.x + (edge.width - width) / 2, edge.y, width, 1);
     Clear.render(label, buf);
-    line(header.dim(), label, buf);
+    line(header, label, buf);
 }
 
 fn centered_rule_label(title: Line<'_>, rule: Rect) -> (Line<'_>, Rect) {
@@ -2752,6 +2749,48 @@ mod small_height_tests {
                 heights(view.center_layout(Rect::new(0, 0, width, 60))),
                 expected
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod section_edge_tests {
+    use super::*;
+
+    #[test]
+    fn section_edge_truncation_preserves_the_panel_title_style() {
+        let title = super::super::event_detail::TitleRow {
+            left: None,
+            exit_code: None,
+            title: "A long section title".into(),
+            title_style: Style::new().fg(Color::Blue).bold(),
+            time: None,
+            meta_style: Style::new().dim(),
+        };
+        let panel = Rect::new(0, 0, 100, 1);
+        let columns = super::super::event_detail::event_detail_columns(panel, panel);
+        let (line, maps) = title.line(columns);
+        let mut panel_buffer = Buffer::empty(panel);
+        line.render(panel, &mut panel_buffer);
+        let expected = &panel_buffer[(maps[0].0.start, 0)];
+        for width in [5, 12, 40] {
+            let edge = Rect::new(0, 0, width, 1);
+            let mut buffer = Buffer::empty(edge);
+            rule(edge, &mut buffer);
+            render_section_edge(
+                title.title_in(100, std::path::Path::new("/")).0,
+                edge,
+                &mut buffer,
+            );
+            let text: String = (0..width).map(|x| buffer[(x, 0)].symbol()).collect();
+            assert_eq!(text.contains('…'), width < 24, "{text}");
+            for x in 0..width {
+                let cell = &buffer[(x, 0)];
+                if cell.symbol() != " " && cell.symbol() != "─" {
+                    assert_eq!(cell.fg, expected.fg, "{text}");
+                    assert_eq!(cell.modifier, expected.modifier, "{text}");
+                }
+            }
         }
     }
 }

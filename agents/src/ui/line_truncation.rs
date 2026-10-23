@@ -88,13 +88,18 @@ pub(crate) fn truncate_line_with_ellipsis_if_overflow(
         return line;
     }
 
+    let first_style = line
+        .spans
+        .first()
+        .map(|span| span.style)
+        .unwrap_or_default();
     let truncated = truncate_line_to_width(line, max_width.saturating_sub(1));
     let Line {
         style,
         alignment,
         mut spans,
     } = truncated;
-    let ellipsis_style = spans.last().map(|span| span.style).unwrap_or_default();
+    let ellipsis_style = spans.last().map(|span| span.style).unwrap_or(first_style);
     spans.push(Span::styled("…", ellipsis_style));
     Line {
         style,

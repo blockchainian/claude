@@ -673,29 +673,41 @@ fn event_detail_top_edge_tracks_the_section_on_the_top_row() {
 }
 
 #[test]
-fn event_detail_top_edge_title_is_muted() {
+fn event_detail_top_edge_title_preserves_the_panel_title_style() {
     let (mut view, _) = fixture(true);
-    screen_rows(&view, 100, 40);
-    event_detail_wheel(&mut view, true);
     let area = Rect::new(0, 0, 100, 40);
-    let mut buffer = Buffer::empty(area);
-    view.render(area, &mut buffer);
+    let draw = |view: &View| {
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer);
+        buffer
+    };
+    let initial = draw(&view);
+    let detail = view.viewport.borrow().event_detail;
+    let title_cell = (detail.y..detail.bottom())
+        .find_map(|y| {
+            let row = (0..area.width)
+                .map(|x| initial[(x, y)].symbol())
+                .collect::<String>();
+            column_of(&row, "Assistant").map(|x| initial[(x as u16, y)].clone())
+        })
+        .expect("the title is visible inside the panel");
+    assert!(title_cell.modifier.contains(ratatui::style::Modifier::BOLD));
+    assert_ne!(title_cell.fg, ratatui::style::Color::Reset);
+    event_detail_wheel(&mut view, true);
+    let buffer = draw(&view);
     let y = view.viewport.borrow().output_borders[0].y;
-    let footer = (0..100)
+    let edge = (0..area.width)
         .map(|x| buffer[(x, y)].symbol())
         .collect::<String>();
-    let x = column_of(&footer, "Assistant").unwrap_or_else(|| panic!("{footer}")) as u16;
+    let x = column_of(&edge, "Assistant").expect("the title scrolled onto the edge") as u16;
+    assert_eq!(buffer[(x - 1, y)].symbol(), " ");
+    assert_eq!(buffer[(x + 9, y)].symbol(), " ");
+    assert_eq!(buffer[(x - 2, y)].symbol(), "─");
+    assert_eq!(buffer[(x + 10, y)].symbol(), "─");
     for x in x..x + "Assistant".len() as u16 {
         let cell = &buffer[(x, y)];
-        assert!(
-            cell.modifier.contains(ratatui::style::Modifier::DIM),
-            "{cell:?}"
-        );
-        assert_eq!(cell.fg, ratatui::style::Color::Reset, "{cell:?}");
-        assert!(
-            !cell.modifier.contains(ratatui::style::Modifier::BOLD),
-            "{cell:?}"
-        );
+        assert_eq!(cell.fg, title_cell.fg);
+        assert_eq!(cell.modifier, title_cell.modifier);
     }
 }
 
