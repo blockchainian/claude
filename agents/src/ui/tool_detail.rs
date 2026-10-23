@@ -762,6 +762,10 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             (label, Part::new(cells(text), Body::Diff(lang.clone())))
         }
         Section::Markdown { text, .. } => {
+            // A Markdown block after other content starts after a blank line, as it would within one document.
+            if !parts.is_empty() {
+                parts.push(Part::new("", Body::Text));
+            }
             parts.extend(if text_output {
                 Part::text_parts(cells(text), true)
             } else {
@@ -1883,6 +1887,35 @@ mod tests {
             let last = cells.last().unwrap().1.end;
             assert_eq!(&part.source[first..last], expected);
         }
+    }
+
+    #[test]
+    fn markdown_after_other_output_starts_after_a_blank_line() {
+        let mut parts = Vec::new();
+        for text in [
+            "| Name | State |\n| --- | --- |\n| a | waiting |",
+            "| Thread | Attention |\n| --- | --- |\n| t | q |",
+        ] {
+            push_section(
+                &mut parts,
+                &Section::Markdown {
+                    label: "output".into(),
+                    text: text.into(),
+                },
+                Style::default(),
+                true,
+            );
+        }
+        let lines = texts(&parts, 80);
+        let second = lines
+            .iter()
+            .position(|line| line.contains("Thread"))
+            .unwrap();
+        assert!(
+            second > 0 && lines[second - 1].trim().is_empty(),
+            "{lines:?}"
+        );
+        assert!(!lines[0].trim().is_empty(), "{lines:?}");
     }
 
     #[test]

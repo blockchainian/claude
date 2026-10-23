@@ -202,6 +202,8 @@ pub(crate) enum Body {
 pub(crate) enum Format {
     Text,
     Markdown,
+    /// A JSON array as a Markdown table: one row per element, one column per field.
+    Table,
 }
 
 pub(crate) struct Presentation {
@@ -538,6 +540,7 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
     },
     ToolRule {
         name: "codex-manager list",
+        input: Some((Pick::Field(Source::Input, "/state"), Format::Table)),
         output: Some((Pick::With(codex_thread_table), Format::Text)),
         attention: true,
         ..DEFAULT_RULE
@@ -660,6 +663,16 @@ fn raw_input(input: &Value) -> Vec<Section> {
 }
 
 fn picked_sections(value: &Value, pointer: &str, format: Format, output: bool) -> Vec<Section> {
+    let label = pointer.rsplit('/').next().unwrap_or("");
+    if let Format::Table = format {
+        return markdown_table(value, label)
+            .map(|text| Section::Markdown {
+                label: label.into(),
+                text,
+            })
+            .into_iter()
+            .collect();
+    }
     let text = value
         .as_str()
         .map(str::to_owned)
@@ -669,11 +682,11 @@ fn picked_sections(value: &Value, pointer: &str, format: Format, output: bool) -
     }
     vec![match format {
         Format::Markdown => Section::Markdown {
-            label: pointer.rsplit('/').next().unwrap_or("").into(),
+            label: label.into(),
             text,
         },
         Format::Text if output => text_section("output", &text),
-        Format::Text => Section::Prose {
+        Format::Text | Format::Table => Section::Prose {
             text,
             markdown: false,
         },
@@ -1183,22 +1196,59 @@ fn table_cell(text: &str) -> String {
         .collect()
 }
 
+/// A Markdown table of a JSON array: objects give one column per field, in first-seen order;
+/// scalars give a single column headed `name`.
+fn markdown_table(value: &Value, name: &str) -> Option<String> {
+    let rows = value.as_array().filter(|rows| !rows.is_empty())?;
+    let cell = |value: &Value| {
+        table_cell(
+            &value
+                .as_str()
+                .map_or_else(|| value.to_string(), str::to_owned),
+        )
+    };
+    let mut columns: Vec<&str> = Vec::new();
+    for row in rows {
+        for key in row.as_object().into_iter().flat_map(|object| object.keys()) {
+            if !columns.contains(&key.as_str()) {
+                columns.push(key);
+            }
+        }
+    }
+    let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
+    if columns.is_empty() {
+        let mut lines = vec![line(vec![table_cell(name)]), "| --- |".to_owned()];
+        lines.extend(rows.iter().map(|row| line(vec![cell(row)])));
+        return Some(lines.join("\n"));
+    }
+    let mut lines = vec![
+        line(columns.iter().map(|column| table_cell(column)).collect()),
+        line(vec!["---".to_owned(); columns.len()]),
+    ];
+    lines.extend(rows.iter().map(|row| {
+        line(
+            columns
+                .iter()
+                .map(|column| row.get(column).map_or_else(String::new, cell))
+                .collect(),
+        )
+    }));
+    Some(lines.join("\n"))
+}
+
 fn codex_thread_table(data: &ToolData<'_>) -> Option<Body> {
     let result = data.result?;
     if result.error {
         return None;
     }
-    let mut text = String::from("| Name | State |\n| --- | --- |");
-    for thread in result.structured["threads"].as_array()? {
-        text.push_str(&format!(
-            "\n| {} | {} |",
-            table_cell(thread["name"].as_str()?),
-            table_cell(thread["state"].as_str()?)
-        ));
-    }
+    let threads: Vec<Value> = result.structured["threads"]
+        .as_array()?
+        .iter()
+        .map(|thread| serde_json::json!({ "Name": thread["name"], "State": thread["state"] }))
+        .collect();
     Some(Body::Sections(vec![Section::Markdown {
         label: "output".into(),
-        text,
+        text: markdown_table(&Value::Array(threads), "threads")?,
     }]))
 }
 
@@ -1213,20 +1263,17 @@ fn codex_reply_output(data: &ToolData<'_>) -> Option<Body> {
     }]))
 }
 
-/// An Attention heading with one subsection per waiting request, titled by its thread.
+/// The requests still waiting for Claude, one row per thread.
 fn codex_attention_section(data: &ToolData<'_>) -> Option<Section> {
     let result = data.result.filter(|result| !result.error)?;
-    let mut text = String::from("# Attention");
-    for entry in result.structured["attention"].as_array()? {
-        text.push_str(&format!(
-            "\n\n## {}\n\n{}",
-            entry["threadId"].as_str()?,
-            entry["text"].as_str()?
-        ));
-    }
+    let entries: Vec<Value> = result.structured["attention"]
+        .as_array()?
+        .iter()
+        .map(|entry| serde_json::json!({ "Thread": entry["threadId"], "Attention": entry["text"] }))
+        .collect();
     Some(Section::Markdown {
         label: "attention".into(),
-        text,
+        text: markdown_table(&Value::Array(entries), "attention")?,
     })
 }
 
@@ -1902,16 +1949,35 @@ mod tests {
         };
         assert_eq!(reply, call["input"]["reply"].as_str().unwrap());
         let attention = result.structured["attention"].as_array().unwrap();
-        assert!(text.starts_with("# Attention\n\n## "));
-        assert_eq!(text.matches("\n## ").count(), attention.len());
-        for entry in attention {
-            let heading = format!(
-                "## {}\n\n{}",
-                entry["threadId"].as_str().unwrap(),
-                entry["text"].as_str().unwrap()
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows[..2], ["| Thread | Attention |", "| --- | --- |"]);
+        assert_eq!(rows.len(), 2 + attention.len());
+        for (row, entry) in rows[2..].iter().zip(attention) {
+            assert_eq!(
+                *row,
+                format!(
+                    "| {} | {} |",
+                    super::table_cell(entry["threadId"].as_str().unwrap()),
+                    super::table_cell(entry["text"].as_str().unwrap())
+                )
             );
-            assert!(text.contains(&heading));
         }
+    }
+
+    #[test]
+    fn codex_manager_list_input_shows_its_states_as_a_table() {
+        let input = serde_json::json!({ "state": ["waiting", "inProgress"] });
+        let presentation = super::presentation(
+            "mcp__plugin_codex_codex-manager__list",
+            &super::ToolData {
+                input: &input,
+                result: None,
+            },
+        );
+        let [crate::event::Section::Markdown { text, .. }] = presentation.input.as_slice() else {
+            panic!("expected one Markdown table, got {:?}", presentation.input);
+        };
+        assert_eq!(text, "| state |\n| --- |\n| waiting |\n| inProgress |");
     }
 
     #[test]
