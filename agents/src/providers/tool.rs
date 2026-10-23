@@ -384,6 +384,11 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         ..DEFAULT_RULE
     },
     ToolRule {
+        name: "SendUserFile",
+        input: Some((Input::Field("caption"), Format::Text)),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
         name: "apply_patch",
         subject: Some(Subject::Field("paths")),
         input: Some((Input::Field(""), Format::Text)),
@@ -1607,6 +1612,21 @@ mod tests {
         assert_eq!(rows[2], r"| 规则\:拆逗号 | completed |");
         assert_eq!(rows.last().unwrap(), &"| 框架补三处 | inProgress |");
         assert_eq!(rows.len(), 11);
+    }
+
+    #[test]
+    fn send_user_file_input_shows_only_the_caption() {
+        let input = serde_json::json!({
+            "caption": "放大的那几列",
+            "files": ["/tmp/crop.png"],
+            "status": "normal",
+        });
+        let (_, subject, sections) = super::presentation("SendUserFile", &input);
+        assert_eq!(subject, None);
+        assert!(matches!(
+            sections.as_slice(),
+            [crate::event::Section::Prose { text, .. }] if text == "放大的那几列"
+        ));
     }
 
     #[test]
