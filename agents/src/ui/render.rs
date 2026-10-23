@@ -159,6 +159,13 @@ impl View {
             // Round the upper share down and give the remaining content rows below.
             let top = (u32::from(content_height) * 618 / 1000) as u16;
             (top, 0, content_height - top)
+        } else if kind == ScreenLayout::Small {
+            // Reserve the task separator and output's top rule before sharing content.
+            // Lists get one sixth each; details split the rest, taking spare rows first.
+            let rows = content_height.saturating_sub(2);
+            let list = rows / 6;
+            let details = rows - 2 * list;
+            (list + details.div_ceil(2) + 1, list, details / 2 + 1)
         } else {
             (
                 content_height.div_ceil(3),
@@ -243,9 +250,18 @@ impl View {
             [body, Rect::default(), Rect::default()]
         } else if kind == ScreenLayout::Small {
             let rows = body.height.saturating_sub(1);
-            let list = row(body, 0, rows.div_ceil(2));
+            let task_zoom =
+                zoom && matches!(self.height_zoom, Some(Panel::TaskList | Panel::TaskDetails));
+            let task_list_height = if !show_event && !task_zoom {
+                rows.div_ceil(2)
+            } else if list_height > 0 {
+                list_height
+            } else {
+                rows / 3
+            };
+            let list = row(body, 0, task_list_height);
             let gap = row(area, list.bottom() - area.y, u16::from(body.height > 0));
-            let details = row(body, list.height + gap.height, rows / 2);
+            let details = row(body, list.height + gap.height, rows - list.height);
             [list, gap, details]
         } else if body.width >= 2 * PANEL_GAP + 1 {
             let content = Rect {
@@ -2738,3 +2754,81 @@ mod title_input_tests {
 #[cfg(test)]
 #[path = "panel_frame_tests.rs"]
 mod panel_frame_tests;
+
+#[cfg(test)]
+mod small_height_tests {
+    use super::*;
+
+    fn heights(layout: CenterLayout) -> [u16; 4] {
+        [
+            layout.list.height,
+            layout.task_details.height,
+            layout.event_panel.height,
+            layout.event_detail.height.saturating_sub(1),
+        ]
+    }
+
+    #[test]
+    fn small_heights_reserve_input_and_rules() {
+        for (height, input, expected) in [
+            (60, "", [8, 18, 8, 17]),
+            (60, "one\ntwo\nthree", [8, 17, 8, 16]),
+            (59, "", [8, 17, 8, 17]),
+            (61, "", [8, 18, 8, 18]),
+            (62, "", [8, 19, 8, 18]),
+        ] {
+            let mut view = View::default();
+            view.input_box.editor.set_text(input);
+            let layout = view.center_layout(Rect::new(0, 0, 90, height));
+            assert_eq!(
+                heights(layout),
+                expected,
+                "height {height}, input {input:?}"
+            );
+            assert_eq!(
+                expected.iter().sum::<u16>()
+                    + layout.header.height
+                    + layout.footer.height
+                    + layout.prompt.height
+                    + 5,
+                height
+            );
+            assert_eq!(layout.list.bottom(), layout.gap.y);
+            assert_eq!(layout.gap.bottom(), layout.task_details.y);
+            assert_eq!(layout.task_details.bottom(), layout.prompt_top_rule.y);
+            assert_eq!(layout.event_detail.bottom(), layout.footer_rule.y);
+        }
+    }
+
+    #[test]
+    fn small_heights_task_zoom_keeps_one_to_two() {
+        for panel in [Panel::TaskList, Panel::TaskDetails] {
+            let view = View {
+                height_zoom: Some(panel),
+                ..View::default()
+            };
+            let layout = view.center_layout(Rect::new(0, 0, 90, 60));
+            assert_eq!(heights(layout), [17, 36, 0, 0]);
+            assert_eq!(layout.task_details.bottom(), layout.prompt_top_rule.y);
+        }
+    }
+
+    #[test]
+    fn small_heights_event_zoom_and_wider_layouts_unchanged() {
+        for (width, panel, expected) in [
+            (90, Some(Panel::EventList), [0, 0, 54, 0]),
+            (90, Some(Panel::EventDetail), [0, 0, 0, 54]),
+            (120, None, [18, 18, 18, 16]),
+            (160, None, [33, 33, 33, 20]),
+        ] {
+            let view = View {
+                height_zoom: panel,
+                ..View::default()
+            };
+            assert_eq!(
+                heights(view.center_layout(Rect::new(0, 0, width, 60))),
+                expected
+            );
+        }
+    }
+}

@@ -269,24 +269,18 @@ fn merged_rule_moves_jump_and_filter_without_changing_the_model() {
 }
 
 #[test]
-fn small_layout_stacks_full_width_panels_inside_medium_upper_third() {
+fn small_layout_stacks_full_width_panels_with_double_detail_heights() {
     let (_dir, view, _) = fixture();
     for height in [45, 60, 61] {
         let small = view.panel_layout(Rect::new(0, 0, 70, height), false);
         let medium = view.panel_layout(Rect::new(0, 0, 100, height), false);
-        assert_eq!(small.top.height, medium.top.height);
-        assert_eq!(
-            small.prompt,
-            Rect {
-                width: 70,
-                ..medium.prompt
-            }
-        );
-        let rows = small.top.height - 1;
-        assert_eq!(small.list, Rect::new(1, 2, 68, rows.div_ceil(2)));
+        let rows = height - small.header.height - small.footer.height - small.prompt.height - 5;
+        let list = rows / 6;
+        let details = (rows - 2 * list).div_ceil(2);
+        assert_eq!(small.list, Rect::new(1, 2, 68, list));
         assert_eq!(
             small.task_details,
-            Rect::new(1, small.list.bottom() + 1, 68, rows / 2)
+            Rect::new(1, small.list.bottom() + 1, 68, details)
         );
         assert_eq!(small.task_details.bottom(), small.top.bottom());
         assert_eq!(small.gap, Rect::new(0, small.list.bottom(), 70, 1));
@@ -376,5 +370,28 @@ fn layout_breakpoints_select_the_three_panel_arrangements() {
         (200, ScreenLayout::Large),
     ] {
         assert_eq!(ScreenLayout::for_width(width), expected, "width {width}");
+    }
+}
+
+#[test]
+fn small_task_height_zoom_shortcut_keeps_one_to_two() {
+    for panel in [Panel::TaskList, Panel::TaskDetails] {
+        let (_dir, mut view, now) = fixture();
+        let area = Rect::new(0, 0, 90, 60);
+        draw(&view, area, now);
+        view.set_active_panel(panel);
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
+            None
+        );
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('|'), KeyModifiers::SHIFT)),
+            None
+        );
+        assert_eq!(view.height_zoom, Some(panel));
+        let layout = view.center_layout(area);
+        assert_eq!((layout.list.height, layout.task_details.height), (17, 36));
+        assert!(layout.event_panel.is_empty());
+        assert!(layout.event_detail.is_empty());
     }
 }
