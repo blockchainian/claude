@@ -222,3 +222,227 @@ fn horizontal_wheel_activates_the_list_and_task_panels() {
         assert_eq!(view.active_panel, Panel::EventList);
     }
 }
+
+fn image_mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::CONTROL,
+    }
+}
+
+fn image_fixture() -> (tempfile::TempDir, View) {
+    let (directory, mut view) = fixture();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
+    view.event_session = view.selected_id().cloned();
+    view.set_event(crate::providers::claude::event_reader::tail(&path, usize::MAX).unwrap());
+    view.select_event(Some(0));
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 40));
+    view.render_event_detail(Rect::new(20, 8, 56, 25), &mut buffer, Utc::now());
+    assert!(view.viewport.borrow().event_detail_layout.is_some());
+    (directory, view)
+}
+
+fn drawn_image(view: &View) -> crate::event::ImageBlock {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-read-image.jsonl");
+    let payload = std::fs::read_to_string(&path).unwrap();
+    let image = crate::event::ImageBlock {
+        media_type: "image/png".into(),
+        record: crate::event::SourceRecord {
+            path,
+            offset: (payload.lines().next().unwrap().len() + 1) as u64,
+        },
+        pointer: "/message/content/0/content/0/source/data".into(),
+    };
+    let mut columns = super::super::event_detail::event_detail_columns(
+        Rect::new(20, 8, 56, 25),
+        Rect::new(0, 0, 80, 10),
+    );
+    columns.text.width = 40;
+    view.viewport.borrow_mut().event_detail_columns = Some(columns);
+    view.viewport.borrow_mut().event_detail_images = vec![super::super::event_detail::DrawnImage {
+        index: 2,
+        image: image.clone(),
+        area: Rect::new(20, 10, 40, 20),
+        first_row: 5,
+    }];
+    image
+}
+
+#[test]
+fn control_image_mouse_outside_image_does_not_scroll_focus_or_select() {
+    let (_directory, mut view) = image_fixture();
+    drawn_image(&view);
+    let list = view.viewport.borrow().list;
+    let panel = view.active_panel;
+    let selected = view.selected;
+    let offset = view.event_detail.scroll.borrow().offset;
+    for kind in [
+        MouseEventKind::ScrollUp,
+        MouseEventKind::ScrollDown,
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Drag(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        assert_eq!(
+            view.handle_mouse(image_mouse(kind, list.x + 1, list.y + 1)),
+            None
+        );
+        assert_eq!(view.selected, selected);
+        assert_eq!(view.active_panel, panel);
+        assert_eq!(view.event_detail.scroll.borrow().offset, offset);
+        assert!(view.mouse_press.is_none());
+        assert!(view.mouse_panel.is_none());
+        assert!(view.pending_click.is_none());
+        assert!(view.last_copy_click.is_none());
+        assert!(view.event_detail.scroll.borrow().zooms.is_empty());
+    }
+}
+
+#[test]
+fn control_image_click_resets_only_hit_image_and_invalidates_layout() {
+    let (_directory, mut view) = image_fixture();
+    drawn_image(&view);
+    let zoom = super::super::inline_images::Zoom {
+        level: 3,
+        left: 0.2,
+    };
+    view.event_detail
+        .scroll
+        .borrow_mut()
+        .zooms
+        .extend([(1, zoom), (2, zoom)]);
+    assert_eq!(
+        view.handle_mouse(image_mouse(MouseEventKind::Down(MouseButton::Left), 30, 12)),
+        None
+    );
+    let detail = view.event_detail.scroll.borrow();
+    assert_eq!(
+        detail.zooms[&2],
+        super::super::inline_images::Zoom::default()
+    );
+    assert_eq!(detail.zooms[&1], zoom);
+    assert!(view.viewport.borrow().event_detail_layout.is_none());
+    assert!(view.pending_click.is_none());
+    assert!(view.last_copy_click.is_none());
+    assert!(view.mouse_press.is_none());
+}
+
+#[test]
+fn control_image_wheel_without_decodable_size_does_nothing() {
+    let (_directory, mut view) = image_fixture();
+    drawn_image(&view);
+    view.inline_images
+        .replace(Some(super::super::inline_images::InlineImages::new(None)));
+    view.viewport.borrow_mut().event_detail_images[0]
+        .image
+        .pointer = "/missing".into();
+    let offset = view.event_detail.scroll.borrow().offset;
+    for kind in [MouseEventKind::ScrollUp, MouseEventKind::ScrollDown] {
+        view.handle_mouse(image_mouse(kind, 30, 12));
+        assert!(view.event_detail.scroll.borrow().zooms.is_empty());
+        assert_eq!(view.event_detail.scroll.borrow().offset, offset);
+    }
+}
+
+#[test]
+fn control_image_wheel_anchors_pointer() {
+    let (_directory, mut view) = image_fixture();
+    let image = drawn_image(&view);
+    view.inline_images
+        .replace(Some(super::super::inline_images::InlineImages::new(Some(
+            (10, 20),
+        ))));
+    let default = super::super::inline_images::Zoom::default();
+    let (width, height) = view
+        .inline_images
+        .borrow_mut()
+        .as_mut()
+        .unwrap()
+        .size(&image, 40, default)
+        .unwrap();
+    view.event_detail.scroll.borrow_mut().offset = 20;
+    view.handle_mouse(image_mouse(MouseEventKind::ScrollUp, 50, 17));
+    let zoom = view.event_detail.scroll.borrow().zooms[&2];
+    assert_eq!(zoom.level, 1);
+    let (next_width, next_height) = view
+        .inline_images
+        .borrow_mut()
+        .as_mut()
+        .unwrap()
+        .size(&image, 40, zoom)
+        .unwrap();
+    let expected_left = (30.0 / f32::from(width) - 30.0 / f32::from(next_width)).clamp(
+        0.0,
+        f32::from(next_width.saturating_sub(40)) / f32::from(next_width),
+    );
+    assert!((zoom.left - expected_left).abs() < 0.0001);
+    let next_row = (12.0 * f32::from(next_height) / f32::from(height)).round() as usize;
+    assert_eq!(view.event_detail.scroll.borrow().offset, 20 + next_row - 12);
+    assert!(view.viewport.borrow().event_detail_layout.is_none());
+    assert!(view.mouse_press.is_none());
+}
+
+#[test]
+fn ordinary_image_wheel_keeps_panel_dispatch() {
+    let (_directory, mut view) = image_fixture();
+    drawn_image(&view);
+    let area = view.viewport.borrow().event_panel;
+    view.handle_mouse(MouseEvent {
+        modifiers: KeyModifiers::NONE,
+        ..image_mouse(MouseEventKind::ScrollDown, area.x + 1, area.y + 1)
+    });
+    assert_eq!(view.active_panel, Panel::EventList);
+    assert!(view.event_detail.scroll.borrow().zooms.is_empty());
+}
+
+#[test]
+fn control_image_wheel_merges_reports_until_next_frame() {
+    let (_directory, mut view) = image_fixture();
+    drawn_image(&view);
+    view.inline_images
+        .replace(Some(super::super::inline_images::InlineImages::new(Some(
+            (10, 20),
+        ))));
+    view.begin_image_frame();
+    for kind in [
+        MouseEventKind::ScrollUp,
+        MouseEventKind::ScrollUp,
+        MouseEventKind::ScrollDown,
+    ] {
+        view.handle_mouse(image_mouse(kind, 30, 12));
+        assert_eq!(view.event_detail.scroll.borrow().zooms[&2].level, 1);
+    }
+    view.begin_image_frame();
+    view.handle_mouse(image_mouse(MouseEventKind::ScrollUp, 30, 12));
+    assert_eq!(view.event_detail.scroll.borrow().zooms[&2].level, 2);
+    for level in [1, 0, 0] {
+        view.begin_image_frame();
+        view.handle_mouse(image_mouse(MouseEventKind::ScrollDown, 30, 12));
+        assert_eq!(view.event_detail.scroll.borrow().zooms[&2].level, level);
+    }
+    assert_eq!(
+        view.event_detail.scroll.borrow().zooms[&2],
+        super::super::inline_images::Zoom::default()
+    );
+}
+
+#[test]
+fn control_image_click_does_not_join_normal_click_state() {
+    let (_directory, mut view) = image_fixture();
+    drawn_image(&view);
+    let original = view.last_copy_click.clone();
+    let selection = view.text_selection.borrow().is_some();
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        view.handle_mouse(image_mouse(kind, 30, 12));
+    }
+    assert_eq!(view.last_copy_click, original);
+    assert_eq!(view.text_selection.borrow().is_some(), selection);
+    assert!(view.pending_click.is_none());
+    assert!(view.mouse_press.is_none());
+    assert!(view.mouse_panel.is_none());
+}

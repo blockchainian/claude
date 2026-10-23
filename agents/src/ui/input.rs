@@ -296,6 +296,10 @@ impl View {
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
+        if mouse.modifiers.contains(KeyModifiers::CONTROL) {
+            self.zoom_event_image(mouse);
+            return None;
+        }
         if let Some(action) = self.hint_mouse(mouse) {
             return action;
         }
@@ -305,6 +309,81 @@ impl View {
             self.set_active_panel(self.active_panel);
         }
         self.finish_panel_action(action)
+    }
+
+    fn zoom_event_image(&mut self, mouse: MouseEvent) {
+        use super::inline_images::Zoom;
+
+        let reset = mouse.kind == MouseEventKind::Down(MouseButton::Left);
+        let wheel = matches!(
+            mouse.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        );
+        if !reset && !wheel {
+            return;
+        }
+        let mut detail = self.event_detail.scroll.borrow_mut();
+        if wheel && detail.zoomed_this_frame {
+            return;
+        }
+        let mut viewport = self.viewport.borrow_mut();
+        let Some(drawn) = viewport
+            .event_detail_images
+            .iter()
+            .find(|image| image.area.contains((mouse.column, mouse.row).into()))
+        else {
+            return;
+        };
+        let index = drawn.index;
+        let zoom = detail.zooms.get(&index).copied().unwrap_or_default();
+        let mut next = if reset {
+            Zoom::default()
+        } else {
+            Zoom {
+                level: if mouse.kind == MouseEventKind::ScrollUp {
+                    zoom.level.saturating_add(1)
+                } else {
+                    zoom.level.saturating_sub(1)
+                },
+                left: zoom.left,
+            }
+        };
+        if !reset && next.level == zoom.level {
+            return;
+        }
+        let sizes = viewport.event_detail_columns.and_then(|columns| {
+            let mut images = self.inline_images.borrow_mut();
+            let images = images.as_mut()?;
+            let before = images.size(&drawn.image, columns.text.width, zoom)?;
+            let after = images.size(&drawn.image, columns.text.width, next)?;
+            (before.0 > 0 && before.1 > 0 && after.0 > 0 && after.1 > 0).then_some((
+                columns.text.width,
+                before,
+                after,
+            ))
+        });
+        if let Some((width, before, after)) = sizes {
+            if !reset {
+                let x = f32::from(mouse.column - drawn.area.x);
+                let fraction = zoom.left + x / f32::from(before.0);
+                let max_left = f32::from(after.0.saturating_sub(width)) / f32::from(after.0);
+                next.left = (fraction - x / f32::from(after.0)).clamp(0.0, max_left);
+            }
+            let row = usize::from(drawn.first_row) + usize::from(mouse.row - drawn.area.y);
+            let next_row = (row as f64 * f64::from(after.1) / f64::from(before.1)).round() as usize;
+            detail.offset = if next_row >= row {
+                detail.offset.saturating_add(next_row - row)
+            } else {
+                detail.offset.saturating_sub(row - next_row)
+            };
+        } else if !reset {
+            return;
+        }
+        detail.zooms.insert(index, next);
+        if wheel {
+            detail.zoomed_this_frame = true;
+        }
+        viewport.event_detail_layout = None;
     }
 
     /// Executes the action of a completed click on a rendered hint.
@@ -1939,8 +2018,7 @@ impl View {
         if !plain {
             return None;
         }
-        if self.selected_draft.is_some()
-            && matches!(key.code, KeyCode::Char('f' | 'a' | 'x' | 'r'))
+        if self.selected_draft.is_some() && matches!(key.code, KeyCode::Char('f' | 'a' | 'x' | 'r'))
         {
             return Some(Action::Unsupported(match key.code {
                 KeyCode::Char('f') => "Fork",

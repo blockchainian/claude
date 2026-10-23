@@ -91,6 +91,26 @@ pub(super) struct EventDetailScroll {
     pub saved: std::collections::HashMap<u64, super::SectionScroll>,
     /// The zoom of each image in the selected event, by its order among the event's images.
     pub zooms: std::collections::HashMap<usize, super::inline_images::Zoom>,
+    saved_zooms: std::collections::HashMap<
+        u64,
+        std::collections::HashMap<usize, super::inline_images::Zoom>,
+    >,
+    zoom_key: Option<u64>,
+    pub(super) zoomed_this_frame: bool,
+}
+
+impl EventDetailScroll {
+    /// Switch image zooms with the same identity used for saved section scrolls.
+    pub(super) fn switch_zooms(&mut self, key: u64) {
+        if self.zoom_key == Some(key) {
+            return;
+        }
+        if let Some(previous) = self.zoom_key.replace(key) {
+            self.saved_zooms
+                .insert(previous, std::mem::take(&mut self.zooms));
+        }
+        self.zooms = self.saved_zooms.remove(&key).unwrap_or_default();
+    }
 }
 
 /// An image the last render drew in the event detail.
@@ -105,6 +125,11 @@ pub(super) struct DrawnImage {
 }
 
 impl super::View {
+    /// Allows one image zoom step in the next batch of input before a draw.
+    pub(crate) fn begin_image_frame(&self) {
+        self.event_detail.scroll.borrow_mut().zoomed_this_frame = false;
+    }
+
     pub(crate) fn event_output_path(&self) -> Option<std::path::PathBuf> {
         if self.terminal_requested()
             || self.event_detail.mode == super::task_ui::EventDetailMode::Transcript
@@ -150,3 +175,7 @@ impl super::View {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "event_detail_tests.rs"]
+mod tests;
