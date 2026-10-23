@@ -1,6 +1,6 @@
 ---
 name: download-book
-description: Search Anna's Archive for EPUB books, compare result download counts, extract fast and slow download links, and download the selected book to the intel output folder. Use when asked to find a book's download options, inspect this site's EPUB search results, or download a book.
+description: Search Anna's Archive for EPUB (or PDF) books, compare result download counts, extract fast and slow download links, and download the selected book to the intel output folder. Use when asked to find a book's download options, inspect this site's EPUB search results, or download a book.
 ---
 
 # Download book
@@ -42,6 +42,8 @@ The script takes the most-downloaded EPUB on the first search page and prints JS
 Download without asking the user, in the background and one book at a time, because this IP allows
 only one download at once; looking up links without `--download` takes about 90 seconds and can run
 in parallel.
+
+When the search finds no EPUB, re-run with `--format pdf` to take the most-downloaded PDF instead.
 
 Check that `title` is the book the user asked for; if it is not, re-run with the author, edition or
 subtitle added. Then list the EPUB with `unzip -l` to confirm it holds real XHTML chapters rather
