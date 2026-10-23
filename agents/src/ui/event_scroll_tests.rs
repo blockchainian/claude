@@ -178,12 +178,12 @@ fn event_scroll_keyboard_uses_list_bindings_inside_event_detail() {
     assert_ne!(panel(&view, now), initial);
     view.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
     assert_eq!(panel(&view, now), initial);
-    view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
-    assert_eq!(view.event_list.cursor, Some(1));
-    assert_eq!(panel(&view, now), initial);
     view.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
     assert_eq!(view.event_list.cursor, Some(1));
     assert_ne!(panel(&view, now), initial);
+    view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+    assert_eq!(view.event_list.cursor, Some(1));
+    assert_eq!(panel(&view, now), initial);
 }
 
 #[test]
@@ -423,7 +423,7 @@ fn event_scroll_new_rows_do_not_consume_short_entry_navigation() {
 }
 
 #[test]
-fn event_scroll_wheel_pauses_at_title_before_changing_event() {
+fn event_scroll_wheel_leaves_from_the_title_at_once() {
     let (mut view, now) = fixture(true);
     panel(&view, now);
     view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
@@ -437,15 +437,6 @@ fn event_scroll_wheel_pauses_at_title_before_changing_event() {
     );
     panel(&view, now);
     assert_eq!(view.event_detail.scroll.borrow().offset, 0);
-    for _ in 0..2 {
-        wheel(&mut view, false);
-        panel(&view, now);
-        assert_eq!(
-            view.event_list.cursor,
-            Some(1),
-            "the title holds two wheels"
-        );
-    }
     wheel(&mut view, false);
     assert_eq!(view.event_list.cursor, Some(0));
 }
@@ -506,7 +497,7 @@ fn event_scroll_wheel_stops_at_bottom_before_changing_event() {
 }
 
 #[test]
-fn event_scroll_wheel_entering_from_above_pauses_at_title_and_leaves_bottom_at_once() {
+fn event_scroll_wheel_entering_from_above_scrolls_and_leaves_bottom_at_once() {
     let (mut view, now) = fixture(true);
     for _ in 0..2 {
         view.select_event(Some(0));
@@ -515,15 +506,9 @@ fn event_scroll_wheel_entering_from_above_pauses_at_title_and_leaves_bottom_at_o
         panel(&view, now);
         assert_eq!(view.event_list.cursor, Some(1));
         assert_eq!(view.event_detail.scroll.borrow().offset, 0);
-        for _ in 0..2 {
-            wheel(&mut view, true);
-            panel(&view, now);
-            assert_eq!(
-                view.event_detail.scroll.borrow().offset,
-                0,
-                "the title holds two wheels"
-            );
-        }
+        wheel(&mut view, true);
+        panel(&view, now);
+        assert!(view.event_detail.scroll.borrow().offset > 0);
         let max = view.viewport.borrow().event_detail_max;
         while view.event_detail.scroll.borrow().offset < max {
             wheel(&mut view, true);
@@ -551,15 +536,6 @@ fn event_scroll_wheel_entering_from_below_starts_at_bottom() {
         wheel(&mut view, false);
         panel(&view, now);
         assert_eq!(view.event_list.cursor, Some(1));
-    }
-    for _ in 0..2 {
-        wheel(&mut view, false);
-        panel(&view, now);
-        assert_eq!(
-            view.event_list.cursor,
-            Some(1),
-            "the title holds two wheels"
-        );
     }
     wheel(&mut view, false);
     assert_eq!(view.event_list.cursor, Some(0));

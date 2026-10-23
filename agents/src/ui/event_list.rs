@@ -765,7 +765,6 @@ impl View {
             let mut detail = self.event_detail.scroll.borrow_mut();
             detail.offset = 0;
             detail.entry = None;
-            detail.title_hold = None;
         }
         if self.following_event() {
             self.event_list.unseen.set(0);

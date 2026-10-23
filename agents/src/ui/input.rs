@@ -3,8 +3,6 @@ use super::*;
 
 /// Rows one wheel report scrolls the event list and details panels, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
 const WHEEL_ROWS: usize = 3;
-/// Wheel reports a scrollable event list entry's title holds before the wheel moves past it.
-const TITLE_HOLD_WHEELS: usize = 2;
 
 #[derive(PartialEq, Eq)]
 pub(super) enum ClickTarget {
@@ -1290,7 +1288,7 @@ impl View {
         self.scroll_content_rows(forward, over_event, row, 1, false)
     }
 
-    /// With `wheel`, a scrollable event list entry's title holds reports in the direction of travel.
+    /// With `wheel`, an entry reached past the boundary starts at the end it was entered from.
     fn scroll_content_rows(
         &mut self,
         forward: bool,
@@ -1309,19 +1307,8 @@ impl View {
         let mut viewport = self.viewport.borrow_mut();
         if over_event && over_event_detail {
             let mut detail = self.event_detail.scroll.borrow_mut();
-            let title_hold = detail.title_hold.take();
-            if let Some((direction, left)) = title_hold
-                && wheel
-                && direction == forward
-                && viewport.event_detail_max > 0
-            {
-                detail.title_hold = (left > 1).then_some((direction, left - 1));
-                true
-            } else if detail.state.scroll_rows(forward, row, rows) {
+            if detail.state.scroll_rows(forward, row, rows) {
                 detail.offset = detail.state.position();
-                if wheel && !forward && detail.offset == 0 {
-                    detail.title_hold = Some((false, TITLE_HOLD_WHEELS));
-                }
                 true
             } else {
                 drop(viewport);
@@ -1329,9 +1316,7 @@ impl View {
                 let selected = self.event_list.cursor;
                 self.move_event_selection(forward);
                 if wheel && self.event_list.cursor != selected {
-                    let mut detail = self.event_detail.scroll.borrow_mut();
-                    detail.entry = Some(forward);
-                    detail.title_hold = forward.then_some((true, TITLE_HOLD_WHEELS));
+                    self.event_detail.scroll.borrow_mut().entry = Some(forward);
                 }
                 false
             }
