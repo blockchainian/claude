@@ -1,5 +1,5 @@
-use super::describe::{Segment, Size};
-use super::shape::Kind;
+use super::describe::{Description, Segment};
+use super::shape::{Kind, LineRange};
 use super::{shell_summary, syntax};
 use syntect::parsing::Regex;
 
@@ -84,7 +84,12 @@ fn sed_address(source: &str) -> Option<(&str, Option<usize>)> {
 }
 
 /// Recognize sed scripts whose commands only select unchanged input lines.
+#[allow(dead_code)]
 pub(super) fn sed(words: &[String]) -> Option<Segment> {
+    description(words).map(Segment::from)
+}
+
+pub(super) fn description(words: &[String]) -> Option<Description> {
     let mut scripts = Vec::new();
     let mut files = Vec::new();
     let mut quiet = false;
@@ -201,14 +206,13 @@ pub(super) fn sed(words: &[String]) -> Option<Segment> {
     } else {
         Kind::Plain
     };
-    Some(Segment {
-        size: if files.len() > 1 {
-            Size::Unknown
-        } else {
-            cap.map_or(Size::Unknown, Size::AtMost)
+    Some(Description {
+        range: LineRange {
+            min: 0,
+            max: if files.len() > 1 { None } else { cap },
         },
         kind,
         beginning,
-        ..Segment::unknown()
+        ..Description::unknown()
     })
 }

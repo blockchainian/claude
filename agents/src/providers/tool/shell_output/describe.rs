@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use super::sed::sed;
-use super::shape::{Kind, OutputShape};
+use super::sed::description as sed_description;
+use super::shape::{Kind, LineRange, Outcome, OutputShape, Pattern, Strength};
 use super::{Stream, shell_summary, syntax};
 use std::sync::LazyLock;
 use syntect::parsing::{Regex, Region};
@@ -13,13 +13,6 @@ enum Count {
     Echo,
     Printf,
     Files,
-}
-#[derive(Clone, Copy)]
-enum Length {
-    Silent,
-    Exact(Count),
-    AtMost(Count),
-    Unknown,
 }
 #[derive(Clone, Copy)]
 enum Content {
@@ -36,7 +29,8 @@ struct Row {
     flags: &'static [&'static str],
     values: &'static [&'static str],
     required: &'static [&'static str],
-    length: Length,
+    range: LineRange,
+    count: Option<Count>,
     lines: Option<&'static LazyLock<Regex>>,
     content: Content,
     no_match_exit: Option<i64>,
@@ -106,13 +100,33 @@ const DIFF_VALUES: &[&str] = &[
 static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
     use Content::*;
     use Count::*;
-    use Length::*;
-    let row = |shape: &str, flags, length, content, no_match_exit, filter| Row {
+    let silent = (SILENT, None);
+    let unknown = (UNKNOWN, None);
+    let exact = |count| {
+        (
+            LineRange {
+                min: 1,
+                max: Some(1),
+            },
+            Some(count),
+        )
+    };
+    let at_most = |count| {
+        (
+            LineRange {
+                min: 0,
+                max: Some(1),
+            },
+            Some(count),
+        )
+    };
+    let row = |shape: &str, flags, (range, count), content, no_match_exit, filter| Row {
         shape: Regex::new(format!("(?s)\\A(?:{shape})\\z")),
         flags,
         values: &[],
         required: &[],
-        length,
+        range,
+        count,
         lines: None,
         content,
         no_match_exit,
@@ -122,7 +136,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"git\x00log\x00((?:[^\x00]+\x00)*--(?:format|pretty)=(?:t?format:)?%h [^\x00]*(?:\x00.*)?)",
             &["--graph", "--patch", "-p", "--stat*", "-z", "--numstat", "--name-only", "--name-status", "--shortstat"],
-            Unknown,
+            unknown,
             Plain,
             None,
             false,
@@ -131,27 +145,27 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"git\x00diff\x00((?:[^\x00]+\x00)*--numstat(?:\x00.*)?)",
             &["-z", "--stat*", "--patch", "-p", "--name-only", "--name-status", "--shortstat", "--summary"],
-            Unknown,
+            unknown,
             Plain,
             None,
             false,
         )
         .lines(&NUMSTAT),
-        row(r"cd\x00([^\x00-][^\x00]*)", &[], Silent, Plain, None, false),
+        row(r"cd\x00([^\x00-][^\x00]*)", &[], silent, Plain, None, false),
         row(
             r"mkdir\x00(.+)",
             &["-v", "--verbose", "--help", "--version"],
-            Silent,
+            silent,
             Plain,
             None,
             false,
         )
         .options(&["-m", "--mode"], &[]),
-        row(r"sleep\x00([0-9.]+)", &[], Silent, Plain, None, false),
+        row(r"sleep\x00([0-9.]+)", &[], silent, Plain, None, false),
         row(
             r"(?:head|tail)\x00-n\x00([0-9]+)\x00([^\x00]+)",
             &[],
-            AtMost(Number),
+            at_most(Number),
             File,
             None,
             false,
@@ -159,7 +173,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"(?:head|tail)\x00-n?([0-9]+)\x00([^\x00]+)",
             &[],
-            AtMost(Number),
+            at_most(Number),
             File,
             None,
             false,
@@ -167,7 +181,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"tail\x00-n\x00(\+[0-9]+)\x00([^\x00]+)",
             &[],
-            Unknown,
+            unknown,
             File,
             None,
             false,
@@ -175,7 +189,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"(?:head|tail)\x00()([^\x00]+)",
             &[],
-            AtMost(Fixed(10)),
+            at_most(Fixed(10)),
             File,
             None,
             false,
@@ -183,7 +197,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"cat\x00-n\x00()([^\x00]+)",
             &[],
-            Unknown,
+            unknown,
             Numbered,
             None,
             false,
@@ -191,16 +205,16 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"nl\x00-ba\x00()([^\x00]+)",
             &[],
-            Unknown,
+            unknown,
             Numbered,
             None,
             false,
         ),
-        row(r"cat\x00()(.+)", &[], Unknown, File, None, false),
+        row(r"cat\x00()(.+)", &[], unknown, File, None, false),
         row(
             r"git\x00show\x00()([^\x00:]+:[^\x00]+)",
             &[],
-            Unknown,
+            unknown,
             Revision,
             None,
             false,
@@ -208,7 +222,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"git\x00(?:diff|show)(?:\x00([^:]*))?",
             DIFF_FLAGS,
-            Unknown,
+            unknown,
             Diff,
             None,
             false,
@@ -217,7 +231,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"git\x00log\x00((?:-p|--patch)(?:\x00.*)?)",
             DIFF_FLAGS,
-            Unknown,
+            unknown,
             Diff,
             None,
             false,
@@ -226,7 +240,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"diff\x00-u\x00(.+)",
             DIFF_FLAGS,
-            Unknown,
+            unknown,
             Diff,
             None,
             false,
@@ -235,7 +249,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"rg\x00(.+)",
             &["-0", "--null", "--json", "--heading", "--pretty", "-p", "-n", "--line-number", "-c", "--count", "--count-matches", "-q", "--quiet"],
-            Unknown, Plain, Some(1), false,
+            unknown, Plain, Some(1), false,
         )
         .lines(&PATHS)
         .options(&["-g", "--glob", "--iglob", "-t", "--type", "-e", "--regexp", "-f", "--file"],
@@ -244,7 +258,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"rg\x00((?:-[ivFsSwx]+\x00)*[^\x00-][^\x00]*)",
             &["-n", "--line-number", "-H", "--with-filename", "-l", "-c", "--count", "--json", "--heading", "--pretty", "-p", "-o", "--only-matching", "-r", "--replace", "-0", "--null", "--files"],
-            Unknown, Inherit, Some(1), true,
+            unknown, Inherit, Some(1), true,
         ),
         row(
             r"(?:rg|grep)\x00(.+)",
@@ -264,7 +278,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
                 "--pretty",
                 "--quiet",
             ],
-            Unknown,
+            unknown,
             Plain,
             Some(1),
             false,
@@ -305,7 +319,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"git\x00status\x00(.+)",
             &["-z", "--null", "--porcelain*", "--long"],
-            Unknown,
+            unknown,
             Plain,
             None,
             false,
@@ -326,7 +340,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
                 "--stat*",
                 "-z",
             ],
-            Unknown,
+            unknown,
             Plain,
             None,
             false,
@@ -346,7 +360,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"wc\x00(-[lcwcm])\x00(.+)",
             &[],
-            Exact(Files),
+            exact(Files),
             Plain,
             None,
             false,
@@ -354,16 +368,16 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"echo(?:\x00((?!-[neE]+(?:\x00|\z)).*))?",
             &[],
-            Exact(Echo),
+            exact(Echo),
             Plain,
             None,
             false,
         ),
-        row(r"printf\x00(.*)", &[], Exact(Printf), Plain, None, false),
+        row(r"printf\x00(.*)", &[], exact(Printf), Plain, None, false),
         row(
             r"(?:head|tail)\x00-n\x00([0-9]+)",
             &[],
-            AtMost(Number),
+            at_most(Number),
             Inherit,
             None,
             true,
@@ -371,7 +385,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"(?:head|tail)\x00-n?([0-9]+)",
             &[],
-            AtMost(Number),
+            at_most(Number),
             Inherit,
             None,
             true,
@@ -379,7 +393,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"(?:head|tail)",
             &[],
-            AtMost(Fixed(10)),
+            at_most(Fixed(10)),
             Inherit,
             None,
             true,
@@ -387,12 +401,12 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         row(
             r"tail\x00-n\x00(\+[0-9]+)",
             &[],
-            Unknown,
+            unknown,
             Inherit,
             None,
             true,
         ),
-        row(r"cat", &[], Unknown, Verbatim, None, true),
+        row(r"cat", &[], unknown, Verbatim, None, true),
     ]
 });
 
@@ -426,6 +440,141 @@ impl Segment {
             beginning: false,
             cat: false,
         }
+    }
+}
+
+const SILENT: LineRange = LineRange {
+    min: 0,
+    max: Some(0),
+};
+const UNKNOWN: LineRange = LineRange { min: 0, max: None };
+
+/// Shared command facts for the constraint path and the Segment adapter.
+pub(super) struct Description {
+    pub(super) range: LineRange,
+    pub(super) every: Option<&'static LazyLock<Regex>>,
+    pub(super) kind: Kind,
+    pub(super) blank: bool,
+    pub(super) known: Option<String>,
+    pub(super) no_match_exit: Option<i64>,
+    pub(super) beginning: bool,
+    pub(super) cat: bool,
+}
+
+impl Description {
+    pub(super) fn unknown() -> Self {
+        Self {
+            range: UNKNOWN,
+            every: None,
+            kind: Kind::Plain,
+            blank: false,
+            known: None,
+            no_match_exit: None,
+            beginning: false,
+            cat: false,
+        }
+    }
+
+    fn outcome(self) -> Outcome {
+        let first = if self.beginning {
+            opening(&self.kind)
+        } else {
+            None
+        };
+        Outcome {
+            lines: self.range,
+            kind: self.kind,
+            first,
+            last: None,
+            every: self.every.map(|regex| Pattern {
+                regex: (**regex).clone(),
+                strength: Strength::Required,
+            }),
+            known: self.known,
+            blank_only: self.blank,
+        }
+    }
+
+    fn failure(&self) -> Failure {
+        if self.cat {
+            let Kind::File { path, .. } = &self.kind else {
+                unreachable!("cat file descriptions have a file kind");
+            };
+            Failure::Cat(path.clone())
+        } else if self.no_match_exit.is_some() {
+            Failure::NoMatch
+        } else {
+            Failure::Unknown
+        }
+    }
+}
+
+impl From<Description> for Segment {
+    fn from(description: Description) -> Self {
+        let size = match description.range {
+            LineRange { max: Some(0), .. } => Size::Silent,
+            LineRange {
+                min,
+                max: Some(max),
+            } if min == max => Size::Exact(max),
+            LineRange { max: Some(max), .. } => Size::AtMost(max),
+            LineRange { max: None, .. } => Size::Unknown,
+        };
+        Self {
+            size,
+            lines: description.every,
+            kind: description.kind,
+            blank: description.blank,
+            known: description.known,
+            no_match_exit: description.no_match_exit,
+            beginning: description.beginning,
+            cat: description.cat,
+        }
+    }
+}
+
+fn opening(kind: &Kind) -> Option<Pattern> {
+    let Kind::File { path, numbered } = kind else {
+        return None;
+    };
+    let extension = std::path::Path::new(path).extension()?.to_str()?;
+    let pattern = match extension {
+        "py" => r"(?:import |from \S+ import |#!)",
+        "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => r"import ",
+        "go" => r"package ",
+        "rs" => r"(?:use |//!|#!\[)",
+        _ => return None,
+    };
+    let prefix = if *numbered { r"^\s*1\s+" } else { "^" };
+    Some(Pattern {
+        regex: Regex::new(format!("{prefix}{pattern}")),
+        strength: Strength::Hint,
+    })
+}
+
+/// A command failure, before stream and exit information are applied.
+enum Failure {
+    Unknown,
+    Cat(String),
+    NoMatch,
+}
+
+impl Failure {
+    fn outcome(self, stream: &Stream) -> Outcome {
+        let mut output = Description::unknown();
+        match self {
+            Self::Unknown => {}
+            Self::NoMatch => output.range = SILENT,
+            Self::Cat(path) if stream.merged_stderr => {
+                output.range = LineRange {
+                    min: 1,
+                    max: Some(1),
+                };
+                output.known = Some(format!("cat: {path}: No such file or directory\n"));
+            }
+            Self::Cat(_) => output.range = SILENT,
+        }
+        output.outcome()
     }
 }
 
@@ -510,9 +659,9 @@ fn count(rule: Count, arg: &str, files: &str) -> Option<(Option<usize>, Option<S
     })
 }
 
-fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
+fn description(words: &[String], filter: bool) -> Option<(Description, bool)> {
     if words.first().is_some_and(|w| w == "sed") {
-        return sed(words).map(|s| (s, false));
+        return sed_description(words).map(|s| (s, false));
     }
     let joined = words.join("\0");
     for row in ROWS.iter().filter(|r| r.filter == filter) {
@@ -529,7 +678,7 @@ fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
         if (matches!(row.content, Content::Diff)
             || row.lines.is_some()
             || matches!(row.content, Content::Inherit)
-            || matches!(row.length, Length::Silent))
+            || row.range == SILENT)
             && !allowed(arg, row)
         {
             continue;
@@ -559,37 +708,38 @@ fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
             Content::Plain | Content::Inherit | Content::Verbatim => Kind::Plain,
         };
         let mut known = None;
-        let size = match row.length {
-            Length::Silent => Size::Silent,
-            Length::Unknown => Size::Unknown,
-            Length::Exact(c) | Length::AtMost(c) => {
-                let Some((n, output)) = count(c, arg, files) else {
-                    continue;
-                };
-                known = output;
-                match (row.length, n) {
-                    (Length::Exact(_), Some(n)) => Size::Exact(n),
-                    (_, Some(n)) => Size::AtMost(n),
-                    _ => Size::Unknown,
-                }
-            }
+        let range = if let Some(rule) = row.count {
+            let Some((n, output)) = count(rule, arg, files) else {
+                continue;
+            };
+            known = output;
+            n.map_or(UNKNOWN, |n| LineRange {
+                min: if row.range.min == 0 { 0 } else { n },
+                max: Some(n),
+            })
+        } else {
+            row.range
         };
         return Some((
-            Segment {
-                size,
-                lines: row.lines,
+            Description {
+                range,
+                every: row.lines,
                 kind,
                 blank: known.as_ref().is_some_and(|s| s.chars().all(|c| c == '\n')),
                 known,
                 no_match_exit: row.no_match_exit,
                 beginning: matches!(words[0].as_str(), "cat" | "head")
                     && files.split('\0').count() == 1,
-                cat: words[0] == "cat" && files.split('\0').count() == 1,
+                cat: words[0] == "cat" && !files.is_empty() && files.split('\0').count() == 1,
             },
             matches!(row.content, Content::Verbatim),
         ));
     }
     None
+}
+
+fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
+    description(words, filter).map(|(output, verbatim)| (output.into(), verbatim))
 }
 
 // Strip redirections before passing literal shell words to the shared pipeline
@@ -679,21 +829,41 @@ fn redirects(source: &str) -> Option<(String, Vec<usize>, bool, usize)> {
     Some((out, silent, merged, stage))
 }
 
-pub(super) fn pipeline(source: &str, programs: &mut Vec<String>) -> Segment {
+struct Pipeline {
+    output: Description,
+    failure: Option<Failure>,
+    upstream_failure: bool,
+}
+
+impl Pipeline {
+    fn unknown() -> Self {
+        Self {
+            output: Description::unknown(),
+            failure: None,
+            upstream_failure: false,
+        }
+    }
+}
+
+fn pipeline_description(source: &str, programs: &mut Vec<String>) -> Pipeline {
     let Some((literal, silent, merged, last)) = redirects(source) else {
-        return Segment::unknown();
+        return Pipeline::unknown();
     };
     if merged {
-        return Segment::unknown();
+        return Pipeline::unknown();
     }
     if silent.contains(&last) {
-        return Segment {
-            size: Size::Silent,
-            ..Segment::unknown()
+        return Pipeline {
+            output: Description {
+                range: SILENT,
+                ..Description::unknown()
+            },
+            failure: Some(Failure::Unknown),
+            upstream_failure: last > 0,
         };
     }
     let Some(stages) = shell_summary::pipeline_words(&literal) else {
-        return Segment::unknown();
+        return Pipeline::unknown();
     };
     for stage in &stages {
         if let Some(program) = stage
@@ -703,66 +873,460 @@ pub(super) fn pipeline(source: &str, programs: &mut Vec<String>) -> Segment {
             programs.push(program.to_string_lossy().into_owned());
         }
     }
+    let upstream_failure = stages.len() > 1;
     let mut stages = stages.iter();
     let Some(first) = stages.next() else {
-        return Segment::unknown();
+        return Pipeline::unknown();
     };
-    let mut segment = if silent.contains(&0) {
-        Segment {
-            size: Size::Silent,
-            ..Segment::unknown()
+    let described = description(first, false);
+    let mut failure = described.as_ref().map(|(output, _)| output.failure());
+    let mut output = if silent.contains(&0) {
+        Description {
+            range: SILENT,
+            ..Description::unknown()
         }
     } else {
-        describe(first, false)
-            .map(|(segment, _)| segment)
-            .unwrap_or_else(Segment::unknown)
+        described
+            .map(|(output, _)| output)
+            .unwrap_or_else(Description::unknown)
     };
     for (index, stage) in stages.enumerate() {
         if silent.contains(&(index + 1)) {
-            segment = Segment {
-                size: Size::Silent,
-                ..Segment::unknown()
+            output = Description {
+                range: SILENT,
+                ..Description::unknown()
             };
+            failure = Some(Failure::Unknown);
             continue;
         }
-        let Some((filter, verbatim)) = describe(stage, true) else {
-            return Segment::unknown();
+        let Some((filter, verbatim)) = description(stage, true) else {
+            return Pipeline::unknown();
         };
+        failure = Some(filter.failure());
         if !matches!(filter.kind, Kind::Plain) {
-            segment = filter;
+            output = filter;
             continue;
         }
-        segment.cat = false;
+        output.cat = false;
         if !verbatim {
-            segment.beginning &=
+            output.beginning &=
                 stage.first().is_some_and(|word| word == "head") || filter.beginning;
         }
         if stage.first().is_some_and(|word| word == "sed") {
-            if !matches!(segment.size, Size::Silent) {
-                segment.size = filter.size;
+            if output.range != SILENT {
+                output.range = filter.range;
             }
-            segment.known = None;
-            segment.no_match_exit = None;
+            output.known = None;
+            output.no_match_exit = None;
             continue;
         }
-        segment.size = match (&segment.size, filter.size) {
-            (Size::Silent, _) => Size::Silent,
-            (Size::AtMost(a) | Size::Exact(a), Size::AtMost(b)) => Size::AtMost((*a).min(b)),
-            (_, Size::AtMost(b)) => Size::AtMost(b),
-            (Size::Exact(n), Size::Unknown) if !verbatim => Size::AtMost(*n),
-            (size, Size::Unknown) => size.clone(),
-            _ => Size::Unknown,
+        output.range = match (output.range, filter.range.max) {
+            (range, _) if range == SILENT => SILENT,
+            (LineRange { max: Some(a), .. }, Some(b)) => LineRange {
+                min: 0,
+                max: Some(a.min(b)),
+            },
+            (_, Some(b)) => LineRange {
+                min: 0,
+                max: Some(b),
+            },
+            (range, None) if !verbatim => LineRange { min: 0, ..range },
+            (range, None) => range,
         };
         // Only a verbatim filter preserves a producer's complete known output.
         if !verbatim {
-            segment.known = None;
+            output.known = None;
         }
-        segment.no_match_exit = None;
+        output.no_match_exit = None;
     }
-    segment
+    Pipeline {
+        output,
+        failure,
+        upstream_failure,
+    }
+}
+
+pub(super) fn pipeline(source: &str, programs: &mut Vec<String>) -> Segment {
+    pipeline_description(source, programs).output.into()
+}
+
+fn pipeline_shape(source: &str, stream: &Stream, success: bool) -> OutputShape {
+    let mut pipeline = pipeline_description(source, &mut Vec::new());
+    let no_match = matches!(pipeline.failure, Some(Failure::NoMatch));
+    let mut outcomes = Vec::new();
+    if !no_match || pipeline.output.range.max != Some(0) {
+        if no_match {
+            pipeline.output.range.min = 1;
+        }
+        outcomes.push(pipeline.output.outcome());
+    }
+    if pipeline.upstream_failure {
+        outcomes.push(Failure::Unknown.outcome(stream));
+    }
+    if !success && let Some(failure) = pipeline.failure {
+        outcomes.push(failure.outcome(stream));
+    }
+    OutputShape {
+        outcomes,
+        conditional: false,
+    }
 }
 
 /// Describe command outputs for the stream; unsupported shell syntax returns None.
-pub fn shapes(_command: &str, _stream: &Stream) -> Option<Vec<OutputShape>> {
-    todo!()
+pub fn shapes(command: &str, stream: &Stream) -> Option<Vec<OutputShape>> {
+    use crate::ui::shell_commands::{Separator, split_with_separators};
+
+    let commands = split_with_separators(command)?;
+    let mut groups: Vec<(std::ops::Range<usize>, Separator)> = Vec::new();
+    for part in commands {
+        if part.separator == Separator::Pipe {
+            let (range, _) = groups.last_mut()?;
+            range.end = part.range.end;
+        } else {
+            groups.push((part.range, part.separator));
+        }
+    }
+    // Only the final && chain is known to have succeeded when the shell exits 0.
+    let final_group = groups
+        .iter()
+        .rposition(|(_, separator)| *separator != Separator::And)
+        .unwrap_or(0);
+    let mut shapes: Vec<_> = groups
+        .into_iter()
+        .enumerate()
+        .map(|(index, (range, separator))| {
+            let mut shape = pipeline_shape(
+                &command[range],
+                stream,
+                stream.exit_code == Some(0) && index >= final_group,
+            );
+            shape.conditional = separator == Separator::And;
+            if shape.conditional && index < final_group {
+                for outcome in &mut shape.outcomes {
+                    outcome.lines.min = 0;
+                }
+            }
+            shape
+        })
+        .collect();
+    if stream.trimmed {
+        let possible = |shape: &OutputShape| {
+            shape
+                .outcomes
+                .iter()
+                .any(|outcome| outcome.lines.max != Some(0))
+        };
+        let first = shapes.iter().position(possible);
+        let last = shapes.iter().rposition(possible);
+        for index in first.into_iter().chain(last) {
+            for outcome in &mut shapes[index].outcomes {
+                outcome.lines.min = 0;
+            }
+        }
+    }
+    Some(shapes)
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use super::super::shape::{LineRange, Strength};
+    use super::*;
+
+    fn one(command: &str) -> OutputShape {
+        pipeline_shape(command, &Stream::default(), false)
+    }
+
+    #[test]
+    fn command_chains_group_pipes_and_filter_only_final_success_chain() {
+        let stream = Stream {
+            merged_stderr: true,
+            exit_code: Some(0),
+            ..Stream::default()
+        };
+        let result = shapes(
+            "cat before.py; cat a.rs | head -n 2 && rg -n needle src",
+            &stream,
+        )
+        .unwrap();
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].outcomes.len(), 2);
+        assert!(!result[0].conditional);
+        assert_eq!(
+            result[1].outcomes.len(),
+            2,
+            "upstream pipeline failure survives"
+        );
+        assert!(!result[1].conditional);
+        assert!(result[2].conditional);
+        assert_eq!(result[2].outcomes.len(), 1);
+        let result = shapes("cat a.py && cat b.rs", &stream).unwrap();
+        assert!(result.iter().all(|shape| shape.outcomes.len() == 1));
+        let result = shapes("cat a.py || cat b.rs", &stream).unwrap();
+        assert_eq!(result[0].outcomes.len(), 2);
+        assert_eq!(result[1].outcomes.len(), 1);
+        assert!(!result[1].conditional);
+        let failed = Stream {
+            exit_code: Some(1),
+            ..stream
+        };
+        let result = shapes("cat a.py && rg -n needle src", &failed).unwrap();
+        assert!(result.iter().all(|shape| shape.outcomes.len() == 2));
+        assert!(shapes("cat a.py & echo end", &stream).is_none());
+    }
+
+    #[test]
+    fn conditional_commands_before_final_group_can_be_skipped() {
+        let stream = Stream {
+            merged_stderr: true,
+            exit_code: Some(0),
+            ..Stream::default()
+        };
+        let result = shapes(
+            "echo first && echo second && cat missing.py; echo last",
+            &stream,
+        )
+        .unwrap();
+        assert_eq!(result[0].outcomes[0].lines.min, 1);
+        assert_eq!(
+            result[1].outcomes[0].lines,
+            LineRange {
+                min: 0,
+                max: Some(1)
+            }
+        );
+        assert!(result[1].conditional);
+        assert!(result[2].conditional);
+        assert!(result[2].outcomes.iter().all(|o| o.lines.min == 0));
+        assert_eq!(result[2].outcomes[1].lines.max, Some(1));
+        assert_eq!(result[3].outcomes[0].lines.min, 1);
+    }
+
+    #[test]
+    fn trimming_relaxes_only_first_and_last_possible_outputs() {
+        let stream = Stream {
+            trimmed: true,
+            exit_code: Some(0),
+            ..Stream::default()
+        };
+        let result = shapes(
+            "cd src && echo first && echo middle && echo last && sleep 1",
+            &stream,
+        )
+        .unwrap();
+        assert_eq!(result[0].outcomes[0].lines.max, Some(0));
+        assert_eq!(result[1].outcomes[0].lines.min, 0);
+        assert_eq!(result[2].outcomes[0].lines.min, 1);
+        assert_eq!(result[3].outcomes[0].lines.min, 0);
+        assert_eq!(result[4].outcomes[0].lines.max, Some(0));
+        assert_eq!(result[1].outcomes[0].known.as_deref(), Some("first\n"));
+        let result = shapes("printf '\\n'; echo middle; printf '\\n'", &stream).unwrap();
+        assert!(result[0].outcomes[0].blank_only);
+        assert!(result[2].outcomes[0].blank_only);
+    }
+
+    #[test]
+    fn known_command_failures_are_plain_unbounded_alternatives() {
+        let failed = Stream {
+            exit_code: Some(2),
+            is_error: true,
+            ..Stream::default()
+        };
+        let result = shapes("echo hello", &failed).unwrap();
+        assert_eq!(result[0].outcomes.len(), 2);
+        assert_eq!(result[0].outcomes[0].known.as_deref(), Some("hello\n"));
+        let failure = &result[0].outcomes[1];
+        assert_eq!(failure.lines, LineRange { min: 0, max: None });
+        assert!(matches!(failure.kind, Kind::Plain));
+        let success = Stream {
+            exit_code: Some(0),
+            ..failed
+        };
+        assert_eq!(shapes("echo hello", &success).unwrap()[0].outcomes.len(), 1);
+    }
+
+    #[test]
+    fn command_classes_have_success_ranges_and_kinds() {
+        for (command, min, max, file, diff) in [
+            ("cd src", 0, Some(0), false, false),
+            ("mkdir -p build", 0, Some(0), false, false),
+            ("sleep 0.1", 0, Some(0), false, false),
+            ("head -n 3 a.py", 0, Some(3), true, false),
+            ("tail -n 2 a.rs", 0, Some(2), true, false),
+            ("cat a.rs", 0, None, true, false),
+            ("cat -n a.rs", 0, None, true, false),
+            ("nl -ba a.rs", 0, None, true, false),
+            ("git show HEAD:a.rs", 0, None, true, false),
+            ("git diff", 0, None, false, true),
+            ("git log -p", 0, None, false, true),
+            ("diff -u a.rs b.rs", 0, None, false, true),
+            ("wc -l a.rs b.rs", 3, Some(3), false, false),
+            ("echo hello", 1, Some(1), false, false),
+            ("printf 'hello\\n'", 1, Some(1), false, false),
+            ("sed -n '1,3p' a.py", 0, Some(3), true, false),
+            ("custom-command", 0, None, false, false),
+        ] {
+            let shape = one(command);
+            let output = &shape.outcomes[0];
+            assert_eq!(output.lines, LineRange { min, max }, "{command}");
+            assert_eq!(matches!(output.kind, Kind::File { .. }), file, "{command}");
+            assert_eq!(matches!(output.kind, Kind::Diff), diff, "{command}");
+        }
+    }
+
+    #[test]
+    fn line_formats_are_required_patterns() {
+        for (command, line) in [
+            ("rg -n needle src", "src/main.rs:12:needle"),
+            ("rg --files src", "src/main.rs"),
+            ("git status --short", " M src/main.rs"),
+            ("git log --oneline", "12abcde change"),
+            ("git diff --numstat", "1\t2\tsrc/main.rs"),
+        ] {
+            let shape = one(command);
+            let pattern = shape.outcomes[0].every.as_ref().expect(command);
+            assert_eq!(pattern.strength, Strength::Required);
+            assert!(pattern.regex.is_match(line), "{command}: {line}");
+        }
+    }
+
+    #[test]
+    fn cat_failure_is_a_stream_specific_union() {
+        let stream = Stream {
+            merged_stderr: true,
+            ..Stream::default()
+        };
+        let shape = pipeline_shape("cat missing.py", &stream, false);
+        assert_eq!(shape.outcomes.len(), 2);
+        assert!(matches!(shape.outcomes[0].kind, Kind::File { .. }));
+        let error = &shape.outcomes[1];
+        assert!(matches!(error.kind, Kind::Plain));
+        assert_eq!(
+            error.lines,
+            LineRange {
+                min: 1,
+                max: Some(1)
+            }
+        );
+        assert_eq!(
+            error.known.as_deref(),
+            Some("cat: missing.py: No such file or directory\n")
+        );
+        assert!(error.first.is_none());
+        let shape = one("cat missing.py");
+        assert_eq!(
+            shape.outcomes[1].lines,
+            LineRange {
+                min: 0,
+                max: Some(0)
+            }
+        );
+    }
+
+    #[test]
+    fn rg_no_match_has_zero_lines_and_success_is_unchanged() {
+        let shape = one("rg -n needle src");
+        assert_eq!(shape.outcomes.len(), 2);
+        assert_eq!(shape.outcomes[0].lines.min, 1);
+        assert_eq!(
+            shape.outcomes[1].lines,
+            LineRange {
+                min: 0,
+                max: Some(0)
+            }
+        );
+        assert!(shape.outcomes[0].every.is_some());
+        let success = pipeline_shape("rg -n needle src", &Stream::default(), true);
+        assert_eq!(success.outcomes.len(), 1);
+        assert_eq!(success.outcomes[0].lines, shape.outcomes[0].lines);
+        assert!(success.outcomes[0].every.is_some());
+    }
+
+    #[test]
+    fn redirections_keep_their_shape_after_command_splitting() {
+        let stream = Stream {
+            exit_code: Some(0),
+            ..Stream::default()
+        };
+        let shapes = shapes(
+            "cat a.py 2>&1; echo done > result.txt; cat b.rs | cat",
+            &stream,
+        )
+        .unwrap();
+        assert_eq!(shapes.len(), 3);
+        assert_eq!(shapes[0].outcomes.len(), 1);
+        assert_eq!(shapes[0].outcomes[0].lines, UNKNOWN);
+        assert!(matches!(shapes[0].outcomes[0].kind, Kind::Plain));
+        assert_eq!(shapes[1].outcomes[0].lines, SILENT);
+        assert_eq!(shapes[2].outcomes.len(), 2);
+        assert!(matches!(shapes[2].outcomes[0].kind, Kind::File { .. }));
+    }
+
+    #[test]
+    fn rg_cannot_succeed_when_its_input_is_known_empty() {
+        let shape = one("printf '' | rg needle");
+        assert!(
+            shape
+                .outcomes
+                .iter()
+                .all(|output| matches!(output.kind, Kind::Plain))
+        );
+        // The conservative upstream-failure result and the no-match result remain.
+        assert_eq!(shape.outcomes.len(), 2);
+        assert_eq!(shape.outcomes[1].lines, SILENT);
+        let success = pipeline_shape("printf '' | rg needle", &Stream::default(), true);
+        assert_eq!(success.outcomes.len(), 1);
+        assert_eq!(success.outcomes[0].lines, UNKNOWN);
+    }
+
+    #[test]
+    fn openings_only_hint_at_file_start_in_the_right_language() {
+        for (command, yes, no) in [
+            ("cat a.py", "import os", "package main"),
+            ("head a.rs", "use std::io;", "import os"),
+            ("sed -n '1,3p' a.go", "package main", "use std::io;"),
+        ] {
+            let shape = one(command);
+            let hint = shape.outcomes[0].first.as_ref().expect(command);
+            assert_eq!(hint.strength, Strength::Hint);
+            assert!(hint.regex.is_match(yes));
+            assert!(!hint.regex.is_match(no));
+        }
+        for command in [
+            "tail a.py",
+            "sed -n '2,3p' a.py",
+            "cat a.txt",
+            "cat py",
+            "cat a.py | tail -n 2",
+            "cat a.py | rg import",
+        ] {
+            assert!(one(command).outcomes[0].first.is_none(), "{command}");
+        }
+    }
+
+    #[test]
+    fn pipeline_preserves_verbatim_text_and_merged_redirect_is_unknown() {
+        let shape = one("echo hello | cat");
+        assert_eq!(shape.outcomes[0].known.as_deref(), Some("hello\n"));
+        assert_eq!(
+            shape.outcomes[0].lines,
+            LineRange {
+                min: 1,
+                max: Some(1)
+            }
+        );
+        let shape = one("cat a.py | head -n 2");
+        assert_eq!(shape.outcomes[0].lines.max, Some(2));
+        assert!(shape.outcomes[0].first.is_some());
+        let shape = one("cat a.py 2>&1");
+        assert_eq!(shape.outcomes.len(), 1);
+        assert_eq!(shape.outcomes[0].lines, LineRange { min: 0, max: None });
+        assert!(matches!(shape.outcomes[0].kind, Kind::Plain));
+        let shape = pipeline_shape("cat a.py | cat", &Stream::default(), true);
+        assert_eq!(
+            shape.outcomes.len(),
+            2,
+            "upstream failure survives final-stage success"
+        );
+        assert!(matches!(shape.outcomes[1].kind, Kind::Plain));
+    }
 }
