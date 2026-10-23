@@ -3548,3 +3548,41 @@ mod terminal_output_follow;
 
 #[path = "support/terminal_selection_display.rs"]
 mod terminal_selection_display;
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_configuration_version_notices() {
+    let message = "Version 2 configuration unsupported, using defaults";
+    for upgraded_at_start in [true, false] {
+        let bytes = b"{\n  \"version\":2, \"config\":{}, \"state\":{}\n}\n";
+        let (directory, tmux, _) = start_probe_with_setup(
+            if upgraded_at_start {
+                "version-start"
+            } else {
+                "version-upgrade"
+            },
+            include_str!("fixtures/transcript.jsonl"),
+            |root| {
+                if upgraded_at_start {
+                    std::fs::write(root.join("claude/agents.json"), bytes).unwrap();
+                }
+            },
+        );
+        let path = directory.path().join("claude/agents.json");
+        if upgraded_at_start {
+            let capture = tmux.capture_when(|screen| screen.contains(message));
+            assert!(!capture.contains("Cannot save preferences:"), "{capture}");
+            tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+            tmux.wait_for(|screen| !screen.contains(message));
+        } else {
+            std::fs::write(&path, bytes).unwrap();
+        }
+        tmux.run(&["send-keys", "-t", "probe", "g"]);
+        let capture = tmux.capture_when(|screen| screen.contains(message));
+        assert!(!capture.contains("Cannot save preferences:"), "{capture}");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+    println!(
+        "{{\"configuration_version_notices\":\"pass\",\"startup\":true,\"save\":true,\"runtime_upgrade\":true,\"bytes_preserved\":true}}"
+    );
+}

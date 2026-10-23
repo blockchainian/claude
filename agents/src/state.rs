@@ -2,10 +2,35 @@ use crate::event::EventFilter;
 use crate::model::{EventSort, Grouping};
 use crate::providers::{ProviderId, SessionKey, WeeklyUsage};
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+
+const CONFIGURATION_VERSION: u64 = 1;
+
+#[derive(Debug)]
+pub(crate) struct UnsupportedConfiguration(u64);
+
+impl std::fmt::Display for UnsupportedConfiguration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Version {} configuration unsupported, using defaults",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnsupportedConfiguration {}
+
+fn future_version(document: &serde_json::Value) -> Option<u64> {
+    document
+        .get("version")?
+        .as_u64()
+        .filter(|version| *version > CONFIGURATION_VERSION)
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -162,6 +187,7 @@ pub struct Preferences {
     pub usage: HashMap<ProviderId, WeeklyUsage>,
     pub drafts: Vec<StoredDraft>,
     pub draft_notices: Vec<String>,
+    pub(crate) unsupported_version: Cell<Option<u64>>,
     pub(crate) tasks: HashMap<SessionKey, StoredTask>,
 }
 
@@ -263,6 +289,7 @@ impl Default for Preferences {
             usage: HashMap::new(),
             drafts: Vec::new(),
             draft_notices: Vec::new(),
+            unsupported_version: Cell::new(None),
             tasks: HashMap::new(),
         }
     }
@@ -270,13 +297,114 @@ impl Default for Preferences {
 
 impl Preferences {
     pub fn load(config_dir: &Path) -> Self {
-        let Some(stored) = fs::read(config_dir.join("agents.json"))
+        let Some(document) = fs::read(config_dir.join("agents.json"))
             .ok()
-            .and_then(|bytes| serde_json::from_slice::<StoredPreferences>(&bytes).ok())
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
         else {
             return Self::default();
         };
-        Self::from_stored(stored).unwrap_or_default()
+        if let Some(version) = future_version(&document) {
+            let preferences = Self::from_future(&document);
+            preferences.unsupported_version.set(Some(version));
+            return preferences;
+        }
+        let Some(mut preferences) = serde_json::from_value::<StoredPreferences>(document.clone())
+            .ok()
+            .and_then(Self::from_stored)
+        else {
+            return Self::default();
+        };
+        if document.get("version").is_none() {
+            // Re-read under the writer lock so migration cannot replace concurrent changes.
+            if let Err(error) = preferences.update(config_dir, |_| Ok(())) {
+                preferences.draft_notices.push(error.to_string());
+            }
+        }
+        preferences
+    }
+
+    pub fn configuration_notice(&self) -> Option<String> {
+        self.unsupported_version
+            .get()
+            .map(|version| UnsupportedConfiguration(version).to_string())
+    }
+
+    fn update(
+        &self,
+        config_dir: &Path,
+        change: impl FnOnce(&mut serde_json::Value) -> io::Result<()>,
+    ) -> io::Result<()> {
+        if let Some(version) = self.unsupported_version.get() {
+            return Err(io::Error::other(UnsupportedConfiguration(version)));
+        }
+        let result = update(config_dir, change);
+        if let Err(error) = &result
+            && let Some(version) = error
+                .get_ref()
+                .and_then(|error| error.downcast_ref::<UnsupportedConfiguration>())
+        {
+            self.unsupported_version.set(Some(version.0));
+        }
+        result
+    }
+
+    fn from_future(document: &serde_json::Value) -> Self {
+        fn field<T: serde::de::DeserializeOwned>(
+            value: &serde_json::Value,
+            key: &str,
+            default: T,
+        ) -> T {
+            value
+                .get(key)
+                .and_then(|value| serde_json::from_value(value.clone()).ok())
+                .unwrap_or(default)
+        }
+        let config = &document["config"];
+        let defaults = StoredConfig::default();
+        let grouping: String = field(config, "grouping", defaults.grouping.clone());
+        let config = StoredConfig {
+            worktree_root: field(config, "worktree_root", defaults.worktree_root),
+            double_click_ms: field(config, "double_click_ms", defaults.double_click_ms),
+            grouping: Grouping::parse(&grouping)
+                .unwrap_or_default()
+                .as_str()
+                .into(),
+            usage_view: field(config, "usage_view", defaults.usage_view),
+            theme: field(config, "theme", defaults.theme),
+            light_theme: field(config, "light_theme", defaults.light_theme),
+            dark_theme: field(config, "dark_theme", defaults.dark_theme),
+        };
+        let state = &document["state"];
+        let weekly = state["usage"]["weekly"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(key, value)| {
+                let usage: StoredWeeklyUsage = serde_json::from_value(value.clone()).ok()?;
+                weekly_usage(&usage)?;
+                Some((key.clone(), usage))
+            })
+            .collect();
+        let tasks = state["tasks"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(key, value)| {
+                serde_json::from_value(value.clone())
+                    .ok()
+                    .map(|task| (key.clone(), task))
+            })
+            .collect();
+        Self::from_stored(StoredPreferences {
+            config,
+            state: StoredState {
+                pinned: field(state, "pinned", TaskPins::default()),
+                usage: StoredUsage { weekly },
+                tasks,
+                drafts: field(state, "drafts", Vec::new()),
+            },
+        })
+        .expect("individually validated preferences")
     }
 
     fn from_stored(stored: StoredPreferences) -> Option<Self> {
@@ -288,13 +416,7 @@ impl Preferences {
                 "codex" => ProviderId::Codex,
                 _ => continue,
             };
-            let resets_at = value
-                .resets_at
-                .map(|time| time.parse::<chrono::DateTime<chrono::Utc>>())
-                .transpose()
-                .ok()?;
-            let mut weekly = WeeklyUsage::from_used_percent(value.used_percent, resets_at).ok()?;
-            weekly.reset_credits = value.reset_credits;
+            let weekly = weekly_usage(&value)?;
             usage.insert(provider, weekly);
         }
         let mut drafts = Vec::new();
@@ -326,6 +448,7 @@ impl Preferences {
             usage,
             drafts,
             draft_notices,
+            unsupported_version: Cell::new(None),
             tasks: stored
                 .state
                 .tasks
@@ -336,14 +459,14 @@ impl Preferences {
     }
 
     pub fn save_pinned(&self, config_dir: &Path) -> io::Result<()> {
-        update(config_dir, |document| {
+        self.update(config_dir, |document| {
             document["state"]["pinned"] = serde_json::to_value(self.pinned.stored())?;
             Ok(())
         })
     }
 
     pub fn save_drafts(&self, config_dir: &Path) -> io::Result<()> {
-        update(config_dir, |document| {
+        self.update(config_dir, |document| {
             document["state"]["drafts"] = serde_json::to_value(
                 self.drafts
                     .iter()
@@ -355,7 +478,7 @@ impl Preferences {
     }
 
     pub fn save_usage_view(&self, config_dir: &Path) -> io::Result<()> {
-        update(config_dir, |document| {
+        self.update(config_dir, |document| {
             document["config"]["usage_view"] = serde_json::to_value(self.usage_view)?;
             Ok(())
         })
@@ -367,7 +490,7 @@ impl Preferences {
         provider: ProviderId,
         usage: &WeeklyUsage,
     ) -> io::Result<()> {
-        update(config_dir, |document| {
+        self.update(config_dir, |document| {
             document["state"]["usage"]["weekly"][provider.to_string()] =
                 serde_json::to_value(StoredWeeklyUsage::from(usage))?;
             Ok(())
@@ -375,7 +498,7 @@ impl Preferences {
     }
 
     pub fn save_grouping(&self, config_dir: &Path) -> io::Result<()> {
-        update(config_dir, |document| {
+        self.update(config_dir, |document| {
             document["config"]["grouping"] = self.grouping.as_str().into();
             Ok(())
         })
@@ -508,7 +631,7 @@ impl Preferences {
     }
 
     pub fn forget_task(&mut self, config_dir: &Path, key: &SessionKey) -> io::Result<()> {
-        update(config_dir, |document| {
+        self.update(config_dir, |document| {
             if let Some(tasks) = document["state"]
                 .get_mut("tasks")
                 .and_then(serde_json::Value::as_object_mut)
@@ -528,7 +651,7 @@ impl Preferences {
         change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> io::Result<()>,
     ) -> io::Result<()> {
         let mut stored = None;
-        update(config_dir, |document| {
+        self.update(config_dir, |document| {
             let tasks = document["state"]
                 .as_object_mut()
                 .ok_or_else(|| io::Error::other("state must be an object"))?
@@ -562,7 +685,7 @@ impl Preferences {
 
     #[cfg(test)]
     pub fn save(&self, config_dir: &Path) -> io::Result<()> {
-        update(config_dir, |document| {
+        self.update(config_dir, |document| {
             *document = serde_json::to_value(StoredPreferences {
                 config: StoredConfig {
                     worktree_root: self.worktree_root.clone(),
@@ -602,6 +725,18 @@ impl Preferences {
     }
 }
 
+fn weekly_usage(value: &StoredWeeklyUsage) -> Option<WeeklyUsage> {
+    let resets_at = value
+        .resets_at
+        .as_ref()
+        .map(|time| time.parse::<chrono::DateTime<chrono::Utc>>())
+        .transpose()
+        .ok()?;
+    let mut weekly = WeeklyUsage::from_used_percent(value.used_percent, resets_at).ok()?;
+    weekly.reset_credits = value.reset_credits;
+    Some(weekly)
+}
+
 fn update(
     config_dir: &Path,
     change: impl FnOnce(&mut serde_json::Value) -> io::Result<()>,
@@ -619,6 +754,9 @@ fn update(
     let mut document = match fs::read(&destination) {
         Ok(bytes) => {
             let value = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+            if let Some(version) = value.as_ref().and_then(future_version) {
+                return Err(io::Error::other(UnsupportedConfiguration(version)));
+            }
             value
                 .filter(|value| {
                     serde_json::from_value::<StoredPreferences>(value.clone())
@@ -634,6 +772,7 @@ fn update(
         Err(error) => return Err(error),
     };
     change(&mut document)?;
+    document["version"] = CONFIGURATION_VERSION.into();
     let temporary = config_dir.join(format!(".agents-{}.tmp", std::process::id()));
     let mut file = fs::OpenOptions::new()
         .write(true)

@@ -234,7 +234,9 @@ impl App {
         view.set_drafts(&preferences.drafts);
         view.restore_question_answers(&preferences);
         view.restore_attention_skips(&preferences);
-        if !preferences.draft_notices.is_empty() {
+        if let Some(notice) = preferences.configuration_notice() {
+            view.show_error(notice);
+        } else if !preferences.draft_notices.is_empty() {
             view.show_error(preferences.draft_notices.join("; "));
         }
         view.set_double_click_ms(preferences.double_click_ms);
@@ -1649,8 +1651,14 @@ impl App {
 
     fn report_save(&mut self, result: io::Result<()>) {
         if let Err(error) = result {
-            self.view
-                .show_error(format!("Cannot save preferences: {error}"));
+            let unsupported = error
+                .get_ref()
+                .is_some_and(|error| error.is::<crate::state::UnsupportedConfiguration>());
+            self.view.show_error(if unsupported {
+                error.to_string()
+            } else {
+                format!("Cannot save preferences: {error}")
+            });
         }
     }
 

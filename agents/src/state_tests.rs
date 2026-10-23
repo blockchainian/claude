@@ -66,6 +66,7 @@ fn preferences_round_trip_and_corrupt_defaults() {
         dark_theme: Some(PathBuf::from("dark.tmTheme")),
         drafts: Vec::new(),
         draft_notices: Vec::new(),
+        unsupported_version: Cell::new(None),
         tasks: HashMap::new(),
         usage_view: UsageView::Detailed,
         usage: HashMap::from([
@@ -680,4 +681,177 @@ fn task_skipped_at_round_trip_and_removal_preserves_ask() {
     let loaded = Preferences::load(dir.path());
     assert_eq!(loaded.task_skipped_at(&key), None);
     assert_eq!(loaded.task_ask(&key), Some(&ask));
+}
+
+#[test]
+fn future_version_loads_independent_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = draft_fixture("Keep draft");
+    let pins = pinned_fixture_events();
+    let value = serde_json::json!({
+        "version": 2,
+        "config": {"grouping":"model", "double_click_ms":"wrong",
+            "usage_view":"detailed", "theme":42, "light_theme":"light.tmTheme",
+            "dark_theme":[], "worktree_root":"/tmp/trees", "unknown":true},
+        "state": {
+            "pinned":{"active":["claude:kept"], "inactive":[]},
+            "usage":{"weekly":{
+                "claude":serde_json::to_value(StoredWeeklyUsage::from(&usage(21.0, Some(1)))).unwrap(),
+                "codex":{"used_percent":101}, "unknown":null}},
+            "tasks":{"claude:kept":{"sort":"duration", "pinned_events":pins},
+                "codex:bad":{"sort":42}, "claude:other":{"filter":"message"}},
+            "drafts":[draft, {"id":"broken"}]
+        }
+    });
+    let bytes = serde_json::to_vec(&value).unwrap();
+    fs::write(dir.path().join("agents.json"), &bytes).unwrap();
+    let loaded = Preferences::load(dir.path());
+    assert_eq!(loaded.grouping, Grouping::Model);
+    assert_eq!(
+        loaded.double_click_ms,
+        Preferences::default().double_click_ms
+    );
+    assert_eq!(loaded.usage_view, UsageView::Detailed);
+    assert_eq!(loaded.worktree_root, Some(PathBuf::from("/tmp/trees")));
+    assert_eq!(loaded.theme, None);
+    assert_eq!(loaded.light_theme, Some(PathBuf::from("light.tmTheme")));
+    assert_eq!(loaded.dark_theme, None);
+    assert_eq!(loaded.pinned.active, vec!["claude:kept".parse().unwrap()]);
+    assert_eq!(
+        loaded.usage,
+        HashMap::from([(ProviderId::Claude, usage(21.0, Some(1)))])
+    );
+    assert_eq!(
+        loaded.task_sort(&"claude:kept".parse().unwrap()),
+        EventSort::Duration
+    );
+    assert_eq!(
+        loaded.task_pinned_events(&"claude:kept".parse().unwrap()),
+        pins
+    );
+    assert_eq!(
+        loaded.task_sort(&"codex:bad".parse().unwrap()),
+        EventSort::Time
+    );
+    assert_eq!(
+        loaded.task_filter(&"claude:other".parse().unwrap()),
+        EventFilter::Message
+    );
+    assert_eq!(loaded.drafts, vec![draft]);
+    assert_eq!(fs::read(dir.path().join("agents.json")).unwrap(), bytes);
+}
+
+#[test]
+fn future_version_blocks_writes_even_after_loading_supported_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut loaded = Preferences::default();
+    loaded.save(dir.path()).unwrap();
+    loaded = Preferences::load(dir.path());
+    let path = dir.path().join("agents.json");
+    let bytes = b"{\n  \"version\":2, \"config\":false, \"state\":[]\n}\n";
+    fs::write(&path, bytes).unwrap();
+    let before = loaded.clone();
+    let error = loaded
+        .save_task_pinned_events(
+            dir.path(),
+            &"claude:kept".parse().unwrap(),
+            pinned_fixture_events(),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Version 2 configuration unsupported, using defaults"
+    );
+    assert_eq!(loaded.tasks, before.tasks);
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+    let loaded = Preferences::load(dir.path());
+    assert!(loaded.save_grouping(dir.path()).is_err());
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+}
+
+#[test]
+fn unversioned_load_only_adds_version_on_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let value = serde_json::json!({"config":{"grouping":"model", "custom":17},
+        "state":{"tasks":{"claude:kept":{"sort":"duration"}}, "custom":[1,2]}, "unknown":true});
+    fs::write(
+        dir.path().join("agents.json"),
+        serde_json::to_vec(&value).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(Preferences::load(dir.path()).grouping, Grouping::Model);
+    let mut after = document(dir.path());
+    assert_eq!(
+        after.as_object_mut().unwrap().remove("version"),
+        Some(serde_json::json!(1))
+    );
+    assert_eq!(after, value);
+    let invalid = b"{\"config\":{\"grouping\":\"invalid\"},\"state\":{}}";
+    fs::write(dir.path().join("agents.json"), invalid).unwrap();
+    assert_eq!(Preferences::load(dir.path()), Preferences::default());
+    assert_eq!(fs::read(dir.path().join("agents.json")).unwrap(), invalid);
+}
+
+#[test]
+fn future_version_bad_sections_do_not_discard_other_sections() {
+    let dir = tempfile::tempdir().unwrap();
+    for (section, invalid) in [
+        ("config", serde_json::json!(false)),
+        ("pinned", serde_json::json!(["claude:unsupported"])),
+        ("usage", serde_json::json!(false)),
+        ("tasks", serde_json::json!([])),
+        ("drafts", serde_json::json!({})),
+    ] {
+        let mut value = serde_json::json!({"version":2,
+            "config":{"grouping":"model"},
+            "state":{"pinned":{"active":["claude:kept"],"inactive":[]},
+                "usage":{"weekly":{"claude":{"used_percent":21},"codex":{"used_percent":"wrong"}}},
+                "tasks":{"claude:kept":{"sort":"duration"}}, "drafts":[draft_fixture("Kept")]}});
+        if section == "config" {
+            value[section] = invalid;
+        } else {
+            value["state"][section] = invalid;
+        }
+        fs::write(
+            dir.path().join("agents.json"),
+            serde_json::to_vec(&value).unwrap(),
+        )
+        .unwrap();
+        let loaded = Preferences::load(dir.path());
+        assert_eq!(
+            loaded.grouping,
+            if section == "config" {
+                Grouping::default()
+            } else {
+                Grouping::Model
+            }
+        );
+        assert_eq!(loaded.pinned.active.len(), usize::from(section != "pinned"));
+        assert_eq!(loaded.usage.len(), usize::from(section != "usage"));
+        assert_eq!(loaded.tasks.len(), usize::from(section != "tasks"));
+        assert_eq!(loaded.drafts.len(), usize::from(section != "drafts"));
+    }
+}
+
+#[test]
+fn supported_versions_write_current_version_and_future_version_latches_read_only() {
+    let dir = tempfile::tempdir().unwrap();
+    for version in [-1, 0, 1] {
+        fs::write(
+            dir.path().join("agents.json"),
+            format!("{{\"version\":{version},\"config\":{{}},\"state\":{{}}}}"),
+        )
+        .unwrap();
+        let loaded = Preferences::load(dir.path());
+        loaded.save_grouping(dir.path()).unwrap();
+        assert_eq!(document(dir.path())["version"], 1);
+    }
+    let loaded = Preferences::load(dir.path());
+    let path = dir.path().join("agents.json");
+    fs::write(&path, r#"{"version":2}"#).unwrap();
+    assert!(loaded.save_pinned(dir.path()).is_err());
+    let bytes = b"{\"version\":1,\"config\":{},\"state\":{}}";
+    fs::write(&path, bytes).unwrap();
+    assert!(loaded.save_pinned(dir.path()).is_err());
+    assert_eq!(fs::read(&path).unwrap(), bytes);
 }
