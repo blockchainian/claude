@@ -1262,7 +1262,7 @@ impl View {
             viewport.task_details_links.clear();
             viewport.task_details_text = text_selection::TextRegion::default();
         }
-        if self.selected_draft().is_some() {
+        if self.selected_draft().is_some() || self.selector.is_some() {
             self.viewport.borrow_mut().task_details = area;
             return;
         }

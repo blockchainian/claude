@@ -11723,3 +11723,72 @@ mod task_tree_collapse_tests;
 
 #[path = "transcript_tests.rs"]
 mod transcript_tests;
+
+#[test]
+fn selector_hides_task_details_rules_through_panel_padding() {
+    use super::draft_controls::{Selector, SelectorKind, TaskKey};
+    for width in [100, 120, 149, 150] {
+        for effort in [false, true] {
+            let mut view = View::new(Grouping::Project, false);
+            let parent = session("parent", "Parent", SessionStatus::Working, 0);
+            let mut child = session("child", "Child", SessionStatus::Working, 0);
+            child.parent = Some(parent.id.clone());
+            child.started_at = Some(parent.updated_at);
+            view.set_sessions(vec![parent.clone(), child], false);
+            view.selected = view
+                .rows
+                .iter()
+                .position(|row| row.id == parent.id)
+                .unwrap();
+            let area = Rect::new(0, 0, width, 40);
+            let now = parent.updated_at;
+            let mut buffer = Buffer::empty(area);
+            view.render_at(area, &mut buffer, now);
+            let details = view.center_layout(area).task_details;
+            let rules: Vec<_> = (details.y..details.bottom())
+                .filter(|&y| buffer[(details.right(), y)].symbol() == "─")
+                .collect();
+            if width < 150 {
+                assert!(
+                    !rules.is_empty(),
+                    "fixture must draw a background rule at {width}"
+                );
+            }
+            let values = vec![
+                "low".into(),
+                "medium".into(),
+                "high".into(),
+                "xhigh".into(),
+                "max".into(),
+            ];
+            let target = TaskKey::Session(parent.id.clone());
+            view.selector = Some(Selector::new(
+                if effort {
+                    SelectorKind::Effort {
+                        target,
+                        labels: values.clone(),
+                        values,
+                    }
+                } else {
+                    SelectorKind::Model {
+                        target,
+                        labels: values.clone(),
+                        families: vec!["Models".into(); values.len()],
+                        values,
+                    }
+                },
+                0,
+            ));
+            view.render_at(area, &mut buffer, now);
+            for y in rules {
+                assert_eq!(
+                    buffer[(details.right(), y)].symbol(),
+                    " ",
+                    "residue at ({}, {y}), width {width}, effort {effort}",
+                    details.right()
+                );
+            }
+            assert!(view.viewport.borrow().task_details_text.rows.is_empty());
+        }
+    }
+}
