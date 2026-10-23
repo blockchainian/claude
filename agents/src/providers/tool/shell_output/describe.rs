@@ -951,7 +951,45 @@ pub(super) fn pipeline(source: &str, programs: &mut Vec<String>) -> Segment {
 }
 
 fn pipeline_shape(source: &str, stream: &Stream, success: bool) -> OutputShape {
-    let mut pipeline = pipeline_description(source, &mut Vec::new());
+    let mut programs = Vec::new();
+    let mut pipeline = pipeline_description(source, &mut programs);
+    let failure_outcome = |failure: Failure| {
+        if matches!(failure, Failure::Unknown) {
+            let mut outcome = Description::unknown().outcome();
+            outcome.lines = if stream.merged_stderr {
+                LineRange {
+                    min: 1,
+                    max: Some(1),
+                }
+            } else {
+                SILENT
+            };
+            if stream.merged_stderr {
+                let names = programs
+                    .iter()
+                    .map(|name| {
+                        name.chars()
+                            .map(|c| {
+                                if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                                    c.to_string()
+                                } else {
+                                    format!("\\{c}")
+                                }
+                            })
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("|");
+                outcome.first = Some(Pattern {
+                    regex: Regex::new(format!("^(?:(?:\\S+: )?(?:{names}): |(?:fatal|error): )")),
+                    strength: Strength::Required,
+                });
+            }
+            outcome
+        } else {
+            failure.outcome(stream)
+        }
+    };
     let no_match = matches!(pipeline.failure, Some(Failure::NoMatch));
     let mut outcomes = Vec::new();
     if !no_match || pipeline.output.range.max != Some(0) {
@@ -961,10 +999,10 @@ fn pipeline_shape(source: &str, stream: &Stream, success: bool) -> OutputShape {
         outcomes.push(pipeline.output.outcome());
     }
     if pipeline.upstream_failure {
-        outcomes.push(Failure::Unknown.outcome(stream));
+        outcomes.push(failure_outcome(Failure::Unknown));
     }
     if !success && let Some(failure) = pipeline.failure {
-        outcomes.push(failure.outcome(stream));
+        outcomes.push(failure_outcome(failure));
     }
     OutputShape {
         outcomes,
@@ -1125,7 +1163,27 @@ mod shape_tests {
     }
 
     #[test]
-    fn known_command_failures_are_plain_unbounded_alternatives() {
+    fn file_failure_cannot_consume_source_output() {
+        let stream = Stream {
+            merged_stderr: true,
+            ..Stream::default()
+        };
+        for command in ["sed -n 1,2p a.rs", "head -n 2 a.rs", "cat a.rs | head -n 2"] {
+            let shapes = shapes(command, &stream).unwrap();
+            let text = "use std::io;\nfn main() {}\n";
+            let lines = super::super::lines::lines(text, &stream);
+            let solution = super::super::solve::solve(&shapes, &lines, text).unwrap();
+            assert!(
+                solution.outcomes[0]
+                    .iter()
+                    .all(|index| matches!(shapes[0].outcomes[index].kind, Kind::File { .. })),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn known_command_failures_follow_stream_diagnostics() {
         let failed = Stream {
             exit_code: Some(2),
             is_error: true,
@@ -1135,7 +1193,31 @@ mod shape_tests {
         assert_eq!(result[0].outcomes.len(), 2);
         assert_eq!(result[0].outcomes[0].known.as_deref(), Some("hello\n"));
         let failure = &result[0].outcomes[1];
-        assert_eq!(failure.lines, LineRange { min: 0, max: None });
+        assert_eq!(failure.lines, SILENT);
+        let merged = shapes(
+            "echo hello",
+            &Stream {
+                merged_stderr: true,
+                ..failed
+            },
+        )
+        .unwrap();
+        let failure = &merged[0].outcomes[1];
+        assert_eq!(
+            failure.lines,
+            LineRange {
+                min: 1,
+                max: Some(1)
+            }
+        );
+        assert!(
+            failure
+                .first
+                .as_ref()
+                .unwrap()
+                .regex
+                .is_match("sh: echo: write error")
+        );
         assert!(matches!(failure.kind, Kind::Plain));
         let success = Stream {
             exit_code: Some(0),

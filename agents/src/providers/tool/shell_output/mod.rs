@@ -464,6 +464,78 @@ pub(super) fn sections(
     text: &str,
     stream: Stream,
 ) -> Option<Vec<Section>> {
+    // shapes splits commands with their separators before describing pipelines.
+    let shapes = describe::shapes(command, &stream)?;
+    let lines = lines::lines(text, &stream);
+    let solution = solve::solve(&shapes, &lines, text)?;
+    let ownership = ownership::ownership(&shapes, &solution, &lines, text);
+    let mut output = Vec::new();
+    let mut cursor = 0;
+    for (range, owner) in ownership.0 {
+        let command = match owner {
+            ownership::Owner::Command(index) => Some(index),
+            ownership::Owner::Block(commands) => Some(commands.start),
+            ownership::Owner::Plain => None,
+        };
+        let kind = command.map(|index| {
+            let outcome = solution.outcomes[index]
+                .iter()
+                .next()
+                .expect("owned shell output has a feasible outcome");
+            &shapes[index].outcomes[outcome].kind
+        });
+        let mut index = range.start;
+        while index < range.end {
+            let lines::Line::Text(bytes) = &lines[index] else {
+                index += 1;
+                continue;
+            };
+            let start = bytes.start;
+            let mut end = bytes.end;
+            index += 1;
+            while index < range.end {
+                let lines::Line::Text(bytes) = &lines[index] else {
+                    break;
+                };
+                if bytes.start != end {
+                    break;
+                }
+                end = bytes.end;
+                index += 1;
+            }
+            if cursor < start {
+                output.push(text_section(label, &text[cursor..start]));
+            }
+            output.push(kind_section(label, kind, &text[start..end]));
+            cursor = end;
+        }
+    }
+    if cursor < text.len() {
+        output.push(text_section(label, &text[cursor..]));
+    }
+    Some(output)
+}
+
+fn kind_section(label: &str, kind: Option<&Kind>, text: &str) -> Section {
+    match kind {
+        Some(Kind::Diff) => Section::Diff {
+            lang: String::new(),
+            label: String::new(),
+            text: text.into(),
+        },
+        Some(Kind::File { path, numbered }) if syntax(path).is_some() => {
+            let mut section = file_section(label, path, text);
+            if *numbered && let Section::Code { lang, .. } = &mut section {
+                *lang = format!("numbered:{lang}");
+            }
+            section
+        }
+        _ => text_section(label, text),
+    }
+}
+
+#[allow(dead_code)]
+fn old_sections(command: &str, label: &str, text: &str, stream: Stream) -> Option<Vec<Section>> {
     let commands = crate::ui::shell_commands::split(command)?;
     let mut segments = Vec::new();
     let mut programs = Vec::new();

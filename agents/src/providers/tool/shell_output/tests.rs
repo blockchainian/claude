@@ -838,3 +838,22 @@ fn shell_output_real_mismatched_cat_path() {
         .is_empty()
     );
 }
+
+#[test]
+fn shell_output_inconsistent_description_invalidates_call() {
+    let cases = boundary_cases();
+    let case = &cases["2"];
+    let command = case["command"].as_str().unwrap().replace("1,180p", "1,1p");
+    assert!(
+        actual(
+            &command,
+            case["output"].as_str().unwrap(),
+            Stream {
+                merged_stderr: true,
+                exit_code: case["exit"].as_i64(),
+                ..Stream::default()
+            }
+        )
+        .is_empty()
+    );
+}
