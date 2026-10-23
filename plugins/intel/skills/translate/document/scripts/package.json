@@ -1,5 +1,5 @@
 {
-  "name": "translate-pdf-scripts",
+  "name": "translate-scripts",
   "private": true,
   "type": "module",
   "description": "Node dependencies of readable.mjs; setup.sh installs them here.",

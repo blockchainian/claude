@@ -55,7 +55,7 @@ describe("batches and answers", () => {
 });
 
 test("real codex call on one segment", { skip: process.env.TRANSLATE_E2E !== "1" }, () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "translate-pdf-test-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "translate-test-"));
   const segs = [{ id: "u1", text: "In <code>exec.c</code>, the kernel loads a program.", keep: ["<code>exec.c</code>"], math: [] }];
   fs.writeFileSync(path.join(dir, "segs.json"), JSON.stringify(segs));
   const r = spawnSync("node", [path.join(scripts, "translate_segments.mjs"), path.join(dir, "segs.json"), path.join(dir, "zh.json"),

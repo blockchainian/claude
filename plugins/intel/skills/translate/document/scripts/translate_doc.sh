@@ -7,7 +7,7 @@
 # --txt takes a plain-text transcript (one sentence per line) and regroups it into paragraphs first.
 # --html uses a saved copy of the page instead of fetching --url (which still resolves its relative links).
 # --reader keeps only the article of a page from a site whose pages wrap it in chrome (tags, share bars, footers).
-# --work defaults to $INTEL_STATE_DIR/translate-pdf/<out name>; its zh.json caches every translated segment, so a
+# --work defaults to $INTEL_STATE_DIR/translate-document/<out name>; its zh.json caches every translated segment, so a
 # rerun only re-renders and redoes what failed.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -35,7 +35,7 @@ done
 [ -n "$out" ] && { [ -n "$md" ] || [ -n "$txt" ] || [ -n "$url" ] || [ -n "$html" ]; } || {
   echo "usage: translate_doc.sh (--md FILE | --txt FILE | --url URL [--html FILE] [--reader]) --out PDF [options]" >&2; exit 2; }
 name=$(basename "$out" .pdf)
-work="${work:-${INTEL_STATE_DIR:-$HOME/.local/state/intel}/translate-pdf/$name}"
+work="${work:-${INTEL_STATE_DIR:-$HOME/.local/state/intel}/translate-document/$name}"
 mkdir -p "$work/src" "$(dirname "$out")"
 title="${title:-$name}"
 opts=(--title "$title" --context "$context")
