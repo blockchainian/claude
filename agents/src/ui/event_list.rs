@@ -88,6 +88,29 @@ impl View {
         open_text(&self.display_event(event))
     }
 
+    fn event_detail_scroll_key(&self, event: &Event) -> u64 {
+        let record = event
+            .source_records
+            .first()
+            .map(|record| (&record.path, record.offset));
+        event_detail_key(&(
+            self.selected_id(),
+            self.event_detail.mode,
+            matches!(self.selected_event_row(), Some(EventRow::Pinned(_))),
+            &event.source,
+            record,
+            (event.source.is_none() && record.is_none()).then_some((&event.kind, event.started_at)),
+        ))
+    }
+
+    fn restore_event_detail_zoom(&self, event: &Event) {
+        self.restore_event_detail();
+        self.event_detail
+            .scroll
+            .borrow_mut()
+            .switch_zooms(self.event_detail_scroll_key(event));
+    }
+
     fn selected_event_detail_layout(
         &self,
         event: &Event,
@@ -95,6 +118,7 @@ impl View {
         cwd: &Path,
         now: DateTime<Utc>,
     ) -> EventDetailLayout {
+        self.restore_event_detail_zoom(event);
         if self.event_detail.mode == task_ui::EventDetailMode::Transcript {
             let transcript = self
                 .event_detail
@@ -115,7 +139,15 @@ impl View {
         let sections =
             super::tool_detail::event_detail_content(&display, String::new(), Style::new().dim())
                 .sections;
-        event_detail_parts_layout(event, columns, cwd, now, sections)
+        let zooms = &self.event_detail.scroll.borrow().zooms;
+        let mut images = self.inline_images.borrow_mut();
+        event_detail_parts_layout_with_images(event, columns, cwd, now, sections, |index, image| {
+            images.as_mut()?.size(
+                image,
+                columns.text.width,
+                zooms.get(&index).copied().unwrap_or_default(),
+            )
+        })
     }
 
     pub(super) fn render_event(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
@@ -293,6 +325,7 @@ impl View {
         buf: &mut Buffer,
         now: DateTime<Utc>,
     ) {
+        self.viewport.borrow_mut().event_detail_images.clear();
         let areas = areas.into();
         let area = areas.content;
         if self.event_session.as_ref() == self.selected_id() {
@@ -390,6 +423,7 @@ impl View {
         cwd: &std::path::Path,
         now: DateTime<Utc>,
     ) {
+        self.restore_event_detail_zoom(event);
         let areas = areas.into();
         let area = areas.content;
         let list = self.center_layout(buf.area).event_panel;
@@ -458,7 +492,11 @@ impl View {
         viewport.event_detail_columns = Some(columns);
         let rows = self.event_detail_scroll_layout(event, &layout, body_area, &mut viewport);
         let scroll = rows.scroll;
-        let cuts = rows.cuts;
+        let cuts = rows
+            .cuts
+            .into_iter()
+            .filter(|&row| layout.cut_text(row))
+            .collect::<Vec<_>>();
         let kept = rows.kept;
         if overflow && height > 0 {
             let thumb = (height * height)
@@ -517,6 +555,9 @@ impl View {
         let mut visible = visible_rows
             .iter()
             .map(|&source| {
+                if !layout.cut_text(source) {
+                    return Line::default();
+                }
                 let mut line = layout.lines[source].clone();
                 if cuts.contains(&source) {
                     line = super::line_truncation::truncate_line_to_width(
@@ -539,6 +580,7 @@ impl View {
                 .filter(|(row, _)| *row < top)
                 .map(|(_, title)| (title.clone(), columns))
         });
+        let drawn_images = layout.drawn_images(&visible_rows, body_area);
         layout.visible = visible_rows.clone();
         viewport.event_detail_layout = Some(layout);
         drop(viewport);
@@ -573,6 +615,16 @@ impl View {
         }
         self.highlight_text_selection(text_selection::Panel::Event, buf);
         super::links::underline(buf, &self.viewport.borrow().event_links);
+        if let Some(images) = self.inline_images.borrow_mut().as_mut() {
+            let detail = self.event_detail.scroll.borrow();
+            for drawn in &drawn_images {
+                // The image replaces its selectable placeholder text on screen.
+                Clear.render(drawn.area, buf);
+                let zoom = detail.zooms.get(&drawn.index).copied().unwrap_or_default();
+                images.draw(&drawn.image, zoom, drawn.first_row, drawn.area, buf);
+            }
+            self.viewport.borrow_mut().event_detail_images = drawn_images;
+        }
     }
 
     fn event_detail_scroll_layout(
@@ -585,18 +637,7 @@ impl View {
         self.restore_event_detail();
         let mut detail = self.event_detail.scroll.borrow_mut();
         detail.event = super::task_ui::EventId::from_event(event);
-        let record = event
-            .source_records
-            .first()
-            .map(|record| (&record.path, record.offset));
-        let key = event_detail_key(&(
-            self.selected_id(),
-            self.event_detail.mode,
-            matches!(self.selected_event_row(), Some(EventRow::Pinned(_))),
-            &event.source,
-            record,
-            (event.source.is_none() && record.is_none()).then_some((&event.kind, event.started_at)),
-        ));
+        let key = self.event_detail_scroll_key(event);
         let switched = detail.key != Some(key);
         let follow_output = std::mem::take(&mut detail.follow_output) && !switched;
         let entry = detail.entry.take().filter(|_| switched);
@@ -673,6 +714,7 @@ impl View {
         let Some(session) = self.selected_row() else {
             return;
         };
+        self.restore_event_detail_zoom(event);
         let mut viewport = self.viewport.borrow_mut();
         let Some(columns) = viewport.event_detail_columns else {
             return;
@@ -1721,6 +1763,42 @@ pub(super) struct EventDetailLayout {
     titles: Vec<(usize, Line<'static>)>,
     bodies: Vec<std::ops::Range<usize>>,
     body_keys: Vec<u64>,
+    images: Vec<DetailImage>,
+}
+
+struct DetailImage {
+    index: usize,
+    image: crate::event::ImageBlock,
+    rows: std::ops::Range<usize>,
+    x: u16,
+    width: u16,
+}
+
+impl EventDetailLayout {
+    fn cut_text(&self, row: usize) -> bool {
+        !self.images.iter().any(|image| image.rows.contains(&row))
+    }
+
+    fn drawn_images(&self, visible: &[usize], area: Rect) -> Vec<super::event_detail::DrawnImage> {
+        self.images
+            .iter()
+            .filter_map(|image| {
+                let top = visible.iter().position(|row| image.rows.contains(row))?;
+                let height = visible[top..]
+                    .iter()
+                    .take_while(|row| image.rows.contains(row))
+                    .count() as u16;
+                let image_area =
+                    Rect::new(image.x, area.y + top as u16, image.width, height).intersection(area);
+                (!image_area.is_empty()).then(|| super::event_detail::DrawnImage {
+                    index: image.index,
+                    image: image.image.clone(),
+                    area: image_area,
+                    first_row: (visible[top] - image.rows.start) as u16,
+                })
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -1782,8 +1860,21 @@ fn event_detail_parts_layout(
     now: DateTime<Utc>,
     sections: Vec<Section>,
 ) -> EventDetailLayout {
+    event_detail_parts_layout_with_images(event, columns, cwd, now, sections, |_, _| None)
+}
+
+/// Layout uses resolved cell sizes, independently of image decoding and terminal uploads.
+fn event_detail_parts_layout_with_images(
+    event: &Event,
+    columns: EventDetailColumns,
+    cwd: &Path,
+    now: DateTime<Utc>,
+    sections: Vec<Section>,
+    mut image_size: impl FnMut(usize, &crate::event::ImageBlock) -> Option<(u16, u16)>,
+) -> EventDetailLayout {
     let width = usize::from(columns.text.width);
     let body_style = Style::default();
+    let mut image_index = 0;
     let mut layout = EventDetailLayout {
         columns,
         height: 0,
@@ -1799,6 +1890,7 @@ fn event_detail_parts_layout(
         titles: Vec::new(),
         bodies: Vec::new(),
         body_keys: Vec::new(),
+        images: Vec::new(),
     };
     for (section_index, section) in sections.into_iter().enumerate() {
         if section_index > 0 {
@@ -1847,25 +1939,50 @@ fn event_detail_parts_layout(
                     } else {
                         columns.text.width
                     };
-                    let (lines, breaks) =
+                    let (mut lines, mut breaks) =
                         part.layout_in(usize::from(reading_width), body_style, now, cwd);
-                    (part, lines, breaks)
+                    let image = part.image_block().and_then(|image| {
+                        let index = image_index;
+                        image_index += 1;
+                        image_size(index, image).map(|size| (index, size))
+                    });
+                    if let Some((_, (_, height))) = image {
+                        lines.resize(usize::from(height), Line::default());
+                        breaks.resize(lines.len(), None);
+                    }
+                    (part, lines, breaks, image)
                 })
                 .collect();
             let group_width = rendered
                 .iter()
-                .flat_map(|(_, lines, _)| lines.iter())
-                .map(Line::width)
+                .map(|(_, lines, _, image)| {
+                    image.map_or_else(
+                        || lines.iter().map(Line::width).max().unwrap_or(0),
+                        |(_, (width, _))| usize::from(width),
+                    )
+                })
                 .max()
                 .unwrap_or(0)
                 .min(width);
             let group_x =
                 super::centering::centered_x(columns.panel, columns.text, group_width as u16);
             let padding = usize::from(group_x - columns.text.x);
-            for (part, lines, breaks) in rendered {
+            for (part, lines, breaks, image) in rendered {
                 let id = layout.sources.len();
                 let mut maps = part.maps_in(&lines, cwd);
                 let first = layout.lines.len();
+                if let Some((index, (width, _))) = image {
+                    layout.images.push(DetailImage {
+                        index,
+                        image: part
+                            .image_block()
+                            .expect("image size belongs to an image")
+                            .clone(),
+                        rows: first..first + lines.len(),
+                        x: group_x,
+                        width: width.min(columns.text.right().saturating_sub(group_x)),
+                    });
+                }
                 layout.continuations.extend(
                     breaks
                         .into_iter()
@@ -2774,6 +2891,232 @@ mod panel_detail_tests {
                 groups: vec![Group { parts: vec![part] }],
             }],
         )
+    }
+
+    fn image_section() -> (Event, Vec<Section>, crate::event::ImageBlock) {
+        let fixture = include_str!("../../tests/fixtures/claude-read-image.jsonl");
+        let record: serde_json::Value =
+            serde_json::from_str(fixture.lines().nth(1).unwrap()).unwrap();
+        let pointer = "/message/content/0/content/0/source/data";
+        assert!(record.pointer(pointer).unwrap().is_string());
+        let image = crate::event::ImageBlock {
+            media_type: record
+                .pointer("/message/content/0/content/0/source/media_type")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .into(),
+            record: crate::event::SourceRecord {
+                path: Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/claude-read-image.jsonl"),
+                offset: (fixture.lines().next().unwrap().len() + 1) as u64,
+            },
+            pointer: pointer.into(),
+        };
+        let event = fixture_event();
+        let mut sections =
+            super::tool_detail::event_detail_content(&event, String::new(), Style::new().dim())
+                .sections;
+        sections[0].groups = vec![Group {
+            parts: vec![Part::image(image.clone())],
+        }];
+        (event, sections, image)
+    }
+
+    #[test]
+    fn inline_image_rows_budget_copy_and_clipping() {
+        let (event, sections, image) = image_section();
+        let layout = event_detail_parts_layout_with_images(
+            &event,
+            columns(100),
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+            sections,
+            |_, _| Some((20, 8)),
+        );
+        let image_rows = layout.images[0].rows.clone();
+        assert_eq!(image_rows.len(), 8);
+        assert_eq!(
+            layout.lines[image_rows.start].to_string().trim(),
+            "[image image/png]"
+        );
+        for row in image_rows.start + 1..image_rows.end {
+            assert_eq!(layout.lines[row].to_string().trim(), "");
+            assert!(layout.rows[row].1.is_empty());
+        }
+        let source = &layout.sources[layout.rows[image_rows.start].0].text;
+        assert_eq!(source.as_ref(), "[image image/png]");
+        let mut scroll = SectionScroll::default();
+        scroll.prepare(layout.body_keys.clone());
+        let heights = vec![1; layout.lines.len()];
+        let rows = scroll.layout(&heights, &layout.bodies, Some(&[3]), 0..0, 5);
+        assert_eq!(scroll.hidden, [5]);
+        let visible: Vec<_> = rows.kept.into_iter().skip(rows.scroll).take(5).collect();
+        let area = Rect::new(10, 4, 80, 5);
+        let drawn = layout.drawn_images(&visible, area);
+        assert_eq!(drawn.len(), 1);
+        assert_eq!(drawn[0].index, 0);
+        assert_eq!(drawn[0].image, image);
+        assert_eq!(drawn[0].area.height, 3);
+        assert_eq!(drawn[0].area.y, 6);
+        assert_eq!(drawn[0].area.width, 20);
+        assert_eq!(drawn[0].first_row, 0);
+        assert!(!layout.cut_text(rows.cuts[0]));
+        scroll.reveal[0] = 2;
+        let rows = scroll.layout(&heights, &layout.bodies, Some(&[3]), 0..0, 5);
+        let visible: Vec<_> = rows.kept.into_iter().skip(rows.scroll).take(5).collect();
+        let drawn = layout.drawn_images(&visible, area);
+        assert_eq!(drawn[0].first_row, 0);
+        assert_eq!(drawn[0].area.height, 5);
+        let drawn = layout.drawn_images(
+            &(image_rows.start + 3..image_rows.end).collect::<Vec<_>>(),
+            area,
+        );
+        assert_eq!(drawn[0].first_row, 3);
+        assert_eq!(drawn[0].area.height, 5);
+    }
+
+    #[test]
+    fn inline_image_render_records_visible_rows_and_clears_next_frame() {
+        let (event, sections, image) = image_section();
+        let view = View::new(Grouping::Project, false);
+        let panel = Rect::new(0, 0, 100, 6);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 101, 6));
+        let columns = event_detail_columns(panel, view.center_layout(buffer.area).event_panel);
+        let mut layout = event_detail_parts_layout_with_images(
+            &event,
+            columns,
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+            sections,
+            |_, _| Some((4, 8)),
+        );
+        layout.height = 5;
+        view.viewport.borrow_mut().event_detail_layout = Some(layout);
+        *view.inline_images.borrow_mut() =
+            Some(super::super::inline_images::InlineImages::new(None));
+        view.render_event_detail_content(
+            &event,
+            "12:34:56",
+            panel,
+            &mut buffer,
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+        );
+        {
+            let viewport = view.viewport.borrow();
+            let drawn = &viewport.event_detail_images;
+            assert_eq!(drawn.len(), 1);
+            assert_eq!(drawn[0].index, 0);
+            assert_eq!(drawn[0].image, image);
+            assert_eq!(drawn[0].first_row, 0);
+            assert_eq!(drawn[0].area.height, 3);
+            assert_eq!(drawn[0].area.width, 4);
+            let last = drawn[0].area.bottom() - 1;
+            assert!(
+                (columns.text.x..columns.text.right()).all(|x| buffer[(x, last)].symbol() != "…")
+            );
+            assert!(!buffer.content.iter().any(|cell| cell.symbol() == "["));
+            assert_eq!(
+                viewport.event_text.sources[1].text.as_ref(),
+                "[image image/png]"
+            );
+        }
+        view.render_event_detail(Rect::default(), &mut buffer, DateTime::UNIX_EPOCH);
+        assert!(view.viewport.borrow().event_detail_images.is_empty());
+        // Also discard hit regions when the whole frame omits the detail pane.
+        view.viewport.borrow_mut().event_detail_images.push(
+            super::super::event_detail::DrawnImage {
+                index: 0,
+                image,
+                area: panel,
+                first_row: 0,
+            },
+        );
+        view.render_at(buffer.area, &mut buffer, DateTime::UNIX_EPOCH);
+        assert!(view.viewport.borrow().event_detail_images.is_empty());
+    }
+
+    #[test]
+    fn inline_image_zoom_returns_with_its_event() {
+        let (mut first, _, _) = image_section();
+        first.source = Some("image-first".into());
+        let mut second = first.clone();
+        second.source = Some("image-second".into());
+        let view = View::new(Grouping::Project, false);
+        let panel = Rect::new(0, 0, 100, 12);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 101, 12));
+        let render = |event: &Event, buffer: &mut Buffer| {
+            view.viewport.borrow_mut().event_detail_layout = None;
+            view.render_event_detail_content(
+                event,
+                "12:34:56",
+                panel,
+                buffer,
+                Path::new("/"),
+                DateTime::UNIX_EPOCH,
+            );
+        };
+        render(&first, &mut buffer);
+        let zoom = super::super::inline_images::Zoom {
+            level: 2,
+            left: 0.25,
+        };
+        view.event_detail.scroll.borrow_mut().zooms.insert(0, zoom);
+        render(&second, &mut buffer);
+        assert!(view.event_detail.scroll.borrow().zooms.is_empty());
+        let second_zoom = super::super::inline_images::Zoom {
+            level: 3,
+            left: 0.5,
+        };
+        view.event_detail
+            .scroll
+            .borrow_mut()
+            .zooms
+            .insert(0, second_zoom);
+        render(&first, &mut buffer);
+        assert_eq!(view.event_detail.scroll.borrow().zooms.get(&0), Some(&zoom));
+        render(&second, &mut buffer);
+        assert_eq!(
+            view.event_detail.scroll.borrow().zooms.get(&0),
+            Some(&second_zoom)
+        );
+    }
+
+    #[test]
+    fn inline_image_order_includes_unavailable_images() {
+        let (event, mut sections, image) = image_section();
+        sections[0].groups[0].parts.push(Part::image(image));
+        let layout = event_detail_parts_layout_with_images(
+            &event,
+            columns(100),
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+            sections,
+            |index, _| (index == 1).then_some((20, 4)),
+        );
+        assert_eq!(layout.images.len(), 1);
+        assert_eq!(layout.images[0].index, 1);
+        assert_eq!(layout.bodies[0].len(), 5);
+    }
+
+    #[test]
+    fn inline_image_unavailable_keeps_placeholder() {
+        let (event, sections, _) = image_section();
+        let layout = event_detail_parts_layout_with_images(
+            &event,
+            columns(100),
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+            sections,
+            |_, _| None,
+        );
+        assert!(layout.images.is_empty());
+        assert_eq!(layout.bodies[0].len(), 1);
+        assert_eq!(
+            layout.lines.last().unwrap().to_string().trim(),
+            "[image image/png]"
+        );
     }
 
     #[test]

@@ -500,6 +500,7 @@ impl View {
             // A panel this frame leaves out keeps no links from the last one.
             let mut viewport = self.viewport.borrow_mut();
             viewport.area = area;
+            viewport.event_detail_images.clear();
             viewport.navigation_layout = Some(navigation_layout);
             viewport.overlays.clear();
             viewport.picker_rows.clear();

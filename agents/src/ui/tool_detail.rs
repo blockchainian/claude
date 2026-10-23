@@ -21,6 +21,8 @@ pub(super) struct Part {
 enum Body {
     /// A section label, in the given style.
     Label(Style),
+    /// A transcript image, with placeholder text as its copy source.
+    Image(crate::event::ImageBlock),
     /// An input/output arrow without selectable source bytes.
     Arrow,
     /// The dim animation that a call has no output yet.
@@ -45,6 +47,7 @@ impl Body {
         match self {
             Self::Markdown | Self::Prose(_) => ContentKind::Prose,
             Self::Label(_)
+            | Self::Image(_)
             | Self::Arrow
             | Self::Running
             | Self::Code(_)
@@ -63,6 +66,17 @@ impl Part {
             source: source.into(),
             body,
             file_links: Vec::new(),
+        }
+    }
+
+    pub fn image(image: crate::event::ImageBlock) -> Self {
+        Self::new(format!("[image {}]", image.media_type), Body::Image(image))
+    }
+
+    pub fn image_block(&self) -> Option<&crate::event::ImageBlock> {
+        match &self.body {
+            Body::Image(image) => Some(image),
+            _ => None,
         }
     }
 
@@ -312,6 +326,10 @@ impl Part {
         now: chrono::DateTime<chrono::Utc>,
     ) -> Vec<Line<'static>> {
         match &self.body {
+            Body::Image(_) => vec![Line::from(Span::styled(
+                source.to_owned(),
+                Style::new().dim(),
+            ))],
             Body::Label(style) => vec![Line::from(Span::styled(source.to_owned(), *style))],
             Body::Arrow => {
                 let row = if width > 0 { "↓" } else { "" };
@@ -734,10 +752,7 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             return;
         }
         Section::Image(image) => {
-            parts.push(Part::new(
-                format!("[image {}]", image.media_type),
-                Body::Label(Style::new().dim()),
-            ));
+            parts.push(Part::image(image.clone()));
             return;
         }
         Section::Code { label, lang, text } => {
