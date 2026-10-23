@@ -18,7 +18,7 @@ const GRID_LIMIT: u16 = 297;
 struct Uploaded {
     source: ImageBlock,
     id: u8,
-    size: (u16, u16),
+    placements: Vec<((u16, u16), u32)>,
     bytes: usize,
 }
 
@@ -31,6 +31,7 @@ pub struct InlineImages {
     bytes: usize,
     limit: usize,
     commands: Vec<u8>,
+    placement_id: u32,
 }
 
 impl InlineImages {
@@ -43,6 +44,7 @@ impl InlineImages {
             bytes: 0,
             limit: UPLOAD_BYTES,
             commands: Vec::new(),
+            placement_id: 0,
         }
     }
 
@@ -89,7 +91,7 @@ impl InlineImages {
         if first_row >= size.1 || area.intersection(buf.area).is_empty() {
             return;
         }
-        let Some(id) = self.prepare(image, size) else {
+        let Some((id, placement)) = self.prepare(image, size) else {
             return;
         };
         let max_left = f32::from(size.0.saturating_sub(area.width)) / f32::from(size.0);
@@ -116,9 +118,15 @@ impl InlineImages {
                     DIACRITICS[usize::from(column)]
                 );
                 buf[(x, y)].reset();
-                buf[(x, y)]
-                    .set_symbol(&symbol)
-                    .set_style(Style::default().fg(Color::Indexed(id)));
+                buf[(x, y)].set_symbol(&symbol).set_style(
+                    Style::default()
+                        .fg(Color::Indexed(id))
+                        .underline_color(Color::Rgb(
+                            (placement >> 16) as u8,
+                            (placement >> 8) as u8,
+                            placement as u8,
+                        )),
+                );
             }
         }
     }
@@ -135,20 +143,27 @@ impl InlineImages {
         }
     }
 
-    fn prepare(&mut self, image: &ImageBlock, size: (u16, u16)) -> Option<u8> {
+    fn prepare(&mut self, image: &ImageBlock, size: (u16, u16)) -> Option<(u8, u32)> {
         if let Some(index) = self
             .uploaded
             .iter()
             .position(|entry| entry.source == *image)
         {
-            let mut entry = self.uploaded.remove(index)?;
-            if entry.size != size {
-                self.place(entry.id, size);
-                entry.size = size;
-            }
+            let placement = if let Some((_, id)) = self.uploaded[index]
+                .placements
+                .iter()
+                .find(|(s, _)| *s == size)
+            {
+                *id
+            } else {
+                let id = self.place(self.uploaded[index].id, size)?;
+                self.uploaded[index].placements.push((size, id));
+                id
+            };
+            let entry = self.uploaded.remove(index)?;
             let id = entry.id;
             self.uploaded.push_back(entry);
-            return Some(id);
+            return Some((id, placement));
         }
         let raster = self.raster.image(image)?;
         let (cw, ch) = self.cell_size();
@@ -185,22 +200,33 @@ impl InlineImages {
             };
             self.command(&control, chunk);
         }
-        self.place(id, size);
+        let placement = self.place(id, size)?;
         self.uploaded.push_back(Uploaded {
             source: image.clone(),
             id,
-            size,
+            placements: vec![(size, placement)],
             bytes,
         });
         self.bytes += bytes;
-        Some(id)
+        Some((id, placement))
     }
 
-    fn place(&mut self, id: u8, size: (u16, u16)) {
+    fn place(&mut self, id: u8, size: (u16, u16)) -> Option<u32> {
+        // Placeholders select a placement through a 24-bit underline color. Keep dimensions
+        // immutable so preparing a frame cannot resize the preceding frame's visible cells.
+        let placement = (1..=0x00ff_ffff)
+            .map(|step| (self.placement_id + step - 1) % 0x00ff_ffff + 1)
+            .find(|candidate| {
+                self.uploaded
+                    .iter()
+                    .all(|image| image.placements.iter().all(|(_, id)| id != candidate))
+            })?;
+        self.placement_id = placement;
         self.command(
-            &format!("a=p,U=1,i={id},p=1,c={},r={},q=2", size.0, size.1),
+            &format!("a=p,U=1,i={id},p={placement},c={},r={},q=2", size.0, size.1),
             &[],
         );
+        Some(placement)
     }
 
     fn command(&mut self, control: &str, payload: &[u8]) {
@@ -633,13 +659,78 @@ mod tests {
         );
         assert_eq!(
             images.take_commands(),
-            b"\x1b_Ga=p,U=1,i=1,p=1,c=100,r=29,q=2\x1b\\"
+            b"\x1b_Ga=p,U=1,i=1,p=2,c=100,r=29,q=2\x1b\\"
         );
         assert_eq!(buf[(2, 3)].fg, Color::Indexed(1));
         assert_eq!(
             buf[(2, 3)].symbol(),
             format!("\u{10eeee}{}{}", DIACRITICS[0], DIACRITICS[10])
         );
+    }
+
+    #[test]
+    fn zoom_placement_cannot_resize_cells_from_the_previous_frame() {
+        let image = fixture();
+        let mut images = InlineImages::new(Some((10, 20)));
+        let area = Rect::new(0, 0, 80, 3);
+        let mut before = Buffer::empty(area);
+        images.draw(&image, Zoom::default(), 0, area, &mut before);
+        let initial = String::from_utf8(images.take_commands()).unwrap();
+        let mut after = Buffer::empty(area);
+        images.draw(
+            &image,
+            Zoom {
+                level: 1,
+                left: 0.1,
+            },
+            1,
+            area,
+            &mut after,
+        );
+        let zoom = String::from_utf8(images.take_commands()).unwrap();
+        // Commands reach the terminal while the previous frame's cells are still visible.
+        // Both frames must select explicit placements with independent dimensions.
+        assert_ne!(before[(0, 0)].underline_color, Color::Reset);
+        assert_ne!(
+            before[(0, 0)].underline_color,
+            after[(0, 0)].underline_color
+        );
+        let placement = |commands: &str, cells: &Buffer, size: (u16, u16)| {
+            let command = commands.rsplit("a=p,").next().unwrap();
+            let field = |key: &str| {
+                command
+                    .split(',')
+                    .find_map(|field| field.strip_prefix(key))
+                    .unwrap()
+                    .parse::<u32>()
+                    .unwrap()
+            };
+            let id = field("p=");
+            assert_eq!(
+                (field("c="), field("r=")),
+                (u32::from(size.0), u32::from(size.1))
+            );
+            for cell in &cells.content {
+                assert_eq!(
+                    cell.underline_color,
+                    Color::Rgb((id >> 16) as u8, (id >> 8) as u8, id as u8)
+                );
+                let mut chars = cell.symbol().chars();
+                assert_eq!(chars.next(), Some('\u{10eeee}'));
+                let row_char = chars.next().unwrap();
+                let column_char = chars.next().unwrap();
+                let row = DIACRITICS.iter().position(|&c| c == row_char).unwrap();
+                let column = DIACRITICS.iter().position(|&c| c == column_char).unwrap();
+                assert!(row < usize::from(size.1) && column < usize::from(size.0));
+            }
+            id
+        };
+        assert_ne!(
+            placement(&initial, &before, (80, 23)),
+            placement(&zoom, &after, (100, 29))
+        );
+        images.draw(&image, Zoom::default(), 0, area, &mut before);
+        assert!(images.take_commands().is_empty());
     }
 
     #[test]
@@ -670,7 +761,7 @@ mod tests {
         let mut small = InlineImages::new(Some((100, 200)));
         small.draw(&image, Zoom::default(), 0, area, &mut buf);
         assert_eq!(buf[(10, 0)].fg, Color::Indexed(1));
-        assert_eq!(small.uploaded[0].size, (10, 3));
+        assert_eq!(small.uploaded[0].placements[0].0, (10, 3));
     }
 
     #[test]

@@ -13,6 +13,7 @@ use crate::sessions::Hub;
 use crate::state::Preferences;
 use crate::terminal;
 use crate::ui::View;
+use crossterm::SynchronizedUpdate;
 use crossterm::event::Event;
 use crossterm::event::Theme;
 use crossterm::terminal as crossterm_terminal;
@@ -380,9 +381,12 @@ impl App {
                 Ok(false) => {}
                 Err(error) => self.view.show_error(error.to_string()),
             }
-            self.draw_frame(terminal, chrono::Utc::now(), |commands| {
-                terminal::send_image_commands(&mut io::stdout().lock(), commands)
-            })?;
+            // Publish placeholder cells as one frame; tmux otherwise forwards partial rows.
+            io::stdout().sync_update(|out| {
+                self.draw_frame(terminal, chrono::Utc::now(), |commands| {
+                    terminal::send_image_commands(out, commands)
+                })
+            })??;
             if self.wait_for_input(&mut watcher, &mut schedule, selection_tick)? {
                 return Ok(());
             }
