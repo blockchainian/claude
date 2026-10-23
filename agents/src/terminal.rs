@@ -82,14 +82,18 @@ fn write_commands(out: &mut impl Write, commands: &[u8], tmux: bool) -> io::Resu
         return Ok(());
     }
     if tmux {
-        out.write_all(b"\x1bPtmux;")?;
-        for part in commands.split_inclusive(|byte| *byte == 0x1b) {
-            out.write_all(part)?;
-            if part.last() == Some(&0x1b) {
-                out.write_all(b"\x1b")?;
+        // Each graphics APC already contains a bounded upload chunk. Preserve those
+        // boundaries so a batch cannot overflow tmux's DCS input buffer.
+        for command in commands.split_inclusive(|byte| *byte == b'\\') {
+            out.write_all(b"\x1bPtmux;")?;
+            for part in command.split_inclusive(|byte| *byte == 0x1b) {
+                out.write_all(part)?;
+                if part.last() == Some(&0x1b) {
+                    out.write_all(b"\x1b")?;
+                }
             }
+            out.write_all(b"\x1b\\")?;
         }
-        out.write_all(b"\x1b\\")?;
     } else {
         out.write_all(commands)?;
     }
@@ -204,7 +208,7 @@ mod tests {
         write_queries(&mut out, true).unwrap();
         assert_eq!(
             out,
-            b"\x1b]11;?\x1b\\\x1bPtmux;\x1b\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\x1b\\\x1b\x1b[c\x1b\\"
+            b"\x1b]11;?\x1b\\\x1bPtmux;\x1b\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\x1b\\\x1b\\\x1bPtmux;\x1b\x1b[c\x1b\\"
         );
 
         // Captured from iTerm2 through tmux with allow-passthrough on.
@@ -325,7 +329,7 @@ mod tests {
         write_commands(&mut out, commands, true).unwrap();
         assert_eq!(
             out,
-            b"\x1bPtmux;\x1b\x1b_Gi=31;AAAA\x1b\x1b\\\x1b\x1b_Ga=p,i=31\x1b\x1b\\\x1b\\"
+            b"\x1bPtmux;\x1b\x1b_Gi=31;AAAA\x1b\x1b\\\x1b\\\x1bPtmux;\x1b\x1b_Ga=p,i=31\x1b\x1b\\\x1b\\"
         );
         out.clear();
         write_commands(&mut out, commands, false).unwrap();
@@ -333,6 +337,77 @@ mod tests {
         out.clear();
         write_commands(&mut out, b"", true).unwrap();
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn large_image_upload_keeps_each_command_in_its_own_passthrough() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        // Preserve the real Read result shape, using public slide pixels instead of a terminal capture.
+        let fixture = include_str!("../tests/fixtures/claude-read-image.jsonl");
+        let record: serde_json::Value =
+            serde_json::from_str(fixture.lines().nth(1).unwrap()).unwrap();
+        let pointer = "/message/content/0/content/0/source/data";
+        let bytes = STANDARD
+            .decode(record.pointer(pointer).unwrap().as_str().unwrap())
+            .unwrap();
+        let slide = image::load_from_memory(&bytes).unwrap();
+        let mut tall = slide
+            .resize_exact(1353, 2000, image::imageops::FilterType::Triangle)
+            .to_rgb8();
+        // Low-bit texture makes the slide's upload large enough to exercise transport framing.
+        let mut texture = 1_u32;
+        for byte in tall.as_mut() {
+            texture ^= texture << 13;
+            texture ^= texture >> 17;
+            texture ^= texture << 5;
+            *byte = (*byte & !3) | (texture as u8 & 3);
+        }
+        let mut png = std::io::Cursor::new(Vec::new());
+        use image::ImageEncoder;
+        image::codecs::png::PngEncoder::new_with_quality(
+            &mut png,
+            image::codecs::png::CompressionType::Fast,
+            image::codecs::png::FilterType::NoFilter,
+        )
+        .write_image(tall.as_raw(), 1353, 2000, image::ExtendedColorType::Rgb8)
+        .unwrap();
+        let encoded = STANDARD.encode(png.into_inner());
+        let chunks: Vec<_> = encoded.as_bytes().chunks(4096).collect();
+        let mut commands = Vec::new();
+        for (index, chunk) in chunks.iter().enumerate() {
+            let more = u8::from(index + 1 < chunks.len());
+            let control = if index == 0 {
+                format!("a=t,f=100,t=d,i=1,q=2,m={more}")
+            } else {
+                format!("m={more}")
+            };
+            commands.extend_from_slice(format!("\x1b_G{control};").as_bytes());
+            commands.extend_from_slice(chunk);
+            commands.extend_from_slice(b"\x1b\\");
+        }
+        commands.extend_from_slice(b"\x1b_Ga=p,U=1,i=1,p=1,c=194,r=96,q=2\x1b\\");
+        assert!(
+            commands.len() > 1_048_576,
+            "fixture must exceed tmux's input buffer: {}",
+            commands.len()
+        );
+        let mut out = Vec::new();
+        write_commands(&mut out, &commands, true).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let mut recovered = Vec::new();
+        for envelope in text.split("\x1bPtmux;").skip(1) {
+            assert!(
+                envelope.len() < 8192,
+                "one envelope contains multiple upload chunks: {}",
+                envelope.len()
+            );
+            let command = envelope
+                .strip_suffix("\x1b\\")
+                .unwrap()
+                .replace("\x1b\x1b", "\x1b");
+            recovered.extend_from_slice(command.as_bytes());
+        }
+        assert_eq!(recovered, commands);
     }
 
     #[test]
