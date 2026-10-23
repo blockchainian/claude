@@ -627,6 +627,7 @@ fn normalize_function_result(text: &str) -> ToolResult {
         .unwrap_or_else(|| Value::String(text.to_owned()));
     let error = tool::result_state(text, &Value::Null, structured["isError"] == true).is_error;
     ToolResult {
+        source: None,
         content,
         structured,
         error,
@@ -637,6 +638,7 @@ fn normalize_mcp_result(item: &Value) -> Option<ToolResult> {
     let result = item.get("result").filter(|result| !result.is_null());
     let Some(result) = result else {
         return item["error"]["message"].as_str().map(|text| ToolResult {
+            source: None,
             content: text.into(),
             structured: Value::Null,
             error: tool::result_state(text, item, true).is_error,
@@ -648,6 +650,7 @@ fn normalize_mcp_result(item: &Value) -> Option<ToolResult> {
             .map(str::to_owned)
             .unwrap_or_else(|| result.to_string());
         return Some(ToolResult {
+            source: None,
             content: text.clone().into(),
             structured: Value::Null,
             error: tool::result_state(&text, item, false).is_error,
@@ -679,6 +682,7 @@ fn normalize_mcp_result(item: &Value) -> Option<ToolResult> {
     };
     let text = content_text(&content).unwrap_or_default();
     Some(ToolResult {
+        source: None,
         content,
         structured,
         error: tool::result_state(&text, item, result["isError"] == true).is_error,
@@ -769,16 +773,26 @@ fn result_section(text: &str) -> Section {
     text_section("output", text)
 }
 
-fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
+fn completed_call(
+    item: &Value,
+    command: Option<String>,
+    record: Option<&crate::event::SourceRecord>,
+) -> ToolCall {
     let item_type = item["type"].as_str().unwrap();
-    let normalized = (item_type == "McpToolCall")
+    let mut normalized = (item_type == "McpToolCall")
         .then(|| normalize_mcp_result(item))
         .flatten();
+    if let Some(result) = &mut normalized {
+        result.source = record
+            .cloned()
+            .map(|record| (record, "/payload/item/result/content".into()));
+    }
     let (name, arguments, output) = match item_type {
         "CommandExecution" => {
             let arguments = serde_json::json!({"command": command.unwrap()});
             let output = item["aggregated_output"].as_str().and_then(|text| {
                 let result = ToolResult {
+                    source: None,
                     content: text.into(),
                     structured: Value::Null,
                     error: tool::result_state("", item, false).is_error,
@@ -909,7 +923,10 @@ fn item_time(payload: &Value, key: &str) -> io::Result<DateTime<Utc>> {
     })
 }
 
-fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
+fn completed_tool(
+    record: &Value,
+    source: Option<&crate::event::SourceRecord>,
+) -> io::Result<Option<Event>> {
     let payload = &record["payload"];
     if record["type"] != "event_msg" || payload["type"] != "item_completed" {
         return Ok(None);
@@ -995,7 +1012,7 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         })?,
         None => ended_at,
     };
-    let call = completed_call(item, command_text);
+    let call = completed_call(item, command_text, source);
     let body = call.summary.clone();
     let paths = if item_type == "FileChange" && !call.detail_left().is_empty() {
         let mut offset = call.detail_left().len() + 1;
@@ -2261,10 +2278,10 @@ fn events_with_context<'a>(
             payload["item"]["type"].as_str(),
             Some("SubAgentActivity" | "CollabAgentToolCall")
         ) {
-            completed_tool(record)?;
+            completed_tool(record, Some(&reference(offset)))?;
             return Ok(true);
         }
-        if let Some(mut event) = completed_tool(record)? {
+        if let Some(mut event) = completed_tool(record, Some(&reference(offset)))? {
             event.turn = turns.at(offset);
             event.source = Some(source(record, offset));
             event.source_records = source_records;
@@ -2584,6 +2601,26 @@ fn events_with_context<'a>(
 }
 #[cfg(test)]
 mod tests {
+    fn completed_tool(record: &Value) -> std::io::Result<Option<Event>> {
+        super::completed_tool(
+            record,
+            Some(&crate::event::SourceRecord {
+                path: "fixture.jsonl".into(),
+                offset: 0,
+            }),
+        )
+    }
+    fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
+        super::completed_call(
+            item,
+            command,
+            Some(&crate::event::SourceRecord {
+                path: "fixture.jsonl".into(),
+                offset: 0,
+            }),
+        )
+    }
+
     #[test]
     fn turn_groups_mark_a_page_without_the_prompt_as_partial() {
         let records: Vec<_> = include_str!("../../../tests/fixtures/codex-rollout.jsonl")
@@ -2936,7 +2973,8 @@ mod tests {
         assert_eq!(actual, rows[1..]);
         assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&update.events[0].raw_text().unwrap()).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&update.events[0].raw_text().unwrap())
+                .unwrap(),
             rows[0]
         );
     }
@@ -3494,6 +3532,27 @@ mod tests {
     }
 
     #[test]
+    fn inline_image_pointer_resolves_captured_mcp_record() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/mcp-codex/image.json");
+        let record: Value = serde_json::from_reader(std::fs::File::open(&path).unwrap()).unwrap();
+        let entries = events(&path, &[(0, record.clone())], usize::MAX).unwrap();
+        let output = entries[0].1.calls[0].output.as_ref().unwrap();
+        let Section::Image(image) = &output[1] else {
+            panic!("expected image")
+        };
+        assert_eq!(image.media_type, "image/png");
+        assert_eq!(image.record, crate::event::SourceRecord { path, offset: 0 });
+        assert_eq!(image.pointer, "/payload/item/result/content/1/data");
+        assert_eq!(
+            record.pointer(&image.pointer).unwrap().as_str().unwrap(),
+            record["payload"]["item"]["result"]["content"][1]["data"]
+                .as_str()
+                .unwrap()
+        );
+    }
+
+    #[test]
     fn mcp_content_blocks_and_structured_results_are_retained() {
         for source in [
             include_str!("../../../tests/fixtures/mcp-codex/image.json"),
@@ -3512,14 +3571,14 @@ mod tests {
                 if text == result["content"][0]["text"].as_str().unwrap())
             );
             match &call.output.as_ref().unwrap()[1] {
-                Section::Placeholder(text) => {
-                    let mime = if record["payload"]["item"]["server"] == "cua_repl" {
-                        "[image image/png]"
-                    } else {
-                        "[resource text/html]"
-                    };
-                    assert_eq!(text, mime);
+                Section::Image(image) => {
+                    assert_eq!(image.media_type, "image/png");
+                    assert_eq!(
+                        record.pointer(&image.pointer),
+                        Some(&result["content"][1]["data"])
+                    );
                 }
+                Section::Placeholder(text) => assert_eq!(text, "[resource text/html]"),
                 Section::Structured { label, text } => {
                     assert_eq!(label, "output");
                     assert_eq!(

@@ -4,7 +4,7 @@ pub(crate) mod shell_summary;
 
 use shell_output::{Stream, sections as shell_output_sections};
 
-use crate::event::{Section, ToolCall};
+use crate::event::{ImageBlock, Section, SourceRecord, ToolCall};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -20,7 +20,10 @@ pub(crate) fn json_input(value: &Value) -> Vec<Section> {
 }
 
 /// Decode MCP and Anthropic content blocks without exposing binary payloads.
-pub(crate) fn mcp_content(content: &Value) -> Vec<Section> {
+pub(crate) fn mcp_content(
+    content: &Value,
+    source: Option<&(SourceRecord, String)>,
+) -> Vec<Section> {
     if let Some(text) = content.as_str() {
         return if text.is_empty() {
             Vec::new()
@@ -35,7 +38,8 @@ pub(crate) fn mcp_content(content: &Value) -> Vec<Section> {
         .as_array()
         .into_iter()
         .flatten()
-        .map(|block| {
+        .enumerate()
+        .map(|(index, block)| {
             if let Some(text) = block["text"].as_str().filter(|_| block["type"] == "text") {
                 return Section::Text {
                     label: "output".into(),
@@ -47,6 +51,21 @@ pub(crate) fn mcp_content(content: &Value) -> Vec<Section> {
                 .as_str()
                 .or_else(|| block["source"]["media_type"].as_str())
                 .or_else(|| block["resource"]["mimeType"].as_str());
+            if kind == "image"
+                && let Some((record, pointer)) = source
+                && let Some(mime) = mime
+            {
+                let data = if block["source"]["data"].is_string() {
+                    "source/data"
+                } else {
+                    "data"
+                };
+                return Section::Image(ImageBlock {
+                    media_type: mime.into(),
+                    record: record.clone(),
+                    pointer: format!("{pointer}/{index}/{data}"),
+                });
+            }
             Section::Placeholder(match mime {
                 Some(mime) => format!("[{kind} {mime}]"),
                 None => format!("[{kind}]"),
@@ -131,6 +150,8 @@ pub(crate) struct ToolData<'a> {
 }
 
 pub(crate) struct ToolResult {
+    /// The transcript record and JSON pointer of the content array.
+    pub source: Option<(SourceRecord, String)>,
     pub content: Value,
     pub structured: Value,
     pub error: bool,
@@ -861,6 +882,7 @@ pub(crate) fn text_output(
         Value::Null
     };
     let result = ToolResult {
+        source: None,
         content,
         structured,
         error,
@@ -885,7 +907,7 @@ fn raw_output(result: &ToolResult) -> Vec<Section> {
     {
         content = text.split_once('\n').map_or("", |(_, body)| body).into();
     }
-    mcp_content(&content)
+    mcp_content(&content, result.source.as_ref())
         .into_iter()
         .map(|section| match section {
             Section::Text { label, text } if serde_json::from_str::<Value>(&text).is_ok() => {
@@ -948,7 +970,7 @@ fn wait_output(data: &ToolData<'_>) -> Option<Body> {
             .map(str::to_owned)
             .unwrap_or_else(|| result.text())
     };
-    Some(Body::Sections(mcp_content(&Value::String(text))))
+    Some(Body::Sections(mcp_content(&Value::String(text), None)))
 }
 fn questions_output(data: &ToolData<'_>) -> Option<Body> {
     let result = data.result?;
@@ -970,10 +992,11 @@ fn read_output(data: &ToolData<'_>) -> Option<Body> {
     }
     let value = &result.structured;
     if value["type"] == "image" {
-        Some(Body::Sections(vec![Section::Placeholder(format!(
-            "[image {}]",
-            value["file"]["type"].as_str().unwrap_or("unknown")
-        ))]))
+        // Use the message copy so Read and MCP images share the same record pointer.
+        Some(Body::Sections(mcp_content(
+            &result.content,
+            result.source.as_ref(),
+        )))
     } else {
         Some(Body::Sections(vec![file_section(
             "output",
@@ -1080,7 +1103,7 @@ fn mcp_markdown_output(data: &ToolData<'_>) -> Option<Body> {
         return None;
     }
     Some(Body::Sections(
-        mcp_content(&result.content)
+        mcp_content(&result.content, result.source.as_ref())
             .into_iter()
             .map(|section| match section {
                 Section::Text { label, text } => Section::Markdown { label, text },
@@ -1748,7 +1771,7 @@ mod tests {
         .unwrap();
         let mut content = record["message"]["content"][0]["content"].clone();
         content = serde_json::Value::String(content.as_str().unwrap().chars().take(0).collect());
-        assert!(super::mcp_content(&content).is_empty());
+        assert!(super::mcp_content(&content, None).is_empty());
     }
 
     #[test]
@@ -1763,6 +1786,7 @@ mod tests {
             .unwrap();
         let content = &records[1]["message"]["content"][0]["content"];
         let result = super::ToolResult {
+            source: None,
             content: content.clone(),
             structured: serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap(),
             error: false,
@@ -1821,6 +1845,7 @@ mod tests {
         let input = &records[0]["message"]["content"][0]["input"];
         let content = &records[1]["message"]["content"][0]["content"];
         let mut result = super::ToolResult {
+            source: None,
             content: content.clone(),
             structured: serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap(),
             error: false,
@@ -1877,11 +1902,11 @@ mod tests {
                 .unwrap();
         let image = &record["payload"]["item"]["result"]["content"][1];
         // These types were absent from local transcripts; vary a captured media block.
-        for kind in ["image", "audio", "resource_link", "future_content"] {
+        for kind in ["audio", "resource_link", "future_content"] {
             let mut block = image.clone();
             block["type"] = kind.into();
             assert_eq!(
-                super::mcp_content(&serde_json::Value::Array(vec![block])),
+                super::mcp_content(&serde_json::Value::Array(vec![block]), None),
                 vec![crate::event::Section::Placeholder(format!(
                     "[{kind} image/png]"
                 ))]

@@ -647,6 +647,7 @@ struct Entry {
     labels: Vec<(String, Option<String>)>,
 }
 struct ResultAt {
+    content_pointer: String,
     source_records: Vec<crate::event::SourceRecord>,
     at: DateTime<Utc>,
     sequence: usize,
@@ -715,6 +716,11 @@ fn tool_call(name: &str, input: &serde_json::Value, result: Option<&ResultAt>) -
         .map(|result| tool::result_state(&result.content, &serde_json::Value::Null, result.error));
     let exit_code = state.as_ref().and_then(|state| state.exit_code);
     let normalized = result.map(|result| ToolResult {
+        source: result
+            .source_records
+            .first()
+            .cloned()
+            .map(|record| (record, result.content_pointer.clone())),
         content: result.raw_content.clone(),
         structured: normalize_result(if result.value.is_null() && name.starts_with("mcp__") {
             &result.raw_content
@@ -844,13 +850,14 @@ impl EventReader {
             Some("user") => {
                 let entry_count = self.entries.len();
                 if let Some(blocks) = content.as_array() {
-                    for block in blocks {
+                    for (index, block) in blocks.iter().enumerate() {
                         if block["type"] == "tool_result"
                             && let Some(id) = block["tool_use_id"].as_str()
                         {
                             let source_records = self.source_records();
                             let content = result_content(&block["content"]);
                             let result = self.results.entry(id.to_owned()).or_insert(ResultAt {
+                                content_pointer: format!("/message/content/{index}/content"),
                                 source_records: Vec::new(),
                                 at,
                                 sequence: self.sequence,
@@ -969,6 +976,7 @@ impl EventReader {
                                     let content = crate::event::agent::Content::Encrypted.text();
                                     let source_records = self.source_records();
                                     self.results.entry(id.to_owned()).or_insert(ResultAt {
+                                        content_pointer: String::new(),
                                         source_records,
                                         at,
                                         sequence: self.sequence,
@@ -1790,32 +1798,106 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn mcp_real_image_result_keeps_placeholder_and_text() {
+    fn inline_image_pointers_resolve_captured_records() {
+        use std::io::{BufRead, Seek};
+        for fixture in [
+            "claude-read-image.jsonl",
+            "mcp-claude/image.jsonl",
+            "claude-tool-calls.jsonl",
+        ] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures")
+                .join(fixture);
+            let events = super::tail(&path, usize::MAX).unwrap();
+            let mut reader = super::Reader::new(path.clone(), false);
+            assert_eq!(reader.refresh(usize::MAX).unwrap().events, events);
+            let images: Vec<_> = events
+                .iter()
+                .flat_map(|event| &event.calls)
+                .flat_map(|call| call.output.iter().flatten())
+                .filter_map(|section| match section {
+                    Section::Image(image) => Some(image),
+                    _ => None,
+                })
+                .collect();
+            if fixture == "claude-tool-calls.jsonl" {
+                assert!(images.is_empty());
+                continue;
+            }
+            assert!(!images.is_empty(), "{fixture}");
+            for image in images {
+                assert_eq!(image.record.path, path);
+                assert_eq!(
+                    image.media_type,
+                    if fixture == "claude-read-image.jsonl" {
+                        "image/png"
+                    } else {
+                        "image/jpeg"
+                    }
+                );
+                let mut reader = std::io::BufReader::new(std::fs::File::open(&path).unwrap());
+                reader
+                    .seek(std::io::SeekFrom::Start(image.record.offset))
+                    .unwrap();
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let record: Value = serde_json::from_str(&line).unwrap();
+                let data = record.pointer(&image.pointer).unwrap().as_str().unwrap();
+                let block = &record["message"]["content"][0]["content"];
+                let original = block
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|block| block["type"] == "image")
+                    .unwrap();
+                assert_eq!(data, original["source"]["data"].as_str().unwrap());
+                if fixture == "claude-read-image.jsonl" {
+                    use base64::Engine;
+                    let bytes = base64::engine::general_purpose::STANDARD.decode(data).unwrap();
+                    assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+                }
+                assert!(image.pointer.starts_with("/message/content/0/content/"));
+            }
+        }
+    }
+
+    #[test]
+    fn mcp_real_image_result_keeps_image_and_text() {
         let records: Vec<Value> = include_str!("../../../tests/fixtures/mcp-claude/image.jsonl")
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
         let content = records[1]["message"]["content"][0]["content"].clone();
-        let expected: Vec<_> = content
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|block| {
-                if block["type"] == "image" {
-                    Section::Placeholder(format!(
-                        "[image {}]",
-                        block["source"]["media_type"].as_str().unwrap()
-                    ))
-                } else {
-                    text_section("output", block["text"].as_str().unwrap())
-                }
-            })
-            .collect();
+        // The message copy exists even when toolUseResult is absent.
         for copy in [records[1]["toolUseResult"].clone(), Value::Null] {
             let mut records = records.clone();
             records[1]["toolUseResult"] = copy;
+            let result_offset = records[0].to_string().len() as u64 + 1;
             let events = events_from(records);
-            assert_eq!(events[0].calls[0].output, Some(expected.clone()));
+            let output = events[0].calls[0].output.as_ref().unwrap();
+            assert_eq!(output.len(), content.as_array().unwrap().len());
+            for (index, block) in content.as_array().unwrap().iter().enumerate() {
+                if block["type"] == "image" {
+                    let Section::Image(image) = &output[index] else {
+                        panic!("expected image")
+                    };
+                    assert_eq!(
+                        image.media_type,
+                        block["source"]["media_type"].as_str().unwrap()
+                    );
+                    assert_eq!(
+                        image.pointer,
+                        format!("/message/content/0/content/{index}/source/data")
+                    );
+                    assert!(events[0].source_records.contains(&image.record));
+                    assert_eq!(image.record.offset, result_offset);
+                } else {
+                    assert_eq!(
+                        output[index],
+                        text_section("output", block["text"].as_str().unwrap())
+                    );
+                }
+            }
         }
     }
 
