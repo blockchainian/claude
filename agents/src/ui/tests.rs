@@ -3936,7 +3936,9 @@ mod task_details_header {
         view.set_sessions(vec![ready.clone()], false);
         view.set_sessions(vec![ready.clone(), waiting.clone()], false);
         assert_eq!(view.attention_selection, Some(session_key("waiting")));
-        assert!(prompt_rules(&view, "─").is_empty());
+        for light in ["─", "╴", "╶", "┬", "┴", "┼", "├", "┤"] {
+            assert!(prompt_rules(&view, light).is_empty(), "{light}");
+        }
         let rules = prompt_rules(&view, "━");
         assert!(!rules.is_empty());
         for style in rules {

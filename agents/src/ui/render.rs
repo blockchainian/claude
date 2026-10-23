@@ -638,26 +638,12 @@ impl View {
             layout.event_detail_top_rule,
             layout.footer_rule,
         ];
-        // A prompt the attention queue took over is framed by heavy rules in the attention color.
-        let attention_prompt = self.attention_selection.is_some()
-            && self.attention_selection.as_ref() == self.selected_id();
         for (index, border) in borders.iter().enumerate() {
             if !borders[..index].contains(border)
                 && *border != row(layout.header, 1, 1)
                 && !(layout.kind == ScreenLayout::Small && *border == layout.gap)
             {
-                if attention_prompt && index < 2 {
-                    line(
-                        Span::styled(
-                            "━".repeat(usize::from(border.width)),
-                            style::attention_title_style(),
-                        ),
-                        *border,
-                        buf,
-                    );
-                } else {
-                    rule(*border, buf);
-                }
+                rule(*border, buf);
             }
         }
         let task_details = layout.task_details;
@@ -713,6 +699,15 @@ impl View {
             separators.push((x, layout.event_panel.y, layout.event_panel.bottom()));
         }
         join_separators(&separators, area, buf);
+        // A prompt the attention queue took over is framed by heavy rules in the attention
+        // color, drawn after every label and joint on those rules.
+        if self.attention_selection.is_some()
+            && self.attention_selection.as_ref() == self.selected_id()
+        {
+            for rule in [layout.prompt_top_rule, layout.prompt_bottom_rule] {
+                heavy_rule(rule, buf);
+            }
+        }
         self.render_controls(task_details, buf);
         if let Some(dialog) = &self.confirm_dialog {
             self.render_confirm_dialog(dialog, layout.top, buf);
@@ -2181,6 +2176,26 @@ fn centered_rule_label(title: Line<'_>, rule: Rect) -> (Line<'_>, Rect) {
 /// Draws a dim rule across `area`'s first row.
 fn rule(area: Rect, buf: &mut Buffer) {
     line("─".repeat(usize::from(area.width)).dim(), area, buf);
+}
+
+/// Turns the light line pieces of a rule heavy and colors them for attention, leaving its labels.
+fn heavy_rule(area: Rect, buf: &mut Buffer) {
+    let style = Style::default().not_dim().patch(style::attention_title_style());
+    for x in area.left()..area.right() {
+        let cell = &mut buf[(x, area.y)];
+        let heavy = match cell.symbol() {
+            "─" => "━",
+            "╴" => "╸",
+            "╶" => "╺",
+            "┬" => "┯",
+            "┴" => "┷",
+            "┼" => "┿",
+            "├" => "┝",
+            "┤" => "┥",
+            _ => continue,
+        };
+        cell.set_symbol(heavy).set_style(style);
+    }
 }
 
 /// Draws end labels with a half line toward their corner and a space toward the center,
