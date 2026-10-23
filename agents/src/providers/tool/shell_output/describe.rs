@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::sed::description as sed_description;
 use super::shape::{Kind, LineRange, Outcome, OutputShape, Pattern, Strength};
 use super::{Stream, shell_summary, syntax};
@@ -412,46 +410,13 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
     ]
 });
 
-#[derive(Clone)]
-pub(super) enum Size {
-    Silent,
-    Exact(usize),
-    AtMost(usize),
-    Unknown,
-}
-#[derive(Clone)]
-pub(super) struct Segment {
-    pub(super) size: Size,
-    pub(super) lines: Option<&'static LazyLock<Regex>>,
-    pub(super) kind: Kind,
-    pub(super) blank: bool,
-    pub(super) known: Option<String>,
-    pub(super) no_match_exit: Option<i64>,
-    pub(super) beginning: bool,
-    pub(super) cat: bool,
-}
-impl Segment {
-    pub(super) fn unknown() -> Self {
-        Self {
-            size: Size::Unknown,
-            lines: None,
-            kind: Kind::Plain,
-            blank: false,
-            known: None,
-            no_match_exit: None,
-            beginning: false,
-            cat: false,
-        }
-    }
-}
-
 const SILENT: LineRange = LineRange {
     min: 0,
     max: Some(0),
 };
 const UNKNOWN: LineRange = LineRange { min: 0, max: None };
 
-/// Shared command facts for the constraint path and the Segment adapter.
+/// Command facts used to construct output constraints.
 pub(super) struct Description {
     pub(super) range: LineRange,
     pub(super) every: Option<&'static LazyLock<Regex>>,
@@ -512,30 +477,6 @@ impl Description {
             Failure::NoMatch
         } else {
             Failure::Unknown
-        }
-    }
-}
-
-impl From<Description> for Segment {
-    fn from(description: Description) -> Self {
-        let size = match description.range {
-            LineRange { max: Some(0), .. } => Size::Silent,
-            LineRange {
-                min,
-                max: Some(max),
-            } if min == max => Size::Exact(max),
-            LineRange { max: Some(max), .. } => Size::AtMost(max),
-            LineRange { max: None, .. } => Size::Unknown,
-        };
-        Self {
-            size,
-            lines: description.every,
-            kind: description.kind,
-            blank: description.blank,
-            known: description.known,
-            no_match_exit: description.no_match_exit,
-            beginning: description.beginning,
-            cat: description.cat,
         }
     }
 }
@@ -747,10 +688,6 @@ fn description(words: &[String], filter: bool) -> Option<(Description, bool)> {
     None
 }
 
-fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
-    description(words, filter).map(|(output, verbatim)| (output.into(), verbatim))
-}
-
 // Strip redirections before passing literal shell words to the shared pipeline
 // parser. Quotes are preserved; expansions remain the parser's responsibility.
 fn redirects(source: &str) -> Option<(String, Vec<usize>, bool, usize)> {
@@ -854,7 +791,7 @@ impl Pipeline {
     }
 }
 
-fn pipeline_description(source: &str, programs: &mut Vec<String>) -> Pipeline {
+fn pipeline_description(source: &str) -> Pipeline {
     let Some((literal, silent, merged, last)) = redirects(source) else {
         return Pipeline::unknown();
     };
@@ -874,14 +811,6 @@ fn pipeline_description(source: &str, programs: &mut Vec<String>) -> Pipeline {
     let Some(stages) = shell_summary::pipeline_words(&literal) else {
         return Pipeline::unknown();
     };
-    for stage in &stages {
-        if let Some(program) = stage
-            .first()
-            .and_then(|word| std::path::Path::new(word).file_name())
-        {
-            programs.push(program.to_string_lossy().into_owned());
-        }
-    }
     let upstream_failure = stages.len() > 1;
     let mut stages = stages.iter();
     let Some(first) = stages.next() else {
@@ -963,12 +892,8 @@ fn pipeline_description(source: &str, programs: &mut Vec<String>) -> Pipeline {
     }
 }
 
-pub(super) fn pipeline(source: &str, programs: &mut Vec<String>) -> Segment {
-    pipeline_description(source, programs).output.into()
-}
-
 fn pipeline_shape(source: &str, stream: &Stream, success: bool) -> OutputShape {
-    let mut pipeline = pipeline_description(source, &mut Vec::new());
+    let mut pipeline = pipeline_description(source);
     let failure_outcome = |failure: Failure| {
         if matches!(failure, Failure::Cat(_)) {
             return failure.outcome(stream);
@@ -1023,7 +948,7 @@ pub fn shapes(command: &str, stream: &Stream) -> Option<Vec<OutputShape>> {
             let mut shape = pipeline_shape(
                 &command[range],
                 stream,
-                stream.exit_code == Some(0) && index >= final_group,
+                stream.exit_code == Some(0) && !stream.is_error && index >= final_group,
             );
             shape.conditional = separator == Separator::And;
             if shape.conditional && index < final_group {
@@ -1228,7 +1153,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn cat_failure_has_no_stdout_lines() {
+    fn cat_failure_uses_known_diagnostic_when_merged() {
         for merged_stderr in [false, true] {
             let shape = pipeline_shape(
                 "cat missing.py",

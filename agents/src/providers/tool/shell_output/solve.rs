@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::lines::Line;
 use super::shape::{OutputShape, Pattern, Strength};
 use std::ops::BitAnd;

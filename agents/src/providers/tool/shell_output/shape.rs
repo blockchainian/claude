@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use syntect::parsing::Regex;
 
 /// The possible outputs of one command, with success first.

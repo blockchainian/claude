@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::Stream;
 use std::ops::Range;
 
@@ -88,6 +86,32 @@ pub fn lines(text: &str, stream: &Stream, programs: &[&str], known: &[&str]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merged_diagnostics_are_zero_length_gaps_except_known_failures() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/shell-output-boundaries.json"
+        ))
+        .unwrap();
+        let text = fixture["8"]["output"].as_str().unwrap();
+        let stream = Stream {
+            merged_stderr: true,
+            ..Stream::default()
+        };
+        let known = "cat: agents/.cargo/config.toml: No such file or directory\n";
+        assert!(matches!(
+            lines(text, &stream, &["cat"], &[])[61],
+            Line::Gap { hidden: Some(0) }
+        ));
+        assert!(matches!(
+            lines(text, &stream, &["cat"], &[known])[61],
+            Line::Text(_)
+        ));
+        assert!(matches!(
+            lines(text, &Stream::default(), &["cat"], &[])[61],
+            Line::Text(_)
+        ));
+    }
 
     #[test]
     fn records_original_byte_ranges_including_unterminated_lines() {

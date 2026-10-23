@@ -891,3 +891,26 @@ fn shell_output_inconsistent_description_invalidates_call() {
         .is_empty()
     );
 }
+
+#[test]
+fn shell_output_boundary_matches_line_contents() {
+    for ending in ["\n", "\r\n"] {
+        let text = format!("src/a.rs{ending}fn main() {{}}{ending}");
+        assert_eq!(
+            actual("rg --files src; head -n 1 a.rs", &text, Stream::default()),
+            vec![Span {
+                start: 1,
+                end: 2,
+                language: "rs".into()
+            }]
+        );
+    }
+    assert!(
+        actual(
+            "rg --files src; head -n 1 a.rs",
+            "src/a.rs \nfn main() {}\n",
+            Stream::default()
+        )
+        .is_empty()
+    );
+}
