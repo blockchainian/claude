@@ -3903,11 +3903,58 @@ mod task_details_header {
                 .find(|&x| buf[(x, y)].symbol() == "H")
                 .unwrap();
             assert_eq!(buf[(x, y)].fg, color);
+            assert!(buf[(x, y)].modifier.contains(Modifier::BOLD));
             assert!(!buf[(x, y)].modifier.contains(Modifier::DIM));
             let marker = (x..prompt.right())
                 .find(|&x| buf[(x, y)].symbol() == PROMPT_MARKER)
                 .unwrap();
             assert_ne!(buf[(marker, y)].fg, color);
+        }
+    }
+
+    #[test]
+    fn prompt_rules_take_the_attention_color_only_when_attention_takes_the_prompt() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        let ready = session("ready", "Ready task", SessionStatus::Ready, 0);
+        let waiting = session("waiting", "Waiting task", SessionStatus::NeedsInput, 1);
+        let prompt_rules = |view: &View| {
+            let (buf, _) = rule(view, Utc::now());
+            let layout = view.center_layout(buf.area);
+            [layout.prompt_top_rule, layout.prompt_bottom_rule]
+                .into_iter()
+                .flat_map(|rule| {
+                    (rule.x..rule.right())
+                        .filter(|&x| buf[(x, rule.y)].symbol() == "─")
+                        .map(|x| buf[(x, rule.y)].style())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let attention = style::attention_title_style();
+
+        let mut view = test_view(Grouping::Project, true);
+        view.set_sessions(vec![ready.clone()], false);
+        view.set_sessions(vec![ready.clone(), waiting.clone()], false);
+        assert_eq!(view.attention_selection, Some(session_key("waiting")));
+        let rules = prompt_rules(&view);
+        assert!(!rules.is_empty());
+        for style in rules {
+            assert_eq!(style.fg, attention.fg);
+            assert!(!style.add_modifier.contains(Modifier::DIM));
+        }
+
+        let mut view = test_view(Grouping::Project, true);
+        view.set_sessions(vec![ready, waiting], false);
+        let index = view
+            .rows
+            .iter()
+            .position(|row| row.id == session_key("waiting"))
+            .unwrap();
+        view.select(index);
+        assert_eq!(view.selected_id(), Some(&session_key("waiting")));
+        assert!(view.attention_selection.is_none());
+        for style in prompt_rules(&view) {
+            assert!(style.add_modifier.contains(Modifier::DIM));
         }
     }
 

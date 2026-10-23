@@ -539,8 +539,9 @@ impl View {
                 layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
                 buf,
                 &self.input_label(),
+                // The name matches the task details title.
                 self.selected_id()
-                    .map_or_else(Style::default, |id| self.title_style(id)),
+                    .map_or_else(Style::default, |id| self.title_style(id).bold()),
                 self.input_disabled(),
                 self.prompt_focused(),
             );
@@ -637,12 +638,26 @@ impl View {
             layout.event_detail_top_rule,
             layout.footer_rule,
         ];
+        // A prompt the attention queue took over is framed in the attention color.
+        let attention_prompt = self.attention_selection.is_some()
+            && self.attention_selection.as_ref() == self.selected_id();
         for (index, border) in borders.iter().enumerate() {
             if !borders[..index].contains(border)
                 && *border != row(layout.header, 1, 1)
                 && !(layout.kind == ScreenLayout::Small && *border == layout.gap)
             {
-                rule(*border, buf);
+                if attention_prompt && index < 2 {
+                    line(
+                        Span::styled(
+                            "─".repeat(usize::from(border.width)),
+                            style::attention_title_style(),
+                        ),
+                        *border,
+                        buf,
+                    );
+                } else {
+                    rule(*border, buf);
+                }
             }
         }
         let task_details = layout.task_details;
