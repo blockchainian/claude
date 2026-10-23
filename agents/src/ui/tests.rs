@@ -52,6 +52,9 @@ mod task_details_footer;
 #[path = "thread_clock_tests.rs"]
 mod thread_clock_tests;
 
+#[path = "time_alignment_tests.rs"]
+mod time_alignment_tests;
+
 use super::*;
 
 #[path = "ask_question_tests.rs"]
@@ -3397,8 +3400,8 @@ fn task_details_activity_and_message_are_independent() {
             .to_owned()
     };
     let rendered = render(&view);
-    assert!(rendered.contains("             Last activity        7s ago"));
-    assert!(rendered.contains("                 Update           1h ago"));
+    assert!(rendered.contains("             Last activity       7s ago"));
+    assert!(rendered.contains("                 Update          1h ago"));
     assert!(rendered.find("Run checks").unwrap() < rendered.find("Update").unwrap());
     assert!(rendered.contains("Checking the project"));
     assert_eq!(
@@ -3415,7 +3418,7 @@ fn task_details_activity_and_message_are_independent() {
     row.activity.as_mut().unwrap().label = "Run checks".into();
     row.status = SessionStatus::Ready;
     view.set_sessions(vec![row.clone()], false);
-    assert!(render(&view).contains("             Last activity        7s ago"));
+    assert!(render(&view).contains("             Last activity       7s ago"));
     assert_eq!(
         render(&view),
         include_str!("../../tests/ui_snapshots/task_details_activity_ready.txt")
@@ -3424,8 +3427,8 @@ fn task_details_activity_and_message_are_independent() {
     row.last_message_at = Some(now - Duration::seconds(3));
     view.set_sessions(vec![row.clone()], false);
     let replied = render(&view);
-    assert!(replied.contains("             Last activity        7s ago"));
-    assert!(replied.contains("                 Update           3s ago"));
+    assert!(replied.contains("             Last activity       7s ago"));
+    assert!(replied.contains("                 Update          3s ago"));
     assert_eq!(
         replied,
         include_str!("../../tests/ui_snapshots/task_details_activity_replied.txt")
@@ -3528,7 +3531,7 @@ fn task_details_activity_uses_tool_color() {
     let area = Rect::new(0, 0, 60, 24);
     let mut buf = Buffer::empty(area);
     view.render_task_details(area, &mut buf, now);
-    let header = "                       Last activity                  2m ago";
+    let header = "                       Last activity                 2m ago";
     let y = (0..area.height)
         .find(|y| {
             header
@@ -3571,7 +3574,7 @@ fn task_details_message_uses_model_color_under_markdown() {
     let area = Rect::new(0, 0, 60, 24);
     let mut buf = Buffer::empty(area);
     view.render_task_details(area, &mut buf, now);
-    let header = "                           Update                     2m ago";
+    let header = "                           Update                    2m ago";
     let y = (0..area.height)
         .find(|y| {
             header
@@ -3621,21 +3624,21 @@ fn prompt_header_omits_message_counts_and_clamps_elapsed_time() {
             Some(now - Duration::seconds(45)),
             None,
             1,
-            "                 Prompt              45s",
+            "                 Prompt             45s",
         ),
         (
             SessionStatus::Ready,
             Some(now),
             Some(now - Duration::seconds(1)),
             0,
-            "                 Prompt               0s",
+            "                 Prompt              0s",
         ),
         (
             SessionStatus::Working,
             Some(now + Duration::seconds(1)),
             None,
             0,
-            "                 Prompt               0s",
+            "                 Prompt              0s",
         ),
         (
             SessionStatus::Ready,
@@ -4504,7 +4507,7 @@ fn task_details_background_includes_only_working_subagents() {
         .iter()
         .map(|cell| cell_text(cell.symbol()))
         .collect::<String>();
-    assert!(text.contains("──────────── Worker command ───────── 0s"));
+    assert!(text.contains("──────────── Worker command ──────── 0s╶"));
     assert!(text.contains("Nested agent"));
     assert!(!text.contains("Review files"));
 }
@@ -4928,7 +4931,7 @@ fn task_metadata_drops_rightmost_columns_at_title_limit() {
             "updated at {width}: {text}"
         );
         assert_eq!(
-            buf[(area.x + 2 + title_width - 1, y)].symbol(),
+            buf[(area.x + 2 + title_width - 1 - u16::from(show_status), y)].symbol(),
             "…",
             "title at {width}: {text}"
         );
@@ -5192,6 +5195,10 @@ fn dashboard_event_detail_starts_directly_below_rule() {
     }
 }
 
+fn text_row_has_background_rule(buf: &Buffer, width: u16, y: u16) -> bool {
+    width >= 2 && buf[(width - 2, y)].symbol() == "╶" && buf[(width - 1, y)].symbol() == "─"
+}
+
 #[test]
 fn dashboard_screen_padding_is_one_cell() {
     for width in [100, 149, 150, 200] {
@@ -5222,12 +5229,18 @@ fn dashboard_screen_padding_is_one_cell() {
             // Rules run edge to edge; everything else keeps the padding cell.
             let rule = buf[(0, y)].symbol() == "─";
             assert_eq!(buf[(0, y)].symbol() == "─", rule, "row {y}");
-            assert_eq!(buf[(width - 1, y)].symbol() == "─", rule, "row {y}");
+            let background_rule = width < 150 && text_row_has_background_rule(&buf, width, y);
+            assert_eq!(
+                buf[(width - 1, y)].symbol() == "─",
+                rule || background_rule,
+                "row {y}"
+            );
             if !rule {
                 assert_eq!(buf[(0, y)].symbol(), " ", "row {y}");
                 let right = buf[(width - 1, y)].symbol();
                 assert!(
                     right == " "
+                        || background_rule && right == "─"
                         || (layout.event_panel.y..layout.event_panel.bottom()).contains(&y)
                             && ["┌", "│", "└"].contains(&right),
                     "row {y}: {right}"
@@ -5281,7 +5294,7 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
             if label == "Update" || label == "Prompt" {
                 assert_eq!(
                     (left + 1..right).rfind(|&x| buf[(x, y)].symbol() != " "),
-                    Some(right - 2),
+                    Some(right - 2 - u16::from(width < 150)),
                     "{label} right at {width}"
                 );
             }
@@ -5289,16 +5302,24 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
         let y = (2..35)
             .find(|&y| text(y, left + 1, right).contains("Run checks"))
             .unwrap();
-        assert!(text(y, left + 1, right).trim_end().ends_with("25s"));
+        assert!(
+            text(y, left + 1, right)
+                .trim_end()
+                .ends_with(if width < 150 { "25s╶─" } else { "25s╶" })
+        );
         assert_eq!(
             text(y, left + 1, right).trim_end().chars().count() as u16,
-            right - left - 2,
-            "background time at {width}"
+            right - left - 1,
+            "background rule at {width}"
         );
         // Wrapped bodies, selections and links stay inside the same content bounds.
         for y in 3..view.center_layout(area).task_details.bottom() {
             for x in [left + 1, right - 1] {
-                assert_eq!(buf[(x, y)].symbol(), " ", "padding ({x}, {y}) at {width}");
+                let background_tail = x == right - 1 && ["╶", "─"].contains(&buf[(x, y)].symbol());
+                assert!(
+                    buf[(x, y)].symbol() == " " || background_tail,
+                    "padding ({x}, {y}) at {width}"
+                );
             }
         }
         let viewport = view.viewport.borrow();
@@ -5823,9 +5844,9 @@ fn non_current_event_time_matches_unselected_task_and_task_details_times() {
                 .contains("Update")
         })
         .expect("message header");
-    assert_ne!(task_details[(99, task_details_y)].symbol(), " ");
+    assert_ne!(task_details[(98, task_details_y)].symbol(), " ");
     assert_eq!(
-        task_details[(99, task_details_y)].style(),
+        task_details[(98, task_details_y)].style(),
         task_time.style()
     );
 }

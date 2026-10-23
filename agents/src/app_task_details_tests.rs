@@ -106,7 +106,11 @@ fn app_task_details_groups_and_project_links_follow_panel_rules() {
                 let (x, y) = position(buffer, label);
                 assert_eq!(x, left + (right - left - label.len() as u16) / 2);
                 let actual = row_text(buffer, y, left, right);
-                assert!(actual.ends_with(value), "{width}: {actual:?}");
+                assert!(actual.trim_end().ends_with(value), "{width}: {actual:?}");
+                assert_eq!(
+                    actual.trim_end().len(),
+                    usize::from(right - left - u16::from(width < 150))
+                );
                 assert!(!actual.contains("messages"));
             }
             let pr_x = right - 3 - u16::from(width < 150);
@@ -139,7 +143,12 @@ fn app_task_details_groups_and_project_links_follow_panel_rules() {
             );
 
             let (_, background_y) = position(buffer, "Check files");
-            assert_eq!(row_text(buffer, background_y, right - 5, right), "1h 0m");
+            let time_right = right - u16::from(width < 150);
+            assert_eq!(
+                row_text(buffer, background_y, time_right - 5, time_right),
+                "1h 0m"
+            );
+            assert_eq!(cell_text(buffer, time_right, background_y), "╶");
             for x in pr_x..pr_x + 3 {
                 assert_eq!(click_link(&mut app, MouseEvent {
                     kind: MouseEventKind::Down(MouseButton::Left), column: x, row: status_y, modifiers: KeyModifiers::NONE,

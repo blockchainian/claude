@@ -1372,6 +1372,10 @@ impl View {
         };
         self.viewport.borrow_mut().task_details = area;
         let width = usize::from(area.width.max(1));
+        let layout = ScreenLayout::for_width(buf.area.width);
+        let right_padding = usize::from(layout != ScreenLayout::Large);
+        let section_header =
+            |label, value, width| centered_header(label, value, width, right_padding);
         // Sections top to bottom: background, activity, update, prompt and queued
         // messages, needs input, tasks. The title sits on the rule below the panel.
         let content_top = area.y;
@@ -1411,7 +1415,7 @@ impl View {
         let subagents = self.subagents_for(session).collect::<Vec<_>>();
         if !boxes.is_empty() || !subagents.is_empty() {
             separate_section(&mut items);
-            items.push(Item::Decoration(centered_header(
+            items.push(Item::Decoration(section_header(
                 "Background".dim().into(),
                 Line::default(),
                 width,
@@ -1471,7 +1475,7 @@ impl View {
             separate_section(&mut items);
             let start = items.len() + 1;
             items.extend([
-                Item::Decoration(centered_header(
+                Item::Decoration(section_header(
                     "Last activity".dim().into(),
                     Span::styled(
                         format_relative_time(now, Some(activity.at)),
@@ -1509,7 +1513,7 @@ impl View {
                     Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
             }
             separate_section(&mut items);
-            items.push(Item::Decoration(centered_header(
+            items.push(Item::Decoration(section_header(
                 "Update".dim().into(),
                 header,
                 width,
@@ -1547,9 +1551,9 @@ impl View {
                 .is_none_or(|parent| parent.provider != ProviderId::Codex)
         {
             let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
-                centered_header("Prompt".dim().into(), elapsed.dim().into(), width)
+                section_header("Prompt".dim().into(), elapsed.dim().into(), width)
             } else {
-                centered_header("Prompt".dim().into(), Line::default(), width)
+                section_header("Prompt".dim().into(), Line::default(), width)
             };
             separate_section(&mut items);
             items.push(Item::Decoration(prompt_header));
@@ -1605,7 +1609,7 @@ impl View {
         if session.status == SessionStatus::NeedsInput || needs.is_some() {
             separate_section(&mut items);
             let start = items.len();
-            items.push(Item::Decoration(centered_header(
+            items.push(Item::Decoration(section_header(
                 Span::styled("Needs input", style::attention_title_style()).into(),
                 Line::default(),
                 width,
@@ -1682,7 +1686,7 @@ impl View {
                 .iter()
                 .filter(|(_, status)| *status == SessionStatus::Working)
                 .count();
-            items.push(Item::Decoration(centered_header(
+            items.push(Item::Decoration(section_header(
                 "Tasks".dim().into(),
                 format!("{in_progress}/{}", tasks.len()).dim().into(),
                 width,
@@ -1839,7 +1843,9 @@ impl View {
                 Some((screen_row(start)..screen_row(end), text.to_owned(), label))
             })
             .collect();
-        let content_area = Rect::new(0, 0, area.width, total as u16);
+        // Background rules continue through the padding cell beside the panel.
+        let content_width = area.width + u16::from(area.right() < buf.area.right());
+        let content_area = Rect::new(0, 0, content_width, total as u16);
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
         let mut drawn_links = Vec::new();
@@ -1875,7 +1881,14 @@ impl View {
                 }));
             }
             let height = item.height();
-            let item_area = row(content_area, offset as u16, height as u16);
+            let item_area = row(
+                Rect {
+                    width: area.width,
+                    ..content_area
+                },
+                offset as u16,
+                height as u16,
+            );
             let title_columns = match item {
                 Item::Text(text) | Item::Decoration(text) => {
                     let mut text_area = item_area;
@@ -1900,6 +1913,7 @@ impl View {
                         &session.cwd,
                         now,
                         item_area,
+                        right_padding,
                         &mut content,
                     ))
                 }
@@ -1931,6 +1945,7 @@ impl View {
                         elapsed.as_deref(),
                         body.into_iter().collect(),
                         item_area,
+                        right_padding,
                         &mut content,
                     ))
                 }
@@ -2007,7 +2022,7 @@ impl View {
             offset += height;
         }
         for y in 0..available.min(total - scroll) {
-            for x in 0..area.width {
+            for x in 0..content_width {
                 buf[(area.x + x, area.y + y as u16)] = content[(x, (scroll + y) as u16)].clone();
             }
         }
@@ -2140,17 +2155,24 @@ fn budget_task_details(
 }
 
 /// Centers a section label, fitting its right value into the space after it.
-fn centered_header(label: Line<'static>, value: Line<'static>, width: usize) -> Line<'static> {
+fn centered_header(
+    label: Line<'static>,
+    value: Line<'static>,
+    width: usize,
+    right_padding: usize,
+) -> Line<'static> {
     let label = truncate_line_with_ellipsis_if_overflow(label, width);
     let start = (width - label.width()) / 2;
-    let available = width.saturating_sub(start + label.width() + 1);
+    let value_right = width.saturating_sub(right_padding);
+    let available = value_right.saturating_sub(start + label.width() + 1);
     let value = truncate_line_with_ellipsis_if_overflow(value, available);
     let mut header = Line::from(" ".repeat(start).dim());
     header.spans.extend(label.spans);
     if value.width() > 0 {
-        header
-            .spans
-            .push(" ".repeat(width - header.width() - value.width()).dim());
+        header.spans.push(
+            " ".repeat(value_right - header.width() - value.width())
+                .dim(),
+        );
         header.spans.extend(value.spans);
     }
     header
@@ -2316,6 +2338,7 @@ fn render_background(
     cwd: &std::path::Path,
     now: chrono::DateTime<chrono::Utc>,
     box_area: Rect,
+    right_padding: usize,
     buf: &mut Buffer,
 ) -> Vec<std::ops::Range<u16>> {
     let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
@@ -2333,6 +2356,7 @@ fn render_background(
             })
             .collect(),
         box_area,
+        right_padding,
         buf,
     )
 }
@@ -2342,6 +2366,7 @@ fn render_background_box(
     elapsed: Option<&str>,
     output: Vec<Line<'static>>,
     box_area: Rect,
+    right_padding: usize,
     buf: &mut Buffer,
 ) -> Vec<std::ops::Range<u16>> {
     let block = Block::default()
@@ -2349,8 +2374,12 @@ fn render_background_box(
         .border_style(Style::default().dim());
     let inner = block.inner(box_area);
     block.render(box_area, buf);
-    let title =
-        super::title_rule::centered_title_rule(description, usize::from(box_area.width), elapsed);
+    let title = super::title_rule::centered_title_rule(
+        description,
+        usize::from(box_area.width),
+        elapsed,
+        right_padding,
+    );
     // The first and last spans draw rules; the middle spans contain the title.
     let mut columns = Vec::new();
     if title.spans.len() >= 4 {
@@ -2359,12 +2388,19 @@ fn render_background_box(
         columns.push(start..end);
         if let Some(elapsed) = elapsed {
             let last = title.spans.last().unwrap();
-            if last.content.ends_with(elapsed) {
-                columns.push(box_area.width - elapsed.width() as u16..box_area.width);
+            let suffix = format!("{elapsed}╶{}", "─".repeat(right_padding));
+            if last.content.ends_with(&suffix) {
+                let end = box_area.width.saturating_sub(right_padding as u16);
+                columns.push(end - elapsed.width() as u16..end);
             }
         }
     }
-    line(title, row(box_area, 0, 1), buf);
+    let title_area = Rect {
+        width: box_area.width.saturating_add(1),
+        ..row(box_area, 0, 1)
+    }
+    .intersection(buf.area);
+    title.render(title_area, buf);
     Paragraph::new(output).render(inner, buf);
     columns
 }
@@ -2552,7 +2588,7 @@ mod background_title_tests {
             for time in [None, Some("35s")] {
                 let area = Rect::new(0, 0, 40, 2);
                 let mut buf = Buffer::empty(area);
-                render_background_box(title, time, vec![Line::from("output")], area, &mut buf);
+                render_background_box(title, time, vec![Line::from("output")], area, 0, &mut buf);
                 let text: String = buf.content[..40]
                     .iter()
                     .enumerate()

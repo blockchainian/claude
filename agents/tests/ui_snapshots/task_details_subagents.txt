@@ -1,9 +1,9 @@
                Background
-───────────── Nested agent ─────── 2m 5s
+───────────── Nested agent ────── 2m 5s╶
 Read files extra line
-───────────── Check files ──────── 1m 5s
+───────────── Check files ─────── 1m 5s╶
 Read files extra line
-────────────── Run checks ────────── 10s
+────────────── Run checks ───────── 10s╶
 
                  Prompt
                  Parent

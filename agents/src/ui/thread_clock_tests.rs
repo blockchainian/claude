@@ -38,7 +38,11 @@ fn child_box_clock_matches_its_own_prompt_for_both_providers() {
                 .find(|line| line.replace(' ', "").contains("中文答题卡住"))
                 .unwrap();
             assert!(
-                title.trim_end().ends_with(expected),
+                title
+                    .trim_end()
+                    .strip_suffix('╶')
+                    .unwrap()
+                    .ends_with(expected),
                 "{provider:?} {status:?}: {title}"
             );
             if prompt_at.is_some() {

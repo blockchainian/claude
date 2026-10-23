@@ -58,8 +58,8 @@ fn section_labels_stay_centered_before_right_values() {
             let start = (usize::from(width) - label.len()) / 2;
             assert_eq!(rendered.find(label), Some(start), "{width}: {rendered}");
             assert!(!rendered.contains("message"));
-            if !value.is_empty() && usize::from(width) - start - label.len() > value.len() {
-                assert!(rendered.ends_with(value), "{rendered}");
+            if !value.is_empty() && usize::from(width) - 1 - start - label.len() > value.len() {
+                assert!(rendered.ends_with(&format!("{value} ")), "{rendered}");
             }
             if !value.is_empty() {
                 let tail = rendered[start + label.len()..].trim();

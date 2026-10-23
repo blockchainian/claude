@@ -250,7 +250,7 @@ fn nested_rows_align_status_and_time_columns() {
             "width={width}:\n{root}\n{deep}"
         );
         for row in [root, deep] {
-            assert!(row.ends_with("2m ago"), "width={width}: {row}");
+            assert!(row.ends_with("2m ago "), "width={width}: {row}");
         }
     }
 }

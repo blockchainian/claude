@@ -45,7 +45,7 @@ fn tasks_section_orders_filters_counts_and_reuses_status_styles() {
     assert!(find("Needs input") < find("Tasks"));
     assert!(!rows.iter().any(|row| row.trim() == "Project"));
     assert_eq!(rows[find("Tasks")].find("Tasks"), Some(17));
-    assert!(rows[find("Tasks")].ends_with("2/4"));
+    assert!(rows[find("Tasks")].trim_end().ends_with("2/4"));
     assert!(
         !rows
             .iter()

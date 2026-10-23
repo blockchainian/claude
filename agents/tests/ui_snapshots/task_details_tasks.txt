@@ -19,6 +19,6 @@
 
 
 
-                 Tasks               1/2
+                 Tasks              1/2
             ● Working first
             ○ Pending first

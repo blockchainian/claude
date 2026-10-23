@@ -252,7 +252,15 @@ impl View {
             if !header && with_subtasks.contains(&task.id) {
                 state.fold_toggles.push((dot_area, task.id.clone()));
             }
-            let (title, status_area, updated) = columns(rect, indent);
+            let (mut title, mut status_area, mut updated) = columns(rect, indent);
+            if super::render::ScreenLayout::for_width(buf.area.width)
+                == super::render::ScreenLayout::Small
+                && !status_area.is_empty()
+            {
+                title.width = title.width.saturating_sub(1);
+                status_area.x = status_area.x.saturating_sub(1);
+                updated.x = updated.x.saturating_sub(1);
+            }
             let title_style = if header {
                 style
             } else {

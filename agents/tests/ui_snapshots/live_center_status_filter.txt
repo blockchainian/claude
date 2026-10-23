@@ -1,7 +1,7 @@
   Active 2                  Inactive 1
 ────────────────────────────────────────
                 project
- ○ Unloaded task            Inactive
+ ○ Unloaded task           Inactive
 
 ─────────────── Inactive ───────────────
                  Prompt
