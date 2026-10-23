@@ -530,8 +530,8 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
     ToolRule {
         name: "codex-manager reply",
         title: &[Pick::Field(Source::Input, "/threadId")],
-        input: Some((Pick::With(codex_reply_input), Format::Text)),
-        output: Some((Pick::With(empty_output), Format::Text)),
+        input: Some((Pick::Field(Source::Input, "/ask"), Format::Text)),
+        output: Some((Pick::With(codex_reply_output), Format::Text)),
         attention: true,
         ..DEFAULT_RULE
     },
@@ -1201,17 +1201,15 @@ fn codex_thread_table(data: &ToolData<'_>) -> Option<Body> {
     }]))
 }
 
-/// The request being answered under the thread title, then the answer under its own label.
-fn codex_reply_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
-    let prose = |text: &str| Section::Prose {
-        text: text.to_owned(),
+/// The answer Claude sent, shown below the request it answers.
+fn codex_reply_output(data: &ToolData<'_>) -> Option<Body> {
+    if data.result.is_some_and(|result| result.error) {
+        return None;
+    }
+    Some(Body::Sections(vec![Section::Prose {
+        text: text(data.input, "reply")?.to_owned(),
         markdown: false,
-    };
-    Some(vec![
-        prose(text(data.input, "ask")?),
-        Section::Label("Reply".into()),
-        prose(text(data.input, "reply")?),
-    ])
+    }]))
 }
 
 /// An Attention heading with one subsection per waiting request, titled by its thread.
@@ -1887,23 +1885,21 @@ mod tests {
             presentation.title.as_deref(),
             call["input"]["threadId"].as_str()
         );
-        let [
-            crate::event::Section::Prose { text: ask, .. },
-            crate::event::Section::Label(label),
-            crate::event::Section::Prose { text: reply, .. },
-        ] = presentation.input.as_slice()
-        else {
-            panic!("expected ask and reply, got {:?}", presentation.input);
+        let [crate::event::Section::Prose { text: ask, .. }] = presentation.input.as_slice() else {
+            panic!("expected the ask, got {:?}", presentation.input);
         };
         assert_eq!(ask, call["input"]["ask"].as_str().unwrap());
-        assert_eq!(label, "Reply");
-        assert_eq!(reply, call["input"]["reply"].as_str().unwrap());
         let Some(super::Body::Sections(output)) = presentation.output else {
             panic!("expected visible body")
         };
-        let [crate::event::Section::Markdown { text, .. }] = output.as_slice() else {
-            panic!("expected only the attention section, got {output:?}");
+        let [
+            crate::event::Section::Prose { text: reply, .. },
+            crate::event::Section::Markdown { text, .. },
+        ] = output.as_slice()
+        else {
+            panic!("expected the reply and the attention section, got {output:?}");
         };
+        assert_eq!(reply, call["input"]["reply"].as_str().unwrap());
         let attention = result.structured["attention"].as_array().unwrap();
         assert!(text.starts_with("# Attention\n\n## "));
         assert_eq!(text.matches("\n## ").count(), attention.len());
