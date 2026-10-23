@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-struct Span {
-    start: usize,
-    end: usize,
-    language: String,
+pub(super) struct Span {
+    pub(super) start: usize,
+    pub(super) end: usize,
+    pub(super) language: String,
 }
 
 fn spans(output: &[Section], source: &str) -> Vec<Span> {
@@ -47,7 +47,7 @@ fn spans(output: &[Section], source: &str) -> Vec<Span> {
     spans
 }
 
-fn actual(command: &str, stdout: &str, stream: Stream) -> Vec<Span> {
+pub(super) fn actual(command: &str, stdout: &str, stream: Stream) -> Vec<Span> {
     sections(command, "stdout", stdout, stream)
         .map(|output| spans(&output, stdout))
         .unwrap_or_default()
@@ -261,7 +261,7 @@ fn shell_output_command_table() {
         ("cat 'a.rs", "a", &[]),
         ("sed -n '1,2,3p' a.rs", "a", &[]),
         ("wc -l src/*.rs; cat a.rs", "1 a.rs\na", &[]),
-        ("sed -n '1p;2p' a.rs", "a", &[]),
+        ("sed -n '1p;2p' a.rs", "a", &[(0, 1, "rs")]),
         (
             "sed -n 1p a.unknown-language; cat b.py",
             "plain\nprint(1)",

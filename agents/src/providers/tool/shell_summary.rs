@@ -283,6 +283,50 @@ pub(super) fn pipeline_words(input: &str) -> Option<Vec<Vec<String>>> {
     Some(commands)
 }
 
+/// Shell numeric addresses are kept as source text, never evaluated.
+pub(super) fn address_expansion(source: &str) -> Option<usize> {
+    let bytes = source.as_bytes();
+    if source.starts_with("$((") {
+        let mut depth = 2usize;
+        for (i, &byte) in bytes.iter().enumerate().skip(3) {
+            match byte {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(i + 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        return None;
+    }
+    let start = if source.starts_with("${") {
+        2
+    } else if source.starts_with('$') {
+        1
+    } else {
+        return None;
+    };
+    if !bytes
+        .get(start)
+        .is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_')
+    {
+        return None;
+    }
+    let end = start
+        + bytes[start..]
+            .iter()
+            .take_while(|c| c.is_ascii_alphanumeric() || **c == b'_')
+            .count();
+    if start == 2 {
+        (bytes.get(end) == Some(&b'}')).then_some(end + 1)
+    } else {
+        Some(end)
+    }
+}
+
 fn scan(
     input: &str,
     out: &mut Groups,
@@ -303,6 +347,15 @@ fn scan(
     let mut heredocs: Vec<(String, bool)> = Vec::new();
     while i < chars.len() {
         let c = chars[i];
+        if single && words.first().is_some_and(|w| w == "sed") && quote != Some('\'') && c == '$' {
+            let tail: String = chars[i..].iter().collect();
+            if let Some(len) = address_expansion(&tail) {
+                let expansion = &tail[..len];
+                word.push_str(expansion);
+                i += expansion.chars().count();
+                continue;
+            }
+        }
         if single && quote.is_none() && c == '|' {
             if chars.get(i + 1).is_some_and(|c| matches!(c, '|' | '&')) {
                 return None;

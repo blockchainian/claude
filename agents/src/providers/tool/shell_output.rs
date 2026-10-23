@@ -15,7 +15,6 @@ pub(super) struct Stream {
 enum Count {
     Fixed(usize),
     Number,
-    Range,
     Echo,
     Printf,
     Files,
@@ -131,14 +130,6 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         )
         .options(&["-m", "--mode"], &[]),
         row(r"sleep\x00([0-9.]+)", &[], Silent, Plain, None, false),
-        row(
-            r"sed\x00-n\x00([0-9]+(?:,(?:[0-9]+|\$))?p|\$p)\x00([^\x00]+)",
-            &[],
-            AtMost(Range),
-            File,
-            None,
-            false,
-        ),
         row(
             r"(?:head|tail)\x00-n\x00([0-9]+)\x00([^\x00]+)",
             &[],
@@ -369,14 +360,6 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
             None,
             true,
         ),
-        row(
-            r"sed\x00-n\x00([0-9]+(?:,(?:[0-9]+|\$))?p|\$p)",
-            &[],
-            AtMost(Range),
-            Inherit,
-            None,
-            true,
-        ),
         row(r"cat", &[], Unknown, Verbatim, None, true),
     ]
 });
@@ -467,25 +450,6 @@ fn count(rule: Count, arg: &str, files: &str) -> Option<(Option<usize>, Option<S
     Some(match rule {
         Count::Fixed(n) => (Some(n), None),
         Count::Number => (Some(number(arg)?), None),
-        Count::Range => {
-            let range = arg.strip_suffix('p')?;
-            if range == "$" {
-                (Some(1), None)
-            } else if let Some((a, b)) = range.split_once(',') {
-                let a = number(a)?.checked_sub(1)?;
-                (
-                    if b == "$" {
-                        None
-                    } else {
-                        Some(number(b)?.checked_sub(a).filter(|n| *n > 0)?)
-                    },
-                    None,
-                )
-            } else {
-                number(range)?.checked_sub(1)?;
-                (Some(1), None)
-            }
-        }
         Count::Files => {
             let names: Vec<_> = files.split('\0').collect();
             if names.iter().any(|s| s.is_empty() || s.starts_with('-')) {
@@ -516,7 +480,216 @@ fn count(rule: Count, arg: &str, files: &str) -> Option<(Option<usize>, Option<S
     })
 }
 
+// An address returns a finite line number only for literal numeric addresses.
+fn sed_address(source: &str) -> Option<(&str, Option<usize>)> {
+    let source = source.trim_start();
+    let bytes = source.as_bytes();
+    let first = *bytes.first()?;
+    let (mut end, mut number) = if first.is_ascii_digit() {
+        let end = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+        (end, source[..end].parse().ok())
+    } else if first == b'$' {
+        let end = match shell_summary::address_expansion(source) {
+            // `$p` is sed's last-line address followed by its print command.
+            Some(2)
+                if b"pPdDqQnNhHwWbtT".contains(&bytes[1])
+                    && (source.len() == 2
+                        || source[2..].starts_with([';', '\n', '}', ' ', '\t'])) =>
+            {
+                1
+            }
+            Some(end) => end,
+            None => 1,
+        };
+        (end, None)
+    } else if first == b'/' || first == b'\\' {
+        let start = usize::from(first == b'\\');
+        let delimiter = source[start..].chars().next()?;
+        let mut i = start + delimiter.len_utf8();
+        let mut class = None;
+        loop {
+            let byte = *bytes.get(i)?;
+            if byte == b'\\' {
+                i += 1;
+                i += source[i..].chars().next()?.len_utf8();
+                continue;
+            }
+            if source[i..].starts_with(delimiter) && class.is_none() {
+                break;
+            }
+            if let Some(start) = class {
+                if byte == b'[' && matches!(bytes.get(i + 1), Some(b':' | b'.' | b'=')) {
+                    let marker = bytes[i + 1];
+                    i += 2;
+                    while !(bytes.get(i) == Some(&marker) && bytes.get(i + 1) == Some(&b']')) {
+                        bytes.get(i)?;
+                        i += 1;
+                    }
+                    i += 2;
+                    continue;
+                }
+                // An initial ] (also after ^) belongs to the character class.
+                if byte == b']' && i != start && !(i == start + 1 && bytes[start] == b'^') {
+                    class = None;
+                }
+            } else if byte == b'[' {
+                class = Some(i + 1);
+            }
+            i += source[i..].chars().next()?.len_utf8();
+        }
+        i += delimiter.len_utf8();
+        while matches!(bytes.get(i), Some(b'I' | b'M')) {
+            i += 1;
+        }
+        (i, None)
+    } else {
+        return None;
+    };
+    if bytes.get(end) == Some(&b'~') {
+        let start = end + 1;
+        end = start
+            + bytes[start..]
+                .iter()
+                .take_while(|b| b.is_ascii_digit())
+                .count();
+        if end == start {
+            return None;
+        }
+        number = None;
+    }
+    Some((&source[end..], number))
+}
+
+/// Recognize sed scripts whose commands only select unchanged input lines.
+fn sed(words: &[String]) -> Option<Segment> {
+    let mut scripts = Vec::new();
+    let mut files = Vec::new();
+    let mut quiet = false;
+    let mut options = true;
+    let mut args = words.iter().skip(1);
+    while let Some(word) = args.next() {
+        if options && word == "--" {
+            options = false;
+        } else if options && word.starts_with("--") {
+            let (name, value) = word
+                .split_once('=')
+                .map_or((word.as_str(), None), |(k, v)| (k, Some(v)));
+            match name {
+                "--file" => return None,
+                "--expression" => scripts.push(value.or_else(|| args.next().map(String::as_str))?),
+                "--quiet" | "--silent" => quiet = true,
+                _ => {}
+            }
+        } else if options && word.starts_with('-') && word != "-" {
+            for (index, letter) in word[1..].char_indices() {
+                match letter {
+                    'f' => return None,
+                    'e' => {
+                        let value = &word[index + 2..];
+                        scripts.push(if value.is_empty() {
+                            args.next()?.as_str()
+                        } else {
+                            value
+                        });
+                        break;
+                    }
+                    'n' => quiet = true,
+                    'i' => break, // Any attached suffix belongs to -i.
+                    _ => {}
+                }
+            }
+        } else {
+            files.push(word.as_str());
+        }
+    }
+    if scripts.is_empty() {
+        if files.is_empty() {
+            return None;
+        }
+        scripts.push(files.remove(0));
+    }
+    let mut cap = quiet.then_some(0usize);
+    for script in scripts {
+        let mut rest = script;
+        loop {
+            rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == ';');
+            if rest.is_empty() {
+                break;
+            }
+            let mut bound = None;
+            if let Some((tail, first)) = sed_address(rest) {
+                rest = tail.trim_start();
+                bound = first.map(|_| 1usize);
+                if let Some(tail) = rest.strip_prefix(',') {
+                    let tail = tail.trim_start();
+                    let (tail, last) = if tail.starts_with(['+', '~']) {
+                        let (tail, _) = sed_address(&tail[1..])?;
+                        (tail, None)
+                    } else {
+                        sed_address(tail)?
+                    };
+                    rest = tail.trim_start();
+                    bound = first
+                        .zip(last)
+                        .and_then(|(a, b)| b.checked_sub(a)?.checked_add(1));
+                }
+            }
+            if let Some(tail) = rest.strip_prefix('!') {
+                rest = tail.trim_start();
+                bound = None;
+            }
+            let command = rest.chars().next()?;
+            rest = &rest[command.len_utf8()..];
+            match command {
+                'p' | 'P' | 'd' | 'D' | 'q' | 'Q' | 'n' | 'N' | 'b' | 't' | 'T' | ':' | '{'
+                | '}' | 'w' | 'W' | 'h' | 'H' => {}
+                _ => return None,
+            }
+            cap = if command == 'p' {
+                cap.zip(bound).and_then(|(a, b)| a.checked_add(b))
+            } else {
+                None
+            };
+            if matches!(command, 'b' | 't' | 'T' | ':' | 'w' | 'W') {
+                rest = rest.trim_start_matches([' ', '\t']);
+                let end = rest.find([';', '\n']).unwrap_or(rest.len());
+                rest = &rest[end..];
+            } else if matches!(command, 'q' | 'Q') {
+                rest = rest.trim_start_matches([' ', '\t']);
+                rest = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+            }
+        }
+    }
+    let kind = if let Some(&path) = files.first() {
+        if files.iter().any(|p| p.contains(['$', '`'])) {
+            return None;
+        }
+        let scope = syntax(path);
+        if files.len() > 1 && (scope.is_none() || files.iter().any(|p| syntax(p) != scope)) {
+            return None;
+        }
+        Kind::File {
+            path: path.into(),
+            numbered: false,
+        }
+    } else {
+        Kind::Plain
+    };
+    Some(Segment {
+        size: if files.len() > 1 {
+            Size::Unknown
+        } else {
+            cap.map_or(Size::Unknown, Size::AtMost)
+        },
+        kind,
+        ..Segment::unknown()
+    })
+}
+
 fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
+    if words.first().is_some_and(|w| w == "sed") {
+        return sed(words).map(|s| (s, false));
+    }
     let joined = words.join("\0");
     for row in ROWS.iter().filter(|r| r.filter == filter) {
         let mut captures = Region::new();
@@ -604,6 +777,14 @@ fn redirects(source: &str) -> Option<(String, Vec<usize>, bool, usize)> {
     let mut silent = Vec::new();
     while i < bytes.len() {
         let b = bytes[i];
+        if quote != Some(b'\'')
+            && b == b'$'
+            && let Some(len) = shell_summary::address_expansion(&source[i..])
+        {
+            out.push_str(&source[i..i + len]);
+            i += len;
+            continue;
+        }
         if b == b'\\' && quote != Some(b'\'') {
             let end = i + 2;
             out.push_str(source.get(i..end)?);
@@ -723,6 +904,18 @@ fn pipeline(source: &str, programs: &mut Vec<String>) -> Segment {
         let Some((filter, verbatim)) = describe(stage, true) else {
             return Segment::unknown();
         };
+        if !matches!(filter.kind, Kind::Plain) {
+            segment = filter;
+            continue;
+        }
+        if stage.first().is_some_and(|word| word == "sed") {
+            if !matches!(segment.size, Size::Silent) {
+                segment.size = filter.size;
+            }
+            segment.known = None;
+            segment.no_match_exit = None;
+            continue;
+        }
         segment.size = match (&segment.size, filter.size) {
             (Size::Silent, _) => Size::Silent,
             (Size::AtMost(a) | Size::Exact(a), Size::AtMost(b)) => Size::AtMost((*a).min(b)),
@@ -1115,5 +1308,132 @@ mod tests {
             }
         }
         assert_eq!(boundary(&segment, &["format \n"], 0, 1, true), None);
+    }
+}
+
+#[cfg(test)]
+mod sed_tests {
+    use super::super::shell_output_tests::{Span, actual};
+    use super::*;
+
+    #[test]
+    fn sed_row_selection_commands() {
+        for (command, language) in [
+            ("sed -n 1,140p src/sessions/mod.rs", "rs"),
+            (
+                "cd /x/agents/src/ui && sed -n '690,730p;790,815p;885,905p' render.rs",
+                "rs",
+            ),
+            ("cat a.rs | sed -n '15,25p;125,140p;555,575p'", "rs"),
+            ("sed -n '/## Install/,/^## /p' memory/agents.md", "md"),
+            (r"sed -n '/#\[cfg(test)\]/q;p' src/rename/walker.rs", "rs"),
+            (r#"sed -n "$((n-12)),$((n+12))p" claude.strings"#, "strings"),
+            (r#"sed -n "${n}p" claude.strings"#, "strings"),
+            ("sed -n '18,$p' log.diff", "diff"),
+            ("sed -n 40p screen.ansi", "ansi"),
+            ("sed -e '1,3p' -e '9p' -n a.rs", "rs"),
+            ("sed '/^$/d' notes.md", "md"),
+            ("sed -E -r -s -u -i -n --expression='1,3p' a.rs", "rs"),
+            ("sed -ne '1,3p' a.rs", "rs"),
+            ("sed -n '1~2p;2,+3p;3,~4p' a.rs", "rs"),
+            (r"sed -n '\cfoo\ccIM!p' a.rs", "rs"),
+            (r"sed -n '/[;/]/p;/foo;bar/Ip' a.rs", "rs"),
+            (r"sed -n '/[[:alpha:]/]/p' a.rs", "rs"),
+            (r"sed -n '/[]/]/p' a.rs", "rs"),
+            (r#"sed -n "${n} p" a.rs"#, "rs"),
+            (
+                "sed -n '1{p;h;H;P;D;N;};b done;:done;t done;T done;w out;W out;q;Q;n;d' a.rs",
+                "rs",
+            ),
+            ("sed -n '1p\n2p' a.rs b.rs", "rs"),
+            (r#"sed -n "$n,3p" a.rs"#, "rs"),
+        ] {
+            // Unknown syntaxes still retain their extension in the parsed file kind.
+            let stages = pipeline(command, &mut Vec::new());
+            if matches!(language, "strings" | "ansi") {
+                assert!(
+                    matches!(&stages.kind, Kind::File { path, .. } if path.ends_with(language)),
+                    "{command}"
+                );
+            } else {
+                assert_eq!(
+                    actual(command, "line\n", Stream::default()),
+                    vec![Span {
+                        start: 0,
+                        end: 1,
+                        language: language.into()
+                    }],
+                    "{command}"
+                );
+            }
+        }
+        for command in [
+            "sed 's/ *$//' lr.out",
+            "sed -n '1,5p;=' f.rs",
+            "sed -f script.sed f.rs",
+            "sed --file=script.sed f.rs",
+            r"sed '1a\foo' f.rs",
+            "sed -n '1p;s/x/y/' a.rs",
+            "sed -n 'g' a.rs",
+            "sed -n 'v' a.rs",
+            "sed -n '1p' a.rs b.py",
+        ] {
+            assert!(
+                actual(command, "line\n", Stream::default()).is_empty(),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn sed_row_selection_bounds() {
+        let command = "sed -n '1,3p;60,90p' a.rs";
+        assert!(matches!(
+            pipeline(command, &mut Vec::new()).size,
+            Size::AtMost(34)
+        ));
+        assert_eq!(
+            actual(
+                "head -n 1 a.rs | sed -n '1p;1p'",
+                "a\na\n",
+                Stream::default()
+            ),
+            vec![Span {
+                start: 0,
+                end: 2,
+                language: "rs".into()
+            }]
+        );
+        assert_eq!(
+            actual("head -n 1 a.rs | sed 'p'", "a\na\n", Stream::default()),
+            vec![Span {
+                start: 0,
+                end: 2,
+                language: "rs".into()
+            }]
+        );
+        for n in [1, 34, 35] {
+            assert_eq!(
+                !actual(command, &"line\n".repeat(n), Stream::default()).is_empty(),
+                n <= 34
+            );
+        }
+        for command in [
+            "sed -n '18,$p' log.diff",
+            "sed -n '$p' a.rs",
+            "sed '1,3p' a.rs",
+            "sed -n '1!p' a.rs",
+            "sed -n '/foo/p' a.rs",
+            "sed -n '1~2p' a.rs",
+            "sed -n 'p' a.rs",
+            "sed -n '1,3p;h' a.rs",
+            "sed -n '1,3p' a.rs b.rs",
+            r#"sed -n "${n}p" a.rs"#,
+        ] {
+            assert!(
+                matches!(pipeline(command, &mut Vec::new()).size, Size::Unknown),
+                "{command}"
+            );
+        }
     }
 }
