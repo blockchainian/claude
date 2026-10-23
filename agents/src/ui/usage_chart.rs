@@ -117,6 +117,9 @@ fn stack_heights(tokens: u64, others: u64, max: u64, height: u16) -> (u16, u16) 
         .checked_sub(others)
         .expect("usage chart other tasks exceed total");
     let all = dot_height(tokens, max, height);
+    if selected == 0 {
+        return (all, all);
+    }
     if max == 0 || height == 0 {
         return (all, 0);
     }
@@ -178,6 +181,12 @@ mod tests {
         assert_eq!(dot_height(50, 100, 40), 20);
         assert_eq!(dot_height(100, 100, 40), 40);
         assert_eq!(dot_height(1_000, 100, 40), 40);
+    }
+
+    #[test]
+    fn a_bin_without_selected_usage_is_all_other_tasks() {
+        // 24 of 100 tokens fill 10 of 40 dots; rounding others to a cell edge would leave 2.
+        assert_eq!(stack_heights(24, 24, 100, 40), (10, 10));
     }
 
     #[test]
