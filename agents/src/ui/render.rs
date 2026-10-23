@@ -248,11 +248,19 @@ impl View {
         };
         let [mut list, mut gap, mut task_details] = if body.is_empty() {
             [body, Rect::default(), Rect::default()]
+        } else if kind == ScreenLayout::Small
+            && zoom
+            && let Some(panel @ (Panel::TaskList | Panel::TaskDetails)) = self.height_zoom
+        {
+            let hidden = Rect::default();
+            if panel == Panel::TaskList {
+                [body, hidden, hidden]
+            } else {
+                [hidden, hidden, body]
+            }
         } else if kind == ScreenLayout::Small {
             let rows = body.height.saturating_sub(1);
-            let task_zoom =
-                zoom && matches!(self.height_zoom, Some(Panel::TaskList | Panel::TaskDetails));
-            let task_list_height = if !show_event && !task_zoom {
+            let task_list_height = if !show_event {
                 rows.div_ceil(2)
             } else if list_height > 0 {
                 content_height.saturating_sub(2) / 6
@@ -2802,15 +2810,40 @@ mod small_height_tests {
     }
 
     #[test]
-    fn small_heights_task_zoom_keeps_one_to_two() {
+    fn small_heights_task_zoom_fills_available_rows() {
         for panel in [Panel::TaskList, Panel::TaskDetails] {
-            let view = View {
-                height_zoom: Some(panel),
-                ..View::default()
-            };
-            let layout = view.center_layout(Rect::new(0, 0, 90, 60));
-            assert_eq!(heights(layout), [17, 36, 0, 0]);
-            assert_eq!(layout.task_details.bottom(), layout.prompt_top_rule.y);
+            for (width, height, input) in [(70, 18, ""), (90, 60, ""), (99, 60, "one\ntwo\nthree")]
+            {
+                let mut view = View {
+                    height_zoom: Some(panel),
+                    ..View::default()
+                };
+                view.input_box.editor.set_text(input);
+                let area = Rect::new(3, 5, width, height);
+                let layout = view.center_layout(area);
+                let (target, hidden) = if panel == Panel::TaskList {
+                    (layout.list, layout.task_details)
+                } else {
+                    (layout.task_details, layout.list)
+                };
+                assert_eq!(target.x, area.x + HORIZONTAL_PADDING);
+                assert_eq!(target.width, width - 2 * HORIZONTAL_PADDING);
+                assert_eq!(target.y, layout.header.bottom());
+                assert_eq!(target.bottom(), layout.prompt_top_rule.y);
+                assert_eq!(
+                    target.height,
+                    height - layout.header.height - layout.footer.height - layout.prompt.height - 2,
+                    "{panel:?} {width}x{height} {input:?}"
+                );
+                assert!(hidden.is_empty(), "{panel:?}: {hidden:?}");
+                assert!(layout.gap.is_empty());
+                assert!(layout.event_panel.is_empty());
+                assert!(layout.event_detail.is_empty());
+                assert_eq!(layout.prompt_top_rule.bottom(), layout.prompt.y);
+                assert_eq!(layout.prompt.bottom(), layout.prompt_bottom_rule.y);
+                assert_eq!(layout.prompt_bottom_rule, layout.footer_rule);
+                assert_eq!(layout.footer_rule.bottom(), layout.footer.y);
+            }
         }
     }
 

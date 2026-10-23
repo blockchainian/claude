@@ -376,7 +376,7 @@ fn layout_breakpoints_select_the_three_panel_arrangements() {
 }
 
 #[test]
-fn small_task_height_zoom_shortcut_keeps_one_to_two() {
+fn small_task_height_zoom_shortcut_shows_only_target() {
     for panel in [Panel::TaskList, Panel::TaskDetails] {
         let (_dir, mut view, now) = fixture();
         let area = Rect::new(0, 0, 90, 60);
@@ -392,7 +392,15 @@ fn small_task_height_zoom_shortcut_keeps_one_to_two() {
         );
         assert_eq!(view.height_zoom, Some(panel));
         let layout = view.center_layout(area);
-        assert_eq!((layout.list.height, layout.task_details.height), (17, 36));
+        assert_eq!(
+            (layout.list.height, layout.task_details.height),
+            if panel == Panel::TaskList {
+                (54, 0)
+            } else {
+                (0, 54)
+            }
+        );
+        assert!(layout.gap.is_empty());
         assert!(layout.event_panel.is_empty());
         assert!(layout.event_detail.is_empty());
     }
