@@ -747,123 +747,22 @@ impl View {
     /// Renders labels on the dashboard frame.
     fn render_frame_labels(
         &self,
-        baseline: CenterLayout,
+        _baseline: CenterLayout,
         layout: CenterLayout,
         area: Rect,
         buf: &mut Buffer,
         now: DateTime<Utc>,
     ) {
-        let kind = layout.kind;
-        let large = kind == ScreenLayout::Large;
-        let at = |rect: Rect, y| Rect::new(rect.x, y, rect.width, 1).intersection(area);
-        let small = kind == ScreenLayout::Small;
-        if !baseline.event_panel.is_empty() {
-            let borders = [
-                at(
-                    baseline.event_panel,
-                    if large {
-                        layout.header.bottom().saturating_sub(1)
-                    } else {
-                        layout.prompt_bottom_rule.y
-                    },
-                ),
-                at(
-                    baseline.event_panel,
-                    if large {
-                        layout.prompt_top_rule.y
-                    } else {
-                        layout.event_detail_top_rule.y
-                    },
-                ),
+        if !layout.event_panel.is_empty() {
+            let panel = layout.event_panel;
+            self.viewport.borrow_mut().event_borders = [
+                Rect::new(panel.x, panel.y.saturating_sub(1), panel.width, 1),
+                Rect::new(panel.x, panel.bottom(), panel.width, 1),
             ];
-            if !layout.event_panel.is_empty() {
-                self.viewport.borrow_mut().event_borders = [
-                    Rect {
-                        x: layout.event_panel.x,
-                        width: layout.event_panel.width,
-                        ..borders[0]
-                    },
-                    Rect {
-                        x: layout.event_panel.x,
-                        width: layout.event_panel.width,
-                        ..borders[1]
-                    },
-                ];
-            }
-            let model_y = if large {
-                layout.prompt_top_rule.y
-            } else {
-                layout.prompt_bottom_rule.y
-            };
-            let event_left = if large {
-                baseline
-                    .event_panel
-                    .x
-                    .saturating_sub(HORIZONTAL_PADDING + 1)
-            } else {
-                area.x
-            };
-            let jump_y = borders[1].y;
-            let jump_rule = if layout.event_panel.is_empty() {
-                Rect::default()
-            } else {
-                let left = layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1);
-                Rect::new(
-                    left,
-                    jump_y,
-                    layout.event_panel.right() + HORIZONTAL_PADDING - left,
-                    1,
-                )
-            };
-            let mut jump_buffer = Buffer::empty(jump_rule);
-            self.render_event_jump(jump_rule, &mut jump_buffer);
-            let jump = self.viewport.borrow().event_label;
-            let mut occupied = self
-                .viewport
-                .borrow()
-                .field_targets
-                .iter()
-                .filter(|(_, field)| matches!(field, Field::Model | Field::Effort))
-                .map(|(rect, _)| *rect)
-                .reduce(|left, right| left.union(right))
-                .map(|rect| Rect::new(rect.x - 1, rect.y, rect.width + 2, 1))
-                .into_iter()
-                .collect::<Vec<_>>();
-            let placed_jump = place_frame_label(jump, event_left, &occupied);
-            if let Some(placed) = placed_jump {
-                for offset in 0..jump.width {
-                    buf[(placed.x + offset, placed.y)] =
-                        jump_buffer[(jump.x + offset, jump.y)].clone();
-                }
-                occupied.push(placed);
-            }
-            {
-                let mut viewport = self.viewport.borrow_mut();
-                viewport.event_label = placed_jump.unwrap_or_default();
-                viewport.event_jump = if self.event_list.sort == EventSort::Time {
-                    viewport.event_label
-                } else {
-                    Rect::default()
-                };
-            }
-            let baseline_model_y = if large {
-                baseline.prompt_top_rule.y
-            } else {
-                baseline.prompt_bottom_rule.y
-            };
-            let baseline_filter_y = if large {
-                baseline.prompt_top_rule.y
-            } else {
-                baseline.event_detail_top_rule.y
-            };
-            let merged = borders[1].y == model_y && baseline_filter_y != baseline_model_y;
-            self.render_event_filter(
-                if small { borders[0] } else { borders[1] },
-                merged && !small,
-                kind,
-                &occupied,
-                buf,
-            );
+            let left = panel.x.saturating_sub(HORIZONTAL_PADDING + 1);
+            let edge = Rect::new(left, panel.bottom(), area.right() - left, 1);
+            self.render_event_jump(edge, buf);
+            self.render_event_filter(edge, buf);
         }
         self.render_task_frame_labels(layout, area, buf, now);
     }
@@ -1225,14 +1124,7 @@ impl View {
         viewport.task_details_links.extend(links);
     }
 
-    fn render_event_filter(
-        &self,
-        rule: Rect,
-        merged: bool,
-        layout: ScreenLayout,
-        occupied: &[Rect],
-        buf: &mut Buffer,
-    ) {
+    fn render_event_filter(&self, rule: Rect, buf: &mut Buffer) {
         let title = match self.event_list.filter {
             crate::event::EventFilter::All => return,
             crate::event::EventFilter::Message => "Assistant",
@@ -1243,26 +1135,10 @@ impl View {
             return;
         }
         let (header, mut label) = centered_rule_label(Line::from(title), rule);
-        if layout == ScreenLayout::Small {
-            label.x = rule.x;
+        label.x = rule.x;
+        if label.intersects(self.viewport.borrow().event_label) {
+            return;
         }
-        let label = if merged {
-            let Some(label) = place_frame_label(label, rule.x, occupied) else {
-                return;
-            };
-            label
-        } else {
-            let viewport = self.viewport.borrow();
-            if label.intersects(viewport.event_label)
-                || viewport
-                    .field_targets
-                    .iter()
-                    .any(|(target, _)| label.intersects(*target))
-            {
-                return;
-            }
-            label
-        };
         Clear.render(label, buf);
         line(header, label, buf);
     }
@@ -2243,26 +2119,6 @@ fn centered_rule_label(title: Line<'_>, rule: Rect) -> (Line<'_>, Rect) {
     let x = rule.x + rule.width.saturating_sub(width) / 2;
     let label = Rect::new(x, rule.y, width.min(rule.width), 1).intersection(rule);
     (header, label)
-}
-
-/// Keeps a label in its columns unless an occupied label forces it left, leaving a rule cell.
-fn place_frame_label(mut label: Rect, left: u16, occupied: &[Rect]) -> Option<Rect> {
-    if label.is_empty() {
-        return None;
-    }
-    loop {
-        if label.x < left {
-            return None;
-        }
-        let Some(obstacle) = occupied
-            .iter()
-            .filter(|rect| label.intersects(**rect))
-            .min_by_key(|rect| rect.x)
-        else {
-            return Some(label);
-        };
-        label.x = obstacle.x.checked_sub(label.width + 1)?;
-    }
 }
 
 /// Draws a dim rule across `area`'s first row.

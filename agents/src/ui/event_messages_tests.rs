@@ -385,7 +385,7 @@ fn filters_restore_when_reopening_a_task() {
 
 #[test]
 fn filtered_event_border_labels_have_layout_coordinates() {
-    for width in [100, 149, 150, 200] {
+    for width in [90, 100, 149, 150, 200] {
         let (_dir, mut view) = fixture();
         let area = Rect::new(0, 0, width, 40);
         let mut rows = String::new();
@@ -410,7 +410,7 @@ fn filtered_event_border_labels_have_layout_coordinates() {
                 assert!(!row.contains("Assistant") && !row.contains("Tool"), "{row}");
             } else {
                 let length = title.len() as u16;
-                let label = Rect::new(border.x + (border.width - length - 2) / 2, y, length + 2, 1);
+                let label = Rect::new(border.x.saturating_sub(2), y, length + 2, 1);
                 let blocked = label.intersects(viewport.event_label)
                     || viewport
                         .field_targets
@@ -423,7 +423,12 @@ fn filtered_event_border_labels_have_layout_coordinates() {
                         .map(|x| buf[(x, y)].symbol())
                         .collect();
                     assert_eq!(actual, format!(" {title} "), "width {width}: {row}");
-                    let status_y = view.center_layout(area).header.y + 1;
+                    let layout = view.center_layout(area);
+                    let status_y = if width < 100 {
+                        layout.gap.y
+                    } else {
+                        layout.header.y + 1
+                    };
                     let status_row: String =
                         (0..width).map(|x| buf[(x, status_y)].symbol()).collect();
                     let status = View::status(view.selected_row().unwrap()).0;
@@ -431,7 +436,7 @@ fn filtered_event_border_labels_have_layout_coordinates() {
                     for column in label.x + 1..label.right() - 1 {
                         assert_eq!(buf[(column, y)].style(), buf[(status_x, status_y)].style());
                     }
-                    assert_eq!(buf[(label.x - 1, y)].symbol(), "─");
+
                     assert_eq!(buf[(label.right(), y)].symbol(), "─");
                 }
             }
@@ -481,7 +486,7 @@ fn filtered_event_labels_preserve_duration_and_model_labels() {
                 "Tool"
             };
             let label = Rect::new(
-                border.x + border.width.saturating_sub(title.len() as u16 + 2) / 2,
+                border.x.saturating_sub(2),
                 border.y,
                 title.len() as u16 + 2,
                 1,
@@ -491,6 +496,47 @@ fn filtered_event_labels_preserve_duration_and_model_labels() {
                 .collect();
             if label.intersects(viewport.event_label) {
                 assert!(!row.contains(title), "{row}");
+            }
+        }
+    }
+}
+
+#[test]
+fn event_filter_follows_its_panel_through_zoom() {
+    for width in [90, 120, 160] {
+        for panel in [
+            Panel::TaskList,
+            Panel::TaskDetails,
+            Panel::EventList,
+            Panel::EventDetail,
+        ] {
+            for height in [false, true] {
+                for width_zoom in [false, true] {
+                    let (_dir, mut view) = fixture();
+                    view.event_list.filter = EventFilter::Tool;
+                    view.height_zoom = height.then_some(panel);
+                    view.width_zoom = width_zoom.then_some(panel);
+                    let area = Rect::new(0, 0, width, 50);
+                    let mut buf = Buffer::empty(area);
+                    view.render(area, &mut buf);
+                    let viewport = view.viewport.borrow();
+                    let drawn: Vec<_> = (0..50)
+                        .filter(|&y| {
+                            (0..width)
+                                .map(|x| buf[(x, y)].symbol())
+                                .collect::<String>()
+                                .contains(" Tool ")
+                        })
+                        .collect();
+                    if viewport.event_panel.is_empty() {
+                        assert!(drawn.is_empty(), "{width} {panel:?}: {drawn:?}");
+                    } else {
+                        let x = viewport.event_panel.x.saturating_sub(2);
+                        let y = viewport.event_borders[1].y;
+                        let label: String = (x..x + 6).map(|x| buf[(x, y)].symbol()).collect();
+                        assert_eq!(label, " Tool ", "{width} {panel:?}");
+                    }
+                }
             }
         }
     }

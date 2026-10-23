@@ -235,7 +235,7 @@ fn small_layout_labels_belong_to_the_three_task_edges() {
 }
 
 #[test]
-fn small_layout_event_controls_share_the_rule_above_the_event_list() {
+fn small_layout_event_controls_share_the_event_list_bottom_edge() {
     for sort in [EventSort::Time, EventSort::Duration] {
         let (_dir, mut view, now) = fixture();
         view.event_list.sort = sort;
@@ -244,7 +244,10 @@ fn small_layout_event_controls_share_the_rule_above_the_event_list() {
         let area = Rect::new(0, 0, 70, 60);
         let buf = draw(&view, area, now);
         let layout = view.center_layout(area);
-        assert_eq!(label(&buf, "Assistant", layout.prompt_bottom_rule.y).x, 2);
+        assert_eq!(
+            label(&buf, "Assistant", layout.event_detail_top_rule.y).x,
+            1
+        );
         let jump = view.viewport.borrow().event_label;
         assert_eq!(jump.y, layout.event_detail_top_rule.y);
         assert!(!jump.is_empty());
