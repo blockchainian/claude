@@ -648,6 +648,21 @@ test("notify_claude and ask_claude reach the Claude session that supervises the 
   }
 });
 
+test("a message without its text argument is refused, not delivered empty", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const tools = new ToolsChild(home.home);
+  try {
+    for (const name of ["ask_claude", "notify_claude"]) {
+      const result = await tools.call(name, { prompt: "你最喜欢什么颜色？" }, { callId: "call-1", threadId: "thread-A" });
+      assert.equal(result.isError, true);
+      assert.match(result.text, /text/);
+    }
+  } finally {
+    await tools.close();
+    await home.close();
+  }
+});
+
 test("a thread nobody supervises, or whose Claude session is gone, is told so at once", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const tools = new ToolsChild(home.home);
