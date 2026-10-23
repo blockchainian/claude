@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ABOUTME: Finds the most downloaded EPUB on one Anna's Archive search page and its download links, and with --out downloads it.
+// ABOUTME: Finds the most downloaded EPUB (or PDF) on one Anna's Archive search page and its download links, and with --out downloads it.
 // ABOUTME: All site requests go through a headed Chrome session that passes the DDoS-Guard check.
 
 import { createWriteStream, realpathSync } from 'node:fs';
@@ -15,6 +15,8 @@ import { envPath, loadEnvFile, outputDir } from '../../fetch-x-mentions/scripts/
 const DEFAULT_BASE = 'https://annas-archive.pk';
 const MD5_LINK = /^\/md5\/([0-9a-f]{32})\/?$/;
 const SLOW_LINK = /^\/slow_download\/([0-9a-f]{32})\/\d+\/\d+\/?$/;
+// Each downloadable format, with the leading bytes a real file of that format starts with.
+const FORMATS = { epub: { label: 'EPUB', magic: Buffer.from('PK\x03\x04') }, pdf: { label: 'PDF', magic: Buffer.from('%PDF') } };
 const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'wbr']);
 
 function decodeHtml(value) {
@@ -217,17 +219,17 @@ async function slowUrl(base, md5, detail, savedSlowHtml) {
   return { entry: result.entry, status: result.status, error };
 }
 
-async function isEpub(path) {
+async function startsWith(path, magic) {
   const file = await open(path);
   try {
-    const { buffer, bytesRead } = await file.read(Buffer.alloc(4), 0, 4, 0);
-    return bytesRead === 4 && buffer.equals(Buffer.from('PK\x03\x04'));
+    const { buffer, bytesRead } = await file.read(Buffer.alloc(magic.length), 0, magic.length, 0);
+    return bytesRead === magic.length && buffer.equals(magic);
   } finally { await file.close(); }
 }
 
 // Downloads from the first link not refused with 429 (too many downloads at once from this IP). Each resolver
 // runs only after the link before it was refused, because resolving a slow entry means sitting through its queue.
-export async function downloadFirst(resolvers, out, fetchFile = fetch) {
+export async function downloadFirst(resolvers, out, fetchFile = fetch, format = 'epub') {
   const refused = [];
   for (const resolve of resolvers) {
     const url = await resolve();
@@ -243,7 +245,7 @@ export async function downloadFirst(resolvers, out, fetchFile = fetch) {
     await mkdir(dirname(out), { recursive: true });
     try {
       await pipeline(Readable.fromWeb(response.body), createWriteStream(part));
-      if (!(await isEpub(part))) throw new Error('下载的文件不是 EPUB（可能是错误页）');
+      if (!(await startsWith(part, FORMATS[format].magic))) throw new Error(`下载的文件不是 ${FORMATS[format].label}（可能是错误页）`);
       await rename(part, out);
     } finally { await rm(part, { force: true }); }
     return { path: out, url, refused };
@@ -257,18 +259,18 @@ function downloadResolvers(base, detail, md5, fast, slow) {
   return [() => fast.url, () => slow.url, ...others.map(entry => async () => (await resolveSlow(base, entry, Date.now() + SLOW_WAIT_MS)).url)];
 }
 
-// The default save path: <INTEL_OUTPUT_DIR>/books/<title>.epub, with path-unsafe characters replaced.
-export function bookPath(title, env = process.env) {
-  return join(outputDir(env), 'books', `${title.replace(/[\/\\:*?"<>|\x00-\x1f]/g, '-').trim()}.epub`);
+// The default save path: <INTEL_OUTPUT_DIR>/books/<title>.<format>, with path-unsafe characters replaced.
+export function bookPath(title, env = process.env, format = 'epub') {
+  return join(outputDir(env), 'books', `${title.replace(/[\/\\:*?"<>|\x00-\x1f]/g, '-').trim()}.${format}`);
 }
 
 function args(argv) {
   if (argv.includes('--help') || argv.includes('-h')) {
-    console.log('用法：node <anna-archive-links.mjs 路径> <书名> [--search-html 文件] [--detail-html 文件] [--slow-html 文件] [--download | --out 文件]\n--download 下载到 <INTEL_OUTPUT_DIR>/books/<书名>.epub，--out 下载到指定文件：某个链接返回 429 就换下一个链接。\n会员密钥从 ~/.config/intel/.env 的 ANNA_ARCHIVE_SECRET_KEY 读取，不读取环境变量。');
+    console.log('用法：node <anna-archive-links.mjs 路径> <书名> [--search-html 文件] [--detail-html 文件] [--slow-html 文件] [--format epub|pdf] [--download | --out 文件]\n--format 选格式，默认 epub。--download 下载到 <INTEL_OUTPUT_DIR>/books/<书名>.<格式>，--out 下载到指定文件：某个链接返回 429 就换下一个链接。\n会员密钥从 ~/.config/intel/.env 的 ANNA_ARCHIVE_SECRET_KEY 读取，不读取环境变量。');
     process.exit(0);
   }
-  const options = { baseUrl: DEFAULT_BASE };
-  const keys = { '--search-html': 'searchHtml', '--detail-html': 'detailHtml', '--slow-html': 'slowHtml', '--base-url': 'baseUrl', '--out': 'out' };
+  const options = { baseUrl: DEFAULT_BASE, format: 'epub' };
+  const keys = { '--search-html': 'searchHtml', '--detail-html': 'detailHtml', '--slow-html': 'slowHtml', '--base-url': 'baseUrl', '--out': 'out', '--format': 'format' };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] in keys) {
       if (!argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error(`${argv[i]} 缺少值`);
@@ -278,6 +280,7 @@ function args(argv) {
     else throw new Error(`未知参数：${argv[i]}`);
   }
   if (!options.title) throw new Error('请提供书名或搜索词');
+  if (!Object.hasOwn(FORMATS, options.format)) throw new Error(`--format 只支持 ${Object.keys(FORMATS).join('、')}`);
   return options;
 }
 
@@ -286,9 +289,9 @@ async function run(options) {
   if (!httpUrl(base)) throw new Error('base-url 必须是 HTTP(S) URL');
   const search = options.searchHtml
     ? await readFile(options.searchHtml, 'utf8')
-    : checkedHtml(await get(`${base}/search?${new URLSearchParams({ q: options.title, ext: 'epub' })}`), '搜索页');
+    : checkedHtml(await get(`${base}/search?${new URLSearchParams({ q: options.title, ext: options.format })}`), '搜索页');
   const records = searchResults(search);
-  if (!records.size) throw new Error('未找到 EPUB 结果；请检查搜索词和页面内容');
+  if (!records.size) throw new Error(`未找到 ${FORMATS[options.format].label} 结果；请检查搜索词和页面内容`);
   const ids = [...records.keys()];
   const counts = new Map(ids.filter(md5 => records.get(md5).downloadsTotal !== undefined).map(md5 => [md5, records.get(md5).downloadsTotal]));
   const missing = ids.filter(md5 => !counts.has(md5));
@@ -310,9 +313,9 @@ async function run(options) {
     fastUrl(base, winner).catch(error => ({ error: error.message })),
     detail instanceof Error ? { error: detail.message } : slowUrl(base, winner, detail, savedSlowHtml).catch(error => ({ error: error.message })),
   ]);
-  const out = options.out ?? (options.download ? bookPath(records.get(winner).title) : undefined);
+  const out = options.out ?? (options.download ? bookPath(records.get(winner).title, process.env, options.format) : undefined);
   const download = out
-    ? await downloadFirst(downloadResolvers(base, detail instanceof Error ? '' : detail, winner, fast, slow), out).catch(error => ({ error: error.message }))
+    ? await downloadFirst(downloadResolvers(base, detail instanceof Error ? '' : detail, winner, fast, slow), out, fetch, options.format).catch(error => ({ error: error.message }))
     : undefined;
   console.log(JSON.stringify({ title: records.get(winner).title, md5: winner, downloads_total: counts.get(winner), compared: records.size, detail_url: `${base}/md5/${winner}`, fast, slow, download }, null, 2));
 }

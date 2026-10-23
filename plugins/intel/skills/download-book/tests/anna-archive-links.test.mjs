@@ -126,3 +126,20 @@ test('bookPath saves under the intel output root, named from the book title', ()
   assert.equal(bookPath('A/B: C', { INTEL_OUTPUT_DIR: '/out' }), '/out/books/A-B- C.epub');
   assert.match(bookPath('Emma', {}), /\/Documents\/books\/Emma\.epub$/);
 });
+
+test('downloadFirst checks the file against the requested format', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'anna-dl-'));
+  const out = join(dir, 'book.pdf');
+  const pdf = async () => new Response('%PDF-1.7\n', { status: 200 });
+  assert.deepEqual(await downloadFirst([() => 'https://a/1'], out, pdf, 'pdf'), { path: out, url: 'https://a/1', refused: [] });
+  assert.equal(readFileSync(out, 'utf8'), '%PDF-1.7\n');
+  rmSync(out);
+  const epub = async () => new Response(EPUB, { status: 200 });
+  await assert.rejects(downloadFirst([() => 'https://a/1'], out, epub, 'pdf'), /不是 PDF/);
+  assert.equal(existsSync(out), false);
+  rmSync(dir, { recursive: true });
+});
+
+test('bookPath names the file with the requested format', () => {
+  assert.equal(bookPath('Literate Programming', { INTEL_OUTPUT_DIR: '/out' }, 'pdf'), '/out/books/Literate Programming.pdf');
+});
