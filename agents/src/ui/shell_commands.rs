@@ -26,14 +26,31 @@ pub(crate) struct SeparatedCommand {
 }
 
 /// Return command ranges with separators; ambiguous syntax or background & returns None.
-pub(crate) fn split_with_separators(_source: &str) -> Option<Vec<SeparatedCommand>> {
-    todo!()
+pub(crate) fn split_with_separators(source: &str) -> Option<Vec<SeparatedCommand>> {
+    parse(source, true)
 }
 
 /// Returns source ranges only when shell grouping is unambiguous.
 pub(crate) fn split(source: &str) -> Option<Vec<Command>> {
+    let commands = parse(source, false)?;
+    Some(
+        commands
+            .iter()
+            .enumerate()
+            .map(|(index, command)| Command {
+                range: command.range.clone(),
+                and_next: commands
+                    .get(index + 1)
+                    .is_some_and(|next| next.separator == Separator::And),
+            })
+            .collect(),
+    )
+}
+
+fn parse(source: &str, separated: bool) -> Option<Vec<SeparatedCommand>> {
     let bytes = source.as_bytes();
     let mut commands = Vec::new();
+    let mut separator = Separator::Start;
     let mut groups = Vec::new();
     let mut heredocs = Vec::new();
     let mut start = 0;
@@ -142,15 +159,44 @@ pub(crate) fn split(source: &str) -> Option<Vec<Command>> {
                 if !heredocs.is_empty() || bytes.get(index + 2) == Some(&b'&') {
                     return None;
                 }
-                push_command(source, start, index, true, &mut commands)?;
+                push_command(source, start, index, separator, &mut commands)?;
+                separator = Separator::And;
                 index += 2;
                 start = index;
+            }
+            b'|' if separated && groups.is_empty() => {
+                if !heredocs.is_empty() {
+                    return None;
+                }
+                let or = bytes.get(index + 1) == Some(&b'|');
+                let width = if or { 2 } else { 1 };
+                if matches!(bytes.get(index + width), Some(b'|' | b'&')) {
+                    return None;
+                }
+                push_command(source, start, index, separator, &mut commands)?;
+                separator = if or { Separator::Or } else { Separator::Pipe };
+                index += width;
+                start = index;
+            }
+            b'&' if separated => {
+                if !groups.is_empty() && bytes.get(index + 1) == Some(&b'&') {
+                    index += 2;
+                    continue;
+                }
+                // Descriptor duplication and combined stdout/stderr redirects are not jobs.
+                if bytes.get(index + 1) != Some(&b'>')
+                    && (index == 0 || !matches!(bytes[index - 1], b'<' | b'>'))
+                {
+                    return None;
+                }
+                index += 1;
             }
             b';' if groups.is_empty() => {
                 if !heredocs.is_empty() || matches!(bytes.get(index + 1), Some(b';' | b'&')) {
                     return None;
                 }
-                push_command(source, start, index, false, &mut commands)?;
+                push_command(source, start, index, separator, &mut commands)?;
+                separator = Separator::Semicolon;
                 index += 1;
                 start = index;
             }
@@ -170,7 +216,8 @@ pub(crate) fn split(source: &str) -> Option<Vec<Command>> {
                     if command.ends_with('|') {
                         return None;
                     }
-                    push_command(source, start, end, false, &mut commands)?;
+                    push_command(source, start, end, separator, &mut commands)?;
+                    separator = Separator::Semicolon;
                 }
                 index += usize::from(index < bytes.len());
                 start = index;
@@ -223,8 +270,8 @@ pub(crate) fn split(source: &str) -> Option<Vec<Command>> {
         return None;
     }
     if !source[start..].trim().is_empty() {
-        push_command(source, start, source.len(), false, &mut commands)?;
-    } else if commands.last().is_some_and(|command| command.and_next) {
+        push_command(source, start, source.len(), separator, &mut commands)?;
+    } else if matches!(separator, Separator::And | Separator::Or | Separator::Pipe) {
         return None;
     }
     Some(commands)
@@ -238,17 +285,17 @@ fn push_command(
     source: &str,
     start: usize,
     end: usize,
-    and_next: bool,
-    commands: &mut Vec<Command>,
+    separator: Separator,
+    commands: &mut Vec<SeparatedCommand>,
 ) -> Option<()> {
     let text = source[start..end].trim();
     if text.is_empty() {
         return None;
     }
     let start = start + source[start..end].len() - source[start..end].trim_start().len();
-    commands.push(Command {
+    commands.push(SeparatedCommand {
         range: start..start + text.len(),
-        and_next,
+        separator,
     });
     Some(())
 }
@@ -482,6 +529,86 @@ mod tests {
             .iter()
             .map(|command| (&source[command.range.clone()], command.and_next))
             .collect()
+    }
+
+    fn separated(source: &str) -> Vec<(&str, Separator)> {
+        split_with_separators(source)
+            .expect("valid foreground shell commands")
+            .into_iter()
+            .map(|command| (&source[command.range], command.separator))
+            .collect()
+    }
+
+    #[test]
+    fn separates_shell_operators() {
+        use Separator::*;
+        let source = "git status --short; git diff --stat\nsed -n '1,40p' src/main.rs && cargo test || cat errors.log | head -n 20";
+        assert_eq!(
+            separated(source),
+            vec![
+                ("git status --short", Start),
+                ("git diff --stat", Semicolon),
+                ("sed -n '1,40p' src/main.rs", Semicolon),
+                ("cargo test", And),
+                ("cat errors.log", Or),
+                ("head -n 20", Pipe),
+            ]
+        );
+        for operator in ["&&", "||", "|"] {
+            let source = format!("git status {operator}\n git diff");
+            assert_eq!(separated(&source).len(), 2);
+        }
+    }
+
+    #[test]
+    fn separated_commands_protect_shell_contexts_and_heredocs() {
+        for inner in [
+            "echo 'a && b || c | d; e & f'",
+            "echo \"a && b || c | d; e & f\"",
+            "echo $(a && b || c | d)",
+            "echo `a && b || c | d`",
+            "echo $'a && b || c | d'",
+            "echo a\\&b",
+            "cat <<'EOF'\na && b || c | d; e & f\nEOF",
+            "cat <<-EOF\n\ta && b || c | d; e & f\n\tEOF",
+        ] {
+            let source = format!("{inner}\necho done");
+            assert_eq!(
+                separated(&source),
+                vec![
+                    (inner, Separator::Start),
+                    ("echo done", Separator::Semicolon)
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn separated_commands_reject_background_but_keep_redirects() {
+        for source in [
+            "cargo test &",
+            "cargo test & git status",
+            "cargo test &>out &",
+        ] {
+            assert_eq!(split_with_separators(source), None, "{source}");
+        }
+        for command in [
+            "cargo test 2>&1",
+            "cargo test &>out",
+            "cargo test &>>out",
+            "cat <&0",
+            "echo 2>&-",
+            "echo >out 2>&1",
+        ] {
+            let source = format!("{command} && git status");
+            assert_eq!(
+                separated(&source),
+                vec![(command, Separator::Start), ("git status", Separator::And)]
+            );
+        }
+        for source in ["a ||", "a |", "a &&", "a ||| b", "a |& b", "a ;; b"] {
+            assert_eq!(split_with_separators(source), None, "{source}");
+        }
     }
 
     #[test]
