@@ -102,8 +102,9 @@ export async function codexWithImage(prompt, images, { model, effort, serviceTie
 /** True when every \\( has its \\) and every \\[ its \\], in order: an unclosed formula turns the rest of the
  * page into raw LaTeX in the render. */
 export function mathBalanced(md) {
+  const prose = md.replace(/```[\s\S]*?(?:```|$)|`[^`]*`/g, "");
   let open = null;
-  for (const m of md.matchAll(/\\([()[\]])/g)) {
+  for (const m of prose.matchAll(/\\([()[\]])/g)) {
     const d = m[1];
     if (d === "(" || d === "[") {
       if (open) return false;
