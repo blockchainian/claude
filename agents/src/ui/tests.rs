@@ -530,7 +530,7 @@ fn new_events_keep_rows_still_off_the_newest_row() {
     assert_eq!(body, rendered_cell(&before, "run a background job"));
     let jump = rendered_cell(&after, "↓ 1 New");
     let label = " ↓ 1 New ".width() as u16;
-    assert_eq!((jump.0, jump.1), (rect.right() + 2 - label, rect.y - 1));
+    assert_eq!((jump.0, jump.1), (rect.right() + 2 - label, rect.bottom()));
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(Rect::new(0, 0, 100, 25), &mut buf, now);
     assert_eq!(buf[jump].fg, Color::Reset);
@@ -3243,13 +3243,7 @@ fn event_model_and_effort_use_dim_style_and_picker_targets() {
                 let mut buf = Buffer::empty(area);
                 view.render(area, &mut buf);
                 let layout = view.center_layout(area);
-                let y = if crate::ui::render::ScreenLayout::for_width(width)
-                    == crate::ui::render::ScreenLayout::Large
-                {
-                    layout.event_panel.bottom()
-                } else {
-                    layout.event_panel.y - 1
-                };
+                let y = layout.list.bottom();
                 let targets = view.viewport.borrow().field_targets.clone();
                 for (field, text) in [
                     (Field::Model, human_name.unwrap_or("claude-opus-5-5")),
@@ -3257,25 +3251,19 @@ fn event_model_and_effort_use_dim_style_and_picker_targets() {
                 ] {
                     let rect = targets.iter().find(|(_, value)| *value == field).unwrap().0;
                     assert_eq!(rect.y, y);
-                    assert_eq!(rect.width as usize, text.len());
+                    let available = (layout.gap.x + 2) / 2 - 4;
+                    let text = crate::ui::line_truncation::truncate_line_with_ellipsis_if_overflow(
+                        Line::from(text),
+                        usize::from(available),
+                    )
+                    .to_string();
+                    assert_eq!(rect.width as usize, text.width());
                     assert_eq!(
                         rect.x,
                         if field == Field::Model {
-                            (if crate::ui::render::ScreenLayout::for_width(width)
-                                == crate::ui::render::ScreenLayout::Large
-                            {
-                                layout.event_panel.x - 2
-                            } else {
-                                layout.gap.x + 1
-                            }) + 2
+                            2
                         } else {
-                            targets
-                                .iter()
-                                .find(|(_, value)| *value == Field::Model)
-                                .unwrap()
-                                .0
-                                .right()
-                                + 3
+                            layout.gap.x - rect.width
                         }
                     );
                     for (offset, symbol) in text.chars().enumerate() {
@@ -3286,10 +3274,10 @@ fn event_model_and_effort_use_dim_style_and_picker_targets() {
                     }
                 }
                 if use_colors && width == 120 && human_name.is_none() {
-                    let text: String = (layout.event_panel.x..layout.event_panel.right())
+                    let text: String = (0..layout.gap.x + 2)
                         .map(|x| cell_text(buf[(x, y)].symbol()))
                         .collect();
-                    let styles: String = (layout.event_panel.x..layout.event_panel.right())
+                    let styles: String = (0..layout.gap.x + 2)
                         .map(|x| {
                             if buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM) {
                                 'd'
@@ -5170,7 +5158,7 @@ fn dashboard_event_list_fills_rows_next_to_rules() {
                 assert_eq!(layout.task_details.bottom(), rule_y);
                 assert_eq!(event_panel.bottom(), rule_y);
                 assert_eq!(buf[(event_panel.x - 2, rule_y)].symbol(), "┴");
-                assert_eq!(buf[(event_panel.x - 1, rule_y)].symbol(), "╴");
+                assert_eq!(buf[(event_panel.x - 1, rule_y)].symbol(), "─");
                 assert_ne!(buf[(event_panel.x, rule_y)].symbol(), " ");
             }
         }
@@ -5795,7 +5783,14 @@ fn task_event_last_message_uses_relative_time_and_missing_transcript_keeps_panel
     view.rows[view.selected].transcript = None;
     let rendered = event_screen(&view, 100, 25, now);
     assert!(!rendered.contains("Please inspect"));
-    assert!(rendered.lines().nth(10).unwrap().contains("╴opus "));
+    let model_y = view.center_layout(Rect::new(0, 0, 100, 25)).list.bottom();
+    assert!(
+        rendered
+            .lines()
+            .nth(usize::from(model_y))
+            .unwrap()
+            .contains("╴opus ")
+    );
 }
 
 #[test]
@@ -9725,13 +9720,7 @@ fn event_new_button_keeps_right_alignment_and_target() {
             let layout = view.center_layout(Rect::new(0, 0, width, 40));
             let viewport = view.viewport.borrow();
             let latest = viewport.event_jump;
-            let border_y = if crate::ui::render::ScreenLayout::for_width(width)
-                == crate::ui::render::ScreenLayout::Large
-            {
-                layout.event_panel.bottom()
-            } else {
-                layout.event_panel.y - 1
-            };
+            let border_y = layout.event_panel.bottom();
             assert_eq!(latest.right() - 1, layout.event_panel.right());
             assert_eq!(latest.y, border_y);
             let label = format!(" ↓ {unseen} New ");
@@ -10349,7 +10338,7 @@ fn border_labels_use_dim_half_lines_beside_separator_joints() {
             for (x, y, symbol) in [
                 (joint - 1, layout.event_panel.y - 1, "╶"),
                 (joint - 1, layout.event_panel.bottom(), "╶"),
-                (joint + 1, layout.event_panel.bottom(), "╴"),
+                (joint + 1, layout.event_panel.bottom(), "─"),
             ] {
                 let cell = &buf[(x, y)];
                 assert_eq!(
@@ -10393,7 +10382,7 @@ fn border_labels_use_half_lines_beside_screen_edge_corners() {
         let row: String = (0..width)
             .map(|x| cell_text(buf[(x, model.y)].symbol()))
             .collect();
-        assert!(row.contains("opus · medium "), "{row}");
+        assert!(row.contains("opus ") && row.contains(" medium"), "{row}");
         for x in [model.x - 1, width - 2] {
             assert!(
                 buf[(x, model.y)]
@@ -11080,7 +11069,9 @@ fn task_details_model_has_no_prefix() {
         })
         .collect::<Vec<_>>();
     assert!(
-        lines.iter().any(|line| line.contains("claude-opus · high")),
+        lines
+            .iter()
+            .any(|line| line.contains("claude-opus ") && line.contains(" high")),
         "{lines:?}"
     );
 }
@@ -11472,8 +11463,11 @@ fn task_details_weekly_usage_keeps_model_and_effort_targets() {
     let mut buffer = Buffer::empty(area);
     view.render_at(area, &mut buffer, Utc::now());
     let targets = &view.viewport.borrow().field_targets;
-    // The medium layout starts them at the midline, under the task's folder.
-    for (field, x, width) in [(Field::Model, 57, 11), (Field::Effort, 71, 4)] {
+    let layout = view.center_layout(area);
+    for (field, x, width) in [
+        (Field::Model, area.x + 2, 11),
+        (Field::Effort, layout.gap.x - 4, 4),
+    ] {
         let rect = targets
             .iter()
             .find(|(_, candidate)| *candidate == field)
@@ -11483,7 +11477,10 @@ fn task_details_weekly_usage_keeps_model_and_effort_targets() {
         let line = (area.x..area.right())
             .map(|x| cell_text(buffer[(x, rect.y)].symbol()))
             .collect::<String>();
-        assert!(line.contains("claude-opus · high"), "{line}");
+        assert!(
+            line.contains("claude-opus ") && line.contains(" high"),
+            "{line}"
+        );
         assert!(
             !line.contains("weekly") && !line.contains("Model:"),
             "{line}"

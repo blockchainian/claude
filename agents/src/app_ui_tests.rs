@@ -986,10 +986,8 @@ fn large_border_labels_stay_in_their_columns() {
         let task_details = separators[0] + 2..separators[1] - 1;
         let event_panel = separators[1] + 2..width - 1;
         assert!(
-            segment(&buffer, tasks.clone(), middle)
-                .chars()
-                .all(|c| c == '─'),
-            "task list middle border must remain a rule:\n{}",
+            segment(&buffer, tasks.clone(), middle).contains("Opus 5.5"),
+            "model belongs to the task list's borrowed bottom edge:\n{}",
             rendered.join("\n")
         );
         let bottom = segment(&buffer, task_details.clone(), middle);

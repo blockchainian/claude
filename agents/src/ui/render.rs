@@ -631,13 +631,19 @@ impl View {
             render_input_row(&prompt, edit, layout.search, buf);
         }
         // Activity and task status share the rule immediately above the prompt.
-        for border in [
+        let borders = [
             layout.prompt_top_rule,
             layout.prompt_bottom_rule,
             layout.event_detail_top_rule,
             layout.footer_rule,
-        ] {
-            rule(border, buf);
+        ];
+        for (index, border) in borders.iter().enumerate() {
+            if !borders[..index].contains(border)
+                && *border != row(layout.header, 1, 1)
+                && !(layout.kind == ScreenLayout::Small && *border == layout.gap)
+            {
+                rule(*border, buf);
+            }
         }
         let task_details = layout.task_details;
         if !task_details.is_empty() {
@@ -688,7 +694,52 @@ impl View {
             self.viewport.borrow_mut().marker = None;
         }
     }
-    /// Labels keep their unzoomed columns while their frame rules move or coincide.
+    /// Task labels stay within the visible owner's edges or the task list's borrowed edge.
+    fn render_task_frame_labels(
+        &self,
+        layout: CenterLayout,
+        area: Rect,
+        buf: &mut Buffer,
+        now: DateTime<Utc>,
+    ) {
+        if layout.task_details.is_empty() {
+            return;
+        }
+        let edge = |panel: Rect, y| {
+            let left = if panel.x == layout.top.x {
+                area.x
+            } else {
+                panel.x.saturating_sub(HORIZONTAL_PADDING + 1)
+            };
+            let right = if panel.right() == layout.top.right() {
+                area.right()
+            } else {
+                panel.right() + HORIZONTAL_PADDING + 1
+            };
+            Rect::new(left, y, right.saturating_sub(left), 1).intersection(area)
+        };
+        self.render_status_rule(
+            edge(layout.task_details, layout.task_details.y.saturating_sub(1)),
+            buf,
+            now,
+        );
+        let borrowed = !layout.list.is_empty();
+        self.render_title_rule(
+            edge(layout.task_details, layout.task_details.bottom()),
+            !borrowed,
+            buf,
+        );
+        if borrowed {
+            let y = if layout.kind == ScreenLayout::Small {
+                layout.list.y.saturating_sub(1)
+            } else {
+                layout.list.bottom()
+            };
+            self.render_task_model(edge(layout.list, y), Rect::default(), true, buf);
+        }
+    }
+
+    /// Renders labels on the dashboard frame.
     fn render_frame_labels(
         &self,
         baseline: CenterLayout,
@@ -701,48 +752,6 @@ impl View {
         let large = kind == ScreenLayout::Large;
         let at = |rect: Rect, y| Rect::new(rect.x, y, rect.width, 1).intersection(area);
         let small = kind == ScreenLayout::Small;
-        let left = if small {
-            area.x
-        } else {
-            baseline.gap.x + HORIZONTAL_PADDING
-        };
-        let right = if large && !baseline.event_panel.is_empty() {
-            baseline.event_panel.x - HORIZONTAL_PADDING
-        } else {
-            area.right()
-        };
-        let title = Rect::new(
-            left,
-            layout.prompt_top_rule.y,
-            right.saturating_sub(left),
-            1,
-        )
-        .intersection(area);
-        let status = if small && !layout.gap.is_empty() {
-            at(title, layout.gap.y)
-        } else {
-            at(title, layout.header.y + 1).intersection(layout.header)
-        };
-        let status = if status.is_empty() {
-            Rect::default()
-        } else {
-            status
-        };
-        // Save the status labels separately so an input-side label takes precedence when
-        // rules coincide, without clearing unrelated status labels on the same rule.
-        let mut status_base = Buffer::empty(status);
-        rule(status, &mut status_base);
-        let mut status_labels = status_base.clone();
-        if !status.is_empty() {
-            self.render_status_rule(status, &mut status_labels, now);
-        }
-        let before = (status.x..status.right())
-            .map(|x| buf[(x, status.y)].clone())
-            .collect::<Vec<_>>();
-
-        if small {
-            self.render_event_model(at(area, layout.header.y + 1), Rect::default(), true, buf);
-        }
         if !baseline.event_panel.is_empty() {
             let borders = [
                 at(
@@ -789,57 +798,21 @@ impl View {
             } else {
                 area.x
             };
-            let jump_y = if !small && self.event_list.sort == EventSort::Duration {
-                borders[1].y
+            let jump_y = borders[1].y;
+            let jump_rule = if layout.event_panel.is_empty() {
+                Rect::default()
             } else {
-                model_y
+                let left = layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1);
+                Rect::new(
+                    left,
+                    jump_y,
+                    layout.event_panel.right() + HORIZONTAL_PADDING - left,
+                    1,
+                )
             };
-            let jump_rule = Rect::new(
-                event_left,
-                jump_y,
-                area.right().saturating_sub(event_left),
-                1,
-            );
             let mut jump_buffer = Buffer::empty(jump_rule);
             self.render_event_jump(jump_rule, &mut jump_buffer);
             let jump = self.viewport.borrow().event_label;
-            let model_left = if !large && baseline.gap.width > 0 {
-                left
-            } else {
-                event_left
-            };
-            let baseline_model_y = if large {
-                baseline.prompt_top_rule.y
-            } else {
-                baseline.prompt_bottom_rule.y
-            };
-            let baseline_jump_y = if self.event_list.sort == EventSort::Duration {
-                if large {
-                    baseline.prompt_top_rule.y
-                } else {
-                    baseline.event_detail_top_rule.y
-                }
-            } else {
-                baseline_model_y
-            };
-            let reservation = if baseline_jump_y == baseline_model_y {
-                jump
-            } else {
-                Rect::default()
-            };
-            if !small {
-                self.render_event_model(
-                    Rect::new(
-                        model_left,
-                        model_y,
-                        area.right().saturating_sub(model_left),
-                        1,
-                    ),
-                    reservation,
-                    false,
-                    buf,
-                );
-            }
             let mut occupied = self
                 .viewport
                 .borrow()
@@ -868,6 +841,11 @@ impl View {
                     Rect::default()
                 };
             }
+            let baseline_model_y = if large {
+                baseline.prompt_top_rule.y
+            } else {
+                baseline.prompt_bottom_rule.y
+            };
             let baseline_filter_y = if large {
                 baseline.prompt_top_rule.y
             } else {
@@ -882,29 +860,7 @@ impl View {
                 buf,
             );
         }
-        if !title.is_empty() && baseline.task_details.width > 0 {
-            self.render_title_rule(title, buf);
-        }
-        // A whole status label yields on overlap, including its surrounding spaces.
-        let mut x = status.x;
-        while x < status.right() {
-            if status_labels[(x, status.y)] == status_base[(x, status.y)] {
-                x += 1;
-                continue;
-            }
-            let start = x;
-            while x < status.right() && status_labels[(x, status.y)] != status_base[(x, status.y)] {
-                x += 1;
-            }
-            if (small && !layout.gap.is_empty())
-                || (start..x)
-                    .all(|column| buf[(column, status.y)] == before[usize::from(column - status.x)])
-            {
-                for column in start..x {
-                    buf[(column, status.y)] = status_labels[(column, status.y)].clone();
-                }
-            }
-        }
+        self.render_task_frame_labels(layout, area, buf, now);
     }
 
     pub(super) fn render_confirm_dialog(
@@ -1000,7 +956,6 @@ impl View {
             (None, Some(_)) => SessionStatus::New.label(),
             (None, None) => return,
         };
-        self::rule(rule, buf);
         // The status stays centered on the whole rule, keeping both end labels clear.
         let fits = |text: &String| usize::from(rule.width) >= 2 * (text.width() + 2) + 7;
         let elapsed = session
@@ -1082,8 +1037,8 @@ impl View {
     }
     /// Centers the selected task's name, or a new task's label, on the rule under the details
     /// panel, a space apart on each side; a double click edits a task's name. The project
-    /// folder on the left and the pull request or branch on the right flank it.
-    fn render_title_rule(&self, rule: Rect, buf: &mut Buffer) {
+    /// folder and branch flank it while borrowing; otherwise they share its right edge.
+    fn render_title_rule(&self, rule: Rect, settings_on_edge: bool, buf: &mut Buffer) {
         let session = self
             .selected_row()
             .filter(|_| self.selected_draft().is_none());
@@ -1107,14 +1062,6 @@ impl View {
         // The name, shown or edited, keeps the color it has in the task list.
         let name_style = self.title_style(&key);
         let title_style = name_style.bold();
-        // The left corner is a joint, or the separator that keeps going down beside the prompt.
-        self::rule(
-            Rect::new(rule.x + 1, rule.y, rule.width.saturating_sub(1), 1),
-            buf,
-        );
-        if buf[(rule.x, rule.y)].symbol() == "│" {
-            buf[(rule.x, rule.y)].set_symbol("├");
-        }
         let folder_width = usize::from(rule.width).saturating_sub(title.width().min(20) + 10) / 2;
         let folder_width = folder_width.min(usize::from(rule.width / 3));
         let folder = super::formatting::format_directory_display(&heading, Some(folder_width));
@@ -1134,16 +1081,49 @@ impl View {
                 .map(|branch| Span::styled(branch, style::time_style())),
             _ => None,
         };
+        let has_branch = right.is_some();
+        let folder_cells = folder.width() as u16;
+        let right = if settings_on_edge {
+            let mut spans = vec![Span::styled(folder.clone(), style::time_style())];
+            if let Some(branch) = right {
+                spans.push(" ─ ".dim());
+                spans.push(branch);
+            }
+            Some(Line::from(spans))
+        } else {
+            right.map(Line::from)
+        };
         // Keep short branch labels intact; longer labels share the folder's width budget.
-        let right = right.map(|span| {
-            truncate_line_with_ellipsis_if_overflow(Line::from(span), folder_width.max(20))
-        });
+        let right =
+            right.map(|span| truncate_line_with_ellipsis_if_overflow(span, folder_width.max(20)));
+        if settings_on_edge {
+            self.render_task_model(
+                rule,
+                Rect::new(rule.x + rule.width / 2, rule.y, rule.width.div_ceil(2), 1),
+                false,
+                buf,
+            );
+        }
+        let model_width = self
+            .viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .filter(|(_, field)| matches!(field, Field::Model | Field::Effort))
+            .filter(|(rect, _)| rect.y == rule.y)
+            .map(|(rect, _)| usize::from(rect.right().saturating_sub(rule.x + 2)))
+            .max()
+            .unwrap_or(0);
         // The title stays centered on the whole rule, so the wider side label's width is kept
         // clear on both sides, plus the corner, one rule cell and a space on each side.
         let side = right
             .as_ref()
             .map_or(0, |line| line.width())
-            .max(folder.width());
+            .max(if settings_on_edge {
+                model_width
+            } else {
+                folder.width()
+            });
         let width = usize::from(rule.width).saturating_sub(6 + 2 * (side + 2));
         let editor = self.title_editor();
         let title = if let Some(editor) = editor {
@@ -1198,10 +1178,22 @@ impl View {
         let (folder_area, right_area) = render_rule_ends(
             rule,
             label_width,
-            Some(Line::from(Span::styled(folder, style::time_style()))),
+            (!settings_on_edge).then(|| Line::from(Span::styled(folder, style::time_style()))),
             right,
             buf,
         );
+        let (folder_area, right_area) = if settings_on_edge {
+            let folder_area =
+                right_area.map(|area| Rect::new(area.x, area.y, folder_cells.min(area.width), 1));
+            let branch_area = right_area.and_then(|area| {
+                let start = area.x + folder_cells + 3;
+                (has_branch && start < area.right())
+                    .then(|| Rect::new(start, area.y, area.right() - start, 1))
+            });
+            (folder_area, branch_area)
+        } else {
+            (folder_area, right_area)
+        };
         let mut viewport = self.viewport.borrow_mut();
         let Some(session) = session else {
             // A new task's folder is still a choice, so it opens the repository browser, not the folder.
@@ -1271,7 +1263,10 @@ impl View {
     }
 
     /// Places model and effort together or at opposite ends; each value opens its own picker.
-    fn render_event_model(&self, rule: Rect, reservation: Rect, ends: bool, buf: &mut Buffer) {
+    fn render_task_model(&self, rule: Rect, reservation: Rect, ends: bool, buf: &mut Buffer) {
+        if rule.width < 4 || rule.is_empty() {
+            return;
+        }
         let draft = self.selected_draft();
         let (model, effort) = match (self.selected_row().filter(|_| draft.is_none()), draft) {
             // A session shows only the settings it has reported; nothing stands in for the rest.
@@ -2571,9 +2566,8 @@ mod background_title_tests {
             view.event_list.restoring = false;
             view.render(area, &mut buf);
             let viewport = view.viewport.borrow();
-            let small = ScreenLayout::for_width(width) == ScreenLayout::Small;
-            let other = viewport.event_borders[usize::from(small)];
-            let y = viewport.event_borders[usize::from(!small)].y;
+            let other = viewport.event_borders[0];
+            let y = viewport.event_borders[1].y;
             let label = Rect::new(viewport.event_panel.right() + 1 - 10, y, 10, 1);
             let text: String = (label.x..label.right())
                 .map(|x| buf[(x, y)].symbol())
@@ -2683,11 +2677,13 @@ mod title_input_tests {
     fn new_task_name_keeps_its_task_list_color_while_shown_and_edited() {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().join("Directory");
+        std::fs::create_dir(&cwd).unwrap();
         let mut view = View::new(Grouping::Project, true);
         view.set_active_panel(Panel::TaskDetails);
         view.add_draft(DraftSetup {
             provider: ProviderId::Claude,
-            cwd: directory.path().to_owned(),
+            cwd,
             model: None,
             effort: None,
             branch: String::new(),
@@ -2695,18 +2691,23 @@ mod title_input_tests {
         let key = view.selected_draft().unwrap().key();
         let color = Some(view.title_color(&key));
         let rule = Rect::new(0, 0, 60, 1);
-        let name_cell = |view: &View, text: &str| {
+        let name_cell = |view: &View| {
             let mut buf = Buffer::empty(rule);
-            view.render_title_rule(rule, &mut buf);
-            let x = (0..rule.width)
-                .find(|&x| buf[(x, 0)].symbol() == &text[..1])
-                .unwrap();
-            buf[(x, 0)].clone()
+            view.render_title_rule(rule, false, &mut buf);
+            let viewport = view.viewport.borrow();
+            let label = if view.title_editor().is_some() {
+                viewport.title_input
+            } else {
+                viewport.task_details_title
+            };
+            assert!(!label.is_empty());
+            assert_eq!(buf[(label.x, label.y)].symbol(), "D");
+            buf[(label.x, label.y)].clone()
         };
         view.rename.set_text("Draft name");
-        assert_eq!(name_cell(&view, "D").fg, color.unwrap());
+        assert_eq!(name_cell(&view).fg, color.unwrap());
         assert!(view.accept_draft_name());
-        assert_eq!(name_cell(&view, "D").fg, color.unwrap());
+        assert_eq!(name_cell(&view).fg, color.unwrap());
     }
 
     #[test]
@@ -2731,7 +2732,7 @@ mod title_input_tests {
                     let rule = Rect::new(7, 3, width, 1);
                     let mut buf = Buffer::empty(Rect::new(5, 2, width + 4, 3));
                     view.viewport.borrow_mut().field_targets.clear();
-                    view.render_title_rule(rule, &mut buf);
+                    view.render_title_rule(rule, false, &mut buf);
                     let input = view.viewport.borrow().title_input;
                     assert!(input.x >= rule.x && input.right() <= rule.right());
                     if !input.is_empty() {
@@ -2762,6 +2763,10 @@ mod title_input_tests {
 #[cfg(test)]
 #[path = "panel_frame_tests.rs"]
 mod panel_frame_tests;
+
+#[cfg(test)]
+#[path = "owner_label_tests.rs"]
+mod owner_label_tests;
 
 #[cfg(test)]
 mod small_height_tests {

@@ -434,15 +434,6 @@ fn panel_zoom_event_list_has_no_left_separator_joints() {
         assert_eq!(view.active_panel, Panel::EventList);
         view.render_at(area, &mut buf, now);
         let original = buf.clone();
-        let model_x = view
-            .viewport
-            .borrow()
-            .field_targets
-            .iter()
-            .find(|(_, field)| *field == Field::Model)
-            .unwrap()
-            .0
-            .x;
         let layout = view.center_layout(area);
         let joint_x = layout.event_panel.x - render::HORIZONTAL_PADDING - 1;
         let rows = [layout.header.bottom() - 1, layout.prompt_top_rule.y];
@@ -460,16 +451,13 @@ fn panel_zoom_event_list_has_no_left_separator_joints() {
                 buf[(area.x, y)].symbol()
             );
         }
-        let model = view
-            .viewport
-            .borrow()
-            .field_targets
-            .iter()
-            .find(|(_, field)| *field == Field::Model)
-            .map(|(target, _)| *target)
-            .unwrap();
-        assert_eq!(model.x, model_x);
-        assert_eq!(model.y, rows[1]);
+        assert!(
+            view.viewport
+                .borrow()
+                .field_targets
+                .iter()
+                .all(|(_, field)| !matches!(field, Field::Model | Field::Effort))
+        );
 
         zoom_key(&mut view, '=', KeyModifiers::NONE);
         view.render_at(area, &mut buf, now);

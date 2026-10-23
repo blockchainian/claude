@@ -537,16 +537,7 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
                 "width {width}"
             );
             assert_eq!(jump.width, label.width() as u16);
-            assert_eq!(
-                jump.y,
-                if crate::ui::render::ScreenLayout::for_width(width)
-                    == crate::ui::render::ScreenLayout::Large
-                {
-                    bottom.y
-                } else {
-                    top.y
-                }
-            );
+            assert_eq!(jump.y, bottom.y);
             let drawn: String = (jump.x..jump.right())
                 .map(|x| buf[(x, jump.y)].symbol())
                 .collect();
@@ -563,11 +554,7 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
                     "{field:?} overlaps New at width {width}"
                 );
             }
-            assert_eq!(
-                top.intersects(jump),
-                crate::ui::render::ScreenLayout::for_width(width)
-                    != crate::ui::render::ScreenLayout::Large
-            );
+            assert_eq!(top.intersects(jump), false);
             let border_click = (top.x, top.y);
             drop(viewport);
             // The plain top border selects oldest; the labeled button still selects latest.
@@ -871,4 +858,44 @@ fn duration_running_rows_redraw_only_while_visible_and_keep_update_order() {
     view.select_event(Some(0));
     view.render_event(area, &mut buf, now);
     assert_eq!(view.event_redraw_in(now), None);
+}
+
+#[test]
+fn event_jump_follows_event_panel_visibility_and_width() {
+    for width in [90, 120, 160] {
+        for panel in [
+            Panel::TaskList,
+            Panel::TaskDetails,
+            Panel::EventList,
+            Panel::EventDetail,
+        ] {
+            for commands in ["", "|", "_", "|_"] {
+                let (_dir, mut view, events) = fixture();
+                view.set_event(events);
+                view.select_event(Some(3));
+                view.event_list.unseen.set(3);
+                view.active_panel = panel;
+                let area = Rect::new(0, 0, width, 50);
+                view.render(area, &mut Buffer::empty(area));
+                for key in commands.chars() {
+                    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+                    view.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::SHIFT));
+                }
+                view.render(area, &mut Buffer::empty(area));
+                let viewport = view.viewport.borrow();
+                if viewport.event_panel.is_empty() {
+                    assert!(
+                        viewport.event_jump.is_empty(),
+                        "{width} {panel:?} {commands}"
+                    );
+                } else {
+                    assert_eq!(viewport.event_jump.y, viewport.event_borders[1].y);
+                    assert_eq!(
+                        viewport.event_jump.right(),
+                        viewport.event_panel.right() + 1
+                    );
+                }
+            }
+        }
+    }
 }

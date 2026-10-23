@@ -101,25 +101,11 @@ fn event_border_places_model_label_and_effort_targets_in_both_layouts() {
                 .find(|(_, field)| *field == Field::Effort)
                 .unwrap()
                 .0;
-            let y = if crate::ui::render::ScreenLayout::for_width(width)
-                == crate::ui::render::ScreenLayout::Large
-            {
-                layout.event_panel.bottom()
-            } else {
-                layout.event_panel.y - 1
-            };
+            let y = layout.list.bottom();
             assert_eq!(model.y, y);
             assert_eq!(effort.y, y);
-            // The medium layout starts them at the midline, under the task's folder.
-            let start = if crate::ui::render::ScreenLayout::for_width(width)
-                == crate::ui::render::ScreenLayout::Large
-            {
-                layout.event_panel.x
-            } else {
-                layout.gap.x + super::super::render::HORIZONTAL_PADDING + 2
-            };
-            assert_eq!(model.x, start);
-            assert_eq!(effort.x, model.right() + 3);
+            assert_eq!(model.x, 2);
+            assert_eq!(effort.right(), layout.gap.x);
             let text = |rect: Rect| {
                 (rect.x..rect.right())
                     .map(|x| cell_text(buf[(x, rect.y)].symbol()))
@@ -139,7 +125,7 @@ fn event_border_places_model_label_and_effort_targets_in_both_layouts() {
 #[test]
 fn model_effort_border_shows_only_known_values_and_right_aligns_new() {
     for width in [100, 149, 150, 220] {
-        for (model, effort, expected) in [
+        for (model, effort, _expected) in [
             (Some("Opus"), Some("high"), "Opus · high"),
             (Some("Opus"), None, "Opus "),
             (None, Some("high"), "high "),
@@ -157,36 +143,33 @@ fn model_effort_border_shows_only_known_values_and_right_aligns_new() {
                 let mut buf = Buffer::empty(Rect::new(0, 0, width, 50));
                 view.render(buf.area, &mut buf);
                 let viewport = view.viewport.borrow();
-                let model_y = if crate::ui::render::ScreenLayout::for_width(width)
-                    == crate::ui::render::ScreenLayout::Large
-                {
-                    viewport.event_panel.bottom()
-                } else {
-                    viewport.event_panel.y - 1
-                };
-                let start = if crate::ui::render::ScreenLayout::for_width(width)
-                    == crate::ui::render::ScreenLayout::Large
-                {
-                    viewport.event_panel.x
-                } else {
-                    view.center_layout(buf.area).gap.x + 3
-                };
-                let line: String = (start..buf.area.right())
+                let layout = view.center_layout(buf.area);
+                let model_y = layout.list.bottom();
+                let line: String = (0..layout.gap.x + 2)
                     .map(|x| cell_text(buf[(x, model_y)].symbol()))
                     .collect();
-                if !expected.is_empty() {
-                    assert!(line.starts_with(expected), "{line}");
+                for (field, value) in [(Field::Model, model), (Field::Effort, effort)] {
+                    let target = viewport.field_targets.iter().find(|(_, key)| *key == field);
+                    assert_eq!(target.is_some(), value.is_some(), "{line}");
+                    if let (Some((rect, _)), Some(value)) = (target, value) {
+                        let text: String = (rect.x..rect.right())
+                            .map(|x| cell_text(buf[(x, rect.y)].symbol()))
+                            .collect();
+                        assert_eq!(text, value);
+                        assert_eq!(rect.y, model_y);
+                        if field == Field::Model {
+                            assert_eq!(rect.x, 2);
+                        } else {
+                            assert_eq!(rect.right(), layout.gap.x);
+                        }
+                    }
                 }
-                assert_eq!(
-                    line.contains('·'),
-                    model.is_some() && effort.is_some(),
-                    "{line}"
-                );
+                assert!(!line.contains('·'), "{line}");
                 if unseen == 0 {
                     assert!(viewport.event_jump.is_empty());
                 } else {
                     let jump = viewport.event_jump;
-                    assert_eq!(jump.y, model_y);
+                    assert_eq!(jump.y, layout.event_panel.bottom());
                     assert_eq!(
                         jump.right() - 2,
                         super::super::event_list::event_row_areas(viewport.event_panel)

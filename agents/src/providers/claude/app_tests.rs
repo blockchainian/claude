@@ -444,24 +444,9 @@ fn top_border_loads_first_event_of_whole_event() {
     };
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
-    let bottom = (0..45)
-        .find(|&y| {
-            (100..200)
-                .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
-                .collect::<String>()
-                .contains("claude-opus")
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "{}",
-                (0..45)
-                    .map(|y| (0..200)
-                        .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
-                        .collect::<String>())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            )
-        });
+    let bottom = (2..45)
+        .find(|&y| (100..200).any(|x| buffer[(x, y)].symbol() == "┴"))
+        .expect("event list bottom rule joins its visible column separator");
     for latest in [false, true] {
         click(&mut app, 1);
         click(&mut app, 1);

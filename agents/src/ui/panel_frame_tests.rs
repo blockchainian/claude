@@ -1,7 +1,7 @@
 use super::*;
 use crate::providers::Provider;
 
-fn fixture() -> (tempfile::TempDir, View, DateTime<Utc>) {
+pub(super) fn fixture() -> (tempfile::TempDir, View, DateTime<Utc>) {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("projects/project");
     std::fs::create_dir_all(&project).unwrap();
@@ -36,13 +36,13 @@ fn fixture() -> (tempfile::TempDir, View, DateTime<Utc>) {
     (dir, view, now)
 }
 
-fn draw(view: &View, area: Rect, now: DateTime<Utc>) -> Buffer {
+pub(super) fn draw(view: &View, area: Rect, now: DateTime<Utc>) -> Buffer {
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
     buf
 }
 
-fn label(buf: &Buffer, text: &str, y: u16) -> Rect {
+pub(super) fn label(buf: &Buffer, text: &str, y: u16) -> Rect {
     for x in buf.area.x..buf.area.right() {
         if (x..buf.area.right())
             .map(|x| cell_text(buf[(x, y)].symbol()))
@@ -61,125 +61,43 @@ fn label(buf: &Buffer, text: &str, y: u16) -> Rect {
 }
 
 #[test]
-fn frame_labels_keep_their_columns_through_every_zoom() {
-    let mut failures = Vec::new();
-    for width in [110, 200] {
+fn frame_labels_restore_after_every_zoom() {
+    for width in [90, 120, 160] {
         for panel in [
             Panel::TaskList,
             Panel::TaskDetails,
             Panel::EventList,
             Panel::EventDetail,
         ] {
-            for sort in [EventSort::Time, EventSort::Duration] {
-                for commands in ["_", "|", "_|"] {
-                    let (_dir, mut view, now) = fixture();
-                    view.event_list.sort = sort;
-                    view.event_list.cursor = Some(0);
-                    view.event_list.unseen.set(2);
-                    let area = Rect::new(0, 0, width, 50);
-                    let original = view.panel_layout(area, false);
-                    let baseline = draw(&view, area, now);
-                    let title = view.viewport.borrow().task_details_title;
-                    let model_y = if ScreenLayout::for_width(width) == ScreenLayout::Large {
-                        original.prompt_top_rule.y
-                    } else {
-                        original.prompt_bottom_rule.y
-                    };
-                    let filter_y = if ScreenLayout::for_width(width) == ScreenLayout::Large {
-                        original.prompt_top_rule.y
-                    } else {
-                        original.event_detail_top_rule.y
-                    };
-                    let labels = [
-                        (title, 0),
-                        (
-                            label(&baseline, "frame-project", original.prompt_top_rule.y),
-                            0,
-                        ),
-                        (
-                            label(&baseline, "frame-labels", original.prompt_top_rule.y),
-                            0,
-                        ),
-                        (
-                            label(
-                                &baseline,
-                                &format!(
-                                    "{} · medium",
-                                    view.model_text(ProviderId::Claude, "claude-opus-4-6")
-                                ),
-                                model_y,
-                            ),
-                            1,
-                        ),
-                        (label(&baseline, "Assistant", filter_y), 2),
-                        if sort == EventSort::Duration {
-                            (label(&baseline, "duration", filter_y), 2)
-                        } else {
-                            (label(&baseline, "↓ 2 New", model_y), 1)
-                        },
-                    ];
-                    view.set_active_panel(panel);
-                    for command in commands.chars() {
-                        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
-                        view.handle_key(KeyEvent::new(KeyCode::Char(command), KeyModifiers::SHIFT));
-                    }
-                    let layout = view.center_layout(area);
-                    let actual = draw(&view, area, now);
-                    let ys = [
-                        layout.prompt_top_rule.y,
-                        if ScreenLayout::for_width(width) == ScreenLayout::Large {
-                            layout.prompt_top_rule.y
-                        } else {
-                            layout.prompt_bottom_rule.y
-                        },
-                        if ScreenLayout::for_width(width) == ScreenLayout::Large {
-                            layout.prompt_top_rule.y
-                        } else {
-                            layout.event_detail_top_rule.y
-                        },
-                    ];
-                    for (label, rule) in labels {
-                        assert!(!label.is_empty());
-                        let shifted = rule == 2
-                            && label.width == 9
-                            && ScreenLayout::for_width(width) != ScreenLayout::Large
-                            && ys[1] == ys[2];
-                        let target_x = if shifted {
-                            labels[3].0.x - label.width - 3
-                        } else {
-                            label.x
-                        };
-                        for offset in 0..label.width {
-                            let x = target_x + offset;
-                            if actual[(x, ys[rule])].symbol()
-                                != baseline[(label.x + offset, label.y)].symbol()
-                            {
-                                failures.push(format!(
-                                    "{width} {panel:?} {commands}: label {label:?} column {x}"
-                                ));
-                                break;
-                            }
-                        }
-                        if shifted {
-                            assert_eq!(
-                                actual[(target_x + label.width + 1, ys[rule])].symbol(),
-                                "─"
-                            );
-                        }
-                    }
-                    for y in [layout.prompt_top_rule.y, original.prompt_top_rule.y] {
-                        assert!((area.x..area.right()).all(|x| {
-                            !actual[(x, y)]
-                                .symbol()
-                                .chars()
-                                .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
-                        }));
-                    }
+            for commands in ["_", "|", "_|", "|_"] {
+                let (_dir, mut view, now) = fixture();
+                let area = Rect::new(0, 0, width, 60);
+                view.set_active_panel(panel);
+                let baseline = draw(&view, area, now);
+                for command in commands.chars() {
+                    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+                    view.handle_key(KeyEvent::new(KeyCode::Char(command), KeyModifiers::SHIFT));
                 }
+                let actual = draw(&view, area, now);
+                let layout = view.center_layout(area);
+                for y in [layout.prompt_top_rule.y, layout.prompt_bottom_rule.y] {
+                    assert!((area.x..area.right()).all(|x| {
+                        !actual[(x, y)]
+                            .symbol()
+                            .chars()
+                            .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
+                    }));
+                }
+                view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+                view.handle_key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::NONE));
+                assert_eq!(
+                    draw(&view, area, now),
+                    baseline,
+                    "{width} {panel:?} {commands}"
+                );
             }
         }
     }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
@@ -206,7 +124,7 @@ fn short_windows_keep_both_prompt_rules() {
 }
 
 #[test]
-fn merged_rule_moves_jump_and_filter_without_changing_the_model() {
+fn merged_rule_keeps_borrowed_settings_only_while_owner_is_visible() {
     for width in [40, 110] {
         let (_dir, mut view, now) = fixture();
         view.rows[0].model =
@@ -221,49 +139,23 @@ fn merged_rule_moves_jump_and_filter_without_changing_the_model() {
             .filter(|(_, field)| matches!(field, Field::Model | Field::Effort))
             .map(|(rect, _)| *rect)
             .collect();
-        let jump = view.viewport.borrow().event_label;
-        assert!(!jump.is_empty());
-        let filter_y = if width < 100 {
-            view.panel_layout(area, false).prompt_bottom_rule.y
-        } else {
-            view.panel_layout(area, false).event_detail_top_rule.y
-        };
-        label(&before, "Assistant", filter_y);
         view.height_zoom = Some(Panel::TaskList);
         let after = draw(&view, area, now);
         let layout = view.center_layout(area);
-        let y = layout.prompt_bottom_rule.y;
-        assert_eq!(y, layout.event_detail_top_rule.y);
-        for rect in &models {
-            let y = if width < 100 { rect.y } else { y };
-            for x in rect.x..rect.right() {
-                assert_eq!(
-                    after[(x, y)],
-                    before[(x, rect.y)],
-                    "model changed: {width} ({x}, {y})"
-                );
-            }
-        }
-        let model_left = models[0].x - 1;
-        let moved_jump = view.viewport.borrow().event_label;
+        let targets = view.viewport.borrow().field_targets.clone();
         if width < 100 {
-            assert_eq!(moved_jump.right(), jump.right());
+            assert!(
+                targets
+                    .iter()
+                    .all(|(_, field)| !matches!(field, Field::Model | Field::Effort))
+            );
         } else {
-            assert_eq!(moved_jump.right() + 1, model_left);
-        }
-        if moved_jump.right() < area.right() {
-            assert_eq!(after[(moved_jump.right(), y)].symbol(), "─");
-        }
-        label(&after, "duration", y);
-        if width == 110 {
-            let filter = label(&after, "Assistant", y);
-            assert_eq!(filter.right() + 2, moved_jump.x);
-            assert_eq!(after[(filter.right() + 1, y)].symbol(), "─");
-        } else {
-            let row = (area.x..area.right())
-                .map(|x| cell_text(after[(x, y)].symbol()))
-                .collect::<String>();
-            assert!(row.contains("Assistant"), "{row}");
+            for rect in models {
+                let y = layout.list.bottom();
+                for x in rect.x..rect.right() {
+                    assert_eq!(after[(x, y)], before[(x, rect.y)], "{width} ({x},{y})");
+                }
+            }
         }
     }
 }
@@ -354,7 +246,7 @@ fn small_layout_event_controls_share_the_rule_above_the_event_list() {
         let layout = view.center_layout(area);
         assert_eq!(label(&buf, "Assistant", layout.prompt_bottom_rule.y).x, 2);
         let jump = view.viewport.borrow().event_label;
-        assert_eq!(jump.y, layout.prompt_bottom_rule.y);
+        assert_eq!(jump.y, layout.event_detail_top_rule.y);
         assert!(!jump.is_empty());
     }
 }
