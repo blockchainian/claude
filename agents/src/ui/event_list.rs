@@ -325,6 +325,20 @@ impl View {
 
     /// Draws the duration label or the New button at the time column’s right edge.
     /// The button appears while an older event is selected and new events have arrived.
+    /// The following section's title, while its row remains below the visible window.
+    pub(super) fn next_event_section_title(&self) -> Option<Line<'static>> {
+        let viewport = self.viewport.borrow();
+        let layout = viewport.event_detail_layout.as_ref()?;
+        let top = *layout.visible.first()?;
+        let bottom = *layout.visible.last()?;
+        layout
+            .titles
+            .iter()
+            .find(|(row, _)| *row > top)
+            .filter(|(row, _)| *row > bottom)
+            .map(|(_, title)| title.clone())
+    }
+
     pub(super) fn render_event_jump(&self, area: Rect, buf: &mut Buffer) {
         let mut viewport = self.viewport.borrow_mut();
         viewport.event_jump = Rect::default();

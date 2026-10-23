@@ -1102,3 +1102,34 @@ fn empty_output_file_keeps_following_across_separate_appends() {
         screen_rows(&view, 200, 50);
     }
 }
+
+#[test]
+fn event_detail_bottom_edge_tracks_the_next_hidden_title() {
+    for width in [90, 120, 160] {
+        let (mut view, _) = tool_fixture();
+        let mut saw_hidden = false;
+        let mut saw_visible = false;
+        for _ in 0..45 {
+            let rows = screen_rows(&view, width, 24);
+            let viewport = view.viewport.borrow();
+            let content = &rows
+                [usize::from(viewport.event_detail.y)..usize::from(viewport.event_detail.bottom())];
+            let edge = &rows[usize::from(viewport.output_borders[1].y)];
+            let first_visible = content.iter().any(|row| row.contains("first body"));
+            let next_visible = content.iter().any(|row| row.contains("Second tool"));
+            if first_visible && !next_visible {
+                assert!(edge.contains("Second tool"), "{width}: {}", rows.join("\n"));
+                saw_hidden = true;
+            } else if next_visible {
+                assert!(!edge.contains("Second tool"));
+                saw_visible = true;
+            }
+            drop(viewport);
+            event_detail_wheel(&mut view, true);
+        }
+        assert!(
+            saw_hidden && saw_visible,
+            "{width}: hidden={saw_hidden}, visible={saw_visible}"
+        );
+    }
+}
