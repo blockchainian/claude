@@ -733,6 +733,13 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             parts.push(Part::new(text.clone(), Body::Label(Style::new().dim())));
             return;
         }
+        Section::Image(image) => {
+            parts.push(Part::new(
+                format!("[image {}]", image.media_type),
+                Body::Label(Style::new().dim()),
+            ));
+            return;
+        }
         Section::Code { label, lang, text } => {
             (label, Part::new(cells(text), Body::Code(lang.clone())))
         }

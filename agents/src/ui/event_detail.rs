@@ -89,6 +89,19 @@ pub(super) struct EventDetailScroll {
     /// An output refresh reached while the detail was at its bottom.
     pub follow_output: bool,
     pub saved: std::collections::HashMap<u64, super::SectionScroll>,
+    /// The zoom of each image in the selected event, by its order among the event's images.
+    pub zooms: std::collections::HashMap<usize, super::inline_images::Zoom>,
+}
+
+/// An image the last render drew in the event detail.
+pub(super) struct DrawnImage {
+    /// Its order among the event's images.
+    pub index: usize,
+    pub image: crate::event::ImageBlock,
+    /// The screen cells it covers.
+    pub area: ratatui::layout::Rect,
+    /// The image row drawn at the top of `area`.
+    pub first_row: u16,
 }
 
 impl super::View {

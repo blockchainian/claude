@@ -124,6 +124,15 @@ pub struct FileLink {
     pub line: u64,
 }
 
+/// An image content block inside a transcript record, read on demand.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImageBlock {
+    pub media_type: String,
+    pub record: SourceRecord,
+    /// The JSON pointer of the block's base64 data within the record.
+    pub pointer: String,
+}
+
 /// A transcript line retained by its file position, decoded only when requested.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceRecord {
@@ -293,6 +302,8 @@ pub enum Section {
     Structured { label: String, text: String },
     /// An unsupported content block, displayed dimly without its payload.
     Placeholder(String),
+    /// An image block; drawn inline when the terminal supports images, else as its placeholder text.
+    Image(ImageBlock),
     /// Code highlighted by `lang`, a syntax token or file extension such as "bash" or "rs".
     Code {
         label: String,

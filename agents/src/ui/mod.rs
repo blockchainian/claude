@@ -24,6 +24,7 @@ mod event_search;
 pub(crate) mod highlight;
 mod hints;
 mod hyperlink;
+mod inline_images;
 mod input;
 mod key_name;
 mod line_edit;
@@ -187,6 +188,8 @@ struct Viewport {
     event_detail_footer_title: Option<(Line<'static>, event_detail::EventDetailColumns)>,
     /// The selected event's layout, cached until its content or size changes.
     event_detail_layout: Option<event_list::EventDetailLayout>,
+    /// Images the last render drew in the event detail, top down.
+    event_detail_images: Vec<event_detail::DrawnImage>,
     event_detail_columns: Option<event_detail::EventDetailColumns>,
     event_text: text_selection::TextRegion,
     task_details_text: text_selection::TextRegion,
@@ -319,6 +322,8 @@ pub struct View {
     loading: bool,
     has_more: bool,
     viewport: RefCell<Viewport>,
+    /// Inline images, present only while the terminal supports them.
+    inline_images: RefCell<Option<inline_images::InlineImages>>,
     /// Task row and time of the last left click in the list.
     last_click: Option<(usize, Instant)>,
     double_click_interval: Duration,
@@ -451,6 +456,7 @@ impl View {
             loading: false,
             has_more: false,
             viewport: RefCell::new(Viewport::default()),
+            inline_images: RefCell::new(None),
             last_click: None,
             double_click_interval: DOUBLE_CLICK_INTERVAL,
             pending_click: None,
