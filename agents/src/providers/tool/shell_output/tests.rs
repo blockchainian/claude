@@ -1,4 +1,4 @@
-use super::shell_output::{Stream, sections};
+use super::{Stream, sections};
 use crate::event::Section;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -646,7 +646,7 @@ struct ScopeInput {
 fn shell_output_repository_corpus_has_no_wrong_colors() {
     let mut colored = 0;
     let mut wrong = Vec::new();
-    for (index, line) in include_str!("../../../tests/fixtures/shell-output-corpus.jsonl")
+    for (index, line) in include_str!("../../../../tests/fixtures/shell-output-corpus.jsonl")
         .lines()
         .enumerate()
     {
@@ -756,7 +756,7 @@ fn shell_output_audit() {
 
 fn boundary_cases() -> serde_json::Value {
     serde_json::from_str(include_str!(
-        "../../../tests/fixtures/shell-output-boundaries.json"
+        "../../../../tests/fixtures/shell-output-boundaries.json"
     ))
     .unwrap()
 }

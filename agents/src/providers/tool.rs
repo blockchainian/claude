@@ -1,7 +1,5 @@
 pub(crate) mod groups;
 mod shell_output;
-#[cfg(test)]
-mod shell_output_tests;
 pub(crate) mod shell_summary;
 
 use shell_output::{Stream, sections as shell_output_sections};

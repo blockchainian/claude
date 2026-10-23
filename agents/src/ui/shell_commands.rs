@@ -1,9 +1,33 @@
+#![allow(dead_code)]
+
 use std::ops::Range;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Command {
     pub range: Range<usize>,
     pub and_next: bool,
+}
+
+/// The shell operator immediately before a command; newlines count as semicolons.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Separator {
+    Start,
+    Semicolon,
+    And,
+    Or,
+    Pipe,
+}
+
+/// A command's source byte range and preceding shell operator.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SeparatedCommand {
+    pub range: Range<usize>,
+    pub separator: Separator,
+}
+
+/// Return command ranges with separators; ambiguous syntax or background & returns None.
+pub(crate) fn split_with_separators(_source: &str) -> Option<Vec<SeparatedCommand>> {
+    todo!()
 }
 
 /// Returns source ranges only when shell grouping is unambiguous.
