@@ -414,8 +414,8 @@ class Manager {
   }
 
   attention() {
-    const lines = this.state().threads.flatMap((thread) => this.waiting(thread).map((entry) => `thread ${thread.id} is waiting for reply (${entry.kind} ${entry.callId}): ${entry.text}`));
-    return lines.length ? lines : undefined;
+    const entries = this.state().threads.flatMap((thread) => this.waiting(thread).map((entry) => ({ threadId: thread.id, kind: entry.kind, callId: entry.callId, text: entry.text })));
+    return entries.length ? entries : undefined;
   }
 
   async startThread(client, { cwd, name, sandbox, claudeTools, record, model, effort }) {
@@ -523,8 +523,8 @@ class Manager {
     return { threadId, turnId: turn.id, steered, await: awaitCommand(threadId), note: steered ? "A turn was already running, so the prompt was injected into it." : "Run the await command with run_in_background." };
   }
 
-  async reply({ threadId, callId, text }) {
-    if (!threadId || !text) throw new Error("threadId and text are required");
+  async reply({ threadId, callId, ask, reply: text }) {
+    if (!threadId || !ask || !text) throw new Error("threadId, ask and reply are required");
     this.thread(threadId);
     await this.connect();
     const waiting = this.waiting(this.thread(threadId));
@@ -618,7 +618,7 @@ const TOOLS = [
   { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task; returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute checkout or worktree root, not a subdirectory." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation: its goal, the files involved, test-first, the gate, and commit+push." }, name: { type: "string", description: "Short human-readable thread name." }, model: { type: "string", enum: Object.keys(MODEL_EFFORTS), description: "Worker model; supply effort with it, or omit both for daemon defaults." }, effort: { type: "string", enum: [...new Set(Object.values(MODEL_EFFORTS).flat())], description: `Required effort for the selected model; supply model with it. ${Object.entries(MODEL_EFFORTS).map(([model, efforts]) => `${model} allows ${efforts.join(" or ")}`).join("; ")}.` } }, required: ["cwd", "prompt"] } },
   { name: "attach", description: "Take over a codex session already running elsewhere, found by its thread id or exact name, so that send, interrupt and the await command work on it. Its approvals stay with the client it runs in.", inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or exact session name." } }, required: ["thread"] } },
   { name: "send", description: "Send a follow-up prompt to a codex thread: it starts a new turn when the thread is idle and is injected into the running turn otherwise. Keep follow-ups small and related, at most three items; start a new thread for unrelated work.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, prompt: { type: "string" } }, required: ["threadId", "prompt"] } },
-  { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. The text becomes the result of its ask_claude call or, for an approval request, one of the decisions its inbox event listed. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, text: { type: "string" } }, required: ["threadId", "text"] } },
+  { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. Pass the request's text as ask and your answer as reply. The reply becomes the result of its ask_claude call or, for an approval request, one of the decisions its inbox event listed. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, ask: { type: "string", description: "The waiting request's text, verbatim: the ask_claude question or the approval description." }, reply: { type: "string", description: "The answer; for an approval, one of its listed decisions." } }, required: ["threadId", "ask", "reply"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "list", description: "List the codex threads this session started or attached, with each one's state, what it is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: { state: { type: "array", items: { type: "string", enum: ["detached", "waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] }, description: "Return only threads in these states; omit for all threads. Detached takes precedence over waiting on an ask or approval, then the last turn status applies." } } } },
   { name: "detach", description: "Release a thread you no longer need. A thread you started is archived with its spawned agents and takes no further send; an attached session stays open in its own client, and send or attach takes it back. Refused while a turn is running.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },

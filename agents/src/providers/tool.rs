@@ -232,6 +232,8 @@ pub(crate) struct ToolRule {
     pub task: Option<TaskAction>,
     pub list_subject: bool,
     pub list_input: bool,
+    /// Appends the codex-manager requests still waiting for Claude to the output.
+    pub attention: bool,
     shell_stream: Stream,
 }
 
@@ -248,6 +250,7 @@ const DEFAULT_RULE: ToolRule = ToolRule {
     task: None,
     list_subject: false,
     list_input: false,
+    attention: false,
     shell_stream: Stream {
         merged_stderr: false,
         trimmed: false,
@@ -514,29 +517,34 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         name: "codex-manager start",
         title: &[Pick::Field(Source::Input, "/name")],
         input: Some((Pick::Field(Source::Input, "/prompt"), Format::Markdown)),
+        attention: true,
         ..DEFAULT_RULE
     },
     ToolRule {
         name: "codex-manager send",
         title: &[Pick::Field(Source::Input, "/threadId")],
         input: Some((Pick::Field(Source::Input, "/prompt"), Format::Markdown)),
+        attention: true,
         ..DEFAULT_RULE
     },
     ToolRule {
         name: "codex-manager reply",
         title: &[Pick::Field(Source::Input, "/threadId")],
-        input: Some((Pick::Field(Source::Input, "/text"), Format::Text)),
-        output: Some((Pick::With(codex_attention_output), Format::Text)),
+        input: Some((Pick::With(codex_reply_input), Format::Text)),
+        output: Some((Pick::With(empty_output), Format::Text)),
+        attention: true,
         ..DEFAULT_RULE
     },
     ToolRule {
         name: "codex-manager list",
         output: Some((Pick::With(codex_thread_table), Format::Text)),
+        attention: true,
         ..DEFAULT_RULE
     },
     ToolRule {
         name: "codex-manager interrupt",
         title: &[Pick::Field(Source::Input, "/threadId")],
+        attention: true,
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -546,6 +554,7 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
             Pick::Field(Source::Input, "/threadId"),
         ],
         output: Some((Pick::Field(Source::Result, "/threadId"), Format::Text)),
+        attention: true,
         ..DEFAULT_RULE
     },
 ];
@@ -698,7 +707,7 @@ pub(crate) fn presentation(name: &str, data: &ToolData<'_>) -> Presentation {
         None => None,
     }
     .unwrap_or_else(|| raw_input(&remaining));
-    let output = if data.result.is_some() {
+    let mut output = if data.result.is_some() {
         Some(output(rule.output, data))
     } else {
         match rule.output {
@@ -706,6 +715,11 @@ pub(crate) fn presentation(name: &str, data: &ToolData<'_>) -> Presentation {
             _ => None,
         }
     };
+    if rule.attention
+        && let Some(Body::Sections(sections)) = &mut output
+    {
+        sections.extend(codex_attention_section(data));
+    }
     Presentation {
         title,
         input,
@@ -1187,22 +1201,34 @@ fn codex_thread_table(data: &ToolData<'_>) -> Option<Body> {
     }]))
 }
 
-/// One bullet per waiting request, without its `thread … (ask …): ` prefix.
-fn codex_attention_output(data: &ToolData<'_>) -> Option<Body> {
-    let result = data.result?;
-    if result.error {
-        return None;
+/// The request being answered under the thread title, then the answer under its own label.
+fn codex_reply_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    let prose = |text: &str| Section::Prose {
+        text: text.to_owned(),
+        markdown: false,
+    };
+    Some(vec![
+        prose(text(data.input, "ask")?),
+        Section::Label("Reply".into()),
+        prose(text(data.input, "reply")?),
+    ])
+}
+
+/// An Attention heading with one subsection per waiting request, titled by its thread.
+fn codex_attention_section(data: &ToolData<'_>) -> Option<Section> {
+    let result = data.result.filter(|result| !result.error)?;
+    let mut text = String::from("# Attention");
+    for entry in result.structured["attention"].as_array()? {
+        text.push_str(&format!(
+            "\n\n## {}\n\n{}",
+            entry["threadId"].as_str()?,
+            entry["text"].as_str()?
+        ));
     }
-    let bullets: Vec<String> = result.structured["attention"]
-        .as_array()?
-        .iter()
-        .filter_map(Value::as_str)
-        .map(|line| {
-            let text = line.split_once(": ").map_or(line, |(_, text)| text);
-            format!("• {}", text.trim().replace('\n', "\n  "))
-        })
-        .collect();
-    (!bullets.is_empty()).then(|| Body::Sections(vec![text_section("output", &bullets.join("\n"))]))
+    Some(Section::Markdown {
+        label: "attention".into(),
+        text,
+    })
 }
 
 pub(crate) fn code_section(label: &str, lang: &str, text: &str) -> Section {
@@ -1836,7 +1862,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_manager_reply_shows_thread_text_and_attention_bullets() {
+    fn codex_manager_reply_shows_ask_reply_and_attention_by_thread() {
         let records: Vec<serde_json::Value> =
             include_str!("../../tests/fixtures/claude-manager-reply.jsonl")
                 .lines()
@@ -1861,24 +1887,34 @@ mod tests {
             presentation.title.as_deref(),
             call["input"]["threadId"].as_str()
         );
-        let [crate::event::Section::Prose { text, markdown: false }] = presentation.input.as_slice()
+        let [
+            crate::event::Section::Prose { text: ask, .. },
+            crate::event::Section::Label(label),
+            crate::event::Section::Prose { text: reply, .. },
+        ] = presentation.input.as_slice()
         else {
-            panic!("expected the reply text, got {:?}", presentation.input);
+            panic!("expected ask and reply, got {:?}", presentation.input);
         };
-        assert_eq!(text, call["input"]["text"].as_str().unwrap());
+        assert_eq!(ask, call["input"]["ask"].as_str().unwrap());
+        assert_eq!(label, "Reply");
+        assert_eq!(reply, call["input"]["reply"].as_str().unwrap());
         let Some(super::Body::Sections(output)) = presentation.output else {
             panic!("expected visible body")
         };
-        let [crate::event::Section::Text { text, .. }] = output.as_slice() else {
-            panic!("expected one text section, got {output:?}");
+        let [crate::event::Section::Markdown { text, .. }] = output.as_slice() else {
+            panic!("expected only the attention section, got {output:?}");
         };
         let attention = result.structured["attention"].as_array().unwrap();
-        let bullets: Vec<&str> = text.lines().filter(|line| line.starts_with("• ")).collect();
-        assert_eq!(bullets.len(), attention.len());
-        let first = attention[0].as_str().unwrap();
-        let (_, request) = first.split_once(": ").unwrap();
-        assert!(bullets[0].starts_with(&format!("• {}", request.lines().next().unwrap())));
-        assert!(!text.contains("is waiting for reply"));
+        assert!(text.starts_with("# Attention\n\n## "));
+        assert_eq!(text.matches("\n## ").count(), attention.len());
+        for entry in attention {
+            let heading = format!(
+                "## {}\n\n{}",
+                entry["threadId"].as_str().unwrap(),
+                entry["text"].as_str().unwrap()
+            );
+            assert!(text.contains(&heading));
+        }
     }
 
     #[test]
