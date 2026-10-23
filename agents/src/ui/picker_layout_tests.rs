@@ -101,3 +101,51 @@ fn clicking_bottom_aligned_model_row_applies_its_choice() {
     );
     assert!(view.selector.is_none());
 }
+
+#[test]
+fn model_effort_picker_alignment_follows_screen_width() {
+    for (width, height) in [(90, 60), (99, 60), (100, 60), (120, 60), (160, 60)] {
+        for field in [Field::Model, Field::Effort] {
+            let (_directory, mut view) = family_view(ProviderId::Claude);
+            view.open_field(field);
+            view.selector.as_mut().unwrap().selected = 0;
+            let area = Rect::new(0, 0, width, height);
+            let mut buffer = Buffer::empty(area);
+            view.render(area, &mut buffer);
+            let details = view.viewport.borrow().task_details;
+            let rows = view.selector.as_ref().unwrap().rows();
+            assert!(details.height > rows.len() as u16);
+            let top = if width <= 99 {
+                details.y
+            } else {
+                details.bottom() - rows.len() as u16
+            };
+            for (offset, row) in rows.iter().enumerate() {
+                let y = top + offset as u16;
+                let text = match row {
+                    ListRow::Text(text) | ListRow::Choice(_, text) => text,
+                };
+                let actual: String = (details.x..details.right())
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect();
+                assert_eq!(
+                    actual.trim(),
+                    text.to_string(),
+                    "{width} {field:?} row {offset}"
+                );
+                if let ListRow::Choice(index, _) = row {
+                    assert_eq!(row_of(&view, *index).y, y);
+                }
+            }
+            let first = row_of(&view, 0);
+            view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            screen(&view, area);
+            assert_eq!(view.selector.as_ref().unwrap().selected, 1);
+            assert!(row_of(&view, 1).y > first.y);
+            view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+            screen(&view, area);
+            assert_eq!(view.selector.as_ref().unwrap().selected, 0);
+            assert_eq!(row_of(&view, 0), first);
+        }
+    }
+}

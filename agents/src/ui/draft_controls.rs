@@ -799,7 +799,20 @@ impl View {
             0
         };
         let height = usize::from(area.height - reserved).min(choices.len()) as u16;
-        let list = render::row(area, area.height - reserved - height, height);
+        let top_aligned = matches!(
+            selector.kind,
+            SelectorKind::Model { .. } | SelectorKind::Effort { .. }
+        ) && self
+            .viewport
+            .borrow()
+            .navigation_layout
+            .is_some_and(|layout| layout.kind == render::ScreenLayout::Small);
+        let offset = if top_aligned {
+            0
+        } else {
+            area.height - reserved - height
+        };
+        let list = render::row(area, offset, height);
         let mut rows = super::navigation::render_list(
             &choices,
             selector.selected,
