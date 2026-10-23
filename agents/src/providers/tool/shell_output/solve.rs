@@ -84,6 +84,8 @@ pub struct FeasibleCuts(pub Vec<BitSet>);
 pub struct Solution {
     pub cuts: FeasibleCuts,
     pub outcomes: Vec<BitSet>,
+    /// Whether each cut can fall inside a truncation gap.
+    pub in_gap: Vec<bool>,
 }
 
 /// Solve output constraints and filter hints; return None when no partition fits.
