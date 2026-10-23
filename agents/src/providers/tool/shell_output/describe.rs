@@ -161,6 +161,17 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
             false,
         )
         .options(&["-m", "--mode"], &[]),
+        row(
+            r"git\x00add\x00(.+)",
+            &[
+                "-v", "--verbose", "-n", "--dry-run", "-i", "--interactive", "-p", "--patch",
+                "-e", "--edit", "-h", "--help",
+            ],
+            silent,
+            Plain,
+            None,
+            false,
+        ),
         row(r"sleep\x00([0-9.]+)", &[], silent, Plain, None, false),
         row(
             r"(?:head|tail)\x00-n\x00([0-9]+)\x00([^\x00]+)",
@@ -1112,6 +1123,8 @@ mod shape_tests {
         for (command, min, max, file, diff) in [
             ("cd src", 0, Some(0), false, false),
             ("mkdir -p build", 0, Some(0), false, false),
+            ("git add -A -- a.rs", 0, Some(0), false, false),
+            ("git add -nv a.rs", 0, None, false, false),
             ("sleep 0.1", 0, Some(0), false, false),
             ("head -n 3 a.py", 0, Some(3), true, false),
             ("tail -n 2 a.rs", 0, Some(2), true, false),

@@ -139,6 +139,12 @@ fn shell_output_command_table() {
             "diff --git a/a.rs b/a.rs\n-a\n+b",
             &[(0, 3, "diff")],
         ),
+        (
+            "git add a.rs; git diff --cached -- a.rs",
+            "diff --git a/a.rs b/a.rs\n@@ -1 +1 @@\n-a\n+b",
+            &[(0, 4, "diff")],
+        ),
+        ("git add -v a.rs; git diff", "add 'a.rs'\n-a\n+b", &[]),
         ("git diff --stat", "a.rs | 1 +", &[]),
         (
             "git diff -- a.rs",
