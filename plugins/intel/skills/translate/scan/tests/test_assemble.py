@@ -74,3 +74,12 @@ def test_a_sketch_crop_keeps_its_labels_and_leaves_the_text_around_it():
         assert x1 >= 0.965 * W, box  # "rev(B)" ends at 0.969
         assert y0 >= 0.1164 * H - 2, box  # below "inner product of all relative shifts"
         assert y1 <= 0.1964 * H + 2, box  # above "useful for smoothing etc."
+
+
+def test_a_later_page_title_keeps_its_section_when_ocr_uses_a_top_level_heading():
+    fixtures = Path(__file__).parent / "fixtures"
+    pages = [(fixtures / f"literate-programming-p{n:02}.md").read_text() for n in (1, 2)]
+    sections = assemble.split_sections(assemble.demote_unnumbered(assemble.join_pages(pages)))
+    assert [title for title, _ in sections] == [
+        "Chapter 1", "Introduction by B. A. Galler", "Computer Programming as an Art, by D. E. Knuth"
+    ]

@@ -4,7 +4,7 @@ description: >
   Translate a whole English EPUB book into a Chinese PDF that keeps the original's format: the same cover
   image, page size, chapter structure, running heads, folios, a clickable 目录 page and PDF bookmarks (Cover,
   目录, one per chapter), with each section's bold, emphasis, sub/superscripts and, on request, images. Chapters
-  are translated in parallel through `codex exec`, one call per chapter. Use for "/translate <book.epub>",
+  are translated in parallel through the Codex Responses client, one call per chapter. Use for "/translate <book.epub>",
   "把这本书翻译成中文", "translate this book", or to re-render an already translated book after editing its
   Markdown. Needs the book as an EPUB — get it with the download-book skill first. NOT for a single page or
   article (just translate it inline), and not for digesting or summarizing a source (use digest).
@@ -15,7 +15,8 @@ description: >
 ## Skill directory
 
 Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The
-scripts import from the sibling `fetch-x-mentions` skill, so keep the whole intel plugin installed.
+scripts import from the sibling `fetch-x-mentions` skill and use relative imports to
+`../../../unminify/scripts/codex-api-client.mjs`, so keep the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
@@ -41,7 +42,8 @@ under `translate/` in the output root, named after the book's main title without
 ```
 
 It installs what is missing and reports whether `codex` is logged in and Chrome is present. Translation runs on
-the user's ChatGPT plan through `codex`; when its quota is out, wait or pass `--model` to another codex model.
+the user's ChatGPT plan through the Codex Responses client using the existing Codex login; when its quota is out,
+wait or pass `--model` to another Codex model.
 
 ## Extract
 
@@ -82,7 +84,7 @@ as a coined term with two accepted renderings; otherwise decide and note it in t
   > <work>/translate.log 2>&1
 ```
 
-Translation goes through the logged-in `codex exec` CLI; never replace it with host agents. A trade book is done
+Translation calls the Codex Responses client directly with the existing Codex login; never replace it with host agents. A trade book is done
 in a few minutes. A rerun skips sections whose `.md` exists, and `--force --only 04,05` redoes chosen ones.
 
 A section whose answer fails the checks twice is kept as `<id>.rejected.md` and reported as `FAILED`. Short or

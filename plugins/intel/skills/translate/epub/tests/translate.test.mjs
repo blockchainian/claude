@@ -1,5 +1,4 @@
-// ABOUTME: Tests translate.mjs: the prompt and rules, answer checks, the private CODEX_HOME layout,
-// ABOUTME: the codex exec command line, and (with TRANSLATE_E2E=1) one real gpt-6-luna call.
+// ABOUTME: Tests translation prompts, answer checks, CLI behavior and an optional real gpt-6-luna call.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -54,38 +53,10 @@ describe("answer checks", () => {
   });
 });
 
-describe("codex home and command", () => {
-  const fakeHome = path.join(tmp, "codex-src");
-  fs.mkdirSync(fakeHome, { recursive: true });
-  fs.writeFileSync(path.join(fakeHome, "auth.json"), '{"tok":"x"}');
-  const saved = process.env.CODEX_HOME;
-  process.env.CODEX_HOME = fakeHome;
-  const home = tr.codexHome(path.join(tmp, "a"), "gpt-6-luna", "low", "/x/instructions.md", "priority");
-  const cfg = fs.readFileSync(path.join(home, "config.toml"), "utf8");
-  const std = tr.codexHome(path.join(tmp, "b"), "gpt-6-luna", "low", "/x/i.md", "standard");
-  const stdCfg = fs.readFileSync(path.join(std, "config.toml"), "utf8");
-  if (saved === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = saved;
-
-  test("codex config pins model, effort, tier", () => {
-    assert.ok(cfg.includes('model = "gpt-6-luna"') && cfg.includes('model_reasoning_effort = "low"'));
-    assert.ok(cfg.includes('service_tier = "priority"') && cfg.includes("project_doc_max_bytes = 0"));
-    assert.equal(fs.readFileSync(path.join(home, "auth.json"), "utf8"), '{"tok":"x"}');
-  });
-
-  test("standard tier omits service_tier", () => {
-    assert.ok(!stdCfg.includes("service_tier"));
-  });
-
-  test("codex exec runs read-only, ephemeral, with every tool off and the prompt on stdin", () => {
-    const args = tr.codexArgs("/w", "/w/last.txt");
-    assert.deepEqual(args.slice(0, 8), ["exec", "--ignore-rules", "--skip-git-repo-check", "--ephemeral", "-C", "/w", "-s", "read-only"]);
-    for (const f of tr.OFF) assert.ok(args.includes(f), f);
-    assert.deepEqual(args.slice(-4), ["--json", "-o", "/w/last.txt", "-"]);
-  });
-});
-
 describe("cli", () => {
   const work = path.join(tmp, "work");
+  fs.mkdirSync(path.join(tmp, "codex-src"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "codex-src", "auth.json"), "{}");
   fs.mkdirSync(path.join(work, "text"), { recursive: true });
   fs.mkdirSync(path.join(work, "translated"), { recursive: true });
   fs.writeFileSync(path.join(work, "text", "01-one.xhtml"), "<p>one</p>");
@@ -103,7 +74,7 @@ describe("cli", () => {
     assert.ok(r.stdout.startsWith(tr.RULES_EPUB + "\n-----\nBook: T by A\nSection: 第二章 Two (chapter, 1 words)"), r.stdout.slice(0, 200));
   });
 
-  test("a missing codex is reported per section, not fatal", () => {
+  test("a missing Codex login is reported per section, not fatal", () => {
     const r = spawnSync(process.execPath, [path.join(scriptsDir, "translate.mjs"), work, "--only", "02"],
       { encoding: "utf8", env: { ...process.env, PATH: path.join(tmp, "empty-bin"), CODEX_HOME: path.join(tmp, "codex-src") } });
     assert.equal(r.status, 1);

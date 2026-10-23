@@ -4,7 +4,7 @@ description: >
   Translate a typeset English PDF with a text layer, such as a research paper (one or two columns), lecture or
   recitation notes, a textbook chapter, an outline or a handout, into a Chinese PDF in the translate-epub skill's book
   format. Reading order, headings, lists, code, tables, LaTeX math, footnotes and references are kept, and figures
-  are cropped from the page with their captions. MinerU parses the layout, the translate-epub skill's codex runner
+  are cropped from the page with their captions. MinerU parses the layout, the translate-epub skill's Codex Responses client
   translates each section, and its render.py typesets the result. Use for "/translate-paper <paper.pdf>",
   "把这篇论文翻译成中文", "translate these lecture notes", or a batch of course PDFs.
   NOT for scanned or handwritten PDFs without a text layer (use translate-scan), slides (use translate-presentation),
@@ -16,7 +16,9 @@ description: >
 ## Skill directory
 
 Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The scripts import from
-the sibling `translate-epub` and `fetch-x-mentions` skills, so keep the whole intel plugin installed.
+the sibling `translate-epub` and `fetch-x-mentions` skills by relative paths. The shared
+`runCodex` calls `unminify/scripts/codex-api-client.mjs` directly with the existing Codex login,
+so keep the whole intel plugin installed.
 
 ## Environment variables
 
@@ -88,7 +90,7 @@ TRANSFER₁, L⁴) may come back as text. Before checking, two mechanical repair
 - **Exponents.** A `<sup>N</sup>` the translator made of a source superscript (L⁴) goes back to the character,
   unless N is a footnote mark.
 
-Before the sections it makes two codex calls:
+Before the sections it makes two Codex Responses requests:
 
 - **Glossary.** When `<work>/glossary.md` is missing, it writes one with the title, every heading and 20–40
   terms. The call is seeded with the course glossary `<INTEL_STATE_DIR>/translate-glossaries/<key>.md`, the key

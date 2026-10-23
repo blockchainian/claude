@@ -199,7 +199,7 @@ async function makeGlossary(work, meta, opt) {
   const course = coursePath && fs.existsSync(coursePath) ? fs.readFileSync(coursePath, "utf8") : "";
   const seed = course ? `Course glossary (reuse these renderings exactly; list a term from it only if this text uses it):\n${course}\n` : "";
   const prompt = seed + `Title: ${meta.title}\n\nHeadings:\n${headings.map(h => "- " + h).join("\n")}\n\nOpening of the text:\n\n${sample}\n`;
-  const [md] = await runCodex(prompt, opt.model, "low", opt.serviceTier, { rules: RULES_GLOSSARY });
+  const [md] = await runCodex(prompt, opt.model, "low", opt.serviceTier, { rules: RULES_GLOSSARY, events: path.join(work, "glossary.events.jsonl") });
   fs.writeFileSync(path.join(work, "glossary.md"), md.trim() + "\n");
   if (coursePath) console.log(`course glossary ${path.basename(coursePath)}: ${appendCourseTerms(coursePath, md)} new terms`);
   return md;
@@ -221,7 +221,7 @@ Everything you need is in the message: do not run commands, do not read or write
 
 /** The cover's author lines: each author with their affiliation, read from the byline by one codex call. */
 async function coverAuthors(meta, opt) {
-  const [answer] = await runCodex("Byline:\n\n" + meta.byline.join("\n") + "\n", opt.model, "low", opt.serviceTier, { rules: RULES_BYLINE });
+  const [answer] = await runCodex("Byline:\n\n" + meta.byline.join("\n") + "\n", opt.model, "low", opt.serviceTier, { rules: RULES_BYLINE, events: path.join(opt.work, "byline.events.jsonl") });
   const parsed = JSON.parse(answer.trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
   if (!Array.isArray(parsed.authors) || !parsed.authors.every(a => typeof a.name === "string")) throw new Error(`bad byline answer: ${answer}`);
   return parsed;
