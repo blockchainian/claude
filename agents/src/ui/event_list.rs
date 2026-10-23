@@ -56,10 +56,10 @@ impl View {
             if let Some(settings) = &call.model_settings {
                 if let Some(model) = settings.model.as_deref().filter(|model| !model.is_empty()) {
                     let model = self.model_text(settings.provider, model);
-                    call.event_detail_title.push_str(&format!(" · {model}"));
+                    call.title.push_str(&format!(" · {model}"));
                     if call.name == "advisor" {
-                        call.title.push_str(&format!(" · {model}"));
-                        display.body.clone_from(&call.title);
+                        call.summary.push_str(&format!(" · {model}"));
+                        display.body.clone_from(&call.summary);
                     }
                 }
                 if let Some(effort) = settings
@@ -67,7 +67,7 @@ impl View {
                     .as_deref()
                     .filter(|effort| !effort.is_empty())
                 {
-                    call.event_detail_title.push_str(&format!(" · {effort}"));
+                    call.title.push_str(&format!(" · {effort}"));
                 }
             }
         }
@@ -2196,7 +2196,7 @@ pub(super) mod event_markdown {
             let summary = "等 tab 线程 ✓";
             assert_eq!(event.kind, Kind::Tool);
             assert_eq!(event.body, summary);
-            assert_eq!(event.calls[0].title, summary);
+            assert_eq!(event.calls[0].summary, summary);
             assert_eq!(event.calls[0].id, "b9wi31ww0");
             let body = open_text(&event);
             assert!(body.contains("all 3 tests passed"), "{body}");

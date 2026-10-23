@@ -583,8 +583,8 @@ pub(super) fn event_detail_content(
 }
 
 /// Choose the tool section's metadata and centered title together.
-fn call_title(call: &crate::event::ToolCall) -> (Option<String>, String) {
-    let mut left = call.event_detail_left.clone();
+pub(super) fn call_title(call: &crate::event::ToolCall) -> (Option<String>, String) {
+    let mut left = call.detail_left();
     if let Some(code) = call.exit_code.filter(|code| *code != 0) {
         if left.is_empty() {
             left = code.to_string();
@@ -594,7 +594,11 @@ fn call_title(call: &crate::event::ToolCall) -> (Option<String>, String) {
     }
     (
         (!left.is_empty()).then_some(left),
-        call.event_detail_title.clone(),
+        if call.title.trim().is_empty() {
+            crate::providers::tool::display_tool_name(&call.name)
+        } else {
+            call.title.clone()
+        },
     )
 }
 
@@ -979,7 +983,7 @@ mod tests {
         let detail = event_detail_content(event, "09:55:00".into(), Style::new().dim());
         assert_eq!(detail.sections.len(), 1);
         let section = &detail.sections[0];
-        assert_eq!(section.title.left.as_deref(), Some("New task"));
+        assert_eq!(section.title.left.as_deref(), None);
         assert_eq!(section.title.title, "root → demo_sub");
         assert_eq!(section.title.time.as_deref(), Some("09:55:00"));
         let parts: Vec<_> = section
@@ -1001,7 +1005,7 @@ mod tests {
         assert_eq!(detail.sections.len(), 4);
         let expected_times = ["21:22:10", "21:22:35", "21:22:53", "21:22:53"];
         for (section, expected) in detail.sections.iter().zip(expected_times) {
-            assert_eq!(section.title.left.as_deref(), Some("Message"));
+            assert_eq!(section.title.left.as_deref(), None);
             assert_eq!(section.title.title, "tests_audit → root");
             assert_eq!(section.title.time.as_deref(), Some(expected));
             let body: Vec<_> = section
@@ -1065,11 +1069,10 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Bash".into(),
-            event_detail_title: "Check the workspace".into(),
+            title: "Check the workspace".into(),
             show_event_detail: false,
             id: "description-fixture".into(),
-            title: "Bash".into(),
+            summary: "Bash".into(),
             name: "Bash".into(),
             input: vec![],
             output: None,
@@ -1098,11 +1101,10 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "general-purpose".into(),
-            event_detail_title: "Inspect source".into(),
+            title: "Inspect source".into(),
             show_event_detail: false,
             id: "call-id".into(),
-            title: "Agent".into(),
+            summary: "Agent".into(),
             name: "Agent".into(),
             input: vec![Section::Prose {
                 text: "Find the entry".into(),
@@ -1122,7 +1124,7 @@ mod tests {
             assert_eq!(detail.sections.len(), count);
             for section in &detail.sections {
                 let title = &section.title;
-                assert_eq!(title.left.as_deref(), Some("general-purpose · 1"));
+                assert_eq!(title.left.as_deref(), Some("Agent · 1"));
                 assert_eq!(title.title, "Inspect source");
                 assert_eq!(
                     title.time.as_deref(),
@@ -1140,18 +1142,47 @@ mod tests {
                 assert!(section.groups[2].parts[0].running());
             }
         }
-        call.event_detail_title = "source-reader".into();
+        call.title = "source-reader".into();
         assert_eq!(call_title(&call).1, "source-reader");
-        call.event_detail_title = "Agent".into();
+        call.title = "Agent".into();
         assert_eq!(call_title(&call).1, "Agent");
-        call.event_detail_left = "Task call-id".into();
+        call.name = "Task call-id".into();
         assert_eq!(call_title(&call).0.as_deref(), Some("Task call-id · 1"));
-        call.event_detail_left = "Read".into();
+        call.name = "Read".into();
         assert_eq!(call_title(&call).0.as_deref(), Some("Read · 1"));
-        call.event_detail_left = "Bash".into();
+        call.name = "Bash".into();
         assert_eq!(call_title(&call).0.as_deref(), Some("Bash · 1"));
-        call.event_detail_left.clear();
+        call.title.clear();
         assert_eq!(call_title(&call).0.as_deref(), Some("1"));
+        assert_eq!(call_title(&call).1, "Bash");
+        call.exit_code = None;
+        for source in [
+            include_str!("../../tests/fixtures/claude-client/ask_claude.jsonl"),
+            include_str!("../../tests/fixtures/claude-client/notify_claude.jsonl"),
+            include_str!("../../tests/fixtures/tool-list/claude.jsonl"),
+        ] {
+            let record: serde_json::Value =
+                serde_json::from_str(source.lines().next().unwrap()).unwrap();
+            call.name = record["payload"]["item"]["tool"]
+                .as_str()
+                .or_else(|| record["message"]["content"][0]["name"].as_str())
+                .unwrap()
+                .into();
+            for subject in ["", " \t "] {
+                call.title = subject.into();
+                assert_eq!(
+                    call_title(&call),
+                    (None, crate::providers::tool::display_tool_name(&call.name))
+                );
+            }
+            call.title = "Inspect source".into();
+            assert_eq!(call_title(&call).1, "Inspect source");
+        }
+        call.title = "Inspect source".into();
+        for name in ["advisor", "background"] {
+            call.name = name.into();
+            assert_eq!(call_title(&call), (None, "Inspect source".into()));
+        }
     }
 
     #[test]
@@ -1252,11 +1283,10 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Bash".into(),
-            event_detail_title: "Bash".into(),
+            title: "Bash".into(),
             show_event_detail: false,
             id: "running-copy".into(),
-            title: "Bash".into(),
+            summary: "Bash".into(),
             name: "Bash".into(),
             input: vec![],
             output: None,
@@ -1859,11 +1889,10 @@ mod tests {
                 model_settings: None,
                 agent_thread_id: None,
                 agent_path: None,
-                event_detail_left: "Bash".into(),
-                event_detail_title: "Bash".into(),
+                title: "Bash".into(),
                 show_event_detail: false,
                 id: "Bash-fixture".into(),
-                title: "Bash".into(),
+                summary: "Bash".into(),
                 name: "Bash".into(),
                 input: vec![Section::Shell {
                     prefix: 0,
@@ -1884,11 +1913,10 @@ mod tests {
                 model_settings: None,
                 agent_thread_id: None,
                 agent_path: None,
-                event_detail_left: "Read".into(),
-                event_detail_title: "Read".into(),
+                title: "Read".into(),
                 show_event_detail: false,
                 id: "Read-fixture".into(),
-                title: "Read".into(),
+                summary: "Read".into(),
                 name: "Read".into(),
                 input: vec![Section::Text {
                     label: "path".into(),
@@ -1951,11 +1979,10 @@ mod tests {
                     model_settings: None,
                     agent_thread_id: None,
                     agent_path: None,
-                    event_detail_left: "Bash".into(),
-                    event_detail_title: "Run checks".into(),
+                    title: "Run checks".into(),
                     show_event_detail: false,
                     id: "arrow-fixture".into(),
-                    title: "Run checks".into(),
+                    summary: "Run checks".into(),
                     name: "Bash".into(),
                     input: vec![],
                     output: Some(vec![]),
@@ -1988,11 +2015,10 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Edit".into(),
-            event_detail_title: "Edit".into(),
+            title: "Edit".into(),
             show_event_detail: false,
             id: "Edit-fixture".into(),
-            title: "Edit".into(),
+            summary: "Edit".into(),
             name: "Edit".into(),
             input: vec![Section::Diff {
                 lang: "rs".into(),
@@ -2095,11 +2121,10 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Bash".into(),
-            event_detail_title: "Bash".into(),
+            title: "Bash".into(),
             show_event_detail: false,
             id: "Bash-fixture".into(),
-            title: "Bash".into(),
+            summary: "Bash".into(),
             name: "Bash".into(),
             input: vec![],
             output: Some(vec![

@@ -1,9 +1,7 @@
 use crate::event::{Event, Image, Kind, Section, ToolCall};
 use crate::model::{Activity, SessionTask, TaskStatus};
 use crate::providers::text::printable;
-#[cfg(test)]
-use crate::providers::tool::Output;
-use crate::providers::tool::{self, list_title, tool_kind};
+use crate::providers::tool::{self, Body, ToolData, ToolResult, list_title, tool_kind};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -18,7 +16,7 @@ fn response_output(name: &str, text: &str) -> Vec<Section> {
 }
 
 #[cfg(test)]
-fn output_sections(text: &str, mode: Option<Output>) -> Vec<Section> {
+fn output_sections(text: &str, mode: Option<(tool::Pick<Body>, tool::Format)>) -> Vec<Section> {
     tool::text_output(text, mode, &Value::Null)
 }
 
@@ -576,7 +574,7 @@ fn tool_body(payload: &Value) -> Option<String> {
         call.agent_message
             .as_ref()
             .map(|message| message.content.text().to_owned())
-            .unwrap_or(call.title),
+            .unwrap_or(call.summary),
     )
 }
 
@@ -600,6 +598,7 @@ fn tool_arguments(payload: &Value) -> Option<Value> {
     Some(arguments)
 }
 
+#[cfg(test)]
 fn text_section(label: &str, text: &str) -> Section {
     Section::Text {
         label: label.to_owned(),
@@ -612,41 +611,122 @@ fn agent_name(path: &str) -> &str {
     crate::event::agent::name(path)
 }
 
+fn parsed_object(text: &str) -> Value {
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .filter(Value::is_object)
+        .unwrap_or(Value::Null)
+}
+
+fn normalize_function_result(text: &str) -> ToolResult {
+    let structured = parsed_object(text);
+    let content = structured
+        .get("content")
+        .filter(|content| content.is_array())
+        .cloned()
+        .unwrap_or_else(|| Value::String(text.to_owned()));
+    let error = tool::result_state(text, &Value::Null, structured["isError"] == true).is_error;
+    ToolResult {
+        content,
+        structured,
+        error,
+    }
+}
+
+fn normalize_mcp_result(item: &Value) -> Option<ToolResult> {
+    let result = item.get("result").filter(|result| !result.is_null());
+    let Some(result) = result else {
+        return item["error"]["message"].as_str().map(|text| ToolResult {
+            content: text.into(),
+            structured: Value::Null,
+            error: tool::result_state(text, item, true).is_error,
+        });
+    };
+    if !result.is_object() {
+        let text = result
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| result.to_string());
+        return Some(ToolResult {
+            content: text.clone().into(),
+            structured: Value::Null,
+            error: tool::result_state(&text, item, false).is_error,
+        });
+    }
+    let mut content = result["content"].clone();
+    let structured = if let Some(structured) = result
+        .get("structuredContent")
+        .filter(|value| !value.is_null())
+    {
+        let block = serde_json::json!({"type":"text", "text":structured.to_string()});
+        if let Some(blocks) = content.as_array_mut() {
+            blocks.push(block);
+        } else if content.is_null() {
+            content = Value::Array(vec![block]);
+        }
+        structured.clone()
+    } else {
+        content
+            .as_array()
+            .filter(|blocks| blocks.len() == 1)
+            .and_then(|blocks| {
+                (blocks[0]["type"] == "text")
+                    .then(|| blocks[0]["text"].as_str())
+                    .flatten()
+            })
+            .map(parsed_object)
+            .unwrap_or(Value::Null)
+    };
+    let text = content_text(&content).unwrap_or_default();
+    Some(ToolResult {
+        content,
+        structured,
+        error: tool::result_state(&text, item, result["isError"] == true).is_error,
+    })
+}
+
+fn presentation_output(output: Option<Body>, completed: bool) -> (Option<Vec<Section>>, bool) {
+    match output {
+        Some(Body::Sections(sections)) => (Some(sections), false),
+        Some(Body::Hidden) => (completed.then(Vec::new), true),
+        None => (None, false),
+    }
+}
+
 fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     let raw = payload["arguments"].as_str().unwrap_or("");
     let arguments = tool_arguments(payload);
     let raw_name = response_tool_name(payload);
-    let (_, subject, mut input) =
-        crate::providers::tool::presentation(&raw_name, arguments.as_ref().unwrap_or(&Value::Null));
-    if payload["type"] == "custom_tool_call" {
-        input = vec![text_section(
-            "input",
-            payload["input"].as_str().unwrap_or(""),
-        )];
-    } else if arguments.is_none() {
-        input = vec![text_section("input", raw)];
-    }
+    let input_value = if payload["type"] == "custom_tool_call" {
+        Value::String(payload["input"].as_str().unwrap_or("").to_owned())
+    } else {
+        arguments
+            .clone()
+            .unwrap_or_else(|| Value::String(raw.to_owned()))
+    };
+    let normalized = output.map(normalize_function_result);
     let state = output.map(|text| {
-        let value = serde_json::from_str(text).unwrap_or(Value::Null);
-        tool::result_state(text, &Value::Null, value["isError"] == true)
-    });
-    let output = output.map(|text| {
-        tool::text_output(
+        tool::result_state(
             text,
-            tool::rule(&raw_name).output,
-            arguments.as_ref().unwrap_or(&Value::Null),
+            &Value::Null,
+            normalized.as_ref().is_some_and(|result| result.error),
         )
     });
-    let subject = crate::providers::tool::result_subject(&raw_name, output.as_deref()).or(subject);
-    let (event_detail_left, event_detail_title) =
-        tool::event_detail_titles(&raw_name, subject.as_deref());
+    let presentation = tool::presentation(
+        &raw_name,
+        &ToolData {
+            input: &input_value,
+            result: normalized.as_ref(),
+        },
+    );
+    let subject = presentation.title;
+    let (output, hide_output) = presentation_output(presentation.output, normalized.is_some());
     let mut call = ToolCall {
         agent_message: None,
-        event_detail_left,
-        event_detail_title,
+        title: subject.clone().unwrap_or_default(),
         show_event_detail: true,
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
-        title: list_title(
+        summary: list_title(
             &raw_name,
             subject.as_deref(),
             arguments.as_ref().unwrap_or(&Value::Null),
@@ -654,11 +734,11 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         ),
         name: raw_name.clone(),
         started_at: None,
-        hide_output: false,
+        hide_output,
         model_settings: None,
         agent_thread_id: None,
         agent_path: None,
-        input,
+        input: presentation.input,
         output,
         exit_code: state.as_ref().and_then(|state| state.exit_code),
         is_error: state.is_some_and(|state| state.is_error),
@@ -684,20 +764,36 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     call
 }
 
+#[cfg(test)]
 fn result_section(text: &str) -> Section {
     text_section("output", text)
 }
 
 fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
     let item_type = item["type"].as_str().unwrap();
+    let normalized = (item_type == "McpToolCall")
+        .then(|| normalize_mcp_result(item))
+        .flatten();
     let (name, arguments, output) = match item_type {
-        "CommandExecution" => (
-            "exec_command".to_owned(),
-            serde_json::json!({"command": command.unwrap()}),
-            item["aggregated_output"]
-                .as_str()
-                .map(|text| vec![text_section("output", text)]),
-        ),
+        "CommandExecution" => {
+            let arguments = serde_json::json!({"command": command.unwrap()});
+            let output = item["aggregated_output"].as_str().and_then(|text| {
+                let result = ToolResult {
+                    content: text.into(),
+                    structured: Value::Null,
+                    error: tool::result_state("", item, false).is_error,
+                };
+                match tool::merged_shell_output(&ToolData {
+                    input: &arguments,
+                    result: Some(&result),
+                }) {
+                    Some(Body::Sections(sections)) => Some(sections),
+                    Some(Body::Hidden) => unreachable!("shell output cannot be hidden"),
+                    None => None,
+                }
+            });
+            ("exec_command".to_owned(), arguments, output)
+        }
         "FileChange" => {
             let changes = item["changes"].as_object().unwrap();
             let output = changes
@@ -722,67 +818,44 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
                 item["server"].as_str().unwrap(),
                 item["tool"].as_str().unwrap()
             );
-            let output = item
-                .get("result")
-                .filter(|result| !result.is_null())
-                .map(|result| {
-                    if result.is_object() {
-                        let mut sections = tool::output(
-                            tool::rule(&name).output,
-                            &item["arguments"],
-                            &tool::ToolResult {
-                                content: &result["content"],
-                                value: result,
-                                text: "",
-                                error: result["isError"] == true,
-                            },
-                        );
-                        if let Some(structured) = result
-                            .get("structuredContent")
-                            .filter(|value| !value.is_null())
-                        {
-                            sections.push(Section::Structured {
-                                label: "output".to_owned(),
-                                text: structured.to_string(),
-                            });
-                        }
-                        sections
-                    } else if let Some(text) = result.as_str() {
-                        vec![result_section(text)]
-                    } else {
-                        vec![text_section("output", &result.to_string())]
-                    }
-                })
-                .or_else(|| {
-                    item["error"]["message"]
-                        .as_str()
-                        .map(|text| vec![result_section(text)])
-                });
-            (name, item["arguments"].clone(), output)
+            (name, item["arguments"].clone(), None)
         }
         _ => (item_type.to_owned(), item.clone(), None),
     };
     let raw_name = name;
-    let (_, subject, input) = crate::providers::tool::presentation(&raw_name, &arguments);
-    let subject = crate::providers::tool::result_subject(&raw_name, output.as_deref()).or(subject);
-    let (event_detail_left, event_detail_title) =
-        tool::event_detail_titles(&raw_name, subject.as_deref());
-    let state = tool::result_state("", item, false);
+    let presentation = tool::presentation(
+        &raw_name,
+        &ToolData {
+            input: &arguments,
+            result: normalized.as_ref(),
+        },
+    );
+    let subject = presentation.title;
+    let (table_output, hide_output) = presentation_output(presentation.output, true);
+    let output = if item_type == "McpToolCall" {
+        table_output
+    } else {
+        output
+    };
+    let state = tool::result_state(
+        "",
+        item,
+        normalized.as_ref().is_some_and(|result| result.error),
+    );
     let exit_code = state.exit_code;
     let mut call = ToolCall {
         agent_message: None,
-        event_detail_left,
-        event_detail_title,
+        title: subject.clone().unwrap_or_default(),
         show_event_detail: true,
         id: item["id"].as_str().unwrap_or("").to_owned(),
-        title: list_title(&raw_name, subject.as_deref(), &arguments, exit_code),
+        summary: list_title(&raw_name, subject.as_deref(), &arguments, exit_code),
         name: raw_name.clone(),
         started_at: None,
-        hide_output: false,
+        hide_output,
         model_settings: None,
         agent_thread_id: None,
         agent_path: None,
-        input,
+        input: presentation.input,
         // Completed items can have no result body; an empty output still marks completion.
         output: Some(output.unwrap_or_default()),
         exit_code,
@@ -923,10 +996,10 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         None => ended_at,
     };
     let call = completed_call(item, command_text);
-    let body = call.title.clone();
-    let paths = if item_type == "FileChange" && !call.event_detail_left.is_empty() {
-        let mut offset = call.event_detail_left.len() + 1;
-        call.event_detail_title
+    let body = call.summary.clone();
+    let paths = if item_type == "FileChange" && !call.detail_left().is_empty() {
+        let mut offset = call.detail_left().len() + 1;
+        call.title
             .split(" · ")
             .map(|path| {
                 let range = offset..offset + path.len();
@@ -2251,7 +2324,7 @@ fn events_with_context<'a>(
                     .agent_message
                     .as_ref()
                     .map(|m| m.content.text().to_owned())
-                    .unwrap_or_else(|| call.title.clone());
+                    .unwrap_or_else(|| call.summary.clone());
                 call.started_at = call.agent_path.as_ref().map(|_| at);
                 let mut completed_at = ended.as_ref().map(|(at, _, _)| *at);
                 if let Some((offset, record)) = payload["call_id"]
@@ -2357,11 +2430,11 @@ fn events_with_context<'a>(
                 let body = text.clone();
                 calls.push(ToolCall {
                     agent_message: Some(message),
-                    event_detail_left: String::new(),
-                    event_detail_title: String::new(),
+
+                    title: String::new(),
                     show_event_detail: true,
                     id: required_text(payload, "id")?.to_owned(),
-                    title: body.clone(),
+                    summary: body.clone(),
                     name: message_type.to_owned(),
                     started_at: Some(at),
                     hide_output: true,
@@ -2651,8 +2724,17 @@ mod tests {
             (Some("{}"), input["threadId"].as_str().unwrap()),
         ] {
             let call = response_tool_call(&payload, output);
-            assert_eq!(call.event_detail_title, expected);
-            assert!(call.title.contains(expected));
+            assert_eq!(call.title, expected);
+            assert!(call.summary.contains(expected));
+            if expected == "模型和new挪位" {
+                assert_eq!(
+                    call.output,
+                    Some(vec![text_section(
+                        "output",
+                        input["threadId"].as_str().unwrap()
+                    )])
+                );
+            }
             let mut records: Vec<Value> =
                 include_str!("../../../tests/fixtures/codex-tool-calls.jsonl")
                     .lines()
@@ -2692,19 +2774,19 @@ mod tests {
                     .to_owned(),
             ),
         );
+        assert_eq!(call.summary, "sed, cat");
+        assert_eq!(call.detail_left(), "Exec command");
         assert_eq!(call.title, "sed, cat");
-        assert_eq!(call.event_detail_left, "Exec command");
-        assert_eq!(call.event_detail_title, "sed, cat");
         let mut failed = record["payload"]["item"].clone();
         failed["exit_code"] = 2.into();
         assert_eq!(
-            completed_call(&failed, Some("yarn tsc".into())).title,
+            completed_call(&failed, Some("yarn tsc".into())).summary,
             "yarn tsc · 2"
         );
         let mut empty = record["payload"]["item"].clone();
         empty["exit_code"] = 0.into();
         assert_eq!(
-            completed_call(&empty, Some("$command".into())).title,
+            completed_call(&empty, Some("$command".into())).summary,
             "Exec command"
         );
     }
@@ -2739,8 +2821,8 @@ mod tests {
                 tool_body(&payload).as_deref(),
                 Some("A command description")
             );
-            assert_eq!(call.title, "A command description");
-            assert!(!call.event_detail_title.is_empty());
+            assert_eq!(call.summary, "A command description");
+            assert!(!call.title.is_empty());
             assert!(matches!(&call.input[0], Section::Shell { text, .. } if text == command));
         }
     }
@@ -2775,10 +2857,7 @@ mod tests {
     fn command_rules_declare_summaries() {
         for name in ["exec_command", "shell", "CommandExecution"] {
             assert!(
-                matches!(
-                    tool::rule(name).subject,
-                    Some(tool::Subject::Shell { description: false })
-                ),
+                matches!(tool::rule(name).title, [tool::Pick::With(_)]),
                 "missing command subject: {name}"
             );
         }
@@ -2810,12 +2889,15 @@ mod tests {
         let mut timed_out: Value = serde_json::from_str(raw).unwrap();
         timed_out["timed_out"] = true.into();
         assert_eq!(
-            output_sections(&timed_out.to_string(), Some(Output::Wait)),
+            output_sections(&timed_out.to_string(), tool::rule("wait_agent").output),
             vec![text_section("output", "(timed out)")]
         );
         assert_eq!(
             output_sections(raw, None),
-            vec![text_section("output", raw)]
+            vec![Section::Structured {
+                label: "output".into(),
+                text: raw.to_owned()
+            }]
         );
     }
 
@@ -3031,15 +3113,18 @@ mod tests {
             });
             let call = response_tool_call(&payload, Some("output"));
             assert_eq!(call.name, name);
+            assert_eq!(call.summary, "cat, sed");
             assert_eq!(call.title, "cat, sed");
-            assert_eq!(call.event_detail_title, "cat, sed");
-            assert_eq!(
-                call.event_detail_left,
-                crate::providers::tool::title_name(name)
+            assert_eq!(call.detail_left(), crate::providers::tool::title_name(name));
+            let arguments = tool_arguments(&payload).unwrap();
+            let presentation = tool::presentation(
+                name,
+                &ToolData {
+                    input: &arguments,
+                    result: None,
+                },
             );
-            let (_, _, input) =
-                crate::providers::tool::presentation(name, &tool_arguments(&payload).unwrap());
-            assert_eq!(call.input, input);
+            assert_eq!(call.input, presentation.input);
             assert_eq!(call.output, Some(response_output(name, "output")));
         }
     }
@@ -3069,7 +3154,7 @@ mod tests {
             let events = tail(file.path(), 100).unwrap();
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].body, "cat, sed");
-            assert_eq!(events[0].calls[0].event_detail_left, "Exec command");
+            assert_eq!(events[0].calls[0].detail_left(), "Exec command");
         }
     }
 
@@ -3081,18 +3166,15 @@ mod tests {
             .find(|r| r["payload"]["item"]["type"] == "CommandExecution")
             .unwrap();
         let event = completed_tool(read).unwrap().unwrap();
-        assert_eq!(event.calls[0].event_detail_title, "cat, sed");
-        assert_eq!(event.calls[0].event_detail_left, "Exec command");
+        assert_eq!(event.calls[0].title, "cat, sed");
+        assert_eq!(event.calls[0].detail_left(), "Exec command");
         assert_eq!(event.body, "cat, sed");
         let file = records
             .iter()
             .find(|r| r["payload"]["item"]["type"] == "FileChange")
             .unwrap();
         let event = completed_tool(file).unwrap().unwrap();
-        assert_eq!(
-            event.calls[0].event_detail_title,
-            "/workspace/agents/src/processes.rs"
-        );
+        assert_eq!(event.calls[0].title, "/workspace/agents/src/processes.rs");
         assert!(event.calls[0].input.is_empty());
         assert!(
             matches!(&event.calls[0].output.as_ref().unwrap()[0], Section::Diff { text, .. } if text == file["payload"]["item"]["changes"]["/workspace/agents/src/processes.rs"]["unified_diff"].as_str().unwrap())
@@ -3306,14 +3388,14 @@ mod tests {
         let response = &records[0]["payload"];
         let call = response_tool_call(response, None);
         assert_eq!(call.id, response["call_id"].as_str().unwrap());
-        assert_eq!(call.title, "Spawn agent claude_calls");
+        assert_eq!(call.summary, "Spawn agent claude_calls");
         let record = records
             .iter()
             .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
             .unwrap();
         let call = &completed_tool(record).unwrap().unwrap().calls[0];
         assert_eq!(call.id, record["payload"]["item"]["id"].as_str().unwrap());
-        assert_eq!(call.title, "cat, sed");
+        assert_eq!(call.summary, "cat, sed");
     }
 
     #[test]
@@ -3381,7 +3463,7 @@ mod tests {
             matches!(&custom.input[0], crate::event::Section::Text { text, .. } if text.starts_with("// codex-js-repl"))
         );
         assert!(
-            matches!(&custom.output.as_ref().unwrap()[0], crate::event::Section::Text { text, .. } if text == "[]")
+            matches!(&custom.output.as_ref().unwrap()[0], crate::event::Section::Structured { text, .. } if text == "[]")
         );
         assert!(!calls.iter().any(|call| call.name == "exec"));
     }
@@ -3583,6 +3665,8 @@ mod tests {
             let event = completed_tool(&record).unwrap().unwrap();
             let expected = if arguments.is_null() {
                 Vec::new()
+            } else if let Some(text) = arguments.as_str() {
+                vec![text_section("input", text)]
             } else {
                 vec![Section::Structured {
                     label: "input".into(),
@@ -3653,9 +3737,9 @@ mod tests {
             .find(|record| record["payload"]["name"] == "request_user_input")
             .unwrap();
         let call = response_tool_call(&record["payload"], None);
-        assert_eq!(call.event_detail_left, "Request user input");
-        assert_eq!(call.event_detail_title, "Color");
-        assert_eq!(call.title, "Request user input Color");
+        assert_eq!(call.detail_left(), "Request user input");
+        assert_eq!(call.title, "Color");
+        assert_eq!(call.summary, "Request user input Color");
         assert!(call.show_event_detail);
         assert_eq!(
             call.input,
@@ -3744,9 +3828,9 @@ mod tests {
                     }
                 };
                 assert_eq!(tool_body(&payload).unwrap(), "(encrypted)");
-                assert_eq!(call.title, expected);
+                assert_eq!(call.summary, expected);
                 assert_eq!(
-                    call.event_detail_title,
+                    call.title,
                     if tool == "spawn_agent" {
                         subject.to_owned()
                     } else {
@@ -3788,16 +3872,9 @@ mod tests {
                 let mut payload = record["payload"].clone();
                 payload["name"] = name.clone().into();
                 let call = response_tool_call(&payload, None);
+                assert_eq!(call.detail_left(), "");
                 assert_eq!(
-                    call.event_detail_left,
-                    if tool == "send_message" {
-                        "Message".to_owned()
-                    } else {
-                        crate::providers::tool::display_tool_name(&name)
-                    }
-                );
-                assert_eq!(
-                    call.event_detail_title,
+                    call.title,
                     if tool == "spawn_agent" {
                         subject.to_owned()
                     } else {
@@ -4197,9 +4274,9 @@ mod perspective_tests {
     fn perspective_sentence_names_from_real_records() {
         let records = include_str!("../../../tests/fixtures/codex-perspective/root.jsonl");
         for (name, expected_left, expected_title) in [
-            ("spawn_agent", "Spawn agent", "alpha"),
-            ("wait_agent", "", "Wait agent"),
-            ("followup_task", "Followup task", "← alpha"),
+            ("spawn_agent", "", "alpha"),
+            ("wait_agent", "", ""),
+            ("followup_task", "", "← alpha"),
         ] {
             let record: Value = records
                 .lines()
@@ -4207,8 +4284,8 @@ mod perspective_tests {
                 .find(|r| r["payload"]["name"] == name)
                 .unwrap();
             let call = response_tool_call(&record["payload"], None);
-            assert_eq!(call.event_detail_left, expected_left);
-            assert_eq!(call.event_detail_title, expected_title);
+            assert_eq!(call.detail_left(), expected_left);
+            assert_eq!(call.title, expected_title);
         }
         assert_eq!(
             crate::providers::tool::title_name("FINAL_ANSWER"),
@@ -4314,7 +4391,7 @@ mod perspective_tests {
             events[0]
                 .calls
                 .iter()
-                .all(|call| call.event_detail_title == "beta → root")
+                .all(|call| call.title == "beta → root")
         );
     }
 

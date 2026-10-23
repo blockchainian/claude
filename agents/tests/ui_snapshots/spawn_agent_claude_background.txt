@@ -1,5 +1,5 @@
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Spawn agent                                                                                            查 Claude 前台转后台 · Sonnet 5.5                                                                                             11:28:50
+                                                                                                       查 Claude 前台转后台 · Sonnet 5.5                                                                                             11:28:50
 
                                                                    Investigate Claude Code (installed CLI claude, v2.1.302 on macOS) background sessions. Time limit: 10
                                                                    minutes; write partial findings to the report as you go.

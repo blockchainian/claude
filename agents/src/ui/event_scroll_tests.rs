@@ -196,8 +196,8 @@ fn tool_fixture() -> (View, DateTime<Utc>) {
         .unwrap();
     event.calls.truncate(1);
     let mut call = event.calls[0].clone();
-    call.event_detail_left = "Second tool".into();
-    call.event_detail_title = "Second tool".into();
+    call.name = "Second tool".into();
+    call.title = "Second tool".into();
     event.calls[0].input = vec![crate::event::Section::Text {
         label: String::new(),
         text: (1..=20)
@@ -644,7 +644,7 @@ fn event_detail_top_edge_tracks_the_section_on_the_top_row() {
             .collect::<Vec<_>>()
             .join("\n"),
     }];
-    let first = events[0].calls[0].event_detail_title.replace(' ', "");
+    let first = events[0].calls[0].title.replace(' ', "");
     view.set_event(events);
     view.select_event(Some(0));
     screen_rows(&view, 100, 40);
@@ -721,7 +721,7 @@ fn recorded_tool_edge(forward: bool) {
             .into_iter()
             .find(|event| event.calls.first().is_some_and(|call| call.name == "Bash"))
             .unwrap();
-        let title = event.calls[0].event_detail_title.clone();
+        let title = event.calls[0].title.clone();
         view.set_event(vec![event]);
         view.select_event(Some(0));
         let initial = screen_rows(&view, width, 30);
@@ -1150,7 +1150,7 @@ fn assert_next_event_edge(sort: EventSort, next_call: &str) {
             .find(|event| event.calls[0].name == next_call)
             .unwrap()
             .clone();
-        let title = next.calls[0].event_detail_title.clone();
+        let title = next.calls[0].title.clone();
         // Render the next event's own title row before comparing the edge's cells.
         view.select_fixture_event(Some(next));
         let area = Rect::new(0, 0, width, 30);
@@ -1204,7 +1204,7 @@ fn event_detail_bottom_edge_shows_when_the_whole_event_fits() {
             .find(|event| event.calls[0].name == next)
             .unwrap()
             .calls[0]
-            .event_detail_title;
+            .title;
         let rows = screen_rows(&view, 120, 200);
         assert_eq!(view.viewport.borrow().event_detail_max, 0);
         let y = view.viewport.borrow().output_borders[1].y;
@@ -1222,7 +1222,7 @@ fn event_detail_bottom_edge_waits_for_the_last_visible_line() {
             .find(|event| event.calls[0].name == next)
             .unwrap()
             .calls[0]
-            .event_detail_title
+            .title
             .clone();
         for key in [None, Some(KeyCode::Down), Some(KeyCode::End)] {
             if let Some(key) = key {

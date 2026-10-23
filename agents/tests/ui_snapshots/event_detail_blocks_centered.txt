@@ -1,17 +1,17 @@
 Spawn agent claude_calls — 120 columns
-Spawn agent                                           claude_calls
+                                                      claude_calls
 
                                                        [scrubbed]
 Spawn agent claude_calls — 200 columns
-Spawn agent                                                                                   claude_calls
+                                                                                              claude_calls
 
                                                                                                [scrubbed]
 Spawn agent codex_calls — 120 columns
-Spawn agent                                            codex_calls
+                                                       codex_calls
 
                                                        [scrubbed]
 Spawn agent codex_calls — 200 columns
-Spawn agent                                                                                    codex_calls
+                                                                                               codex_calls
 
                                                                                                [scrubbed]
 WebFetch https://render.com/docs/postgresql-instance-types — 120 columns

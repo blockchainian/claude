@@ -93,10 +93,7 @@ fn spawn_agent_claude_background_name_model_and_hidden_receipt() {
     let mut view = display_view();
     assert_eq!(event.summary(), "Spawn agent 查 Claude 前台转后台");
     let shown = view.display_event(event);
-    assert_eq!(
-        shown.calls[0].event_detail_title,
-        "查 Claude 前台转后台 · Sonnet 5.5"
-    );
+    assert_eq!(shown.calls[0].title, "查 Claude 前台转后台 · Sonnet 5.5");
     let body = view.event_detail_text(event);
     assert!(
         !body.contains("Async agent launched successfully"),
@@ -130,10 +127,7 @@ fn spawn_agent_codex_model_and_hidden_receipt() {
     let mut view = display_view();
     assert_eq!(event.summary(), "Spawn agent demo_sub");
     let shown = view.display_event(event);
-    assert_eq!(
-        shown.calls[0].event_detail_title,
-        "demo_sub · GPT-6.1-Sol · low"
-    );
+    assert_eq!(shown.calls[0].title, "demo_sub · GPT-6.1-Sol · low");
     let body = view.event_detail_text(event);
     assert!(!body.contains("task_name"), "{body}");
     snapshot("spawn_agent_codex.txt", &panel(&mut view, event));

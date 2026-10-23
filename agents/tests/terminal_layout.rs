@@ -2760,7 +2760,10 @@ fn terminal_manager_detach_title() {
     .unwrap();
     tmux.run(&["send-keys", "-t", "probe", "End"]);
     tmux.wait_for(|capture| {
-        capture.contains("codex-manager detach") && capture.contains("archived")
+        capture.contains("codex-manager detach")
+            && capture.lines().any(|line| {
+                line.trim().trim_end_matches('│').trim() == "01a1489e-5020-7f40-90e8-c9413012630b"
+            })
     });
     for width in [200_u16, 120, 150, 149] {
         tmux.run(&[
@@ -2782,14 +2785,20 @@ fn terminal_manager_detach_title() {
                         && line.matches('─').count() > usize::from(width / 2)
                 })
                 && capture.contains("codex-manager detach")
-                && capture.contains("archived")
+                && capture.lines().any(|line| {
+                    line.trim().trim_end_matches('│').trim()
+                        == "01a1489e-5020-7f40-90e8-c9413012630b"
+                })
         });
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         let rows: Vec<_> = capture.lines().collect();
         let rule = rows
-            .iter()
-            .rposition(|line| line.matches('─').count() > usize::from(width / 2))
-            .unwrap();
+            .windows(2)
+            .rposition(|pair| {
+                pair[0].matches('─').count() > usize::from(width / 2)
+                    && pair[1].trim_start().starts_with("codex-manager detach")
+            })
+            .unwrap_or_else(|| panic!("detach detail header not found: {capture}"));
         let title = rows[rule + 1];
         assert!(
             rows[rule + 2].trim_end_matches('│').trim().is_empty(),
@@ -2822,7 +2831,13 @@ fn terminal_manager_detach_title() {
             "empty input arrow stays on the panel midline: {capture}"
         );
         assert!(
-            capture.contains("\"archived\": true") && capture.contains("\"detached\": true"),
+            capture
+                .lines()
+                .any(|line| line.trim().trim_end_matches('│').trim() == subject),
+            "{capture}"
+        );
+        assert!(
+            !capture.contains("\"archived\"") && !capture.contains("\"detached\""),
             "{capture}"
         );
         let path = std::env::temp_dir().join(format!("agents-manager-detach-title-{width}.txt"));
@@ -3067,6 +3082,17 @@ fn terminal_manager_detach_result_name() {
             .count()
             == 2
     });
+    assert!(
+        capture
+            .lines()
+            .any(|line| line.trim().trim_end_matches('│').trim()
+                == "01a1489e-5020-7f40-90e8-c9413012630b"),
+        "{capture}"
+    );
+    assert!(
+        !capture.contains("\"name\"") && !capture.contains("\"threadId\""),
+        "{capture}"
+    );
     let path = std::env::temp_dir().join("agents-detach-result-name.txt");
     std::fs::write(&path, capture).unwrap();
     println!("{}", serde_json::json!({"verdict":"pass", "capture":path}));

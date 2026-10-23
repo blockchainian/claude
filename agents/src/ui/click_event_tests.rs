@@ -589,7 +589,7 @@ fn manager_detach_detail_centers_thread_and_has_no_input() {
         .remove(0);
     let thread_id = "01a1489e-5020-7f40-90e8-c9413012630b";
     assert_eq!(
-        event.calls[0].title,
+        event.calls[0].summary,
         format!("codex-manager detach {thread_id}")
     );
     assert!(event.calls[0].input.is_empty());
@@ -624,12 +624,11 @@ fn manager_detach_detail_centers_thread_and_has_no_input() {
         Some(usize::from(columns.text.x))
     );
     assert_eq!(
-        rows.iter()
-            .filter(|row| row.contains("\"threadId\": \"01a1489e"))
-            .count(),
+        rows.iter().filter(|row| row.trim() == thread_id).count(),
         1,
-        "the thread ID remains only in the generic output"
+        "the output contains only the thread ID"
     );
+    assert!(!rows.iter().any(|row| row.contains("\"threadId\"")));
     let snapshot = rows
         .iter()
         .map(|row| row.trim_end())

@@ -36,7 +36,10 @@ fn ask_question_list_uses_questions_and_detail_uses_headers() {
             .map(|question| question["header"].as_str().unwrap())
             .collect::<Vec<_>>()
             .join(" · ");
-        assert_eq!(event.calls[0].title, format!("AskUserQuestion {questions}"));
+        assert_eq!(
+            event.calls[0].summary,
+            format!("AskUserQuestion {questions}")
+        );
         assert_eq!(event.body, format!("AskUserQuestion {questions}"));
         assert!(event_list::shows_calls(&event));
         let (mut view, now) = event_fixture();
@@ -61,7 +64,7 @@ fn ask_question_list_uses_questions_and_detail_uses_headers() {
                 .collect::<Vec<_>>(),
             title
         );
-        assert_eq!(event.calls[0].event_detail_title, title.join(" · "));
+        assert_eq!(event.calls[0].title, title.join(" · "));
     }
 }
 

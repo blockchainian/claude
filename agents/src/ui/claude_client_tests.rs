@@ -38,8 +38,8 @@ fn claude_client_recorded_input_and_reply_snapshot() {
         let call = &events[0].calls[0];
         let display_name = crate::providers::tool::display_tool_name(&call.name);
         assert_eq!(events[0].body, format!("{display_name} {input}"));
-        assert_eq!(call.event_detail_left, "");
-        assert_eq!(call.event_detail_title, display_name);
+        assert_eq!(call.detail_left(), "");
+        assert_eq!(super::tool_detail::call_title(call).1, display_name);
         let reply = record["payload"]["item"]["result"]["content"][0]["text"]
             .as_str()
             .unwrap();

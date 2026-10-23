@@ -187,9 +187,8 @@ pub fn present(call: &mut ToolCall) {
     let Some(message) = &call.agent_message else {
         return;
     };
-    call.title = message.summary(1);
-    call.event_detail_left = message.label();
-    call.event_detail_title = if message.kind == "SPAWN_AGENT" {
+    call.summary = message.summary(1);
+    call.title = if message.kind == "SPAWN_AGENT" {
         message
             .recipient
             .as_deref()
@@ -221,7 +220,7 @@ pub fn summary(event: &Event) -> Option<String> {
             event
                 .calls
                 .iter()
-                .map(|call| call.title.as_str())
+                .map(|call| call.summary.as_str())
                 .collect::<Vec<_>>()
                 .join(" · "),
         )

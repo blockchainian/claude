@@ -4525,8 +4525,8 @@ fn background_box_dims_title_but_not_indicator_or_output() {
     assert!(buf[(16, top)].modifier.contains(Modifier::DIM));
     let (tool_view, _) = open_tool_fixture();
     let mut event = tool_view.event_panel[7].clone();
+    event.calls[0].summary = "Run checks".into();
     event.calls[0].title = "Run checks".into();
-    event.calls[0].event_detail_title = "Run checks".into();
     let detail =
         super::tool_detail::event_detail_content(&event, String::new(), Style::new().dim());
     let mut title_buf = Buffer::empty(Rect::new(0, 0, 40, 1));
@@ -7998,11 +7998,10 @@ fn tool_calls() -> Vec<crate::event::ToolCall> {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Bash".into(),
-            event_detail_title: "Bash".into(),
+            title: "Bash".into(),
             show_event_detail: false,
             id: "Bash-fixture".into(),
-            title: "Bash".into(),
+            summary: "Bash".into(),
             name: "Bash".into(),
             input: vec![Section::Shell {
                 prefix: 0,
@@ -8023,11 +8022,10 @@ fn tool_calls() -> Vec<crate::event::ToolCall> {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Read".into(),
-            event_detail_title: "Read".into(),
+            title: "Read".into(),
             show_event_detail: false,
             id: "Read-fixture".into(),
-            title: "Read".into(),
+            summary: "Read".into(),
             name: "Read".into(),
             input: vec![Section::Text {
                 label: "path".into(),
@@ -8071,8 +8069,8 @@ fn merged_tool_titles_copy_only_titles_and_arrows_center_on_panel() {
     ] {
         let (mut view, now) = open_tool_fixture();
         let mut event = view.event_panel[7].clone();
+        event.calls[0].summary = title.into();
         event.calls[0].title = title.into();
-        event.calls[0].event_detail_title = title.into();
         view.select_fixture_event(Some(event));
         let height = if width < 100 { 90 } else { 48 };
         let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
@@ -9137,8 +9135,8 @@ fn review_cached_layout_shares_source_bytes() {
 fn open_tool_layout_titles_and_arrows() {
     let (mut view, now) = open_tool_fixture();
     view.event_panel[7].calls.truncate(1);
+    view.event_panel[7].calls[0].summary = "Run tests".into();
     view.event_panel[7].calls[0].title = "Run tests".into();
-    view.event_panel[7].calls[0].event_detail_title = "Run tests".into();
     view.select_fixture_event(Some(view.event_panel[7].clone()));
     let open = event_screen(&view, 100, 48, now);
     assert!(
@@ -9261,8 +9259,8 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
         let call = event.calls.iter().find(|call| call.name == name).unwrap();
         let mut event = event.clone();
         event.calls = vec![call.clone()];
-        let title = call.event_detail_title.clone();
-        let left = call.event_detail_left.clone();
+        let title = call.title.clone();
+        let left = call.detail_left();
         for kind in [
             crate::event::Kind::Tool,
             crate::event::Kind::Error,
@@ -9779,10 +9777,7 @@ fn wrapped_senders_stay_in_list_and_move_to_open_header() {
             .lines()
             .nth(usize::from(view.viewport.borrow().event_detail.y + 1))
             .unwrap();
-        assert!(
-            header.trim_start().starts_with("Message"),
-            "sender: {header}"
-        );
+        assert!(!header.contains("Message"), "sender: {header}");
         assert!(header.contains(sender), "kind: {header}");
         assert!(header.ends_with(&clock), "time: {header}");
         assert!(
@@ -10788,7 +10783,7 @@ fn claude_agent_display_from_real_records() {
             .find(|e| e.calls.iter().any(|c| c.id == id))
             .unwrap();
         assert_eq!(event.summary(), label);
-        assert_eq!(event.calls[0].title, label);
+        assert_eq!(event.calls[0].summary, label);
         let (mut view, now) = event_fixture();
         view.select_fixture_event(Some(event.clone()));
         let screen = event_screen(&view, 200, 45, now);
@@ -10801,9 +10796,7 @@ fn claude_agent_display_from_real_records() {
             "{screen}"
         );
         assert!(!label.is_empty());
-        let description = view.display_event(event).calls[0]
-            .event_detail_title
-            .clone();
+        let description = view.display_event(event).calls[0].title.clone();
         assert!(
             rows[header]
                 .replace(' ', "")
@@ -10829,9 +10822,19 @@ fn claude_agent_display_from_real_records() {
                 .text
                 .to_string();
             assert_eq!(title, description);
-            assert!((0..200).any(|x| cell_text(buffer[(x, header as u16)].symbol()) == "S"));
+            assert_eq!(
+                super::tool_detail::event_detail_content(
+                    view.visible_event().unwrap(),
+                    String::new(),
+                    Style::new().dim()
+                )
+                .sections[0]
+                    .title
+                    .left,
+                None
+            );
         }
-        let description = event.calls[0].event_detail_title.clone();
+        let description = event.calls[0].title.clone();
         assert!(
             description.is_empty()
                 || !rows[header + 1..]
@@ -11612,13 +11615,13 @@ fn recorded_agent_settings_use_the_picker_catalog_and_shared_effort() {
         .unwrap();
     let settings = call.model_settings.as_ref().unwrap();
     assert_eq!(settings.model.as_deref(), Some("gpt-6.1-sol"));
-    assert!(!call.event_detail_title.contains("GPT-6.1-Sol"));
+    assert!(!call.title.contains("GPT-6.1-Sol"));
     let display = view.display_event(event);
     assert!(
         display
             .calls
             .iter()
-            .any(|call| call.event_detail_title.contains("GPT-6.1-Sol · low"))
+            .any(|call| call.title.contains("GPT-6.1-Sol · low"))
     );
     let mut missing = event.clone();
     for call in &mut missing.calls {
@@ -11631,7 +11634,7 @@ fn recorded_agent_settings_use_the_picker_catalog_and_shared_effort() {
         display
             .calls
             .iter()
-            .any(|call| call.event_detail_title.ends_with("GPT-6.1-Sol"))
+            .any(|call| call.title.ends_with("GPT-6.1-Sol"))
     );
 }
 

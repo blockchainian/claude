@@ -23,7 +23,7 @@ WebFetch                                                                    http
                                                             authenticated tool (e.g. gh for GitHub, or an MCP-provided fetch tool) instead of
                                                             WebFetch.
 Agent toolu_01Jh2saBdGuVcXWa4bGuH4sW — 120 columns
-Spawn agent                                          写工具详情计划
+                                                     写工具详情计划
 
   Write an implementation plan for a feature in the agents Rust TUI session dashboard, at agents/agents (git
   worktree on branch agents-panel; read agents/AGENTS.md and agents/AGENTS.md first). The plan will be run by
@@ -88,7 +88,7 @@ Spawn agent                                          写工具详情计划
     scripts under agents/ or tests/); state it in the plan, or say none exists.
   • Keep it minimal; no line numbers; only what the implementer can't work out or would get wrong.
 Agent toolu_01Jh2saBdGuVcXWa4bGuH4sW — 200 columns
-Spawn agent                                                                                  写工具详情计划
+                                                                                             写工具详情计划
 
                                                           Write an implementation plan for a feature in the agents Rust TUI session dashboard,
                                                           at agents/agents (git worktree on branch agents-panel; read agents/AGENTS.md and
@@ -180,7 +180,7 @@ Skill                                                                           
                                                                                                     ↓
                                                                                                    •··
 SendMessage tool-2 — 120 columns
-Message                                           ← hide-idle-teammates
+                                                  ← hide-idle-teammates
 
    Is the uncommitted edit to agents/src/ui/line_truncation.rs in the agents-panel worktree yours? I'm add-
    codex-support; my Codex thread (step 4 of the provider refactor) is mid-gate in that same tree and its
@@ -191,7 +191,7 @@ Message                                           ← hide-idle-teammates
                                                             ↓
                                                            •··
 SendMessage tool-2 — 200 columns
-Message                                                                                   ← hide-idle-teammates
+                                                                                          ← hide-idle-teammates
 
                                                           Is the uncommitted edit to agents/src/ui/line_truncation.rs in the agents-panel
                                                           worktree yours? I'm add-codex-support; my Codex thread (step 4 of the provider
@@ -215,77 +215,77 @@ Skill                                                                           
                                                                                                     ↓
                                                                               Launching skill: computer-use:capture-window
 Agent toolu_01CpDDPATKMy7THBJHHDx14U — 120 columns
-Spawn agent                                             reviewer
+                                                        reviewer
 
                                                       Review files
                                                             ↓
                                                            •··
 Agent toolu_01CpDDPATKMy7THBJHHDx14U — 200 columns
-Spawn agent                                                                                     reviewer
+                                                                                                reviewer
 
                                                                                               Review files
                                                                                                     ↓
                                                                                                    •··
 spawn_agent call_tKZ0LQYkzNUlq6ZsRz9pnc2T — 120 columns
-Spawn agent                                             real_scan
+                                                        real_scan
 
                                                       Review files.
 spawn_agent call_tKZ0LQYkzNUlq6ZsRz9pnc2T — 200 columns
-Spawn agent                                                                                     real_scan
+                                                                                                real_scan
 
                                                                                               Review files.
 send_message call_f449799618f74814b21e98c2d8107ef5 — 120 columns
-Message                                                  ← root
+                                                         ← root
 
                                                       Review files.
                                                             ↓
                                                        (no output)
 send_message call_f449799618f74814b21e98c2d8107ef5 — 200 columns
-Message                                                                                          ← root
+                                                                                                 ← root
 
                                                                                               Review files.
                                                                                                     ↓
                                                                                                (no output)
 followup_task call_68f30964d6e546d19b8a488b2f611465 — 120 columns
-Followup task                                          ← ux_probe
+                                                       ← ux_probe
 
                                                       Review files.
                                                             ↓
                                                        (no output)
 followup_task call_68f30964d6e546d19b8a488b2f611465 — 200 columns
-Followup task                                                                                  ← ux_probe
+                                                                                               ← ux_probe
 
                                                                                               Review files.
                                                                                                     ↓
                                                                                                (no output)
 spawn_agent call_1809a0d0a2ad4ca7bc5e5d116754151f — 120 columns
-Spawn agent                                             demo_sub
+                                                        demo_sub
 
                                                        (encrypted)
 spawn_agent call_1809a0d0a2ad4ca7bc5e5d116754151f — 200 columns
-Spawn agent                                                                                     demo_sub
+                                                                                                demo_sub
 
                                                                                                (encrypted)
 send_message call_79ce27eb65c447ee9080c286a12cb69c — 120 columns
-Message                                              ← rename_gating
+                                                     ← rename_gating
 
                                                        (encrypted)
                                                             ↓
                                                        (no output)
 send_message call_79ce27eb65c447ee9080c286a12cb69c — 200 columns
-Message                                                                                      ← rename_gating
+                                                                                             ← rename_gating
 
                                                                                                (encrypted)
                                                                                                     ↓
                                                                                                (no output)
 followup_task call_68f30964d6e546d19b8a488b2f611465 — 120 columns
-Followup task                                          ← ux_probe
+                                                       ← ux_probe
 
                                                        (encrypted)
                                                             ↓
                                                        (no output)
 followup_task call_68f30964d6e546d19b8a488b2f611465 — 200 columns
-Followup task                                                                                  ← ux_probe
+                                                                                               ← ux_probe
 
                                                                                                (encrypted)
                                                                                                     ↓

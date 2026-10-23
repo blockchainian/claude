@@ -79,8 +79,8 @@ fn advisor_list_row_uses_catalog_model_and_hides_encrypted_payload() {
     )]));
     let display = view.display_event(&event);
     assert_eq!(display.body, "advisor · Fable 5.1");
+    assert_eq!(display.calls[0].summary, "advisor · Fable 5.1");
     assert_eq!(display.calls[0].title, "advisor · Fable 5.1");
-    assert_eq!(display.calls[0].event_detail_title, "advisor · Fable 5.1");
     let area = Rect::new(0, 0, 100, 1);
     let mut buffer = Buffer::empty(area);
     render_event(
@@ -287,8 +287,8 @@ fn mcp_inputs_keep_only_declared_prompt_in_body() {
     let mut event = event.clone();
     event.calls = vec![call.clone()];
     let parts = body_parts(&event);
-    assert_eq!(event.calls[0].event_detail_title, "tool-calls");
-    assert_eq!(event.calls[0].event_detail_left, "codex-manager start");
+    assert_eq!(event.calls[0].title, "tool-calls");
+    assert_eq!(event.calls[0].detail_left(), "codex-manager start");
     let input = parts
         .iter()
         .find(|part| part.source.starts_with("Goal:"))
@@ -313,7 +313,7 @@ fn mcp_inputs_keep_only_declared_prompt_in_body() {
             markdown: true,
         },
     ];
-    event.calls[0].event_detail_title = "Send".into();
+    event.calls[0].title = "Send".into();
     let drawn = layout(&event, 200);
     assert_reading_column(&drawn, 1);
     assert!(
@@ -544,9 +544,9 @@ fn merged_calls_keep_descriptions_in_title_bars() {
     let detail =
         super::super::tool_detail::event_detail_content(&event, String::new(), Style::new().dim());
     let title = &detail.sections[0].title;
-    assert_eq!(title.source(), event.calls[0].event_detail_title.clone());
-    let description = event.calls[0].event_detail_title.clone();
-    assert_eq!(title.left, Some(event.calls[0].event_detail_left.clone()));
+    assert_eq!(title.source(), event.calls[0].title.clone());
+    let description = event.calls[0].title.clone();
+    assert_eq!(title.left, Some(event.calls[0].detail_left()));
     assert!(
         !body_parts(&event)
             .iter()
@@ -858,7 +858,7 @@ fn description_takes_priority_over_name_in_real_agent_inputs() {
         })
         .unwrap();
     let call = &event.calls[0];
-    assert_eq!(Some(call.event_detail_title.as_str()), Some("attach-probe"));
+    assert_eq!(Some(call.title.as_str()), Some("attach-probe"));
     let body = body_parts(event);
     assert!(
         !body
@@ -1158,19 +1158,19 @@ fn tool_list_rows_keep_names_subjects_and_detail_titles() {
         let call = &event.calls[0];
         assert_eq!(
             event.body,
-            format!("{} {}", call.event_detail_left, call.event_detail_title).trim()
+            format!("{} {}", call.detail_left(), call.title).trim()
         );
         assert_eq!(
             super::body_line(&event, 200, Path::new("/workspace")).to_string(),
             format!(
                 "{} {}",
-                call.event_detail_left,
-                call.event_detail_title.trim_start_matches("/workspace/")
+                call.detail_left(),
+                call.title.trim_start_matches("/workspace/")
             )
         );
         let title = layout(&event, 200).lines[0].to_string();
-        assert!(title.starts_with(&call.event_detail_left));
-        assert!(title.contains(call.event_detail_title.trim_start_matches("/workspace/")));
+        assert!(title.starts_with(&call.detail_left()));
+        assert!(title.contains(call.title.trim_start_matches("/workspace/")));
     }
 }
 
@@ -1217,8 +1217,8 @@ fn tool_list_rows_group_members_and_preserve_relative_paths() {
 fn tool_list_rows_keep_shell_display_names_and_grouped_subjects() {
     let event = codex_events("codex-inner/git-chain.jsonl").remove(0);
     assert_eq!(event.body, "git {status, diff}, sed");
-    assert_eq!(event.calls[0].event_detail_left, "Exec command");
-    assert_eq!(event.calls[0].event_detail_title, "git {status, diff}, sed");
+    assert_eq!(event.calls[0].detail_left(), "Exec command");
+    assert_eq!(event.calls[0].title, "git {status, diff}, sed");
     let mut record = list_row_records().remove(0);
     let block = &mut record["message"]["content"][0];
     block["name"] = "Bash".into();
@@ -1259,10 +1259,10 @@ fn tool_list_rows_choose_descriptions_by_data() {
                 .filter(|text| !text.trim().is_empty())
                 .map(str::to_owned)
                 .unwrap_or_else(|| {
-                    if call.event_detail_left.is_empty() {
-                        call.event_detail_title.clone()
+                    if call.title.is_empty() {
+                        crate::providers::tool::display_tool_name(&call.name)
                     } else {
-                        format!("{} {}", call.event_detail_left, call.event_detail_title)
+                        format!("{} {}", call.detail_left(), call.title)
                     }
                 });
             let mut expected = call
@@ -1273,7 +1273,7 @@ fn tool_list_rows_choose_descriptions_by_data() {
             if let Some(code) = call.exit_code.filter(|code| *code != 0) {
                 expected.push_str(&format!(" · {code}"));
             }
-            assert_eq!(call.title, expected, "{}", call.name);
+            assert_eq!(call.summary, expected, "{}", call.name);
         }
     }
 }

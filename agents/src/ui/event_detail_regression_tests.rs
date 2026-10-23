@@ -46,11 +46,10 @@ fn tool_calls() -> Vec<crate::event::ToolCall> {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Bash".into(),
-            event_detail_title: "Bash".into(),
+            title: "Bash".into(),
             show_event_detail: false,
             id: "Bash-fixture".into(),
-            title: "Bash".into(),
+            summary: "Bash".into(),
             name: "Bash".into(),
             input: vec![Section::Shell {
                 prefix: 0,
@@ -71,11 +70,10 @@ fn tool_calls() -> Vec<crate::event::ToolCall> {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Read".into(),
-            event_detail_title: "Read".into(),
+            title: "Read".into(),
             show_event_detail: false,
             id: "Read-fixture".into(),
-            title: "Read".into(),
+            summary: "Read".into(),
             name: "Read".into(),
             input: vec![Section::Text {
                 label: "path".into(),
@@ -212,7 +210,7 @@ fn tool_detail_body_uses_default_foreground_and_preserves_syntax_highlighting() 
     let (mut view, now) = open_tool_fixture();
     let mut event = view.visible_event().unwrap().clone();
     event.calls.truncate(1);
-    event.calls[0].event_detail_title = "Run checks".into();
+    event.calls[0].title = "Run checks".into();
     event.calls[0].output = Some(vec![
         crate::event::Section::Text {
             label: String::new(),
@@ -435,7 +433,7 @@ fn claude_write_content_uses_path_syntax_and_preserves_unknown_text() {
         let event = crate::providers::claude::event_reader::tail(transcript.path(), 1)
             .unwrap()
             .remove(0);
-        assert_eq!(event.calls[0].event_detail_title, path);
+        assert_eq!(event.calls[0].title, path);
         let view = View::new(Grouping::Project, false);
         let area = Rect::new(0, 0, 120, 24);
         let mut buffer = Buffer::empty(area);

@@ -238,14 +238,13 @@ pub struct ToolCall {
     pub hide_output: bool,
     pub agent_thread_id: Option<String>,
     pub agent_path: Option<String>,
-    /// Left metadata and centered title, chosen by the provider.
-    pub event_detail_left: String,
-    pub event_detail_title: String,
+    /// Centered title selected from the tool rule.
+    pub title: String,
     /// Draw calls even for events whose kind normally shows only a message.
     pub show_event_detail: bool,
     /// The provider's stable call identifier.
     pub id: String,
-    pub title: String,
+    pub summary: String,
     /// The provider's tool identifier.
     pub name: String,
     pub input: Vec<Section>,
@@ -256,6 +255,20 @@ pub struct ToolCall {
     pub is_error: bool,
     /// How long a completed call in a merged event ran, from its request to its result.
     pub duration: Option<chrono::Duration>,
+}
+
+impl ToolCall {
+    /// Tool metadata beside the detail title, derived when rendered.
+    pub(crate) fn detail_left(&self) -> String {
+        if self.title.trim().is_empty()
+            || self.agent_message.is_some()
+            || !crate::providers::tool::rule(&self.name).label
+        {
+            String::new()
+        } else {
+            crate::providers::tool::display_tool_name(&self.name)
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -208,8 +208,8 @@ fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
         let event = tail(file.path(), 1).unwrap().remove(0);
         assert_eq!(event.body, title);
         let call = &event.calls[0];
+        assert_eq!(call.summary, title);
         assert_eq!(call.title, title);
-        assert_eq!(call.event_detail_title, title);
         assert_eq!(call.exit_code, code);
         assert_eq!(event.raw_text().unwrap(), line);
     }
@@ -250,7 +250,7 @@ fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
         record["content"] = format!("{}{summary}{}", &text[..start], &text[end..]).into();
         let event = events_from(vec![record]).remove(0);
         assert_eq!(event.body, summary);
-        assert_eq!(event.calls[0].title, summary);
+        assert_eq!(event.calls[0].summary, summary);
         assert_eq!(event.calls[0].exit_code, None);
     }
 }

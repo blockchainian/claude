@@ -710,9 +710,9 @@ fn shell_command_display_keeps_raw_name_command_output_and_timing() {
     let call = &event.calls[0];
     assert_eq!(event.body, "sleep");
     assert_eq!(call.name, "exec_command");
+    assert_eq!(call.summary, "sleep");
     assert_eq!(call.title, "sleep");
-    assert_eq!(call.event_detail_title, "sleep");
-    assert_eq!(call.event_detail_left, "Exec command");
+    assert_eq!(call.detail_left(), "Exec command");
     assert_eq!(
         call.input,
         vec![crate::event::Section::Shell {
@@ -732,9 +732,9 @@ fn chained_shell_subject_groups_subcommands_without_arguments() {
     let event = &entries[0];
     let call = &event.calls[0];
     assert_eq!(event.body, "git {status, diff}, sed");
-    assert_eq!(call.title, event.body);
-    assert_eq!(call.event_detail_title, "git {status, diff}, sed");
-    assert_eq!(call.event_detail_left, "Exec command");
+    assert_eq!(call.summary, event.body);
+    assert_eq!(call.title, "git {status, diff}, sed");
+    assert_eq!(call.detail_left(), "Exec command");
     assert!(event.paths.is_empty());
     assert_eq!(call.name, "exec_command");
     assert!(
@@ -758,7 +758,7 @@ fn interaction_functions_win_over_completed_items() {
     let rows = tail(&path, 100).unwrap();
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[0].summary(), "Spawn agent demo_sub");
-    assert_eq!(rows[0].calls[0].event_detail_left, "Spawn agent");
+    assert_eq!(rows[0].calls[0].detail_left(), "");
     assert_eq!(
         rows[0].calls[0].input,
         vec![crate::event::Section::Markdown {
@@ -790,7 +790,7 @@ fn interaction_messages_keep_route_and_merge_adjacent_sender() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-interaction/child.jsonl");
     let rows = tail(&path, 100).unwrap();
     assert_eq!(rows[0].summary(), "root → new task");
-    assert_eq!(rows[0].calls[0].event_detail_left, "New task");
+    assert_eq!(rows[0].calls[0].detail_left(), "");
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/codex-interaction/messages.jsonl");
     let rows = tail(&path, 100).unwrap();
