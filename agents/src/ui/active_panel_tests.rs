@@ -325,7 +325,9 @@ fn active_panel_unsupported_task_keys_do_not_fall_through() {
                 KeyCode::Backspace,
             ] {
                 let action = key(&mut view, code);
-                if panel == Panel::EventList && code == KeyCode::Char('p') {
+                if matches!(panel, Panel::EventList | Panel::EventDetail)
+                    && code == KeyCode::Char('p')
+                {
                     let selected = view.visible_event().unwrap();
                     assert!(matches!(
                         action,
@@ -695,4 +697,25 @@ fn mouse_activation_covers_panel_rules_and_side_padding() {
             }
         }
     }
+}
+
+#[test]
+fn event_detail_p_toggles_pin_except_in_terminal_mode() {
+    use super::task_ui::EventDetailMode;
+    for mode in [EventDetailMode::Event, EventDetailMode::Transcript] {
+        let (mut view, _) = panel_fixture(200);
+        view.set_active_panel(Panel::EventDetail);
+        view.event_detail.mode = mode;
+        let pinned = |action| match action {
+            Some(Action::ToggleEventPin { pinned, .. }) => pinned.len(),
+            other => panic!("mode={mode:?} action={other:?}"),
+        };
+        assert_eq!(pinned(key(&mut view, KeyCode::Char('p'))), 1);
+        assert_eq!(pinned(key(&mut view, KeyCode::Char('p'))), 0);
+    }
+    let (mut view, _) = panel_fixture(200);
+    view.set_active_panel(Panel::EventDetail);
+    view.event_detail.mode = EventDetailMode::Terminal;
+    key(&mut view, KeyCode::Char('p'));
+    assert!(view.event_list.pinned.is_empty());
 }

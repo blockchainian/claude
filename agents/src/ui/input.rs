@@ -1892,7 +1892,11 @@ impl View {
             self.jump_event_agent();
             return None;
         }
-        if plain && key.code == KeyCode::Char('p') && self.active_panel == Panel::EventList {
+        if plain
+            && key.code == KeyCode::Char('p')
+            && (self.active_panel == Panel::EventList
+                || self.active_panel == Panel::EventDetail && !self.terminal_requested())
+        {
             return self.toggle_event_pin();
         }
         if plain && key.code == KeyCode::Char(' ') && self.active_panel == Panel::EventList {
