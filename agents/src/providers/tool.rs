@@ -719,6 +719,18 @@ fn read_title(data: &ToolData<'_>) -> Option<String> {
         start.saturating_add(count.saturating_sub(1))
     ))
 }
+/// The file path of a file title, without the `:start-end` line range of a partial Read.
+pub(crate) fn title_path(title: &str) -> &str {
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    title
+        .rsplit_once(':')
+        .filter(|(_, lines)| {
+            lines
+                .split_once('-')
+                .is_some_and(|(start, end)| digits(start) && digits(end))
+        })
+        .map_or(title, |(path, _)| path)
+}
 fn empty_input(_: &ToolData<'_>) -> Option<Vec<Section>> {
     Some(Vec::new())
 }

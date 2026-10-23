@@ -1271,7 +1271,7 @@ impl EventReader {
             .title
             .iter()
             .any(|pick| matches!(pick, Pick::Field(Source::Input, "/file_path")))
-            .then(|| event_detail_call.title.clone());
+            .then(|| tool::title_path(&event_detail_call.title).to_owned());
         let kind = tool_kind(name);
         if self.batch.is_some_and(|index| {
             (self.entries[index].event.kind == Kind::Assistant) != (kind == Kind::Assistant)
@@ -1332,13 +1332,15 @@ impl EventReader {
             groups.add(head, member.as_deref());
         }
         let (body, members) = groups.finish_with_ranges().unwrap();
+        // A member's path range stops before a Read's line range, which links find themselves.
         entry.event.paths = members
             .into_iter()
             .filter(|range| {
                 path_subjects
                     .iter()
-                    .any(|path| path == &body[range.clone()])
+                    .any(|path| path == tool::title_path(&body[range.clone()]))
             })
+            .map(|range| range.start..range.start + tool::title_path(&body[range]).len())
             .collect();
         entry.event.body = body;
         let mut detail = event_detail_call;
@@ -2508,6 +2510,9 @@ pub(crate) mod tests {
             )
         );
         assert_eq!(read.summary, format!("Read {}", read.title));
+        let event = events.iter().find(|event| event.calls.contains(read)).unwrap();
+        let paths: Vec<_> = event.paths.iter().map(|range| &event.body[range.clone()]).collect();
+        assert_eq!(paths, [file["filePath"].as_str().unwrap()]);
         assert!(read.input.is_empty());
         let edit = calls.iter().find(|call| call.name == "Edit").unwrap();
         assert!(edit.input.is_empty());
