@@ -2159,15 +2159,15 @@ mod tests {
             rows,
             [
                 "{",
-                "  \"log\": \"line one",
-                "  line two\",",
                 "  \"prompt\": \"Plan",
                 "  • ship it\",",
+                "  \"log\": \"line one",
+                "  line two\",",
                 "  \"title\": \"**inline**\"",
                 "}",
             ]
         );
-        let bold = lines[4]
+        let bold = lines[2]
             .spans
             .iter()
             .find(|span| span.content == "ship")
