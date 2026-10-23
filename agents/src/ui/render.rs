@@ -161,11 +161,11 @@ impl View {
             (top, 0, content_height - top)
         } else if kind == ScreenLayout::Small {
             // Reserve the task separator and output's top rule before sharing content.
-            // Lists get one sixth each; details split the rest, taking spare rows first.
+            // Outer panels get one sixth each; middle panels split the rest, taking spare rows first.
             let rows = content_height.saturating_sub(2);
-            let list = rows / 6;
-            let details = rows - 2 * list;
-            (list + details.div_ceil(2) + 1, list, details / 2 + 1)
+            let outer = rows / 6;
+            let middle = rows - 2 * outer;
+            (outer + middle.div_ceil(2) + 1, middle / 2, outer + 1)
         } else {
             (
                 content_height.div_ceil(3),
@@ -255,7 +255,7 @@ impl View {
             let task_list_height = if !show_event && !task_zoom {
                 rows.div_ceil(2)
             } else if list_height > 0 {
-                list_height
+                content_height.saturating_sub(2) / 6
             } else {
                 rows / 3
             };
@@ -2771,11 +2771,12 @@ mod small_height_tests {
     #[test]
     fn small_heights_reserve_input_and_rules() {
         for (height, input, expected) in [
-            (60, "", [8, 18, 8, 17]),
-            (60, "one\ntwo\nthree", [8, 17, 8, 16]),
-            (59, "", [8, 17, 8, 17]),
-            (61, "", [8, 18, 8, 18]),
-            (62, "", [8, 19, 8, 18]),
+            (57, "", [8, 16, 16, 8]),
+            (60, "", [8, 18, 17, 8]),
+            (60, "one\ntwo\nthree", [8, 17, 16, 8]),
+            (59, "", [8, 17, 17, 8]),
+            (61, "", [8, 18, 18, 8]),
+            (62, "", [8, 19, 18, 8]),
         ] {
             let mut view = View::default();
             view.input_box.editor.set_text(input);

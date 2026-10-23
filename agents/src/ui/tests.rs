@@ -8079,7 +8079,8 @@ fn merged_tool_titles_copy_only_titles_and_arrows_center_on_panel() {
         event.calls[0].title = title.into();
         event.calls[0].event_detail_title = title.into();
         view.select_fixture_event(Some(event));
-        let mut buf = Buffer::empty(Rect::new(0, 0, width, 48));
+        let height = if width < 100 { 90 } else { 48 };
+        let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
         view.render_at(buf.area, &mut buf, now);
         for title in [title, "Read"] {
             let (rows, body) = {
@@ -9363,11 +9364,11 @@ fn small_scrolled_tool_label_drag_stays_inside_the_buffer() {
         text: "+中文".into(),
     }];
     view.select_fixture_event(Some(event));
-    let open = event_screen(&view, 30, 25, now);
+    let open = event_screen(&view, 30, 60, now);
     let (x, y) = rendered_cell(&open, "/workspace");
     view.begin_text_selection(x, y);
     view.extend_text_selection(29, y + 4);
-    event_screen(&view, 30, 25, now);
+    event_screen(&view, 30, 60, now);
     let viewport = view.viewport.borrow();
     for row in &viewport.event_text.rows {
         assert!(

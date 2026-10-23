@@ -269,7 +269,7 @@ fn merged_rule_moves_jump_and_filter_without_changing_the_model() {
 }
 
 #[test]
-fn small_layout_stacks_full_width_panels_with_double_detail_heights() {
+fn small_layout_stacks_full_width_panels_with_double_middle_heights() {
     let (_dir, view, _) = fixture();
     for height in [45, 60, 61] {
         let small = view.panel_layout(Rect::new(0, 0, 70, height), false);
@@ -282,6 +282,8 @@ fn small_layout_stacks_full_width_panels_with_double_detail_heights() {
             small.task_details,
             Rect::new(1, small.list.bottom() + 1, 68, details)
         );
+        assert_eq!(small.event_panel.height, rows - 2 * list - details);
+        assert_eq!(small.event_detail.height - 1, list);
         assert_eq!(small.task_details.bottom(), small.top.bottom());
         assert_eq!(small.gap, Rect::new(0, small.list.bottom(), 70, 1));
         assert_eq!(small.usage_chart, small.list);
