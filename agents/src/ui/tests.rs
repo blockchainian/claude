@@ -2020,10 +2020,10 @@ fn live_center_search_active() {
             .collect(),
     );
     assert_eq!(
-        screen(&view, 88, 16),
+        screen(&view, 100, 16),
         include_str!("../../tests/ui_snapshots/live_center_search_active.txt")
     );
-    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((14, 11)));
+    assert_eq!(view.cursor_pos(Rect::new(0, 0, 100, 16)), Some((14, 11)));
 }
 #[test]
 fn show_more_is_only_listed_on_inactive() {
@@ -2194,12 +2194,12 @@ fn live_center_show_more() {
     key(&mut view, KeyCode::Home);
     key(&mut view, KeyCode::Down);
     assert_eq!(
-        screen(&view, 80, 12),
+        screen(&view, 100, 12),
         include_str!("../../tests/ui_snapshots/live_center_show_more.txt")
     );
     assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::ShowMore));
     assert_eq!(key(&mut view, KeyCode::Enter), None);
-    let rendered = screen(&view, 80, 12);
+    let rendered = screen(&view, 100, 12);
     assert!(rendered.contains("Show more"));
     assert!(!rendered.contains("Loading more…"));
 }
@@ -2308,7 +2308,7 @@ fn agents_overview_recent_sessions_twelve_rows_delta() {
         true,
     );
     key(&mut view, KeyCode::Home);
-    let rendered = screen(&view, 80, 60);
+    let rendered = screen(&view, 100, 60);
     assert!(rendered.contains("Active 0"));
     assert!(rendered.contains("Inactive 12"));
     assert_eq!(
@@ -2404,7 +2404,7 @@ fn task_list_actions() {
     assert_eq!(view.selected_id(), Some(&session_key("44")));
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
     view.set_active_panel(Panel::TaskDetails);
-    assert!(!screen(&view, 88, 16).contains("Rename ❯"));
+    assert!(!screen(&view, 100, 16).contains("Rename ❯"));
     assert_eq!(view.rename.text(), "Needs an answer");
     key(&mut view, KeyCode::Esc);
     view.set_active_panel(Panel::TaskList);
@@ -2573,7 +2573,7 @@ fn empty_states_notices_and_help_only_handle_close_keys() {
     assert_empty_task_list(&view);
     key(&mut view, KeyCode::Esc);
     view.show_error("Notice".into());
-    let lines = screen(&view, 80, 12);
+    let lines = screen(&view, 100, 12);
     assert!(
         lines.lines().last().unwrap().trim_end().ends_with("Notice"),
         "{lines}"
@@ -2602,7 +2602,7 @@ fn marker_pos_follows_the_selected_row_and_clears_on_help() {
         false,
     );
     key(&mut view, KeyCode::Home);
-    let area = Rect::new(0, 0, 80, 12);
+    let area = Rect::new(0, 0, 100, 12);
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     let (x, y) = view.marker_pos().unwrap();
@@ -2631,11 +2631,11 @@ fn rename_edits_title_and_commits_trimmed_text() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
     view.set_active_panel(Panel::TaskDetails);
-    let rendered = screen(&view, 88, 16);
+    let rendered = screen(&view, 100, 16);
     assert!(!rendered.contains("Rename ❯"));
     let title = view.viewport.borrow().task_details_title;
     assert_eq!(
-        view.cursor_pos(Rect::new(0, 0, 88, 16)),
+        view.cursor_pos(Rect::new(0, 0, 100, 16)),
         Some((title.right() - 1, title.y))
     );
     for c in " updated  ".chars() {
@@ -2648,7 +2648,7 @@ fn rename_edits_title_and_commits_trimmed_text() {
             name: "Current task updated".into()
         })
     );
-    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+    assert!(view.cursor_pos(Rect::new(0, 0, 100, 16)).is_none());
 }
 
 #[test]
@@ -2680,12 +2680,12 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
         key(&mut view, KeyCode::Char(c));
     }
     key(&mut view, KeyCode::Backspace);
-    assert!(!screen(&view, 88, 16).contains("Rename ❯"));
+    assert!(!screen(&view, 100, 16).contains("Rename ❯"));
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     key(&mut view, KeyCode::Esc);
     assert_eq!(view.center_footer_hints().to_string(), hints);
     assert_eq!(view.rows[view.selected].display_title(), "Current task");
-    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+    assert!(view.cursor_pos(Rect::new(0, 0, 100, 16)).is_none());
 }
 
 #[test]
@@ -2704,7 +2704,7 @@ fn rename_parks_inactive_target_and_drops_removed_target() {
         .status = SessionStatus::Inactive;
     view.set_sessions(rows, false);
     assert_eq!(view.selected_id(), Some(&session_key("46")));
-    assert!(!screen(&view, 88, 16).contains("Rename ❯"));
+    assert!(!screen(&view, 100, 16).contains("Rename ❯"));
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
     assert!(
         view.task_uis[&draft_controls::TaskKey::Session(session_key("42"))]
@@ -2716,10 +2716,10 @@ fn rename_parks_inactive_target_and_drops_removed_target() {
     key(&mut view, KeyCode::Char('r'));
     view.set_active_panel(Panel::TaskDetails);
     view.set_sessions(vec![], true);
-    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+    assert!(view.cursor_pos(Rect::new(0, 0, 100, 16)).is_none());
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
     view.set_active_panel(Panel::TaskDetails);
-    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+    assert!(view.cursor_pos(Rect::new(0, 0, 100, 16)).is_none());
 }
 
 #[test]
@@ -2732,10 +2732,10 @@ fn live_center_rename_active() {
     key(&mut view, KeyCode::Char('r'));
     view.set_active_panel(Panel::TaskDetails);
     assert_eq!(
-        screen(&view, 88, 16),
+        screen(&view, 100, 16),
         include_str!("../../tests/ui_snapshots/live_center_rename_active.txt")
     );
-    let area = Rect::new(0, 0, 88, 16);
+    let area = Rect::new(0, 0, 100, 16);
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     assert!(view.center_layout(area).search.is_empty());
@@ -2758,8 +2758,8 @@ fn double_clicking_the_name_edits_on_the_rule_and_escape_keeps_the_title() {
         vec![session("42", "Task to find", SessionStatus::Ready, 120)],
         false,
     );
-    let area = Rect::new(0, 0, 88, 16);
-    screen(&view, 88, 16);
+    let area = Rect::new(0, 0, 100, 16);
+    screen(&view, 100, 16);
     let title = view.viewport.borrow().task_details_title;
     let press = mouse(
         MouseEventKind::Down(MouseButton::Left),
@@ -2771,7 +2771,7 @@ fn double_clicking_the_name_edits_on_the_rule_and_escape_keeps_the_title() {
     assert_eq!(click_mouse(&mut view, press), None);
     assert_eq!(view.rename_target, Some(session_key("42")));
     assert_eq!(view.rename.text(), "Task to find");
-    let rendered = screen(&view, 88, 16);
+    let rendered = screen(&view, 100, 16);
     assert!(!rendered.contains("Rename ❯"));
     assert!(view.center_layout(area).search.is_empty());
     let title = view.viewport.borrow().title_input;
@@ -3025,22 +3025,26 @@ fn live_center_delete_dialog() {
     );
     key(&mut view, KeyCode::Backspace);
     assert_eq!(
-        screen(&view, 88, 16),
+        screen(&view, 100, 16),
         include_str!("../../tests/ui_snapshots/live_center_delete_dialog.txt")
     );
-    let area = Rect::new(0, 0, 88, 16);
+    let area = Rect::new(0, 0, 100, 16);
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     assert!(
-        buf[(6, 4)]
+        buf[(12, 4)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
-    assert!(buf[(6, 6)].modifier.contains(ratatui::style::Modifier::DIM));
+    assert!(
+        buf[(12, 6)]
+            .modifier
+            .contains(ratatui::style::Modifier::DIM)
+    );
     // A painted cell reports unset colours as Reset, so compare against a painted default cell.
     let mut expected = ratatui::buffer::Cell::default();
     expected.set_style(super::style::selection_style());
-    assert_eq!(buf[(6, 8)].style(), expected.style());
+    assert_eq!(buf[(12, 8)].style(), expected.style());
     for width in 0..100 {
         for height in 0..16 {
             let area = Rect::new(5, 8, width, height);
@@ -6310,10 +6314,10 @@ fn center_layout_golden_rects_follow_each_area() {
         body_height,
         list_height,
     ) in [
-        (80, 24, 17, 6, 38, 37, 6, 6),
+        (100, 24, 17, 6, 48, 47, 6, 6),
         (120, 40, 27, 12, 58, 57, 11, 11),
         (200, 60, 37, 22, 48, 48, 33, 33),
-        (80, 24, 17, 6, 38, 37, 6, 6),
+        (100, 24, 17, 6, 48, 47, 6, 6),
     ] {
         let area = Rect::new(5, 7, width, height);
         let layout = view.center_layout(area);
@@ -6351,17 +6355,17 @@ fn center_layout_golden_rects_follow_each_area() {
 fn center_layout_event_and_task_details_hide_thresholds() {
     let (mut view, _) = event_fixture();
     for height in 0..19 {
-        let layout = view.center_layout(Rect::new(0, 0, 94, height));
+        let layout = view.center_layout(Rect::new(0, 0, 100, height));
         assert_eq!(layout.event_panel.height, 0, "height {height}");
     }
-    let layout = view.center_layout(Rect::new(0, 0, 94, 19));
+    let layout = view.center_layout(Rect::new(0, 0, 100, 19));
     assert_eq!(layout.event_panel.height, 4);
     assert_eq!(layout.list.height, 4);
     assert_eq!(layout.event_detail.height, 4);
     assert!(layout.task_details.width > 0);
     assert!(
         !view
-            .center_layout(Rect::new(0, 0, 93, 20))
+            .center_layout(Rect::new(0, 0, 100, 20))
             .task_details
             .is_empty()
     );
@@ -8786,8 +8790,8 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
         click_mouse(&mut view, cwd_cell),
         Some(Action::OpenPath(crate::test_project()))
     );
-    // Under 90 columns the task details panel is gone and the list spans its cells.
-    screen(&view, 80, 40);
+    // Below 100 columns task details move below the task list.
+    screen(&view, 99, 40);
     assert_eq!(click_mouse(&mut view, cwd_cell), None);
 }
 
@@ -11477,7 +11481,7 @@ fn context_usage_on_task_details_border_keeps_status_and_elapsed() {
         let mut usage = crate::usage::Series::default();
         usage.update(&path, provider).unwrap();
         view.set_context_usage(&id, usage.context_percent());
-        for width in [80, 120, 200] {
+        for width in [100, 120, 200] {
             let area = Rect::new(0, 0, width, 40);
             let mut buf = Buffer::empty(area);
             view.render_at(area, &mut buf, now);

@@ -97,7 +97,7 @@ fn claude_subagent_prompt_cache_countdown_shows_only_in_its_last_minute() {
 #[test]
 fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
     for pr in [false, true] {
-        for width in [80, 149, 150, 220] {
+        for width in [100, 149, 150, 220] {
             let mut view = fixture();
             let selected = &mut view.rows[view.selected];
             selected.title = "T".into();

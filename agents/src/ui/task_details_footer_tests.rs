@@ -34,7 +34,7 @@ fn task_details_body_leaves_spare_rows_without_project_or_model() {
 
 #[test]
 fn task_details_status_links_keep_underlines_and_click_targets_in_both_layouts() {
-    for width in [80, 160] {
+    for width in [100, 160] {
         let mut view = fixture();
         let selected = &mut view.rows[view.selected];
         selected.prompt = "Short prompt".into();
@@ -68,7 +68,7 @@ fn task_details_status_links_keep_underlines_and_click_targets_in_both_layouts()
 
 #[test]
 fn event_border_places_model_label_and_effort_targets_in_both_layouts() {
-    for width in [80, 149, 150, 220] {
+    for width in [100, 149, 150, 220] {
         for label in [None, Some("Opus 5.5")] {
             let mut view = fixture();
             let selected = &mut view.rows[view.selected];
@@ -138,7 +138,7 @@ fn event_border_places_model_label_and_effort_targets_in_both_layouts() {
 
 #[test]
 fn model_effort_border_shows_only_known_values_and_right_aligns_new() {
-    for width in [80, 149, 150, 220] {
+    for width in [100, 149, 150, 220] {
         for (model, effort, expected) in [
             (Some("Opus"), Some("high"), "Opus · high"),
             (Some("Opus"), None, "Opus "),
@@ -205,7 +205,7 @@ fn model_effort_border_shows_only_known_values_and_right_aligns_new() {
 
 #[test]
 fn draft_title_rule_places_directory_left_and_branch_right() {
-    for width in [80, 149, 150, 220] {
+    for width in [100, 149, 150, 220] {
         let mut view = fixture();
         view.add_draft(DraftSetup {
             provider: ProviderId::Claude,

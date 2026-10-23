@@ -2070,7 +2070,7 @@ mod terminal_codex_exit;
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_event_metadata_aligns_new_with_clock() {
-    for width in [80, 200] {
+    for width in [100, 200] {
         let (_directory, tmux, transcript) = start_probe("log-latest-border");
         tmux.run(&[
             "resize-window",
@@ -3076,7 +3076,7 @@ fn terminal_manager_detach_result_name() {
 #[ignore = "requires tmux and local Claude account authentication; reads live weekly usage"]
 fn terminal_weekly_usage_on_task_header() {
     let (_directory, tmux, _transcript) = start_probe("weekly-usage");
-    for width in [80, 200] {
+    for width in [100, 200] {
         tmux.run(&[
             "resize-window",
             "-t",
@@ -3199,7 +3199,7 @@ mod terminal_await_output;
 #[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_duration_sort_jump_position() {
     let mut captures = Vec::new();
-    for width in [80, 200] {
+    for width in [100, 200] {
         let (_directory, tmux, _transcript) = start_probe("duration-border");
         tmux.run(&[
             "resize-window",

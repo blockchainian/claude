@@ -72,7 +72,7 @@ impl ScreenLayout {
     pub(super) fn for_width(width: u16) -> Self {
         match width {
             150.. => Self::Large,
-            80..150 => Self::Medium,
+            100..150 => Self::Medium,
             _ => Self::Small,
         }
     }

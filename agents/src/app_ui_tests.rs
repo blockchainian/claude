@@ -1058,7 +1058,7 @@ fn medium_render_survives_large_resize_unchanged() {
         app.draw_at(&mut terminal, now).unwrap();
         terminal.backend().buffer().clone()
     };
-    for width in [80, 120, 149] {
+    for width in [100, 120, 149] {
         let before = draw(width);
         draw(200);
         let after = draw(width);

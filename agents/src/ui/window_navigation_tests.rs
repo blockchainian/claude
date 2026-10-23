@@ -11,7 +11,7 @@ fn chord(view: &mut View, direction: char) -> Option<Action> {
 #[test]
 fn window_navigation_all_directions_in_three_layouts() {
     use Panel::*;
-    for width in [70, 100, 200] {
+    for width in [99, 100, 200] {
         for terminal in [false, true] {
             let bottom = EventDetail;
             let expected = if width == 200 {
@@ -22,7 +22,7 @@ fn window_navigation_all_directions_in_three_layouts() {
                     (Prompt, [Prompt, bottom, TaskList, Prompt]),
                     (bottom, [bottom, bottom, Prompt, bottom]),
                 ]
-            } else if width >= 80 {
+            } else if width >= 100 {
                 vec![
                     (TaskList, [TaskList, Prompt, TaskList, TaskDetails]),
                     (TaskDetails, [TaskList, Prompt, TaskDetails, TaskDetails]),
@@ -408,10 +408,10 @@ fn zoom_key(view: &mut View, key: char, modifiers: KeyModifiers) {
 #[test]
 fn panel_zoom_medium_detail_has_no_collapsed_frame() {
     let (mut view, now) = event_fixture();
-    event_screen(&view, 92, 110, now);
+    event_screen(&view, 100, 110, now);
     view.set_active_panel(Panel::EventDetail);
     zoom_key(&mut view, '|', KeyModifiers::SHIFT);
-    let screen = event_screen(&view, 92, 110, now);
+    let screen = event_screen(&view, 100, 110, now);
     let rows: Vec<_> = screen.lines().collect();
     assert!(
         rows[2].contains("Task log example") && rows[4].contains("run tests"),
@@ -479,7 +479,7 @@ fn panel_zoom_event_list_has_no_left_separator_joints() {
 
 #[test]
 fn panel_zoom_collapsed_panels_keep_frame_labels() {
-    for width in [92, 149, 150, 200] {
+    for width in [100, 149, 150, 200] {
         for panel in [
             Panel::TaskList,
             Panel::TaskDetails,

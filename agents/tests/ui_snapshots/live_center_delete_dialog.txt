@@ -1,16 +1,16 @@
-  Active 0                                                                  Inactive 1
-────────────────────────────────────────────┬──────────────── Inactive ─────────────────
-                  project                   │                  Prompt
- ○ U┌──────────────────────────────────────────────────────────────────────────────┐
-    │ Permanently delete “Unloaded task”?                                          │
-    │ This stops any running work in this task and its child agents, then          │
-    │ permanently deletes their history. This cannot be undone.                    │
-    │                                                                              │
-    │ ❯ 1. Cancel                                                                  │
-    │   2. Permanently delete task and child agents                                │
-    └──────────────────────────────────────────────────────────────────────────────┘
-                                            │
-────────────────────────────────────────────┴╴project ──── Unloaded task ───────────────
+  Active 0                                                                              Inactive 1
+──────────────────────────────────────────────────┬─────────────────── Inactive ────────────────────
+                     project                      │                     Prompt
+ ○ Unloade┌──────────────────────────────────────────────────────────────────────────────┐
+          │ Permanently delete “Unloaded task”?                                          │
+          │ This stops any running work in this task and its child agents, then          │
+          │ permanently deletes their history. This cannot be undone.                    │
+          │                                                                              │
+          │ ❯ 1. Cancel                                                                  │
+          │   2. Permanently delete task and child agents                                │
+          └──────────────────────────────────────────────────────────────────────────────┘
+                                                  │
+──────────────────────────────────────────────────┴╴project ─────── Unloaded task ──────────────────
  Unloaded task ❯
-────────────────────────────────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────────────────────────────────────────
  ? help

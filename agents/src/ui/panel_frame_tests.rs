@@ -238,7 +238,7 @@ fn merged_rule_moves_jump_and_filter_without_changing_the_model() {
             .collect();
         let jump = view.viewport.borrow().event_label;
         assert!(!jump.is_empty());
-        let filter_y = if width < 80 {
+        let filter_y = if width < 100 {
             view.panel_layout(area, false).prompt_bottom_rule.y
         } else {
             view.panel_layout(area, false).event_detail_top_rule.y
@@ -250,7 +250,7 @@ fn merged_rule_moves_jump_and_filter_without_changing_the_model() {
         let y = layout.prompt_bottom_rule.y;
         assert_eq!(y, layout.event_detail_top_rule.y);
         for rect in &models {
-            let y = if width < 80 { rect.y } else { y };
+            let y = if width < 100 { rect.y } else { y };
             for x in rect.x..rect.right() {
                 assert_eq!(
                     after[(x, y)],
@@ -261,7 +261,7 @@ fn merged_rule_moves_jump_and_filter_without_changing_the_model() {
         }
         let model_left = models[0].x - 1;
         let moved_jump = view.viewport.borrow().event_label;
-        if width < 80 {
+        if width < 100 {
             assert_eq!(moved_jump.right(), jump.right());
         } else {
             assert_eq!(moved_jump.right() + 1, model_left);
@@ -288,7 +288,7 @@ fn small_layout_stacks_full_width_panels_inside_medium_upper_third() {
     let (_dir, view, _) = fixture();
     for height in [45, 60, 61] {
         let small = view.panel_layout(Rect::new(0, 0, 70, height), false);
-        let medium = view.panel_layout(Rect::new(0, 0, 80, height), false);
+        let medium = view.panel_layout(Rect::new(0, 0, 100, height), false);
         assert_eq!(small.top.height, medium.top.height);
         assert_eq!(
             small.prompt,
@@ -383,12 +383,13 @@ fn layout_breakpoints_select_the_three_panel_arrangements() {
     for (width, expected) in [
         (0, ScreenLayout::Small),
         (70, ScreenLayout::Small),
-        (79, ScreenLayout::Small),
-        (80, ScreenLayout::Medium),
+        (80, ScreenLayout::Small),
+        (99, ScreenLayout::Small),
+        (100, ScreenLayout::Medium),
         (149, ScreenLayout::Medium),
         (150, ScreenLayout::Large),
         (200, ScreenLayout::Large),
     ] {
-        assert_eq!(ScreenLayout::for_width(width), expected);
+        assert_eq!(ScreenLayout::for_width(width), expected, "width {width}");
     }
 }
