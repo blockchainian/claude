@@ -529,8 +529,8 @@ fn new_events_keep_rows_still_off_the_newest_row() {
     let body = rendered_cell(&after, "run a background job");
     assert_eq!(body, rendered_cell(&before, "run a background job"));
     let jump = rendered_cell(&after, "↓ 1 New");
-    let label = " ↓ 1 New ".width() as u16;
-    assert_eq!((jump.0, jump.1), (rect.right() + 2 - label, rect.bottom()));
+    let label = " ↓ 1 New".width() as u16;
+    assert_eq!((jump.0, jump.1), (rect.right() - label, rect.bottom()));
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(Rect::new(0, 0, 100, 25), &mut buf, now);
     assert_eq!(buf[jump].fg, Color::Reset);
@@ -9721,9 +9721,9 @@ fn event_new_button_keeps_right_alignment_and_target() {
             let viewport = view.viewport.borrow();
             let latest = viewport.event_jump;
             let border_y = layout.event_panel.bottom();
-            assert_eq!(latest.right() - 1, layout.event_panel.right());
+            assert_eq!(latest.right() - 1, layout.event_panel.right() - 2);
             assert_eq!(latest.y, border_y);
-            let label = format!(" ↓ {unseen} New ");
+            let label = format!(" ↓ {unseen} New");
             assert_eq!(
                 rendered_cell(&screen, label.trim_end()),
                 (latest.x, latest.y)

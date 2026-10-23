@@ -353,7 +353,7 @@ impl View {
         }
         let label = if self.event_list.sort == EventSort::Duration {
             self.event_list.unseen.set(0);
-            " duration ".to_owned()
+            " duration".to_owned()
         } else {
             if self.following_event() {
                 self.event_list.unseen.set(0);
@@ -362,13 +362,18 @@ impl View {
             if self.event_list.unseen.get() == 0 {
                 return;
             }
-            format!(" ↓ {} New ", self.event_list.unseen.get())
+            format!(" ↓ {} New", self.event_list.unseen.get())
         };
         let width = (label.width() as u16).min(area.width.saturating_sub(2));
-        let right = area.right();
+        let right = event_row_areas(self.center_layout(buf.area).event_panel).1.right();
         let jump = Rect::new(right.saturating_sub(width), area.y, width, 1);
         Clear.render(jump, buf);
         Line::from(Span::styled(label, style::rule_label_style())).render(jump, buf);
+        for x in jump.right()..area.right() {
+            buf[(x, area.y)]
+                .set_symbol(if x == jump.right() { "╶" } else { "─" })
+                .set_style(Style::default().dim());
+        }
         viewport.event_label = jump;
         if self.event_list.sort == EventSort::Time {
             viewport.event_jump = jump;

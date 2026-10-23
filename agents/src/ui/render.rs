@@ -2440,11 +2440,11 @@ mod background_title_tests {
             let viewport = view.viewport.borrow();
             let other = viewport.event_borders[0];
             let y = viewport.event_borders[1].y;
-            let label = Rect::new(viewport.event_panel.right() + 1 - 10, y, 10, 1);
+            let label = viewport.event_label;
             let text: String = (label.x..label.right())
                 .map(|x| buf[(x, y)].symbol())
                 .collect();
-            assert_eq!(text, " duration ", "width {width}");
+            assert_eq!(text, " duration", "width {width}");
             let row: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
                 "tests/ui_snapshots/event_duration_label_{width}.txt"

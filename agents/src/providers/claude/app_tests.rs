@@ -482,7 +482,7 @@ fn top_border_loads_first_event_of_whole_event() {
                     (130..200)
                         .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
                         .collect::<String>()
-                        .contains(" New ")
+                        .contains(" New╶")
                 })
                 .unwrap();
             let line = (0..200)

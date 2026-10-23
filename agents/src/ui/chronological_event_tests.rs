@@ -48,6 +48,46 @@ impl View {
 }
 
 #[test]
+fn event_border_labels_align_with_clock_in_three_layouts() {
+    let mut failures = Vec::new();
+    for width in [160, 120, 90] {
+        for sort in [EventSort::Duration, EventSort::Time] {
+            let (_dir, mut view, events) = fixture();
+            view.set_event(events);
+            view.select_event(Some(3));
+            view.event_list.sort = sort;
+            view.event_list.unseen.set(21);
+            let area = Rect::new(0, 0, width, 50);
+            let mut buf = Buffer::empty(area);
+            view.render(area, &mut buf);
+            let viewport = view.viewport.borrow();
+            let (_, clock) = super::event_list::event_row_areas(viewport.event_panel);
+            let right = clock.right() - 1;
+            assert_eq!(right, width - 3);
+            let label = viewport.event_label;
+            let expected = if sort == EventSort::Duration {
+                "duration"
+            } else {
+                "↓ 21 New"
+            };
+            let text: String = (label.x..area.right())
+                .map(|x| buf[(x, label.y)].symbol())
+                .collect();
+            let end = (label.x..label.right())
+                .rev()
+                .find(|&x| buf[(x, label.y)].symbol() != " ")
+                .unwrap();
+            if end != right || !text.ends_with(&format!("{expected}╶─")) {
+                failures.push(format!(
+                    "{width} {sort:?}: last={end}, clock={right}, {text:?}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
 fn duration_toggle_follows_slowest_before_and_after_history_load() {
     for following in [false, true] {
         let (_dir, mut view, mut events) = fixture();
@@ -369,7 +409,7 @@ fn chronological_jump_only_shows_and_accepts_clicks_for_new_events() {
     let label: String = (jump.x..jump.right())
         .map(|x| buf[(x, jump.y)].symbol())
         .collect();
-    assert_eq!(label, " ↓ 2 New ");
+    assert_eq!(label, " ↓ 2 New");
     view.pending_click = None;
     click(&mut view, jump);
     assert_eq!(view.event_list.cursor, Some(9));
@@ -530,10 +570,10 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
             let jump = viewport.event_jump;
             let top = viewport.event_borders[0];
             let bottom = viewport.event_borders[1];
-            let label = format!(" ↓ {unseen} New ");
+            let label = format!(" ↓ {unseen} New");
             assert_eq!(
                 jump.right() - 1,
-                viewport.event_panel.right(),
+                viewport.event_panel.right() - 2,
                 "width {width}"
             );
             assert_eq!(jump.width, label.width() as u16);
@@ -892,7 +932,7 @@ fn event_jump_follows_event_panel_visibility_and_width() {
                     assert_eq!(viewport.event_jump.y, viewport.event_borders[1].y);
                     assert_eq!(
                         viewport.event_jump.right(),
-                        viewport.event_panel.right() + 1
+                        viewport.event_panel.right() - 1
                     );
                 }
             }
