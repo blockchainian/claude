@@ -70,10 +70,10 @@ with its app-server daemon running (`codex agents` starts one).
 
 | Tool | Does |
 |---|---|
-| `start(cwd, prompt, name?)` | `thread/start` on the daemon (approval `on-request`, sandbox `workspace-write` with network access, and the `claude-client` MCP server in its config), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. |
+| `start(cwd, prompt, name?, model?, effort?)` | `thread/start` on the daemon (approval `on-request`, sandbox `workspace-write` with network access, and the `claude-client` MCP server in its config), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. Omit both `model` and `effort` to keep the daemon defaults, or pass both: `gpt-6.1-sol` with `medium`, or `gpt-6-luna` with `high`. Other pairs are refused. |
 | `attach(thread)` | Take over a session that is already running elsewhere (the codex TUI, say), found by its thread id or exact name. `thread/resume` with nothing but the id subscribes to it, so its settings stay as its own client set them. After that `send`, `reply`, `interrupt`, `list` and the await command work on it. |
 | `send(threadId, prompt)` | `turn/start` on an existing thread. When a turn is still running the prompt is injected into it (the daemon's start-or-steer rule); the result says which happened. |
-| `reply(threadId, text, callId?)` | Answer what the thread is waiting for: the text becomes the result of its `ask_claude` call, or, for an approval request, one of the decisions its inbox event listed. `callId` picks one when several are waiting. |
+| `reply(threadId, ask, reply, callId?)` | Answer what the thread is waiting for, quoting the request's text as `ask`: the reply becomes the result of its `ask_claude` call, or, for an approval request, one of the decisions its inbox event listed. `callId` picks one when several are waiting. |
 | `interrupt(threadId)` | `turn/interrupt` the thread's current turn. |
 | `list(state?)` | The threads this Claude session started or attached, their `state`, and the unread inbox count per thread. State is `detached` first, then `waiting` for a pending ask or approval, otherwise `lastStatus`: `inProgress`, `completed`, `failed`, `interrupted`, `idle` (no turn yet), or `unavailable` (resume failed). Pass an array of states to include; omit for all threads, or pass `[]` for none. |
 | `detach(threadId)` | Release a thread no longer needed. A thread this session started gets `thread/archive`, together with its spawned agents, and a later `send` is refused. An attached session only gets `thread/unsubscribe`; it stays open in its own client, and a later `send` or `attach` subscribes again. Refused while a turn is running. |
@@ -136,8 +136,9 @@ Claude. Four kinds of event arrive:
 An ask or approval that Claude does not answer within
 `CODEX_MANAGER_ASK_TIMEOUT` seconds (default 300) is answered for it: asks get
 "proceed on your own judgment", approvals get `decline`. While something is
-waiting, every tool result carries an `attention` list and the Stop hook
-nudges once per stop. When the turn ends or a new one starts the daemon aborts
+waiting, every tool result carries an `attention` list, one
+`{threadId, kind, callId, text}` per waiting request, and the Stop hook nudges
+once per stop. When the turn ends or a new one starts the daemon aborts
 whatever was still held, and the manager withdraws the open questions too.
 
 ## How a tool call finds its Claude session
