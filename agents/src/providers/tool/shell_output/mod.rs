@@ -465,8 +465,26 @@ pub(super) fn sections(
     stream: Stream,
 ) -> Option<Vec<Section>> {
     // shapes splits commands with their separators before describing pipelines.
+    let commands = crate::ui::shell_commands::split_with_separators(command)?;
+    let programs: Vec<_> = commands
+        .iter()
+        .filter_map(|part| {
+            let stages = shell_summary::pipeline_words(&command[part.range.clone()])?;
+            let program = stages.first()?.first()?;
+            std::path::Path::new(program)
+                .file_name()?
+                .to_str()
+                .map(str::to_owned)
+        })
+        .collect();
+    let programs: Vec<_> = programs.iter().map(String::as_str).collect();
     let shapes = describe::shapes(command, &stream)?;
-    let lines = lines::lines(text, &stream);
+    let known: Vec<_> = shapes
+        .iter()
+        .flat_map(|shape| &shape.outcomes)
+        .filter_map(|outcome| outcome.known.as_deref())
+        .collect();
+    let lines = lines::lines(text, &stream, &programs, &known);
     let solution = solve::solve(&shapes, &lines, text)?;
     let ownership = ownership::ownership(&shapes, &solution, &lines, text);
     let mut output = Vec::new();

@@ -11,7 +11,23 @@ pub enum Line {
 }
 
 /// Build a line table into text, excluding prefixes and recording truncation gaps.
-pub fn lines(text: &str, _stream: &Stream) -> Vec<Line> {
+pub fn lines(text: &str, stream: &Stream, programs: &[&str], known: &[&str]) -> Vec<Line> {
+    let diagnostic = |line: &str| {
+        !known.iter().any(|expected| {
+            expected.trim_end_matches(['\n', '\r']) == line.trim_end_matches(['\n', '\r'])
+        }) && stream.merged_stderr
+            && programs.iter().any(|program| {
+                let matches = |line: &str| {
+                    if *program == "git" {
+                        line.starts_with("fatal: ") || line.starts_with("error: ")
+                    } else {
+                        line.strip_prefix(program)
+                            .is_some_and(|rest| rest.starts_with(": "))
+                    }
+                };
+                matches(line) || line.split_once(": ").is_some_and(|(_, rest)| matches(rest))
+            })
+    };
     let mut prefix = 0;
     let mut total = None;
     for line in text.split_inclusive('\n') {
@@ -42,7 +58,10 @@ pub fn lines(text: &str, _stream: &Stream) -> Vec<Line> {
                         .ends_with('…')
                         && head.ends_with(|c: char| c.is_ascii_digit())
                 });
-        if marker {
+        if diagnostic(line) {
+            table.push(Line::Gap { hidden: Some(0) });
+            visible += 1;
+        } else if marker {
             table.push(Line::Gap { hidden: None });
             gaps += 1;
         } else {
@@ -55,7 +74,10 @@ pub fn lines(text: &str, _stream: &Stream) -> Vec<Line> {
     if gaps == 1 {
         let hidden = total.and_then(|count| count.checked_sub(visible));
         for line in &mut table {
-            if let Line::Gap { hidden: count } = line {
+            if let Line::Gap {
+                hidden: count @ None,
+            } = line
+            {
                 *count = hidden;
             }
         }
@@ -81,7 +103,11 @@ mod tests {
                 vec![Line::Text(0..5), Line::Text(5..6), Line::Text(6..9)],
             ),
         ] {
-            assert_eq!(lines(text, &Stream::default()), expected, "{text}");
+            assert_eq!(
+                lines(text, &Stream::default(), &[], &[]),
+                expected,
+                "{text}"
+            );
         }
     }
 
@@ -102,7 +128,7 @@ mod tests {
             let text = format!("{prefix}a\nb\n…238 tokens truncated…\nc");
             let start = prefix.len();
             assert_eq!(
-                lines(&text, &Stream::default()),
+                lines(&text, &Stream::default(), &[], &[]),
                 vec![
                     Line::Text(start..start + 2),
                     Line::Text(start + 2..start + 4),
@@ -123,7 +149,7 @@ mod tests {
             "Total output lines: invalid\na\n",
             "\na\n\n",
         ] {
-            let table = lines(text, &Stream::default());
+            let table = lines(text, &Stream::default(), &[], &[]);
             let restored: String = table
                 .iter()
                 .map(|line| match line {
@@ -139,24 +165,26 @@ mod tests {
     fn leaves_multiple_gap_lengths_unknown() {
         let text =
             "Total output lines: 100\n\na\n…238 tokens truncated…\nb\n…133 tokens truncated…\nc";
-        let table = lines(text, &Stream::default());
+        let table = lines(text, &Stream::default(), &[], &[]);
         assert_eq!(table.len(), 5);
         assert_eq!(table[1], Line::Gap { hidden: None });
         assert_eq!(table[3], Line::Gap { hidden: None });
         let text = "Total output lines: 2\n\na\n…238 tokens truncated…\nb";
         assert_eq!(
-            lines(text, &Stream::default())[1],
+            lines(text, &Stream::default(), &[], &[])[1],
             Line::Gap { hidden: Some(0) }
         );
     }
 
     #[test]
     fn prefix_without_output_and_marker_at_end() {
-        assert!(lines("Total output lines: 0\n\n", &Stream::default()).is_empty());
+        assert!(lines("Total output lines: 0\n\n", &Stream::default(), &[], &[]).is_empty());
         assert_eq!(
             lines(
                 "Total output lines: 7\n\n…238 tokens truncated…",
-                &Stream::default()
+                &Stream::default(),
+                &[],
+                &[],
             ),
             vec![Line::Gap { hidden: Some(7) }]
         );
@@ -170,7 +198,7 @@ mod tests {
         .unwrap();
         let text = fixture["2"]["output"].as_str().unwrap();
         assert!(text.starts_with("use super::super::render::ScreenLayout;\n"));
-        let table = lines(text, &Stream::default());
+        let table = lines(text, &Stream::default(), &[], &[]);
         let Line::Text(first) = &table[0] else {
             panic!("expected captured source line")
         };

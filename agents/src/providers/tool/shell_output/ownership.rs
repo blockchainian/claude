@@ -36,7 +36,7 @@ pub fn ownership(
     for (index, line) in lines.iter().enumerate() {
         let blank = match line {
             Line::Text(range) => text[range.clone()].trim().is_empty(),
-            Line::Gap { .. } => false,
+            Line::Gap { hidden } => *hidden == Some(0),
         };
         nonblank[index + 1] = nonblank[index] + usize::from(!blank);
     }

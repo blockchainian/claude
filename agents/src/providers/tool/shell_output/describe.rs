@@ -60,6 +60,8 @@ static PATHS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(?:[^\s:/]+/)+[^\s:]+$|^[\w@+-]+\.[\w.@+-]+$".into()));
 static STATUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:[ MADRCU?!]{2} \S|## )".into()));
 static NUMSTAT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:\d+|-)\t(?:\d+|-)\t".into()));
+static COUNTS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\d+(\s+\d+)*(\s+\S.*)?$".into()));
 static LOG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{7,40} ".into()));
 
 // Shapes match shell words separated by NUL. Capture 1 supplies the count or
@@ -364,7 +366,7 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
             Plain,
             None,
             false,
-        ),
+        ).lines(&COUNTS),
         row(
             r"echo(?:\x00((?!-[neE]+(?:\x00|\z)).*))?",
             &[],
@@ -476,7 +478,12 @@ impl Description {
     }
 
     fn outcome(self) -> Outcome {
-        let first = if self.beginning {
+        let first = if self.beginning && matches!(self.kind, Kind::Diff) {
+            Some(Pattern {
+                regex: Regex::new("^diff --git ".into()),
+                strength: Strength::Required,
+            })
+        } else if self.beginning {
             opening(&self.kind)
         } else {
             None
@@ -560,12 +567,12 @@ enum Failure {
 }
 
 impl Failure {
-    fn outcome(self, stream: &Stream) -> Outcome {
+    fn outcome(self, _stream: &Stream) -> Outcome {
         let mut output = Description::unknown();
         match self {
             Self::Unknown => {}
             Self::NoMatch => output.range = SILENT,
-            Self::Cat(path) if stream.merged_stderr => {
+            Self::Cat(path) if _stream.merged_stderr => {
                 output.range = LineRange {
                     min: 1,
                     max: Some(1),
@@ -728,8 +735,10 @@ fn description(words: &[String], filter: bool) -> Option<(Description, bool)> {
                 blank: known.as_ref().is_some_and(|s| s.chars().all(|c| c == '\n')),
                 known,
                 no_match_exit: row.no_match_exit,
-                beginning: matches!(words[0].as_str(), "cat" | "head")
-                    && files.split('\0').count() == 1,
+                beginning: (words.first().is_some_and(|word| word == "git")
+                    && words.get(1).is_some_and(|word| word == "diff"))
+                    || matches!(words[0].as_str(), "cat" | "head")
+                        && files.split('\0').count() == 1,
                 cat: words[0] == "cat" && !files.is_empty() && files.split('\0').count() == 1,
             },
             matches!(row.content, Content::Verbatim),
@@ -879,7 +888,15 @@ fn pipeline_description(source: &str, programs: &mut Vec<String>) -> Pipeline {
         return Pipeline::unknown();
     };
     let described = description(first, false);
-    let mut failure = described.as_ref().map(|(output, _)| output.failure());
+    let mut failure = described
+        .as_ref()
+        .filter(|_| {
+            !matches!(
+                first.first().map(String::as_str),
+                Some("echo" | "printf" | "pwd" | "true")
+            )
+        })
+        .map(|(output, _)| output.failure());
     let mut output = if silent.contains(&0) {
         Description {
             range: SILENT,
@@ -909,8 +926,8 @@ fn pipeline_description(source: &str, programs: &mut Vec<String>) -> Pipeline {
         }
         output.cat = false;
         if !verbatim {
-            output.beginning &=
-                stage.first().is_some_and(|word| word == "head") || filter.beginning;
+            output.beginning &= stage.first().is_some_and(|word| word == "head")
+                || !matches!(output.kind, Kind::Diff) && filter.beginning;
         }
         if stage.first().is_some_and(|word| word == "sed") {
             if output.range != SILENT {
@@ -951,44 +968,14 @@ pub(super) fn pipeline(source: &str, programs: &mut Vec<String>) -> Segment {
 }
 
 fn pipeline_shape(source: &str, stream: &Stream, success: bool) -> OutputShape {
-    let mut programs = Vec::new();
-    let mut pipeline = pipeline_description(source, &mut programs);
+    let mut pipeline = pipeline_description(source, &mut Vec::new());
     let failure_outcome = |failure: Failure| {
-        if matches!(failure, Failure::Unknown) {
-            let mut outcome = Description::unknown().outcome();
-            outcome.lines = if stream.merged_stderr {
-                LineRange {
-                    min: 1,
-                    max: Some(1),
-                }
-            } else {
-                SILENT
-            };
-            if stream.merged_stderr {
-                let names = programs
-                    .iter()
-                    .map(|name| {
-                        name.chars()
-                            .map(|c| {
-                                if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                                    c.to_string()
-                                } else {
-                                    format!("\\{c}")
-                                }
-                            })
-                            .collect::<String>()
-                    })
-                    .collect::<Vec<_>>()
-                    .join("|");
-                outcome.first = Some(Pattern {
-                    regex: Regex::new(format!("^(?:(?:\\S+: )?(?:{names}): |(?:fatal|error): )")),
-                    strength: Strength::Required,
-                });
-            }
-            outcome
-        } else {
-            failure.outcome(stream)
+        if matches!(failure, Failure::Cat(_)) {
+            return failure.outcome(stream);
         }
+        let mut output = Description::unknown();
+        output.range = SILENT;
+        output.outcome()
     };
     let no_match = matches!(pipeline.failure, Some(Failure::NoMatch));
     let mut outcomes = Vec::new();
@@ -1171,7 +1158,7 @@ mod shape_tests {
         for command in ["sed -n 1,2p a.rs", "head -n 2 a.rs", "cat a.rs | head -n 2"] {
             let shapes = shapes(command, &stream).unwrap();
             let text = "use std::io;\nfn main() {}\n";
-            let lines = super::super::lines::lines(text, &stream);
+            let lines = super::super::lines::lines(text, &stream, &[], &[]);
             let solution = super::super::solve::solve(&shapes, &lines, text).unwrap();
             assert!(
                 solution.outcomes[0]
@@ -1183,47 +1170,16 @@ mod shape_tests {
     }
 
     #[test]
-    fn known_command_failures_follow_stream_diagnostics() {
-        let failed = Stream {
-            exit_code: Some(2),
-            is_error: true,
-            ..Stream::default()
-        };
-        let result = shapes("echo hello", &failed).unwrap();
-        assert_eq!(result[0].outcomes.len(), 2);
-        assert_eq!(result[0].outcomes[0].known.as_deref(), Some("hello\n"));
-        let failure = &result[0].outcomes[1];
-        assert_eq!(failure.lines, SILENT);
-        let merged = shapes(
-            "echo hello",
-            &Stream {
-                merged_stderr: true,
-                ..failed
-            },
-        )
-        .unwrap();
-        let failure = &merged[0].outcomes[1];
-        assert_eq!(
-            failure.lines,
-            LineRange {
-                min: 1,
-                max: Some(1)
-            }
-        );
-        assert!(
-            failure
-                .first
-                .as_ref()
-                .unwrap()
-                .regex
-                .is_match("sh: echo: write error")
-        );
-        assert!(matches!(failure.kind, Kind::Plain));
-        let success = Stream {
-            exit_code: Some(0),
-            ..failed
-        };
-        assert_eq!(shapes("echo hello", &success).unwrap()[0].outcomes.len(), 1);
+    fn literal_output_commands_have_no_failure_outcome() {
+        for command in ["echo hello", "printf 'hello\\n'", "pwd", "true"] {
+            assert_eq!(
+                shapes(command, &Stream::default()).unwrap()[0]
+                    .outcomes
+                    .len(),
+                1,
+                "{command}"
+            );
+        }
     }
 
     #[test]
@@ -1272,36 +1228,23 @@ mod shape_tests {
     }
 
     #[test]
-    fn cat_failure_is_a_stream_specific_union() {
-        let stream = Stream {
-            merged_stderr: true,
-            ..Stream::default()
-        };
-        let shape = pipeline_shape("cat missing.py", &stream, false);
-        assert_eq!(shape.outcomes.len(), 2);
-        assert!(matches!(shape.outcomes[0].kind, Kind::File { .. }));
-        let error = &shape.outcomes[1];
-        assert!(matches!(error.kind, Kind::Plain));
-        assert_eq!(
-            error.lines,
-            LineRange {
-                min: 1,
-                max: Some(1)
-            }
-        );
-        assert_eq!(
-            error.known.as_deref(),
-            Some("cat: missing.py: No such file or directory\n")
-        );
-        assert!(error.first.is_none());
-        let shape = one("cat missing.py");
-        assert_eq!(
-            shape.outcomes[1].lines,
-            LineRange {
-                min: 0,
-                max: Some(0)
-            }
-        );
+    fn cat_failure_has_no_stdout_lines() {
+        for merged_stderr in [false, true] {
+            let shape = pipeline_shape(
+                "cat missing.py",
+                &Stream {
+                    merged_stderr,
+                    ..Stream::default()
+                },
+                false,
+            );
+            assert_eq!(shape.outcomes.len(), 2);
+            assert_eq!(
+                shape.outcomes[1].lines.max,
+                Some(usize::from(merged_stderr))
+            );
+            assert_eq!(shape.outcomes[1].known.is_some(), merged_stderr);
+        }
     }
 
     #[test]

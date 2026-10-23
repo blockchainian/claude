@@ -385,3 +385,27 @@ fn required_every_hints_prefer_nonempty_matching_output() {
     let solved = solve(&shapes, &table(text), text).unwrap();
     assert_eq!(solved.cuts.0[1].iter().collect::<Vec<_>>(), vec![1]);
 }
+
+#[test]
+fn conflicting_unique_hints_do_not_fix_a_cut() {
+    let text = "end\nmiddle\nstart\n";
+    let mut left = output(0, None);
+    left.last = Some(pattern("^end$", Strength::Hint));
+    let mut right = output(0, None);
+    right.first = Some(pattern("^start$", Strength::Hint));
+    let solved = solve(&[shape(vec![left]), shape(vec![right])], &table(text), text).unwrap();
+    assert_eq!(
+        solved.cuts.0[1].iter().collect::<Vec<_>>(),
+        vec![0, 1, 2, 3]
+    );
+}
+
+#[test]
+fn known_text_is_checked_across_a_zero_length_gap() {
+    let text = "code\n";
+    let mut expected = output(1, Some(1));
+    expected.known = Some("error\n".into());
+    let mut lines = table(text);
+    lines.push(Line::Gap { hidden: Some(0) });
+    assert!(solve(&[shape(vec![expected])], &lines, text).is_none());
+}

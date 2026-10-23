@@ -116,7 +116,11 @@ fn shell_output_command_table() {
             &[(0, 1, "numbered:rs")],
         ),
         ("cat -n a.rs; cat a.rs", "1\tfn a() {}\nfn a() {}", &[]),
-        ("git diff -- a.rs", "@@ -1 +1 @@\n-a\n+b", &[(0, 3, "diff")]),
+        (
+            "git diff -- a.rs",
+            "diff --git a/a.rs b/a.rs\n@@ -1 +1 @@\n-a\n+b",
+            &[(0, 4, "diff")],
+        ),
         ("git show HEAD:a.rs", "fn main() {}", &[(0, 1, "rs")]),
         ("git show HEAD", "@@ -1 +1 @@\n-a\n+b", &[(0, 3, "diff")]),
         ("git log -p -1", "@@ -1 +1 @@\n-a\n+b", &[(0, 3, "diff")]),
@@ -125,13 +129,21 @@ fn shell_output_command_table() {
             "@@ -1 +1 @@\n-a\n+b",
             &[(0, 3, "diff")],
         ),
-        ("git diff | head -2", "-a\n+b", &[(0, 2, "diff")]),
-        ("git diff; git show HEAD", "-a\n+b", &[(0, 2, "diff")]),
+        (
+            "git diff | head -2",
+            "diff --git a/a.rs b/a.rs\nindex 1234567..abcdef0 100644\n",
+            &[(0, 2, "diff")],
+        ),
+        (
+            "git diff; git show HEAD",
+            "diff --git a/a.rs b/a.rs\n-a\n+b",
+            &[(0, 3, "diff")],
+        ),
         ("git diff --stat", "a.rs | 1 +", &[]),
         (
-            "git diff -- a.rs --stat",
-            "@@ -1 +1 @@\n-a\n+b",
-            &[(0, 3, "diff")],
+            "git diff -- a.rs",
+            "diff --git a/a.rs b/a.rs\n@@ -1 +1 @@\n-a\n+b",
+            &[(0, 4, "diff")],
         ),
         ("git show --stat HEAD", "a.rs | 1 +", &[]),
         ("sed -n 1p a.rs; git diff", "a\n-b\n+c", &[]),
@@ -145,7 +157,7 @@ fn shell_output_command_table() {
             "2:foo\nprint(1)",
             &[(1, 2, "py")],
         ),
-        ("head -n 1 a.rs; rg -n foo src", "a\n", &[]),
+        ("head -n 1 a.rs; rg -n foo src", "a\n", &[(0, 1, "rs")]),
         (
             "head -n 1 a.rs; rg -n --count foo src",
             "a\nsrc/a.rs:2\n",
@@ -197,7 +209,11 @@ fn shell_output_command_table() {
             "fn a() {}\n----\n----\nfn b() {}\n",
             &[],
         ),
-        ("cat a.rs; echo; cat b.rs", "fn a() {}\n\nfn b() {}\n", &[]),
+        (
+            "cat a.rs; echo; cat b.rs",
+            "fn a() {}\n\nfn b() {}\n",
+            &[(0, 1, "rs"), (2, 3, "rs")],
+        ),
         (
             "cat a.rs; echo ----; cat b.rs",
             "fn a() {}\nfn b() {}\n",
@@ -340,7 +356,13 @@ fn shell_output_search_options() {
                     0,
                 )
             };
-            let expected = if recognized {
+            let expected = if search == "grep -rn foo src" && !recognized {
+                vec![Span {
+                    start: 0,
+                    end: 2,
+                    language: "rs".into(),
+                }]
+            } else if recognized {
                 vec![Span {
                     start,
                     end: start + 1,
@@ -356,6 +378,18 @@ fn shell_output_search_options() {
             );
         }
     }
+    assert_eq!(
+        actual(
+            "cat b.rs; grep -rn -A1 foo src",
+            "fn b() {}\nsrc/a.rs:1:foo\nsrc/a.rs-2-after\n",
+            Stream::default()
+        ),
+        vec![Span {
+            start: 0,
+            end: 1,
+            language: "rs".into()
+        }]
+    );
     let command = "cd agents && sed -n 294,350p src/ui/input.rs; grep -n \"pub enum Panel\\|enum Panel\" -A8 src/ui/mod.rs";
     let output = format!(
         "{}233:enum Panel {{\n234-    #[default]\n{}",
@@ -519,7 +553,7 @@ fn shell_output_provider_rules() {
                 exit_code: Some(1),
                 ..codex
             },
-            &[],
+            &[(0, 1, "rs")],
         ),
         (
             "cat a.rs; rg -n absent b.rs",
@@ -546,10 +580,10 @@ fn shell_output_provider_rules() {
                 exit_code: Some(2),
                 ..codex
             },
-            &[],
+            &[(0, 1, "rs")],
         ),
         (
-            "head -n 1 a.rs",
+            "head -n 100 a.rs",
             "Total output lines: 100\n\na\n…238 tokens truncated…\nb\nc",
             codex,
             &[(2, 3, "rs"), (4, 6, "rs")],

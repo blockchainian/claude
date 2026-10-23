@@ -139,18 +139,53 @@ pub fn solve(shapes: &[OutputShape], lines: &[Line], text: &str) -> Option<Solut
             if feasible[i].iter().flatten().count() <= 1 {
                 continue;
             }
-            let mut candidates = Vec::new();
-            for (cell, domain) in feasible[i].iter().enumerate() {
-                if domain.is_none() || table.cells[cell].gap {
-                    continue;
-                }
-                let position = table.cells[cell].position;
-                if hint_at(shapes, &outcomes, i, position, &table.rows) {
-                    candidates.push(cell);
+            let mut votes = Vec::new();
+            for (command, opening) in [(i, true), (i - 1, false)] {
+                for index in outcomes[command].iter() {
+                    let outcome = &shapes[command].outcomes[index];
+                    let edge = if opening {
+                        &outcome.first
+                    } else {
+                        &outcome.last
+                    };
+                    for (pattern, feature) in edge
+                        .iter()
+                        .filter(|p| p.strength == Strength::Hint)
+                        .map(|p| (p, true))
+                        .chain(outcome.every.iter().map(|p| (p, false)))
+                    {
+                        let mut candidates: Vec<_> = feasible[i]
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(cell, domain)| {
+                                if domain.is_none() || table.cells[cell].gap {
+                                    return None;
+                                }
+                                let position = table.cells[cell].position;
+                                let row = if opening {
+                                    table.next[position]
+                                } else {
+                                    table.previous[position]
+                                };
+                                let matched = row.is_some_and(|row| pattern.regex.is_match(row));
+                                let previous_matches = feature
+                                    && opening
+                                    && table.previous[position]
+                                        .is_some_and(|row| pattern.regex.is_match(row));
+                                (matched && !previous_matches).then_some(cell)
+                            })
+                            .collect();
+                        candidates.dedup_by_key(|cell| table.cells[*cell].lo);
+                        if let [cell] = candidates.as_slice() {
+                            votes.push(*cell);
+                        }
+                    }
                 }
             }
-            if let [cell] = candidates.as_slice() {
-                masks[i] = table.point(*cell, table.cells[*cell].lo);
+            if let Some(&cell) = votes.first()
+                && votes.iter().all(|vote| *vote == cell)
+            {
+                masks[i] = table.point(cell, table.cells[cell].lo);
                 changed = true;
                 break;
             }
@@ -237,6 +272,8 @@ struct Cell {
 struct Table<'a> {
     rows: Vec<Option<&'a str>>,
     cells: Vec<Cell>,
+    previous: Vec<Option<&'a str>>,
+    next: Vec<Option<&'a str>>,
     total: usize,
 }
 
@@ -285,9 +322,27 @@ impl<'a> Table<'a> {
             gap: false,
             unknown: false,
         });
+        let mut previous = vec![None; rows.len() + 1];
+        for i in 0..rows.len() {
+            previous[i + 1] = match lines[i] {
+                Line::Text(_) => rows[i],
+                Line::Gap { hidden: Some(0) } => previous[i],
+                Line::Gap { .. } => None,
+            };
+        }
+        let mut next = vec![None; rows.len() + 1];
+        for i in (0..rows.len()).rev() {
+            next[i] = match lines[i] {
+                Line::Text(_) => rows[i],
+                Line::Gap { hidden: Some(0) } => next[i + 1],
+                Line::Gap { .. } => None,
+            };
+        }
         Self {
             rows,
             cells,
+            previous,
+            next,
             total: offset,
         }
     }
@@ -295,6 +350,8 @@ impl<'a> Table<'a> {
     fn reversed(&self) -> Self {
         Self {
             rows: self.rows.iter().rev().copied().collect(),
+            previous: self.next.iter().rev().copied().collect(),
+            next: self.previous.iter().rev().copied().collect(),
             cells: self
                 .cells
                 .iter()
@@ -364,6 +421,7 @@ struct Rule {
     stop: Vec<usize>,
     unknown: Vec<Option<usize>>,
     known: Option<Vec<String>>,
+    empty_known: bool,
     mode: Option<String>,
     edge_start: Vec<bool>,
     edge_end: Vec<bool>,
@@ -376,6 +434,17 @@ fn required(pattern: &Option<Pattern>) -> Option<&Pattern> {
 }
 
 fn rules(shapes: &[OutputShape], table: &Table<'_>, reverse: bool) -> Vec<Vec<Rule>> {
+    let mut failures =
+        std::collections::HashMap::<&str, std::collections::HashSet<(usize, usize)>>::new();
+    for (command, shape) in shapes.iter().enumerate() {
+        for (index, outcome) in shape.outcomes.iter().enumerate().skip(1) {
+            if let Some(known) = &outcome.known {
+                for line in known.lines() {
+                    failures.entry(line).or_default().insert((command, index));
+                }
+            }
+        }
+    }
     let n = shapes.len();
     (0..n)
         .map(|step| {
@@ -383,7 +452,8 @@ fn rules(shapes: &[OutputShape], table: &Table<'_>, reverse: bool) -> Vec<Vec<Ru
             shapes[index]
                 .outcomes
                 .iter()
-                .map(|outcome| {
+                .enumerate()
+                .map(|(outcome_index, outcome)| {
                     let first = required(if reverse {
                         &outcome.last
                     } else {
@@ -400,7 +470,10 @@ fn rules(shapes: &[OutputShape], table: &Table<'_>, reverse: bool) -> Vec<Vec<Ru
                         .iter()
                         .map(|row| {
                             row.is_none_or(|row| {
-                                (!outcome.blank_only || row.trim().is_empty())
+                                failures
+                                    .get(row)
+                                    .is_none_or(|owners| owners.contains(&(index, outcome_index)))
+                                    && (!outcome.blank_only || row.trim().is_empty())
                                     && every.is_none_or(|p| p.regex.is_match(row))
                             })
                         })
@@ -493,6 +566,7 @@ fn rules(shapes: &[OutputShape], table: &Table<'_>, reverse: bool) -> Vec<Vec<Ru
                         stop,
                         unknown,
                         known,
+                        empty_known: shapes[index].conditional || outcome.blank_only,
                         mode: every.map(|p| p.regex.regex_str().to_owned()),
                         edge_start,
                         edge_end,
@@ -593,7 +667,9 @@ impl Rule {
 
     fn apply(&self, table: &Table<'_>, input: &Domain, nonempty: bool) -> Domain {
         if !nonempty {
-            return if self.min == 0 && self.known.as_ref().is_none_or(Vec::is_empty) {
+            return if self.min == 0
+                && (self.empty_known || self.known.as_ref().is_none_or(Vec::is_empty))
+            {
                 input.clone()
             } else {
                 vec![None; input.len()]
@@ -619,7 +695,7 @@ impl Rule {
                     if value.is_some()
                         && !cell.gap
                         && cell.position > 0
-                        && table.rows[cell.position - 1].is_some_and(|row| row != expected)
+                        && table.previous[cell.position].is_some_and(|row| row != expected)
                     {
                         *value = None;
                     }
@@ -709,64 +785,4 @@ fn suffix(
         union(&mut result, &join(domain, left, right));
     }
     result
-}
-
-fn hint_at(
-    shapes: &[OutputShape],
-    outcomes: &[BitSet],
-    cut: usize,
-    position: usize,
-    rows: &[Option<&str>],
-) -> bool {
-    let mut has_hint = false;
-    for (command, opening) in [(cut, true), (cut - 1, false)] {
-        let mut matched = false;
-        let mut present = false;
-        for index in outcomes[command].iter() {
-            let outcome = &shapes[command].outcomes[index];
-            if opening
-                && let Some(pattern) = &outcome.every
-                && pattern.strength == Strength::Required
-            {
-                present = true;
-                matched |= rows
-                    .get(position)
-                    .copied()
-                    .flatten()
-                    .is_some_and(|s| pattern.regex.is_match(s));
-            }
-            for pattern in [
-                if opening {
-                    &outcome.first
-                } else {
-                    &outcome.last
-                },
-                &outcome.every,
-            ]
-            .into_iter()
-            .flatten()
-            .filter(|p| p.strength == Strength::Hint)
-            {
-                present = true;
-                let row = if opening {
-                    rows.get(position)
-                } else {
-                    position.checked_sub(1).and_then(|i| rows.get(i))
-                };
-                let matches = row
-                    .copied()
-                    .flatten()
-                    .is_some_and(|s| pattern.regex.is_match(s));
-                let previous_matches = opening
-                    && position > 0
-                    && rows[position - 1].is_some_and(|s| pattern.regex.is_match(s));
-                matched |= matches && !previous_matches;
-            }
-        }
-        if present && !matched {
-            return false;
-        }
-        has_hint |= present;
-    }
-    has_hint
 }
