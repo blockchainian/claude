@@ -178,15 +178,22 @@ fn parse(source: &str, separated: bool) -> Option<Vec<SeparatedCommand>> {
                 index += width;
                 start = index;
             }
+            b'<' | b'>' if separated => {
+                // Consume redirection operators before interpreting & or | as separators.
+                index += 1;
+                if bytes.get(index) == Some(&b'&')
+                    || (byte == b'>' && bytes.get(index) == Some(&b'|'))
+                {
+                    index += 1;
+                }
+            }
             b'&' if separated => {
                 if !groups.is_empty() && bytes.get(index + 1) == Some(&b'&') {
                     index += 2;
                     continue;
                 }
-                // Descriptor duplication and combined stdout/stderr redirects are not jobs.
-                if bytes.get(index + 1) != Some(&b'>')
-                    && (index == 0 || !matches!(bytes[index - 1], b'<' | b'>'))
-                {
+                // Combined stdout/stderr redirects are not jobs.
+                if bytes.get(index + 1) != Some(&b'>') {
                     return None;
                 }
                 index += 1;
@@ -589,6 +596,8 @@ mod tests {
             "cargo test &",
             "cargo test & git status",
             "cargo test &>out &",
+            r"echo \>&",
+            "echo $(cargo test &)",
         ] {
             assert_eq!(split_with_separators(source), None, "{source}");
         }
@@ -599,6 +608,7 @@ mod tests {
             "cat <&0",
             "echo 2>&-",
             "echo >out 2>&1",
+            "cargo test >|out",
         ] {
             let source = format!("{command} && git status");
             assert_eq!(
