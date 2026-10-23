@@ -32,10 +32,7 @@ pub fn query(timeout: Duration) -> io::Result<Report> {
         .custom_flags(libc::O_NONBLOCK)
         .open("/dev/tty")?;
     let cell_pixels = read_cell_pixels(&tty)?;
-    send_image_commands(
-        &mut tty,
-        b"\x1B]11;?\x1B\\\x1B_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1B\\\x1B[c",
-    )?;
+    write_queries(&mut tty, in_tmux())?;
     let deadline = Instant::now() + timeout;
     let mut buffer = Vec::new();
     let mut report = loop {
@@ -58,6 +55,17 @@ pub fn query(timeout: Duration) -> io::Result<Report> {
     };
     report.cell_pixels = cell_pixels;
     Ok(report)
+}
+
+fn write_queries(out: &mut impl Write, tmux: bool) -> io::Result<()> {
+    // tmux answers OSC 11 itself but consumes the outer terminal's OSC 11 reply.
+    out.write_all(b"\x1B]11;?\x1B\\")?;
+    // Keep DA1 with kitty so tmux's faster local reply cannot end the query early.
+    write_commands(
+        out,
+        b"\x1B_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1B\\\x1B[c",
+        tmux,
+    )
 }
 
 /// Sends graphics commands before the frame's placeholder cells, through tmux when needed.
@@ -189,6 +197,48 @@ fn parse_component(component: &str) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tmux_background_query_stays_local_and_graphics_waits_for_outer_da1() {
+        let mut out = Vec::new();
+        write_queries(&mut out, true).unwrap();
+        assert_eq!(
+            out,
+            b"\x1b]11;?\x1b\\\x1bPtmux;\x1b\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\x1b\\\x1b\x1b[c\x1b\\"
+        );
+
+        // Captured from iTerm2 through tmux with allow-passthrough on.
+        let background = b"\x1b]11;rgb:b0b0/d0d0/e0e0\x1b\\";
+        let kitty = b"\x1b_Gi=31;OK\x1b\\";
+        let da1 = b"\x1b[?64;1;2;4;6;17;18;21;22;52c";
+        assert_eq!(parse_reply(background), None);
+        assert_eq!(parse_reply(&[&background[..], kitty].concat()), None);
+        assert_eq!(
+            parse_reply(&[&background[..], kitty, da1].concat()),
+            Some(Report {
+                background: Some((176, 208, 224)),
+                supports_images: true,
+                cell_pixels: None,
+            })
+        );
+        assert_eq!(
+            parse_reply(&[&kitty[..], da1].concat()),
+            Some(Report {
+                supports_images: true,
+                ..Report::default()
+            })
+        );
+    }
+
+    #[test]
+    fn queries_without_tmux_go_directly_to_the_terminal() {
+        let mut out = Vec::new();
+        write_queries(&mut out, false).unwrap();
+        assert_eq!(
+            out,
+            b"\x1b]11;?\x1b\\\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c"
+        );
+    }
 
     #[test]
     fn parses_st_and_bel_terminated_replies() {
