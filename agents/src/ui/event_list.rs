@@ -368,7 +368,7 @@ impl View {
         let right = area.right();
         let jump = Rect::new(right.saturating_sub(width), area.y, width, 1);
         Clear.render(jump, buf);
-        Line::from(Span::styled(label, Style::new().dim())).render(jump, buf);
+        Line::from(Span::styled(label, style::rule_label_style())).render(jump, buf);
         viewport.event_label = jump;
         if self.event_list.sort == EventSort::Time {
             viewport.event_jump = jump;

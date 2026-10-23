@@ -1139,7 +1139,8 @@ impl View {
         if rule.is_empty() || rule.width < width + 4 {
             return;
         }
-        let (header, mut label) = centered_rule_label(Line::from(title), rule);
+        let (mut header, mut label) = centered_rule_label(Line::from(title), rule);
+        header.style = style::rule_label_style();
         label.x = rule.x;
         if label.intersects(self.viewport.borrow().event_label) {
             return;

@@ -423,18 +423,13 @@ fn filtered_event_border_labels_have_layout_coordinates() {
                         .map(|x| buf[(x, y)].symbol())
                         .collect();
                     assert_eq!(actual, format!(" {title} "), "width {width}: {row}");
-                    let layout = view.center_layout(area);
-                    let status_y = if width < 100 {
-                        layout.gap.y
-                    } else {
-                        layout.header.y + 1
-                    };
-                    let status_row: String =
-                        (0..width).map(|x| buf[(x, status_y)].symbol()).collect();
-                    let status = View::status(view.selected_row().unwrap()).0;
-                    let status_x = status_row[..status_row.find(status).unwrap()].width() as u16;
-                    for column in label.x + 1..label.right() - 1 {
-                        assert_eq!(buf[(column, y)].style(), buf[(status_x, status_y)].style());
+                    for column in label.x..label.right() {
+                        assert_eq!(
+                            buf[(column, y)].style(),
+                            ratatui::buffer::Cell::default()
+                                .set_style(style::rule_label_style())
+                                .style()
+                        );
                     }
 
                     assert_eq!(buf[(label.right(), y)].symbol(), "─");
@@ -451,6 +446,46 @@ fn filtered_event_border_labels_have_layout_coordinates() {
                 std::fs::write(&path, &rows).unwrap();
             }
             assert_eq!(rows, std::fs::read_to_string(path).unwrap());
+        }
+    }
+}
+
+#[test]
+fn event_filter_characters_match_duration_label_style() {
+    for width in [90, 160] {
+        for (filter, title) in [
+            (EventFilter::Message, "Assistant"),
+            (EventFilter::Tool, "Tool"),
+        ] {
+            let (_dir, mut view) = fixture();
+            view.event_list.filter = filter;
+            view.event_list.sort = EventSort::Duration;
+            view.event_list.restoring = false;
+            let area = Rect::new(0, 0, width, 40);
+            let mut buf = Buffer::empty(area);
+            view.render(area, &mut buf);
+            let viewport = view.viewport.borrow();
+            let sort = viewport.event_label;
+            let start = (0..width)
+                .find(|&x| {
+                    x + title.len() as u16 <= width
+                        && title.chars().enumerate().all(|(offset, character)| {
+                            buf[(x + offset as u16, sort.y)].symbol() == character.to_string()
+                        })
+                })
+                .expect("filter label visible");
+            for x in sort.x..sort.right() {
+                assert_eq!(buf[(x, sort.y)].style(), buf[(sort.x, sort.y)].style());
+            }
+            for (offset, character) in title.chars().enumerate() {
+                let cell = &buf[(start + offset as u16, sort.y)];
+                assert_eq!(cell.symbol(), character.to_string());
+                assert_eq!(
+                    cell.style(),
+                    buf[(sort.x, sort.y)].style(),
+                    "width {width}, {title}, character {offset}"
+                );
+            }
         }
     }
 }

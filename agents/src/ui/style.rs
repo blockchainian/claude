@@ -31,6 +31,10 @@ fn terminal_style(style_for: fn(bool, bool, bool) -> Style) -> Style {
     }
 }
 
+pub(super) fn rule_label_style() -> Style {
+    Style::new().dim()
+}
+
 pub(super) fn selection_style() -> Style {
     #[cfg(test)]
     if let Some(style) = SELECTION_STYLE.get() {
