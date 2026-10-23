@@ -753,3 +753,88 @@ fn shell_output_audit() {
         serde_json::json!({"calls":calls.len(),"elapsed_seconds":elapsed})
     );
 }
+
+fn boundary_cases() -> serde_json::Value {
+    serde_json::from_str(include_str!(
+        "../../../tests/fixtures/shell-output-boundaries.json"
+    ))
+    .unwrap()
+}
+
+#[test]
+fn shell_output_real_boundary_ranges() {
+    let cases = boundary_cases();
+    let expected: &[(&str, Expected<'_>)] = &[
+        ("2", &[(0, 180, "rs"), (217, 238, "rs")]),
+        ("3", &[(0, 235, "rs"), (235, 326, "py")]),
+        ("4", &[(0, 151, "rs"), (156, 184, "py")]),
+        ("8", &[(0, 61, "rs"), (62, 114, "log")]),
+    ];
+    for (id, expected) in expected {
+        let case = &cases[id];
+        assert_eq!(
+            actual(
+                case["command"].as_str().unwrap(),
+                case["output"].as_str().unwrap(),
+                Stream {
+                    merged_stderr: true,
+                    exit_code: case["exit"].as_i64(),
+                    ..Stream::default()
+                }
+            ),
+            expected
+                .iter()
+                .map(|&(start, end, language)| Span {
+                    start,
+                    end,
+                    language: language.into()
+                })
+                .collect::<Vec<_>>(),
+            "real case {id}",
+        );
+    }
+}
+
+#[test]
+fn shell_output_real_ambiguous_opening() {
+    let cases = boundary_cases();
+    let case = &cases["3"];
+    let command = case["command"]
+        .as_str()
+        .unwrap()
+        .replace("730,780p", "730,1000p");
+    assert!(
+        actual(
+            &command,
+            case["output"].as_str().unwrap(),
+            Stream {
+                merged_stderr: true,
+                exit_code: case["exit"].as_i64(),
+                ..Stream::default()
+            }
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn shell_output_real_mismatched_cat_path() {
+    let cases = boundary_cases();
+    let case = &cases["8"];
+    let command = case["command"]
+        .as_str()
+        .unwrap()
+        .replace("agents/.cargo/config.toml", "agents/.cargo/other.toml");
+    assert!(
+        actual(
+            &command,
+            case["output"].as_str().unwrap(),
+            Stream {
+                merged_stderr: true,
+                exit_code: case["exit"].as_i64(),
+                ..Stream::default()
+            }
+        )
+        .is_empty()
+    );
+}

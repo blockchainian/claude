@@ -65,7 +65,12 @@ impl Row {
 }
 static SEARCH: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(?:(?:[^\s:]+:)?\d+[:-]|[^\s:]+-\d+-|--$)".into()));
+// Require a path separator or a filename extension to avoid treating bare code
+// identifiers and numeric output as paths. Unusual names remain unanchored.
+static PATHS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?:[^\s:/]+/)+[^\s:]+$|^[\w@+-]+\.[\w.@+-]+$".into()));
 static STATUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:[ MADRCU?!]{2} \S|## )".into()));
+static NUMSTAT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:\d+|-)\t(?:\d+|-)\t".into()));
 static LOG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{7,40} ".into()));
 
 // Shapes match shell words separated by NUL. Capture 1 supplies the count or
@@ -119,6 +124,24 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
         filter,
     };
     vec![
+        row(
+            r"git\x00log\x00((?:[^\x00]+\x00)*--(?:format|pretty)=(?:t?format:)?%h [^\x00]*(?:\x00.*)?)",
+            &["--graph", "--patch", "-p", "--stat*", "-z", "--numstat", "--name-only", "--name-status", "--shortstat"],
+            Unknown,
+            Plain,
+            None,
+            false,
+        )
+        .lines(&LOG),
+        row(
+            r"git\x00diff\x00((?:[^\x00]+\x00)*--numstat(?:\x00.*)?)",
+            &["-z", "--stat*", "--patch", "-p", "--name-only", "--name-status", "--shortstat", "--summary"],
+            Unknown,
+            Plain,
+            None,
+            false,
+        )
+        .lines(&NUMSTAT),
         row(r"cd\x00([^\x00-][^\x00]*)", &[], Silent, Plain, None, false),
         row(
             r"mkdir\x00(.+)",
@@ -214,6 +237,20 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
             false,
         )
         .options(DIFF_VALUES, &[]),
+        row(
+            r"rg\x00(.+)",
+            &["-0", "--null", "--json", "--heading", "--pretty", "-p", "-n", "--line-number", "-c", "--count", "--count-matches", "-q", "--quiet"],
+            Unknown, Plain, Some(1), false,
+        )
+        .lines(&PATHS)
+        .options(&["-g", "--glob", "--iglob", "-t", "--type", "-e", "--regexp", "-f", "--file"],
+                 &["--files", "-l", "--files-with-matches"]),
+        // A plain rg filter selects complete input lines without changing shape.
+        row(
+            r"rg\x00((?:-[ivFsSwx]+\x00)*[^\x00-][^\x00]*)",
+            &["-n", "--line-number", "-H", "--with-filename", "-l", "-c", "--count", "--json", "--heading", "--pretty", "-p", "-o", "--only-matching", "-r", "--replace", "-0", "--null", "--files"],
+            Unknown, Inherit, Some(1), true,
+        ),
         row(
             r"(?:rg|grep)\x00(.+)",
             &[
@@ -385,6 +422,8 @@ struct Segment {
     blank: bool,
     known: Option<String>,
     no_match_exit: Option<i64>,
+    beginning: bool,
+    cat: bool,
 }
 impl Segment {
     fn unknown() -> Self {
@@ -395,6 +434,8 @@ impl Segment {
             blank: false,
             known: None,
             no_match_exit: None,
+            beginning: false,
+            cat: false,
         }
     }
 }
@@ -609,6 +650,9 @@ fn sed(words: &[String]) -> Option<Segment> {
         scripts.push(files.remove(0));
     }
     let mut cap = quiet.then_some(0usize);
+    let beginning = files.len() == 1
+        && scripts.len() == 1
+        && Regex::new(r"\A1(?:,[0-9]+)?p\z".into()).is_match(scripts[0].trim());
     for script in scripts {
         let mut rest = script;
         loop {
@@ -682,6 +726,7 @@ fn sed(words: &[String]) -> Option<Segment> {
             cap.map_or(Size::Unknown, Size::AtMost)
         },
         kind,
+        beginning,
         ..Segment::unknown()
     })
 }
@@ -704,6 +749,7 @@ fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
         let files = capture(2);
         if (matches!(row.content, Content::Diff)
             || row.lines.is_some()
+            || matches!(row.content, Content::Inherit)
             || matches!(row.length, Length::Silent))
             && !allowed(arg, row)
         {
@@ -757,6 +803,9 @@ fn describe(words: &[String], filter: bool) -> Option<(Segment, bool)> {
                 blank: known.as_ref().is_some_and(|s| s.chars().all(|c| c == '\n')),
                 known,
                 no_match_exit: row.no_match_exit,
+                beginning: matches!(words[0].as_str(), "cat" | "head")
+                    && files.split('\0').count() == 1,
+                cat: words[0] == "cat" && files.split('\0').count() == 1,
             },
             matches!(row.content, Content::Verbatim),
         ));
@@ -908,6 +957,11 @@ fn pipeline(source: &str, programs: &mut Vec<String>) -> Segment {
             segment = filter;
             continue;
         }
+        segment.cat = false;
+        if !verbatim {
+            segment.beginning &=
+                stage.first().is_some_and(|word| word == "head") || filter.beginning;
+        }
         if stage.first().is_some_and(|word| word == "sed") {
             if !matches!(segment.size, Size::Silent) {
                 segment.size = filter.size;
@@ -1033,6 +1087,110 @@ struct Splitter<'a> {
 }
 
 impl Splitter<'_> {
+    // A capped command without a line pattern is taken at its full cap only when
+    // the commands after it confirm that boundary; `limit` is the far end of the
+    // remaining commands (exclusive going forward, inclusive index going back).
+    fn full(
+        &self,
+        k: usize,
+        limit: usize,
+        start: usize,
+        end: usize,
+        whole: usize,
+        forward: bool,
+    ) -> Option<usize> {
+        let segment = &self.segments[k];
+        let Size::AtMost(n) = segment.size else {
+            return None;
+        };
+        if segment.lines.is_some() || n == 0 {
+            return None;
+        }
+        let t = if forward {
+            start.checked_add(n).filter(|t| *t <= end)?
+        } else {
+            end.checked_sub(n).filter(|t| *t >= start)?
+        };
+        let ok = if forward {
+            self.starts(k + 1, limit, t, end, whole)
+        } else {
+            self.ends(k, limit, start, t, whole)
+        };
+        ok.then_some(t)
+    }
+
+    // Whether segment `k` (of `k..limit`) can start at line `t`.
+    fn starts(&self, k: usize, limit: usize, t: usize, end: usize, whole: usize) -> bool {
+        if k >= limit {
+            return t == end && end == whole;
+        }
+        let s = &self.segments[k];
+        match s.size {
+            Size::Silent | Size::Exact(0) => return self.starts(k + 1, limit, t, end, whole),
+            Size::Exact(m) => return t + m <= end && self.starts(k + 1, limit, t + m, end, whole),
+            _ => {}
+        }
+        if t >= end {
+            return false;
+        }
+        let line = |x: usize| self.lines[x].trim_end_matches('\n').trim_end_matches('\r');
+        if let Some(regex) = s.lines {
+            return regex.is_match(line(t)) && (t == 0 || !regex.is_match(line(t - 1)));
+        }
+        if let Some(known) = s.known.as_ref().filter(|_| !s.blank) {
+            let expected: Vec<_> = known.split_inclusive('\n').collect();
+            return !expected.is_empty()
+                && t + expected.len() <= end
+                && self.lines[t..t + expected.len()]
+                    .iter()
+                    .zip(&expected)
+                    .all(|(a, b)| a.trim_end_matches('\n') == b.trim_end_matches('\n'));
+        }
+        if matches!(s.kind, Kind::Diff) {
+            return line(t).starts_with("diff --git ");
+        }
+        if let Size::AtMost(m) = s.size {
+            return t + m <= end && self.starts(k + 1, limit, t + m, end, whole);
+        }
+        false
+    }
+
+    // Whether segment `k` (scanning back to index `limit`) can end at line `t`.
+    fn ends(&self, k: usize, limit: usize, start: usize, t: usize, whole: usize) -> bool {
+        if k <= limit {
+            return t == start && start == whole;
+        }
+        let s = &self.segments[k - 1];
+        match s.size {
+            Size::Silent | Size::Exact(0) => return self.ends(k - 1, limit, start, t, whole),
+            Size::Exact(m) => {
+                return t >= start + m && self.ends(k - 1, limit, start, t - m, whole);
+            }
+            _ => {}
+        }
+        if t <= start {
+            return false;
+        }
+        let line = |x: usize| self.lines[x].trim_end_matches('\n').trim_end_matches('\r');
+        if let Some(regex) = s.lines {
+            return regex.is_match(line(t - 1))
+                && (t == self.lines.len() || !regex.is_match(line(t)));
+        }
+        if let Some(known) = s.known.as_ref().filter(|_| !s.blank) {
+            let expected: Vec<_> = known.split_inclusive('\n').collect();
+            return !expected.is_empty()
+                && t >= start + expected.len()
+                && self.lines[t - expected.len()..t]
+                    .iter()
+                    .zip(&expected)
+                    .all(|(a, b)| a.trim_end_matches('\n') == b.trim_end_matches('\n'));
+        }
+        if let Size::AtMost(m) = s.size {
+            return t >= start + m && self.ends(k - 1, limit, start, t - m, whole);
+        }
+        false
+    }
+
     fn split(&mut self, commands: std::ops::Range<usize>, output: std::ops::Range<usize>) {
         let (mut i, mut j, mut lo, mut hi) =
             (commands.start, commands.end, output.start, output.end);
@@ -1046,6 +1204,7 @@ impl Splitter<'_> {
         let back = markers.last().map_or(lo, |m| m + 1);
         while i < j {
             let Some(next) = boundary(&self.segments[i], self.lines, lo, front.min(hi), true)
+                .or_else(|| self.full(i, j, lo, front.min(hi), hi, true))
             else {
                 break;
             };
@@ -1055,6 +1214,7 @@ impl Splitter<'_> {
         }
         while j > i {
             let Some(next) = boundary(&self.segments[j - 1], self.lines, back.max(lo), hi, false)
+                .or_else(|| self.full(j - 1, i, back.max(lo), hi, lo, false))
             else {
                 break;
             };
@@ -1098,6 +1258,114 @@ impl Splitter<'_> {
                 lo = end;
             }
             self.split(i..j, lo..hi);
+            return;
+        }
+
+        // A unique longest maximal run supplies an interior format anchor.
+        // Adjacent commands with the same format share one plain-text anchor.
+        let mut formats = Vec::new();
+        let mut index = i;
+        while index < j {
+            let first = index;
+            index += 1;
+            let Some(regex) = self.segments[first].lines else {
+                continue;
+            };
+            while index < j
+                && self.segments[index]
+                    .lines
+                    .is_some_and(|r| std::ptr::eq(r, regex))
+            {
+                index += 1;
+            }
+            let mut runs = Vec::new();
+            let mut at = lo;
+            while at < hi {
+                let matches = |at: usize| {
+                    !self.markers.contains(&at)
+                        && regex.is_match(self.lines[at].trim_end_matches(['\n', '\r']))
+                };
+                if !matches(at) {
+                    at += 1;
+                    continue;
+                }
+                let start = at;
+                while at < hi && matches(at) {
+                    at += 1;
+                }
+                runs.push((start, at));
+            }
+            let longest = runs.iter().map(|(a, b)| b - a).max().unwrap_or(0);
+            let mut best = runs.into_iter().filter(|(a, b)| b - a == longest);
+            if let Some((start, end)) = best.next()
+                && best.next().is_none()
+                && (first != i || start == lo)
+                && (index != j || end == hi)
+            {
+                formats.push((first, index, start, end));
+            }
+        }
+        if !formats.is_empty() && formats.windows(2).all(|pair| pair[0].3 <= pair[1].2) {
+            for (first, limit, start, end) in formats {
+                self.split(i..first, lo..start);
+                self.spans.push((start, end, Some(first)));
+                i = limit;
+                lo = end;
+            }
+            self.split(i..j, lo..hi);
+            return;
+        }
+
+        // A language opening can bound a preceding block of a different language.
+        let fits = |commands: std::ops::Range<usize>, count: usize| {
+            let mut min = 0usize;
+            let mut max = Some(0usize);
+            for s in &self.segments[commands] {
+                match s.size {
+                    Size::Silent => {}
+                    Size::Exact(n) => {
+                        min = min.saturating_add(n);
+                        max = max.and_then(|v| v.checked_add(n));
+                    }
+                    Size::AtMost(n) => max = max.and_then(|v| v.checked_add(n)),
+                    Size::Unknown => max = None,
+                }
+            }
+            count >= min && max.is_none_or(|max| count <= max)
+        };
+        let mut openings = Vec::new();
+        for index in i + 1..j {
+            let s = &self.segments[index];
+            if !s.beginning || same(&s.kind, &self.segments[index - 1].kind) {
+                continue;
+            }
+            let Kind::File { path, .. } = &s.kind else {
+                continue;
+            };
+            let pattern = match file_language(path) {
+                "py" => r"^(?:import |from \S+ import |#!)",
+                "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => r"^import ",
+                "go" => r"^package ",
+                "rs" => r"^(?:use |//!|#!\[)",
+                _ => continue,
+            };
+            let regex = Regex::new(pattern.into());
+            let mut candidates = (lo + 1..hi).filter(|&at| {
+                regex.is_match(self.lines[at])
+                    && fits(i..index, at - lo)
+                    && fits(index..j, hi - at)
+                    && !self.markers.contains(&at)
+            });
+            if let Some(start) = candidates.next()
+                && candidates.next().is_none()
+            {
+                openings.push((index, start));
+            }
+        }
+        if !openings.is_empty() && openings.windows(2).all(|pair| pair[0].1 < pair[1].1) {
+            let (index, start) = openings[0];
+            self.split(i..index, lo..start);
+            self.split(index..j, start..hi);
             return;
         }
 
@@ -1224,7 +1492,25 @@ pub(super) fn sections(
     let mut offset = prefix;
     for line in body.split_inclusive('\n') {
         let end = offset + line.len();
-        let diagnostic = stream.merged_stderr
+        let cat_error = stream.merged_stderr
+            && segments.iter_mut().any(|segment| {
+                let Kind::File { path, .. } = &segment.kind else {
+                    return false;
+                };
+                if !segment.cat
+                    || line.trim_end_matches(['\n', '\r'])
+                        != format!("cat: {path}: No such file or directory")
+                {
+                    return false;
+                }
+                segment.kind = Kind::Plain;
+                segment.size = Size::Exact(1);
+                segment.known = Some(line.to_string());
+                segment.beginning = false;
+                true
+            });
+        let diagnostic = !cat_error
+            && stream.merged_stderr
             && programs.iter().any(|program| {
                 line.strip_prefix(program)
                     .is_some_and(|rest| rest.starts_with(':'))
@@ -1434,6 +1720,35 @@ mod sed_tests {
                 matches!(pipeline(command, &mut Vec::new()).size, Size::Unknown),
                 "{command}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn shell_output_real_rg_path_formats() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/shell-output-boundaries.json"
+        ))
+        .unwrap();
+        let paths: Vec<_> = cases["2"]["output"]
+            .as_str()
+            .unwrap()
+            .lines()
+            .skip(212)
+            .take(5)
+            .collect();
+        for command in [
+            "rg --files agents/scratchpad",
+            "rg --files agents/scratchpad | rg '\\.(py|sh)$'",
+            "rg -l needle agents/scratchpad",
+        ] {
+            let segment = pipeline(command, &mut Vec::new());
+            let regex = segment.lines.expect("path listing format");
+            assert!(paths.iter().all(|line| regex.is_match(line)), "{command}");
         }
     }
 }

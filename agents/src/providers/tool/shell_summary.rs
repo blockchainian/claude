@@ -368,6 +368,8 @@ fn scan(
         }
         if single
             && ((quote.is_none()
+                && !(words.first().is_some_and(|w| w == "rg")
+                    && matches!(c, '*' | '?' | '[' | ']'))
                 && matches!(
                     c,
                     ';' | '&'
