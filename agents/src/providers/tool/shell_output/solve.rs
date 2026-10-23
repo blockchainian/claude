@@ -724,6 +724,17 @@ fn hint_at(
         let mut present = false;
         for index in outcomes[command].iter() {
             let outcome = &shapes[command].outcomes[index];
+            if opening
+                && let Some(pattern) = &outcome.every
+                && pattern.strength == Strength::Required
+            {
+                present = true;
+                matched |= rows
+                    .get(position)
+                    .copied()
+                    .flatten()
+                    .is_some_and(|s| pattern.regex.is_match(s));
+            }
             for pattern in [
                 if opening {
                     &outcome.first

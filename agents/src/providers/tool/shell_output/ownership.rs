@@ -59,9 +59,10 @@ pub fn ownership(
         .iter()
         .zip(&solution.outcomes)
         .map(|(shape, outcomes)| {
-            let mut outcomes = outcomes.iter();
-            let first =
-                &shape.outcomes[outcomes.next().expect("feasible outcomes cannot be empty")].kind;
+            let mut outcomes = outcomes
+                .iter()
+                .filter(|&index| shape.outcomes[index].lines.max != Some(0));
+            let first = &shape.outcomes[outcomes.next()?].kind;
             outcomes
                 .all(|index| shape.outcomes[index].kind == *first)
                 .then_some(first)
@@ -274,6 +275,24 @@ mod tests {
         assert_eq!(
             ownership(&shapes, &solution, &lines, text),
             Ownership(vec![(0..3, Owner::Block(0..2))])
+        );
+    }
+
+    #[test]
+    fn silent_failure_does_not_change_a_file_blocks_language() {
+        let text = "fn a() {}\nfn b() {}\n";
+        let lines = lines(text);
+        let mut shapes = [
+            shape(vec![file("a.rs"), Kind::Plain]),
+            shape(vec![file("b.rs"), Kind::Plain]),
+        ];
+        for shape in &mut shapes {
+            shape.outcomes[1].lines.max = Some(0);
+        }
+        let solution = solution(&shapes, &[&[0], &[0, 1, 2], &[2]], lines.len(), &[0, 0, 2]);
+        assert_eq!(
+            ownership(&shapes, &solution, &lines, text),
+            Ownership(vec![(0..2, Owner::Block(0..2))])
         );
     }
 

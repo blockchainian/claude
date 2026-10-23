@@ -372,3 +372,16 @@ fn each_unique_hint_is_propagated_before_considering_the_next() {
     .unwrap();
     assert_eq!(result.earliest, vec![0, 1, 2, 2]);
 }
+
+#[test]
+fn required_every_hints_prefer_nonempty_matching_output() {
+    let text = "export const value = 1;\n72:const foo = 1;\n";
+    let mut matches = output(0, Some(25));
+    matches.every = Some(pattern(r"^\d+:", Strength::Required));
+    let shapes = [
+        shape(vec![output(0, Some(51))]),
+        shape(vec![matches, output(0, Some(0))]),
+    ];
+    let solved = solve(&shapes, &table(text), text).unwrap();
+    assert_eq!(solved.cuts.0[1].iter().collect::<Vec<_>>(), vec![1]);
+}

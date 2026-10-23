@@ -1357,7 +1357,7 @@ mod shape_tests {
         assert_eq!(shape.outcomes[1].lines, SILENT);
         let success = pipeline_shape("printf '' | rg needle", &Stream::default(), true);
         assert_eq!(success.outcomes.len(), 1);
-        assert_eq!(success.outcomes[0].lines, UNKNOWN);
+        assert_eq!(success.outcomes[0].lines, SILENT);
     }
 
     #[test]
