@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use unicode_segmentation::UnicodeSegmentation;
@@ -23,14 +23,28 @@ thread_local! {
     /// Text saved by the most recent kill operation.
     static KILL_BUFFER: RefCell<String> = const { RefCell::new(String::new()) };
     /// Text removed by kills performed while handling one key.
-    static KEY_KILLS: RefCell<Option<String>> = const { RefCell::new(None) };
+    static KEY_KILLS: RefCell<Option<(String, bool)>> = const { RefCell::new(None) };
+    static KEY_HAS_KILL: Cell<bool> = const { Cell::new(false) };
+    static PREVIOUS_KEY_WAS_KILL: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Saves the text removed while handling this key.
 pub(super) fn finish_key() {
-    if let Some(text) = KEY_KILLS.take() {
-        KILL_BUFFER.set(text);
+    let was_kill = KEY_HAS_KILL.replace(false);
+    if let Some((text, backward)) = KEY_KILLS.take() {
+        KILL_BUFFER.with_borrow_mut(|buffer| {
+            if PREVIOUS_KEY_WAS_KILL.get() {
+                if backward {
+                    *buffer = text + buffer.as_str();
+                } else {
+                    buffer.push_str(&text);
+                }
+            } else {
+                *buffer = text;
+            }
+        });
     }
+    PREVIOUS_KEY_WAS_KILL.set(was_kill);
 }
 
 #[derive(Clone, Default)]
@@ -186,6 +200,7 @@ impl LineEdit {
         self.set_text("");
     }
     pub(super) fn insert(&mut self, text: impl ToString) {
+        PREVIOUS_KEY_WAS_KILL.set(false);
         if self.selection_range().is_some() {
             self.replace_selection(text);
             return;
@@ -379,20 +394,23 @@ impl LineEdit {
     fn kill(&mut self, delete: fn(&mut Self)) {
         let (before, cursor) = (self.text.clone(), self.cursor);
         delete(self);
+        KEY_HAS_KILL.set(true);
         // Every kill leaves the caret where its removed text started.
         let removed = &before[self.cursor..self.cursor + before.len() - self.text.len()];
+        let backward = self.cursor < cursor;
         if removed.is_empty() {
             return;
         }
         KEY_KILLS.with_borrow_mut(|kills| {
-            if let Some(earlier) = kills {
+            if let Some((earlier, earlier_backward)) = kills {
                 if self.cursor == cursor {
                     earlier.push_str(removed);
                 } else {
                     *earlier = removed.to_owned() + earlier.as_str();
                 }
+                *earlier_backward |= backward;
             } else {
-                *kills = Some(removed.to_owned());
+                *kills = Some((removed.to_owned(), backward));
             }
         });
     }
@@ -401,6 +419,13 @@ impl LineEdit {
             return false;
         }
         let modifiers = key.modifiers - KeyModifiers::SHIFT;
+        if !matches!(
+            (key.code, modifiers),
+            (KeyCode::Char('k' | 'u' | 'w'), KeyModifiers::CONTROL)
+                | (KeyCode::Char('d'), KeyModifiers::ALT)
+        ) {
+            PREVIOUS_KEY_WAS_KILL.set(false);
+        }
         match (key.code, modifiers) {
             (KeyCode::Char('h'), KeyModifiers::CONTROL)
             | (KeyCode::Backspace, KeyModifiers::NONE) => self.backspace(),
@@ -642,6 +667,59 @@ mod tests {
         KILL_BUFFER.set(String::new());
         press(&mut empty, 'y', KeyModifiers::CONTROL);
         assert_eq!(empty.text(), "keep");
+    }
+
+    #[test]
+    fn consecutive_kills_join_until_a_non_kill_key() {
+        let press = |e: &mut LineEdit, code, modifiers| {
+            assert!(e.handle(KeyEvent::new(code, modifiers)));
+            finish_key();
+        };
+        let ctrl = KeyModifiers::CONTROL;
+        let alt = KeyModifiers::ALT;
+        let mut e = edit("foo bar baz");
+        press(&mut e, KeyCode::Char('w'), ctrl);
+        press(&mut e, KeyCode::Char('w'), ctrl);
+        press(&mut e, KeyCode::Char('y'), ctrl);
+        assert_eq!(e.text(), "foo bar baz");
+
+        let mut e = edit("one two three");
+        e.set_cursor("one ".len());
+        press(&mut e, KeyCode::Char('k'), ctrl);
+        press(&mut e, KeyCode::Char('k'), ctrl);
+        press(&mut e, KeyCode::Char('y'), ctrl);
+        assert_eq!(e.text(), "one two three");
+
+        let mut e = edit("foo bar baz");
+        e.set_cursor("foo ".len());
+        press(&mut e, KeyCode::Char('w'), ctrl);
+        press(&mut e, KeyCode::Char('d'), alt);
+        press(&mut e, KeyCode::Char('y'), ctrl);
+        assert_eq!(e.text(), "foo bar baz");
+
+        let mut e = edit("foo bar baz");
+        press(&mut e, KeyCode::Char('w'), ctrl);
+        press(&mut e, KeyCode::Home, KeyModifiers::NONE);
+        for _ in 0..4 {
+            press(&mut e, KeyCode::Right, KeyModifiers::NONE);
+        }
+        press(&mut e, KeyCode::Char('w'), ctrl);
+        press(&mut e, KeyCode::Char('y'), ctrl);
+        assert_eq!(e.text(), "foo bar ");
+
+        let mut e = edit("foo bar baz");
+        press(&mut e, KeyCode::Char('w'), ctrl);
+        press(&mut e, KeyCode::Char('x'), KeyModifiers::NONE);
+        press(&mut e, KeyCode::Char('w'), ctrl);
+        press(&mut e, KeyCode::Char('y'), ctrl);
+        assert_eq!(e.text(), "foo bar x");
+
+        let mut e = edit("foo bar baz");
+        press(&mut e, KeyCode::Char('w'), ctrl);
+        press(&mut e, KeyCode::Char('y'), ctrl);
+        press(&mut e, KeyCode::Char('w'), ctrl);
+        press(&mut e, KeyCode::Char('y'), ctrl);
+        assert_eq!(e.text(), "foo bar baz");
     }
 
     #[test]

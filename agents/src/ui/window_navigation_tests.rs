@@ -174,6 +174,23 @@ fn window_navigation_release_and_second_ctrl_w_preserve_input() {
 }
 
 #[test]
+fn staged_ctrl_w_replay_joins_consecutive_prompt_kills() {
+    let (mut view, _) = event_fixture();
+    view.rows[view.selected].process = None;
+    view.set_active_panel(Panel::Prompt);
+    view.input_box.editor.set_text("foo bar baz");
+    let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+    assert_eq!(view.handle_key(ctrl_w), None);
+    assert_eq!(view.handle_key(ctrl_w), None);
+    assert_eq!(view.input_box.editor.text(), "foo ");
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL)),
+        None
+    );
+    assert_eq!(view.input_box.editor.text(), "foo bar baz");
+}
+
+#[test]
 fn window_navigation_leaving_search_blurs_and_keeps_query() {
     let (mut view, now) = event_fixture();
     event_screen(&view, 200, 45, now);
