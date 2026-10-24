@@ -510,12 +510,15 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
     },
     ToolRule {
         name: "claude-in-chrome find",
-        input: Some((Pick::Field(Source::Input, "/query"), Format::Text)),
+        title: &[Pick::Field(Source::Input, "/query")],
         ..DEFAULT_RULE
     },
     ToolRule {
         name: "claude-in-chrome computer",
-        input: Some((Pick::With(claude_in_chrome_computer_input), Format::Text)),
+        title: &[
+            Pick::Field(Source::Input, "/action_summary"),
+            Pick::Field(Source::Input, "/action"),
+        ],
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -757,7 +760,7 @@ pub(crate) fn presentation(name: &str, data: &ToolData<'_>) -> Presentation {
         {
             let key = key.replace("~1", "/").replace("~0", "~");
             if let Some(object) = remaining.pointer_mut(parent).and_then(Value::as_object_mut) {
-                object.remove(&key);
+                object.shift_remove(&key);
             }
         }
     }
@@ -873,17 +876,6 @@ fn fetch_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
         });
     }
     Some(sections)
-}
-fn claude_in_chrome_computer_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
-    let action = text(data.input, "action")?;
-    let text = match text(data.input, "action_summary") {
-        Some(summary) => format!("{action}  {summary}"),
-        None => action.to_owned(),
-    };
-    Some(vec![Section::Prose {
-        text,
-        markdown: false,
-    }])
 }
 fn write_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     Some(
@@ -1771,58 +1763,44 @@ mod tests {
     }
 
     #[test]
-    fn chrome_find_shows_only_its_query() {
-        let input = serde_json::json!({
-            "query": "Refresh link near the calendar/summary panel",
-            "tabId": 665979853
-        });
-        let shown = super::presentation(
-            "mcp__claude-in-chrome__find",
-            &super::ToolData {
-                input: &input,
-                result: None,
-            },
-        );
-        assert_eq!(
-            shown.input,
-            [crate::event::Section::Prose {
-                text: "Refresh link near the calendar/summary panel".into(),
-                markdown: false,
-            }]
-        );
-    }
-
-    #[test]
-    fn chrome_computer_shows_its_action_and_summary() {
-        for (input, shown) in [
+    fn chrome_find_and_computer_title_their_fields_and_show_the_rest() {
+        for (name, input, title, rest) in [
             (
+                "mcp__claude-in-chrome__find",
+                serde_json::json!({
+                    "query": "Refresh link near the calendar/summary panel",
+                    "tabId": 665979853
+                }),
+                "Refresh link near the calendar/summary panel",
+                serde_json::json!({"tabId": 665979853}),
+            ),
+            (
+                "mcp__claude-in-chrome__computer",
                 serde_json::json!({
                     "action": "left_click",
                     "tabId": 665979853,
                     "ref": "ref_21",
                     "action_summary": "点搜索按钮执行航班搜索"
                 }),
-                "left_click  点搜索按钮执行航班搜索",
+                "点搜索按钮执行航班搜索",
+                serde_json::json!({"tabId": 665979853, "ref": "ref_21"}),
             ),
             (
+                "mcp__claude-in-chrome__computer",
                 serde_json::json!({"action": "wait", "tabId": 665979853, "duration": 4}),
                 "wait",
+                serde_json::json!({"tabId": 665979853, "duration": 4}),
             ),
         ] {
-            assert_eq!(
-                super::presentation(
-                    "mcp__claude-in-chrome__computer",
-                    &super::ToolData {
-                        input: &input,
-                        result: None,
-                    },
-                )
-                .input,
-                [crate::event::Section::Prose {
-                    text: shown.into(),
-                    markdown: false,
-                }]
+            let shown = super::presentation(
+                name,
+                &super::ToolData {
+                    input: &input,
+                    result: None,
+                },
             );
+            assert_eq!(shown.title.as_deref(), Some(title));
+            assert_eq!(shown.input, super::raw_input(&rest));
         }
     }
 
