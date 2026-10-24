@@ -375,7 +375,7 @@ fn assert_hidden_suffix_search(width: u16) {
         assert_eq!(view.event_detail.scroll.borrow().offset, 0);
         target
     };
-    view.event_detail.search.query.insert("HIDDEN_NEEDLE");
+    view.event_detail.search.input.insert("HIDDEN_NEEDLE");
     view.jump_event_detail_match();
     assert_eq!(view.event_detail.scroll.borrow().offset, target);
     view.render_at(area, &mut buf, now);

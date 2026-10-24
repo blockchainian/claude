@@ -127,7 +127,7 @@ fn single_task_notification_reply_keeps_its_turn_without_a_bracket() {
 #[test]
 fn search_draws_corners_on_visible_rows_and_leaves_input_unmarked() {
     let (_dir, mut view) = completed_fixture();
-    view.event_list.search.query.insert("仪表盘");
+    view.event_list.search.input.insert("仪表盘");
     view.prepare_event_search();
     assert!(view.matching_event_count() >= 2);
     assert!(view.matching_event_count() < view.event_panel.len());

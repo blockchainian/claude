@@ -23,16 +23,16 @@ fn pinned_search_uses_snapshot_body_without_timeline_indices() {
     assert!(view.pinned_event_matches(0));
     view.event_list
         .search
-        .query
+        .input
         .set_text("unmatchable-pinned-search-query");
     view.rematch_event();
     assert!(!view.pinned_event_matches(0));
     assert!(view.event_list.search.matches.is_empty());
     let query = super::super::event_list::kind_label(&view.event_list.pinned[0].event.kind);
-    view.event_list.search.query.set_text(&query);
+    view.event_list.search.input.set_text(&query);
     view.rematch_event();
     assert!(view.pinned_event_matches(0));
     assert!(view.event_list.search.matches.is_empty());
-    view.event_list.search.clear();
+    view.event_list.search.input.close();
     assert!(view.pinned_event_matches(0));
 }

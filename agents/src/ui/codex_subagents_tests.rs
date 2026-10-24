@@ -48,7 +48,7 @@ fn nested_tree_filters_status_and_follows_root_search_group_and_pin() {
     assert_eq!(ids(&view), ["root", "child", "grandchild", "deep"]);
     view.search.set_text("Provider adapters");
     assert!(ids(&view).is_empty());
-    view.search.clear();
+    view.search.set_text("");
     view.status_filter = 1;
     assert_eq!(ids(&view), ["root", "child"]);
 }
@@ -192,7 +192,7 @@ fn nested_connectors_continue_through_ancestors_with_visible_siblings() {
         connector_row(&view, "Deep worker", 12)[..9].concat(),
         "│  │  └─ "
     );
-    view.search.clear();
+    view.search.set_text("");
     view.rows
         .iter_mut()
         .find(|s| s.id.id == "root")

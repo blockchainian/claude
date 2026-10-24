@@ -224,7 +224,7 @@ fn space_preserves_message_selection_and_rematches_hidden_rows_in_both_sorts() {
 fn space_combines_with_search_without_changing_event_matches() {
     let (_dir, mut view) = fixture();
     view.prepare_event_search();
-    view.event_list.search.query.set_text("Tool");
+    view.event_list.search.input.set_text("Tool");
     view.rematch_event();
     let matches: Vec<_> = (0..view.event_panel.len())
         .map(|i| view.event_matches(i))
@@ -238,7 +238,7 @@ fn space_combines_with_search_without_changing_event_matches() {
             .collect::<Vec<_>>(),
         matches
     );
-    view.event_list.search.query.set_text("User");
+    view.event_list.search.input.set_text("User");
     view.rematch_event();
     assert!(view.shown_events().next().is_none());
     assert!(
@@ -264,13 +264,17 @@ fn space_keeps_following_at_the_bottom_and_clears_pending_counts() {
 }
 
 #[test]
-fn space_while_searching_counts_and_navigates_only_current_mode_matches() {
+fn space_edits_focused_search_and_filters_only_when_blurred() {
     let (_dir, mut view) = fixture();
     view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
     for editing in [true, false] {
-        view.event_list.search.editing = editing;
+        if editing {
+            view.event_list.search.input.focus()
+        } else {
+            view.event_list.search.input.blur()
+        };
         for query in ["", "Tool", "User", "e"] {
-            view.event_list.search.query.set_text(query);
+            view.event_list.search.input.set_text(query);
             view.rematch_event();
             let all: Vec<_> = view
                 .shown_events()
@@ -286,10 +290,18 @@ fn space_while_searching_counts_and_navigates_only_current_mode_matches() {
                 .filter(|(_, e)| tool(&e.kind))
                 .map(|(i, _)| EventRow::Timeline(i))
                 .collect();
+            if editing {
+                let filter = view.event_list.filter;
+                assert_eq!(view.handle_key(KeyCode::Char(' ').into()), None);
+                assert_eq!(view.event_list.search.input.text(), format!("{query} "));
+                assert!(view.search_focused());
+                assert_eq!(view.event_list.filter, filter);
+                continue;
+            }
             for expected in [&messages, &tools, &all] {
                 space(&mut view);
-                assert_eq!(view.event_list.search.query.text(), query);
-                assert_eq!(view.event_list.search.editing, editing);
+                assert_eq!(view.event_list.search.input.text(), query);
+                assert_eq!(view.event_list.search.input.focused(), editing);
                 assert_eq!(view.matching_event_count(), expected.len(), "{query}");
                 assert_eq!(
                     view.shown_event_rows()

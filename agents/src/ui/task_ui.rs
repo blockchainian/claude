@@ -1,7 +1,7 @@
 //! Per-task interface state parked while another task is shown.
 
 use super::{
-    SectionScroll, draft_controls::Selector, event_search::EventSearch, line_edit::LineEdit,
+    SectionScroll, draft_controls::Selector, event_search::EventMatches, line_edit::LineEdit,
     prompt_box::PromptBox, question_view::QuestionView,
 };
 use crate::{event::Event, model::EventSort};
@@ -23,7 +23,7 @@ pub(crate) struct EventList {
     pub(super) position: EventPosition,
     pub(super) selected: Option<(bool, EventId)>,
     pub pinned: Vec<PinnedRow>,
-    pub search: EventSearch,
+    pub search: EventMatches,
     pub filter: crate::event::EventFilter,
     pub sort: EventSort,
     pub settings_initialized: bool,
@@ -49,7 +49,7 @@ pub(super) struct EventDetail {
     pub return_mode: EventDetailMode,
     pub transcript: Option<Transcript>,
     pub scroll: std::cell::RefCell<super::event_detail::EventDetailScroll>,
-    pub search: EventSearch,
+    pub search: EventMatches,
 }
 
 pub(super) struct Transcript {

@@ -43,7 +43,7 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
         };
         assert_maps(&view, &buf);
         // Search invalidates the cached layout before jumping to a match.
-        view.event_detail.search.query.set_text("必须");
+        view.event_detail.search.input.set_text("必须");
         view.viewport.borrow_mut().event_detail_layout = None;
         view.jump_event_detail_match();
         view.render_at(area, &mut buf, now);

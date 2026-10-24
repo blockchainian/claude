@@ -821,7 +821,7 @@ impl View {
             buf,
         );
         if let Some(index) = create {
-            let row = super::event_list::search_input_rect(area);
+            let row = render::row(area, area.height.saturating_sub(1), 1);
             if let Some(editor) = selector.branch_editor() {
                 render::render_input_row(&format!("New branch {PROMPT_MARKER} "), editor, row, buf);
                 self.viewport.borrow_mut().task_details_input = row;

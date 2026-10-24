@@ -24,7 +24,7 @@ fn first_list_search_does_not_read_history_on_the_ui_thread() {
         KeyCode::Char('/'),
         KeyModifiers::NONE,
     )));
-    assert!(app.view.event_list.search.active());
+    assert!(app.view.event_list.search.input.applied());
     app.refresh_event(8);
     assert_eq!(
         app.transcript_parsed_bytes, parsed,

@@ -736,10 +736,10 @@ fn medium_and_large_list_and_detail_search_route_paste_without_changing_preview(
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
         let (_directory, mut app) = fixture_with_double_click_ms(20);
         select_archive(&mut app);
-        let original = event_detail_content(&draw_size(&mut app, width, height));
         let initial = draw_size(&mut app, width, height);
         let (column, row) = event_position(&initial, "Stop hook");
         click(&mut app, column, row);
+        let original = event_detail_content(&draw_size(&mut app, width, height));
         key(&mut app, KeyCode::Char('/'));
         app.handle_event(Event::Paste("Stop hook".into()));
         let buffer = draw_size(&mut app, width, height);
@@ -747,7 +747,7 @@ fn medium_and_large_list_and_detail_search_route_paste_without_changing_preview(
         assert_eq!(
             event_detail_content(&buffer),
             original,
-            "filtering the list must preserve newest preview"
+            "filtering the list must preserve selected preview"
         );
         key(&mut app, KeyCode::Esc);
         let buffer = draw_size(&mut app, width, height);

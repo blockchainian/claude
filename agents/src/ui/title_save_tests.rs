@@ -211,7 +211,7 @@ fn attention_returns_to_parked_title_without_submitting() {
         if from_list {
             view.set_active_panel(Panel::TaskList);
             view.handle_key(KeyCode::Char('/').into());
-            assert!(view.searching);
+            assert!(view.search.focused());
         }
         let mut rows = view.rows.clone();
         let second = rows.iter_mut().find(|row| row.id != first).unwrap();
@@ -220,7 +220,7 @@ fn attention_returns_to_parked_title_without_submitting() {
         view.set_sessions(rows, false);
         assert_eq!(view.selected_id(), Some(&second_key));
         assert_eq!(view.active_panel, Panel::Prompt);
-        assert!(!view.searching);
+        assert!(!view.search.focused());
         let mut rows = view.rows.clone();
         rows.iter_mut()
             .find(|row| row.id == second_key)

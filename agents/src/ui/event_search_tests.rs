@@ -58,7 +58,7 @@ fn list_search_finds_trailing_tool_name_after_non_ascii_text() {
             view.event_list.search.bodies[0].to_string(),
             format!("Error {body} exec_command")
         );
-        view.event_list.search.query.set_text("exec_command");
+        view.event_list.search.input.set_text("exec_command");
         view.rematch_event();
         assert_eq!(view.matching_event_count(), 1, "{body}");
         assert_eq!(view.visible_event(), Some(&event), "{body}");
@@ -93,7 +93,7 @@ fn list_search_discards_layout_when_the_selected_event_changes() {
     key(&mut view, KeyCode::Char('/'));
     draw_event_detail(&view);
     let selected = view.visible_event().unwrap().clone();
-    view.event_list.search.query.set_text("run_in_background");
+    view.event_list.search.input.set_text("run_in_background");
     view.rematch_event();
     assert_ne!(view.visible_event(), Some(&selected));
     assert!(view.viewport.borrow().event_detail_layout.is_none());
@@ -116,7 +116,7 @@ fn list_search_reuses_bodies_and_preserves_smart_matching() {
         "",
         "Claude",
     ] {
-        view.event_list.search.query.set_text(query);
+        view.event_list.search.input.set_text(query);
         view.rematch_event();
         let pattern = view.event_list.search.pattern();
         let mut matcher = Matcher::new(Config::DEFAULT);
@@ -151,7 +151,7 @@ fn list_search_keeps_partial_highlights_at_the_row_edge() {
     let (_dir, mut view) = fixture();
     view.active_panel = Panel::EventList;
     key(&mut view, KeyCode::Char('/'));
-    view.event_list.search.query.set_text("hooks");
+    view.event_list.search.input.set_text("hooks");
     view.rematch_event();
     assert_eq!(view.matching_event_count(), 1);
     let event = view.visible_event().unwrap().clone();
@@ -311,10 +311,10 @@ fn duration_keys_include_messages_none_ties_and_running_update_time() {
     let text: String = (0..100).map(|x| first[(x, row)].symbol()).collect();
     assert!(text.trim_end().ends_with("5s"), "{text}");
     assert!(view.shown_position(6).unwrap() < view.shown_position(1).unwrap());
-    view.event_list.search.query.set_text("no matching row");
+    view.event_list.search.input.set_text("no matching row");
     view.rematch_event();
     assert_eq!(view.matching_event_count(), 0);
-    view.event_list.search.clear();
+    view.event_list.search.input.close();
     view.rematch_event();
     assert_eq!(view.event_order, before);
 }

@@ -25,7 +25,7 @@ fn transcript_space_switches_only_in_details_outside_search_and_terminal() {
     view.handle_key(KeyCode::Char('/').into());
     view.handle_key(KeyCode::Char(' ').into());
     assert_eq!(view.event_detail.mode, EventDetailMode::Transcript);
-    assert_eq!(view.event_detail.search.query.text(), " ");
+    assert_eq!(view.event_detail.search.input.text(), " ");
     view.handle_key(KeyCode::Esc.into());
     let screen = std::sync::Arc::new(std::sync::Mutex::new(
         crate::session_terminal::TerminalScreen::new(10, 40),

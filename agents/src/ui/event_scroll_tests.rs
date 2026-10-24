@@ -944,8 +944,9 @@ fn event_detail_task_switch_preserves_scroll_and_search() {
     let other_id = other.id.clone();
     view.set_sessions(vec![view.selected_row().unwrap().clone(), other], false);
     panel(&view, now);
-    view.event_detail.search.query.insert("detail");
-    view.event_detail.search.editing = true;
+    view.set_active_panel(Panel::EventDetail);
+    view.event_detail.search.input.insert("detail");
+    view.event_detail.search.input.focus();
     view.event_detail.scroll.borrow_mut().offset = 5;
     panel(&view, now);
     let scroll = view.event_detail.scroll.borrow().offset;
@@ -954,13 +955,13 @@ fn event_detail_task_switch_preserves_scroll_and_search() {
     let index = view.rows.iter().position(|row| row.id == other_id).unwrap();
     view.set_selected(index);
     view.set_event(Vec::new());
-    assert!(!view.event_detail.search.active());
+    assert!(!view.event_detail.search.input.applied());
     let index = view.rows.iter().position(|row| row.id == id).unwrap();
     view.set_selected(index);
     view.set_event(events);
     view.event_session = Some(id);
-    assert_eq!(view.event_detail.search.query.text(), "detail");
-    assert!(view.event_detail.search.editing);
+    assert_eq!(view.event_detail.search.input.text(), "detail");
+    assert!(view.event_detail.search.input.focused());
     assert_eq!(
         view.visible_event()
             .and_then(|event| event.source.as_deref()),
@@ -988,7 +989,7 @@ fn event_detail_task_switch_discards_scroll_without_the_selected_identity() {
         let other_id = other.id.clone();
         view.set_sessions(vec![view.selected_row().unwrap().clone(), other], false);
         panel(&view, now);
-        view.event_detail.search.query.insert("detail");
+        view.event_detail.search.input.insert("detail");
         view.event_detail.scroll.borrow_mut().offset = 5;
         panel(&view, now);
         assert!(view.event_detail.scroll.borrow().offset > 0);
@@ -1005,7 +1006,7 @@ fn event_detail_task_switch_discards_scroll_without_the_selected_identity() {
         view.event_session = Some(id);
         panel(&view, now);
         assert_eq!(view.event_detail.scroll.borrow().offset, 0);
-        assert_eq!(view.event_detail.search.query.text(), "detail");
+        assert_eq!(view.event_detail.search.input.text(), "detail");
     }
 }
 

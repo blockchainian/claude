@@ -329,7 +329,7 @@ fn rule_6_ctrl_w_overrides_pending_focus() {
 fn rule_6_list_search_does_not_enter_pending_task() {
     let mut view = pending();
     assert_eq!(key(&mut view, KeyCode::Char('/')), None);
-    assert!(view.searching);
+    assert!(view.search.focused());
     assert_eq!(view.active_panel, Panel::TaskList);
     assert!(view.task_entry_pending);
     assert_eq!(remembered(&view), Some(Focus::EventDetail));

@@ -309,7 +309,7 @@ fn keyboard_title_rename_keeps_task_list_shortcuts_after_cancel() {
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     view.set_active_panel(Panel::TaskList);
     view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
-    assert!(view.searching);
+    assert!(view.search.focused());
 }
 
 #[path = "title_save_tests.rs"]

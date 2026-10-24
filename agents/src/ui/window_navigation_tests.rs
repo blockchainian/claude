@@ -160,15 +160,15 @@ fn window_navigation_release_and_second_ctrl_w_preserve_input() {
 }
 
 #[test]
-fn window_navigation_leaving_search_cancels_it_like_a_click() {
+fn window_navigation_leaving_search_blurs_and_keeps_query() {
     let (mut view, now) = event_fixture();
     event_screen(&view, 200, 45, now);
     key(&mut view, KeyCode::Char('/'));
     key(&mut view, KeyCode::Char('x'));
-    assert!(view.searching);
+    assert!(view.search.focused());
     chord(&mut view, 'l');
-    assert!(!view.searching);
-    assert!(view.search.is_empty());
+    assert!(!view.search.focused());
+    assert_eq!(view.search.text(), "x");
     assert!(view.active_panel == Panel::TaskDetails);
 }
 
@@ -316,7 +316,7 @@ fn output_panel_keeps_activation_when_terminal_contents_change() {
 }
 
 #[test]
-fn task_search_editors_park_on_panel_leave_and_resume_typing() {
+fn task_search_editors_blur_on_panel_leave_and_slash_resumes_typing() {
     for panel in [Panel::EventList, Panel::EventDetail] {
         let (mut view, now) = event_fixture();
         view.rows[view.selected].process = None;
@@ -330,19 +330,20 @@ fn task_search_editors_park_on_panel_leave_and_resume_typing() {
         } else {
             &view.event_detail.search
         };
-        assert!(search.editing);
-        assert_eq!(search.query.text(), "a");
+        assert!(!search.input.focused());
+        assert_eq!(search.input.text(), "a");
         key(&mut view, KeyCode::Char('p'));
         assert_eq!(view.input_box.editor.text(), "p");
         view.set_active_panel(panel);
+        key(&mut view, KeyCode::Char('/'));
         key(&mut view, KeyCode::Char('b'));
         let search = if panel == Panel::EventList {
             &view.event_list.search
         } else {
             &view.event_detail.search
         };
-        assert!(search.editing);
-        assert_eq!(search.query.text(), "ab");
+        assert!(search.input.focused());
+        assert_eq!(search.input.text(), "ab");
     }
 }
 
@@ -369,8 +370,8 @@ fn task_search_editors_survive_task_list_switches() {
         } else {
             &view.event_detail.search
         };
-        assert!(search.editing);
-        assert_eq!(search.query.text(), "a");
+        assert!(!search.input.focused());
+        assert_eq!(search.input.text(), "a");
     }
 }
 

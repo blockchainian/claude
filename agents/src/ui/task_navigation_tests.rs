@@ -97,11 +97,11 @@ fn escape_search_and_other_panels_do_not_consume_task_history() {
         let second = view.selected_id().cloned();
         view.active_panel = panel;
         if panel == Panel::TaskList {
-            view.searching = true;
+            view.search.focus();
             view.search.set_text("Task");
         }
         assert_eq!(key(&mut view, KeyCode::Esc), None);
-        assert!(!view.searching);
+        assert!(!view.search.focused());
         assert_eq!(view.selected_id(), second.as_ref());
         view.active_panel = Panel::TaskList;
         assert_eq!(key(&mut view, KeyCode::Esc), None);
@@ -209,18 +209,20 @@ fn escape_closes_overlays_without_consuming_history() {
             }
             3 => {
                 view.set_active_panel(Panel::EventList);
-                view.event_list.search.editing = true;
+                view.event_list.search.input.focus();
             }
             4 => {
                 view.set_active_panel(Panel::EventDetail);
-                view.event_detail.search.editing = true;
+                view.event_detail.search.input.focus();
             }
             _ => unreachable!(),
         }
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert_eq!(view.selected_id(), second.as_ref());
         assert!(!view.help && view.rename_target.is_none() && view.confirm_dialog.is_none());
-        assert!(!view.event_list.search.editing && !view.event_detail.search.editing);
+        assert!(
+            !view.event_list.search.input.focused() && !view.event_detail.search.input.focused()
+        );
         view.set_active_panel(Panel::TaskList);
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert_eq!(view.selected_id(), first.as_ref());

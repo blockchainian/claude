@@ -342,7 +342,7 @@ fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
     *text = text.replacen("decks.txt", "output/decks.txt", 1);
     view.rows[view.selected].cwd = directory.path().into();
     view.select_fixture_event(Some(event));
-    view.event_detail.search.query.set_text("decks.txt");
+    view.event_detail.search.input.set_text("decks.txt");
     let buf = event_detail_buffer(&view, 200, now);
     let (rect, target) = view
         .viewport
@@ -494,9 +494,9 @@ fn event_detail_slash_search_jumps_and_highlights_without_closing() {
     for ch in "globalState".chars() {
         assert_eq!(key(&mut view, KeyCode::Char(ch)), None);
     }
-    assert!(view.event_detail.search.editing);
+    assert!(view.event_detail.search.input.focused());
     assert!(
-        !view.event_list.search.active(),
+        !view.event_list.search.input.applied(),
         "detail search must not filter the list"
     );
     // Wide enough that the matching line is not truncated before the match.
@@ -521,7 +521,7 @@ fn event_detail_slash_search_jumps_and_highlights_without_closing() {
     );
     assert_eq!(view.event_list.cursor, expected);
     key(&mut view, KeyCode::Enter);
-    assert!(!view.event_detail.search.editing);
+    assert!(!view.event_detail.search.input.focused());
     assert_eq!(view.event_list.cursor, expected);
 }
 
@@ -538,9 +538,9 @@ fn right_click_cancels_innermost_modal_before_open_event_detail() {
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert!(!view.help);
     assert_eq!(view.visible_event(), Some(&event));
-    view.searching = true;
+    view.search.focus();
     release_click(&mut view, MouseButton::Right, 1, 1);
-    assert!(!view.searching);
+    assert!(!view.search.focused());
     assert_eq!(view.visible_event(), Some(&event));
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert_eq!(view.visible_event(), view.event_panel.last());
@@ -573,11 +573,11 @@ fn background_return_restores_detail_search() {
     view.select_fixture_event(Some(previous.clone()));
     let text = event_list::open_text(&previous);
     let query = text.split_whitespace().next().unwrap();
-    view.event_detail.search.query.set_text(query);
+    view.event_detail.search.input.set_text(query);
     open_background(&mut view, now);
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert_eq!(view.visible_event(), Some(&previous));
-    assert_eq!(view.event_detail.search.query.text(), query);
+    assert_eq!(view.event_detail.search.input.text(), query);
 }
 
 #[test]

@@ -1281,7 +1281,7 @@ fn event_detail_zoom_drag_ignores_hidden_task_details() {
         end.0 + 3,
         end.1,
     ));
-    view.event_list.search.query.set_text("no matching event");
+    view.event_list.search.input.set_text("no matching event");
     view.rematch_event();
     assert!(view.visible_event().is_none());
     assert_eq!(

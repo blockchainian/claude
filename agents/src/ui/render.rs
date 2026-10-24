@@ -99,10 +99,6 @@ pub(super) struct CenterLayout {
 }
 
 impl View {
-    fn input(&self) -> (String, &line_edit::LineEdit) {
-        (format!("Search {PROMPT_MARKER} "), &self.search)
-    }
-
     pub(super) fn center_layout(&self, area: Rect) -> CenterLayout {
         self.panel_layout(area, true)
     }
@@ -315,8 +311,8 @@ impl View {
         }
         // Keep the chart's original canvas and scale when the input row takes list space.
         let usage_chart = list;
-        let (list, search) = if self.searching {
-            let input = event_list::search_input_rect(list);
+        let (list, search) = if self.search.applied() {
+            let input = search_input::search_row(list);
             (
                 row(list, 0, list.height.saturating_sub(input.height)),
                 input,
@@ -352,7 +348,7 @@ impl View {
             self.center_layout(area)
                 .event_panel
                 .height
-                .saturating_sub(u16::from(self.event_list.search.active())),
+                .saturating_sub(u16::from(self.event_list.search.input.applied())),
         )
     }
 
@@ -405,7 +401,8 @@ impl View {
                 &self.input_label(),
             );
         }
-        if self.task_search_editing()
+        if self.search_focused()
+            && matches!(self.active_panel, Panel::EventList | Panel::EventDetail)
             && !self.help
             && self.confirm_dialog.is_none()
             && !layout.event_panel.is_empty()
@@ -418,22 +415,22 @@ impl View {
                 } else {
                     layout.event_panel
                 };
-            let input = event_list::search_input_rect(search_area);
+            let input = search_input::search_row(search_area);
             let search = if self.active_panel == Panel::EventDetail {
                 &self.event_detail.search
             } else {
                 &self.event_list.search
             };
-            let (_, caret) = input_row(&format!("Search {PROMPT_MARKER} "), &search.query, input);
-            return Some((input.x + caret, input.y));
+            return search.input.caret(input);
         }
-        if !self.searching || self.confirm_dialog.is_some() || self.help || layout.search.is_empty()
+        if !self.search.focused()
+            || self.confirm_dialog.is_some()
+            || self.help
+            || layout.search.is_empty()
         {
             return None;
         }
-        let (prompt, edit) = self.input();
-        let (_, caret) = input_row(&prompt, edit, layout.search);
-        Some((layout.search.x + caret, layout.search.y))
+        self.search.caret(layout.search)
     }
 
     #[cfg(test)]
@@ -626,10 +623,9 @@ impl View {
         }
         self.render_center_rows(layout.list, buf, now);
         self.render_usage_chart(layout.usage_chart, buf, now);
-        if self.searching {
-            let (prompt, edit) = self.input();
+        if self.search.applied() {
             Clear.render(layout.search, buf);
-            render_input_row(&prompt, edit, layout.search, buf);
+            self.search.render(layout.search, buf);
         }
         // Activity and task status share the rule immediately above the prompt.
         let borders = [

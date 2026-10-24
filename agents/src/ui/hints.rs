@@ -76,7 +76,7 @@ impl View {
             || (self.selected_draft().is_some()
                 && (self.prompt_focused()
                     || (self.active_panel == Panel::TaskDetails && self.selector.is_some())))
-            || self.task_search_editing())
+            || self.search_focused())
     }
 
     pub(super) fn center_help_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -186,14 +186,26 @@ mod tests {
                 view.name_target = None;
             }
             view.set_active_panel(panel);
-            view.searching = panel == Panel::TaskList;
-            view.event_list.search.editing = panel == Panel::EventList;
-            view.event_detail.search.editing = panel == Panel::EventDetail;
+            if panel == Panel::TaskList {
+                view.search.focus();
+            } else {
+                view.search.blur();
+            }
+            if panel == Panel::EventList {
+                view.event_list.search.input.focus()
+            } else {
+                view.event_list.search.input.blur()
+            };
+            if panel == Panel::EventDetail {
+                view.event_detail.search.input.focus()
+            } else {
+                view.event_detail.search.input.blur()
+            };
             view.input_box.editor.set_text("draft");
             view.rename.set_text("title");
             view.search.set_text("search");
-            view.event_list.search.query.set_text("event");
-            view.event_detail.search.query.set_text("detail");
+            view.event_list.search.input.set_text("event");
+            view.event_detail.search.input.set_text("detail");
             render(&view);
             let target = view
                 .viewport
@@ -210,8 +222,8 @@ mod tests {
             assert_eq!(view.input_box.editor.text(), "draft");
             assert_eq!(view.rename.text(), "title");
             assert_eq!(view.search.text(), "search");
-            assert_eq!(view.event_list.search.query.text(), "event");
-            assert_eq!(view.event_detail.search.query.text(), "detail");
+            assert_eq!(view.event_list.search.input.text(), "event");
+            assert_eq!(view.event_detail.search.input.text(), "detail");
             assert_eq!(view.active_panel, panel);
             let buffer = render(&view);
             let text = buffer
@@ -232,18 +244,21 @@ mod tests {
                 .expect("back target");
             click(&mut view, target.area.x, target.area.y);
             assert_eq!(view.active_panel, panel);
-            assert_eq!(view.searching, panel == Panel::TaskList);
-            assert_eq!(view.event_list.search.editing, panel == Panel::EventList);
+            assert_eq!(view.search.focused(), panel == Panel::TaskList);
             assert_eq!(
-                view.event_detail.search.editing,
+                view.event_list.search.input.focused(),
+                panel == Panel::EventList
+            );
+            assert_eq!(
+                view.event_detail.search.input.focused(),
                 panel == Panel::EventDetail
             );
             assert!(!view.help, "help did not close in {panel:?}");
             assert_eq!(view.input_box.editor.text(), "draft");
             assert_eq!(view.rename.text(), "title");
             assert_eq!(view.search.text(), "search");
-            assert_eq!(view.event_list.search.query.text(), "event");
-            assert_eq!(view.event_detail.search.query.text(), "detail");
+            assert_eq!(view.event_list.search.input.text(), "event");
+            assert_eq!(view.event_detail.search.input.text(), "detail");
         }
     }
 
@@ -276,7 +291,7 @@ mod tests {
             match mode {
                 0 => {}
                 1 => view.help = true,
-                2 => view.searching = true,
+                2 => view.search.focus(),
                 3 => view.active_panel = Panel::Prompt,
                 4 => {
                     view.confirm_dialog = Some(ConfirmDialog {
@@ -291,11 +306,11 @@ mod tests {
                 }
                 6 => {
                     view.set_active_panel(Panel::EventList);
-                    view.event_list.search.editing = true;
+                    view.event_list.search.input.focus();
                 }
                 7 => {
                     view.set_active_panel(Panel::EventDetail);
-                    view.event_detail.search.editing = true;
+                    view.event_detail.search.input.focus();
                 }
                 _ => unreachable!(),
             }

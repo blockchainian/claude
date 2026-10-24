@@ -151,8 +151,7 @@ impl View {
         if self.active_panel != Panel::Prompt
             || self.help
             || self.confirm_dialog.is_some()
-            || self.searching
-            || self.task_search_editing()
+            || self.search_focused()
         {
             return None;
         }
@@ -631,8 +630,8 @@ mod tests {
             } else {
                 &view.event_detail.search
             };
-            assert!(search.editing);
-            assert_eq!(search.query.text(), "a");
+            assert!(!search.input.focused());
+            assert_eq!(search.input.text(), "a");
         }
     }
 

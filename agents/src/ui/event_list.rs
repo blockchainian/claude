@@ -13,10 +13,6 @@ pub(super) const CLOCK_WIDTH: usize = 8;
 /// Rows above the scrolling sections: the top rule.
 pub(super) const EVENT_TOP: u16 = 1;
 
-pub(super) fn search_input_rect(area: Rect) -> Rect {
-    super::render::row(area, area.height.saturating_sub(1), 1)
-}
-
 impl View {
     pub(super) fn refresh_transcript(&mut self) {
         let mode = if self.terminal_requested() {
@@ -174,21 +170,9 @@ impl View {
         if self.event_session.as_ref() != Some(&session.id) {
             return;
         }
-        if self.event_list.search.active() && area.height > 1 {
-            let input = search_input_rect(area);
-            if self.event_list.search.editing {
-                super::render::render_input_row(
-                    &format!("Search {PROMPT_MARKER} "),
-                    &self.event_list.search.query,
-                    input,
-                    buf,
-                );
-            } else {
-                Line::from(self.event_list.search.query.text().to_owned())
-                    .dim()
-                    .right_aligned()
-                    .render(input, buf);
-            }
+        if self.event_list.search.input.applied() && area.height > 1 {
+            let input = super::search_input::search_row(area);
+            self.event_list.search.input.render(input, buf);
         }
         let max_scroll = self.event_max_scroll();
         self.event_list
@@ -201,7 +185,7 @@ impl View {
         let pinned_count = self.shown_pinned_count();
         let height = usize::from(
             area.height
-                .saturating_sub(u16::from(self.event_list.search.active())),
+                .saturating_sub(u16::from(self.event_list.search.input.applied())),
         );
         let (pinned_height, timeline_height) = self.event_section_heights(height);
         let separator = usize::from(pinned_height > 0);
@@ -434,22 +418,10 @@ impl View {
             EVENT_TOP,
             area.height.saturating_sub(EVENT_TOP),
         );
-        if self.event_detail.search.active() {
+        if self.event_detail.search.input.applied() {
             body_area.height = body_area.height.saturating_sub(1);
-            let input = search_input_rect(area);
-            if self.event_detail.search.editing {
-                super::render::render_input_row(
-                    &format!("Search {PROMPT_MARKER} "),
-                    &self.event_detail.search.query,
-                    input,
-                    buf,
-                );
-            } else {
-                Line::from(self.event_detail.search.query.text().to_owned())
-                    .dim()
-                    .right_aligned()
-                    .render(input, buf);
-            }
+            let input = super::search_input::search_row(area);
+            self.event_detail.search.input.render(input, buf);
         }
         let height = usize::from(body_area.height);
         let mut viewport = self.viewport.borrow_mut();
@@ -669,7 +641,7 @@ impl View {
         let allocations = if self.event_detail.mode != task_ui::EventDetailMode::Transcript
             && wants.len() <= 1
             && height >= static_rows + wants.iter().filter(|&&rows| rows > 0).count()
-            && !self.event_detail.search.active()
+            && !self.event_detail.search.input.applied()
             && !external_scroll
             && state.offset == 0
         {
@@ -727,7 +699,7 @@ impl View {
             EVENT_TOP,
             area.height.saturating_sub(EVENT_TOP),
         );
-        if self.event_detail.search.active() {
+        if self.event_detail.search.input.applied() {
             body_area.height = body_area.height.saturating_sub(1);
         }
         let layout = viewport.event_detail_layout.take().unwrap_or_else(|| {
@@ -744,7 +716,7 @@ impl View {
         let Some(event) = self.visible_event() else {
             return;
         };
-        if self.event_detail.search.query.is_empty() {
+        if self.event_detail.search.input.text().is_empty() {
             return;
         }
         let viewport = self.viewport.borrow();
@@ -804,7 +776,7 @@ impl View {
             self.exit_image_zoom();
             self.cancel_event_detail_selection();
             self.event_list.cursor = index;
-            self.event_detail.search.clear();
+            self.edit_search(Panel::EventDetail, search_input::SearchInput::close);
             let mut viewport = self.viewport.borrow_mut();
             viewport.event_detail_layout = None;
             let mut detail = self.event_detail.scroll.borrow_mut();
@@ -1369,7 +1341,7 @@ impl View {
                 .borrow()
                 .event_panel
                 .height
-                .saturating_sub(u16::from(self.event_list.search.active())),
+                .saturating_sub(u16::from(self.event_list.search.input.applied())),
         )
     }
 
@@ -1667,7 +1639,7 @@ fn render_event(
     last: bool,
     area: Rect,
     buf: &mut Buffer,
-    search: Option<&super::event_search::EventSearch>,
+    search: Option<&super::event_search::EventMatches>,
     cwd: &std::path::Path,
 ) -> Vec<super::links::DrawnLink> {
     if area.is_empty() {
@@ -1698,7 +1670,7 @@ fn render_event(
     } as u16;
     // Match the full row so a match crossing the right edge still highlights its prefix.
     let indices = search
-        .filter(|search| !search.query.is_empty())
+        .filter(|search| !search.input.text().is_empty())
         .map(|search| search.indices(&body.to_string()));
     body = truncate_line_with_ellipsis_if_overflow(body, body_width);
     let links = {
@@ -2229,8 +2201,8 @@ fn collapse_whitespace(text: &str) -> String {
     collapsed
 }
 
-fn highlight_matches(line: &mut Line<'static>, search: &super::event_search::EventSearch) {
-    if !search.query.is_empty() {
+fn highlight_matches(line: &mut Line<'static>, search: &super::event_search::EventMatches) {
+    if !search.input.text().is_empty() {
         let indices = search.indices(&line.to_string());
         highlight_indices(line, &indices);
     }

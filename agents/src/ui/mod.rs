@@ -39,6 +39,9 @@ mod question_view;
 mod render;
 mod reset_credit;
 mod rows;
+mod search_input;
+#[cfg(test)]
+mod search_input_tests;
 #[path = "section_scroll.rs"]
 mod section_scroll;
 mod selection_tabs;
@@ -229,7 +232,7 @@ struct SectionScroll {
 struct BackgroundReturn {
     event: Option<usize>,
     scroll: usize,
-    search: event_search::EventSearch,
+    search: event_search::EventMatches,
 }
 
 /// Confirmation before a destructive provider action.
@@ -310,8 +313,7 @@ pub struct View {
     status_filter: usize,
     /// The task each tab shows selected when it is entered, by tab index.
     tab_selections: Vec<Option<SessionKey>>,
-    search: line_edit::LineEdit,
-    searching: bool,
+    search: search_input::SearchInput,
     rename_target: Option<SessionKey>,
     name_target: Option<crate::model::DraftKey>,
     /// The prompt of the turn Esc is stopping, returned to its input once the stop lands.
@@ -445,8 +447,7 @@ impl View {
             collapsed: vec![HashSet::new(); TASK_FILTERS.len()],
             status_filter: 0,
             tab_selections: vec![None; TASK_FILTERS.len()],
-            search: line_edit::LineEdit::default(),
-            searching: false,
+            search: search_input::SearchInput::default(),
             rename_target: None,
             name_target: None,
             stopping_prompt: None,
@@ -558,28 +559,15 @@ impl View {
         if self.selector.is_some() && task_details_active {
             return false;
         }
-        if !self.searching && !self.task_search_editing() && self.question_paste(text) {
+        if !self.search_focused() && self.question_paste(text) {
             return true;
         }
         if task_details_active && self.title_editor().is_some() {
             self.rename.insert(text);
         } else if self.prompt_focused() && self.input_disabled().is_none() {
             self.input_box.paste(text);
-        } else if self.active_panel == Panel::EventDetail && self.event_detail.search.editing {
-            self.event_detail.search.query.insert(text);
-            self.jump_event_detail_match();
-        } else if self.active_panel == Panel::EventList && self.event_list.search.editing {
-            self.event_list.search.query.insert(text);
-            self.rematch_event();
-            self.show_newest_event();
-        } else if self.searching {
-            self.search.insert(text);
-            let selected = self
-                .selectable_indices()
-                .first()
-                .copied()
-                .unwrap_or(usize::MAX);
-            self.select(selected);
+        } else if self.search_focused() {
+            self.edit_search(self.active_panel, |search| search.insert(text));
         } else {
             return false;
         }
@@ -1226,7 +1214,7 @@ impl View {
     /// Selects the newest shown event and resumes following the event list.
     fn show_newest_event(&mut self) {
         self.select_event(None);
-        self.event_detail.search.clear();
+        self.edit_search(Panel::EventDetail, search_input::SearchInput::close);
         let max = self.event_max_scroll();
         self.event_list.scroll.set(max);
         self.event_detail.scroll.get_mut().offset = 0;
@@ -1347,6 +1335,13 @@ impl View {
             self.set_active_panel(Panel::TaskList);
         } else if !self.restore_task_focus(shown.focus.unwrap_or_else(|| self.input_focus())) {
             self.set_active_panel(Panel::TaskList);
+        }
+        for panel in [Panel::TaskList, Panel::EventList, Panel::EventDetail] {
+            if panel != self.active_panel {
+                self.panel_search_mut(panel)
+                    .expect("panel has search input")
+                    .blur();
+            }
         }
     }
 

@@ -251,8 +251,9 @@ fn mouse_tabs_ignore_modals_but_save_title_on_blur() {
             )
             .is_none()
         );
-        if overlay == 2 {
+        if overlay == 1 || overlay == 2 {
             assert!(view.rename_target.is_none());
+            assert!(!view.search.focused());
             assert_eq!(view.status_filter, 1);
             continue;
         }
@@ -604,10 +605,10 @@ fn task_search_returns_but_selected_detail_resets_to_newest() {
     view.event_detail.scroll.borrow_mut().offset = 5;
     event_screen(&view, 100, 25, now);
     show_task_event(&mut view, other, Vec::new());
-    assert!(!view.event_list.search.active());
+    assert!(!view.event_list.search.input.applied());
     assert!(view.event_list.cursor.is_none());
     show_task_event(&mut view, event_panel, events);
-    assert_eq!(view.event_list.search.query.text(), "tool");
+    assert_eq!(view.event_list.search.input.text(), "tool");
     assert_eq!(view.visible_event(), view.event_panel.last());
     assert_eq!(view.event_detail.scroll.borrow().offset, 0);
     assert_eq!(view.event_scroll(), 0);
@@ -1109,12 +1110,13 @@ fn mouse_list_ignores_modals_but_saves_title_on_blur() {
         key(&mut view, overlay);
         screen(&view, 160, 40);
         let selected = view.selected;
-        if overlay == KeyCode::Char('r') {
+        if matches!(overlay, KeyCode::Char('r' | '/')) {
             click_mouse(
                 &mut view,
                 mouse(MouseEventKind::Down(MouseButton::Left), x, y),
             );
             assert!(view.rename_target.is_none());
+            assert!(!view.search.focused());
             assert_eq!(view.selected, second);
             continue;
         }
@@ -2029,6 +2031,49 @@ fn live_center_search_active() {
     assert_eq!(view.cursor_pos(Rect::new(0, 0, 100, 16)), Some((14, 11)));
 }
 #[test]
+fn live_center_search_blurred_keeps_dim_query_row() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let mut view = simple_fixture();
+    key(&mut view, KeyCode::Char('/'));
+    for c in "Current".chars() {
+        key(&mut view, KeyCode::Char(c));
+    }
+    assert!(key(&mut view, KeyCode::Enter).is_none());
+    assert!(!view.search.focused());
+    assert!(!view.search_focused());
+    assert!(view.search.applied());
+    assert_eq!(view.search.text(), "Current");
+    let area = Rect::new(0, 0, 100, 16);
+    let mut buf = Buffer::empty(area);
+    view.render(area, &mut buf);
+    let row = view.viewport.borrow().search;
+    assert_eq!(row.height, 1);
+    assert!(row.width >= 16);
+    let tail = row.right() - 16;
+    let text: String = (tail..row.right())
+        .map(|x| cell_text(buf[(x, row.y)].symbol()))
+        .collect();
+    let dim: String = (tail..row.right())
+        .map(|x| {
+            let cell = &buf[(x, row.y)];
+            if cell.symbol() != " " && cell.modifier.contains(ratatui::style::Modifier::DIM) {
+                'd'
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    assert_eq!(
+        format!("{text}\n{dim}"),
+        "         Current\n         ddddddd"
+    );
+    for x in row.x..tail {
+        assert_eq!(buf[(x, row.y)].symbol(), " ");
+    }
+    assert!(view.cursor_pos(area).is_none());
+}
+
+#[test]
 fn show_more_is_only_listed_on_inactive() {
     let mut view = fixture();
     view.set_sessions(view.rows.clone(), true);
@@ -2372,10 +2417,10 @@ fn search_text_wins_and_refresh_preserves_selection_and_state() {
     let id = view.selected_id().unwrap().to_owned();
     view.set_sessions(view.rows.clone(), false);
     assert_eq!(view.selected_id(), Some(&id));
-    assert!(view.searching);
+    assert!(view.search.focused());
     assert_eq!(view.search.text(), "task");
     key(&mut view, KeyCode::Esc);
-    assert!(!view.searching);
+    assert!(!view.search.focused());
     assert_eq!(key(&mut view, KeyCode::Esc), None);
 }
 #[test]
@@ -5165,7 +5210,11 @@ fn dashboard_event_list_fills_rows_next_to_rules() {
                 .find(|event| event.kind == crate::event::Kind::Tool)
                 .unwrap()
                 .clone();
-            view.event_list.search.editing = search;
+            if search {
+                view.event_list.search.input.focus()
+            } else {
+                view.event_list.search.input.blur()
+            };
             let body_event = event.clone();
             view.set_event(vec![event; 100]);
             let area = Rect::new(0, 0, width, 60);
@@ -5453,8 +5502,8 @@ fn dashboard_event_search_uses_the_row_padding() {
     for width in [100, 149, 150, 200] {
         let (mut view, now) = column_padding_fixture();
         view.set_active_panel(Panel::EventList);
-        view.event_list.search.editing = true;
-        view.event_list.search.query.set_text("Tool");
+        view.event_list.search.input.focus();
+        view.event_list.search.input.set_text("Tool");
         let area = Rect::new(0, 0, width, 60);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
@@ -5471,7 +5520,7 @@ fn dashboard_event_search_uses_the_row_padding() {
             .collect();
         assert_eq!(input, "Search ❯ Tool");
         assert_eq!(view.cursor_pos(area), Some((left + 13, y)));
-        view.event_list.search.editing = false;
+        view.event_list.search.input.blur();
         view.render_at(area, &mut buf, now);
         let query: String = (width - 5..width - 1)
             .map(|x| cell_text(buf[(x, y)].symbol()))
@@ -5644,12 +5693,12 @@ fn codex_inner_task_event_snapshot() {
     update_event_snapshot_body(&path, &rendered);
     assert_eq!(rendered, std::fs::read_to_string(path).unwrap());
     view.prepare_event_search();
-    view.event_list.search.query.set_text("ImageView");
+    view.event_list.search.input.set_text("ImageView");
     view.rematch_event();
     assert_eq!(view.matching_event_count(), 1);
     assert!(view.event_matches(4));
     for query in ["type", "exec_command"] {
-        view.event_list.search.query.set_text(query);
+        view.event_list.search.input.set_text(query);
         view.rematch_event();
         assert_eq!(view.matching_event_count(), 1, "{query}");
         assert!(view.event_matches(0));
@@ -5937,7 +5986,7 @@ fn selected_event_row_preserves_foreground_and_adds_bold() {
                         older.started_at -= Duration::seconds(1);
                         view.set_event(vec![older, event]);
                         if search {
-                            view.event_list.search.query.set_text("Read");
+                            view.event_list.search.input.set_text("Read");
                             view.rematch_event();
                         }
                         let area = Rect::new(0, 0, width, 60);
@@ -6625,7 +6674,7 @@ mod event_search {
     }
 
     #[test]
-    fn leaving_list_search_preserves_event_and_detail_search() {
+    fn leaving_list_search_blurs_and_preserves_query_on_click() {
         for mouse_exit in [false, true] {
             let (mut view, now) = event_fixture();
             view.select_event(Some(1));
@@ -6650,8 +6699,12 @@ mod event_search {
                 key(&mut view, KeyCode::Esc);
                 view.active_panel = Panel::EventDetail;
             }
-            assert_eq!(view.event_list.search.active(), mouse_exit);
-            assert_eq!(view.event_list.search.editing, mouse_exit);
+            assert_eq!(view.event_list.search.input.applied(), mouse_exit);
+            assert!(!view.event_list.search.input.focused());
+            assert_eq!(
+                view.event_list.search.input.text(),
+                if mouse_exit { "files" } else { "" }
+            );
             assert_eq!(view.visible_event(), Some(&selected));
             let area = Rect::new(0, 0, 100, 40);
             let mut buf = Buffer::empty(area);
@@ -6661,7 +6714,7 @@ mod event_search {
             for c in "files".chars() {
                 key(&mut view, KeyCode::Char(c));
             }
-            assert!(view.event_detail.search.editing);
+            assert!(view.event_detail.search.input.focused());
             let mut buf = Buffer::empty(area);
             view.render_event_detail(area, &mut buf, now);
             assert!(text(&buf).contains("I will check the files"));
@@ -6829,18 +6882,17 @@ mod line_edit {
     }
 
     #[test]
-    fn task_search_kill_stays_on_selected_row() {
+    fn task_search_kill_selects_first_match() {
         let mut view = fixture();
         key(&mut view, KeyCode::Char('/'));
         for c in "task".chars() {
             key(&mut view, KeyCode::Char(c));
         }
         key(&mut view, KeyCode::Down);
-        let selected = view.selected;
         key(&mut view, KeyCode::Left);
         view.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
         assert_eq!(view.search.text(), "tas");
-        assert_eq!(view.selected, selected);
+        assert_eq!(view.selected, view.selectable_indices()[0]);
     }
 
     #[test]
@@ -6895,19 +6947,22 @@ mod input_row {
             event_panel.active_panel = Panel::EventList;
             event_panel.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
         };
-        event_panel.event_list.search.query.set_text(query);
+        event_panel.event_list.search.input.set_text(query);
         if left {
-            task.search.left();
-            event_panel.event_list.search.query.left();
+            task.search.handle_key(KeyCode::Left.into());
+            event_panel
+                .event_list
+                .search
+                .input
+                .handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
         }
         let mut task_buf = Buffer::empty(area);
         task.render_at(area, &mut task_buf, now);
         let mut event_buf = Buffer::empty(area);
         event_panel.render_at(area, &mut event_buf, now);
         let task_row = task.center_layout(area).search;
-        let event_row = super::super::event_list::search_input_rect(
-            event_panel.center_layout(area).event_panel,
-        );
+        let event_row =
+            super::super::search_input::search_row(event_panel.center_layout(area).event_panel);
         (task_buf, task_row, event_buf, event_row, task, event_panel)
     }
 
@@ -6926,12 +6981,11 @@ mod input_row {
                         rendered_inputs(width, "你好 query", false);
                     Clear.render(event_row, &mut event_panel);
                     event_row.width = task_row.width;
-                    super::super::render::render_input_row(
-                        "Search ❯ ",
-                        &event_view.event_list.search.query,
-                        event_row,
-                        &mut event_panel,
-                    );
+                    event_view
+                        .event_list
+                        .search
+                        .input
+                        .render(event_row, &mut event_panel);
                     assert_eq!(task_row.x, event_row.x);
                     for x in 0..task_row.width {
                         let task_cell = &task[(task_row.x + x, task_row.y)];
@@ -6965,8 +7019,12 @@ mod input_row {
                     let (_, task_row, _, event_row, task, event_panel) =
                         rendered_inputs(width, query, left);
                     let area = Rect::new(3, 2, width, 40);
-                    let expected = (9 + task
-                        .search
+                    let mut editor = super::super::line_edit::LineEdit::default();
+                    editor.set_text(query);
+                    if left {
+                        editor.left();
+                    }
+                    let expected = (9 + editor
                         .window(usize::from(task_row.width.saturating_sub(9)))
                         .1)
                         .min(task_row.width.saturating_sub(1));
@@ -6974,10 +7032,12 @@ mod input_row {
                         task.cursor_pos(area),
                         Some((task_row.x + expected, task_row.y))
                     );
-                    let event_expected = (9 + event_panel
-                        .event_list
-                        .search
-                        .query
+                    let mut editor = super::super::line_edit::LineEdit::default();
+                    editor.set_text(query);
+                    if left {
+                        editor.left();
+                    }
+                    let event_expected = (9 + editor
                         .window(usize::from(event_row.width.saturating_sub(9)))
                         .1)
                         .min(event_row.width.saturating_sub(1));
@@ -7615,7 +7675,7 @@ mod subagent_actions {
         assert!(view.rename.text().is_empty());
         assert!(view.confirm_dialog.is_none());
         assert!(view.pinned.active.is_empty());
-        assert!(!view.searching);
+        assert!(!view.search.focused());
         assert!(!view.help);
         assert_eq!(subagent_rows::screen(view, 120, 30), before);
     }
@@ -7719,13 +7779,15 @@ mod subagent_actions {
             KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL),
         ] {
             let mut view = fixture();
-            view.searching = true;
+            view.search.focus();
             view.search.set_text("Parent task");
             let before = subagent_rows::screen(&view, 120, 30);
             assert_eq!(view.handle_key(event), None);
-            assert!(view.searching);
+            assert_eq!(view.search.focused(), event.code != KeyCode::Enter);
             assert_eq!(view.search.text(), "Parent task");
-            assert_eq!(subagent_rows::screen(&view, 120, 30), before);
+            if event.code != KeyCode::Enter {
+                assert_eq!(subagent_rows::screen(&view, 120, 30), before);
+            }
         }
     }
 
@@ -10472,9 +10534,13 @@ mod event_navigation {
                 view.active_panel = Panel::EventList;
                 if search {
                     view.prepare_event_search();
-                    view.event_list.search.query.set_text("a");
+                    view.event_list.search.input.set_text("a");
                     view.rematch_event();
-                    view.event_list.search.editing = editing;
+                    if editing {
+                        view.event_list.search.input.focus()
+                    } else {
+                        view.event_list.search.input.blur()
+                    };
                 }
                 screen(&view, 200, 45);
                 let rect = view.viewport.borrow().event_panel;
@@ -10493,10 +10559,10 @@ mod event_navigation {
                 let key = KeyEvent::new(code, modifiers);
                 let mut editor = super::super::line_edit::LineEdit::default();
                 editor.set_text("a");
-                let consumed = editing && editor.handle(key);
+                let consumed = view.search_focused() && editor.handle(key);
                 if consumed {
                     view.handle_key(key);
-                    assert_eq!(view.event_list.search.query.text(), editor.text());
+                    assert_eq!(view.event_list.search.input.text(), editor.text());
                     continue;
                 }
                 let target = if edge {
@@ -10943,7 +11009,7 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
                 })
             })
             .unwrap_or(baseline.bottom());
-        view.searching = true;
+        view.search.focus();
         view.search.insert("Task");
         let layout = view.center_layout(area);
         assert_eq!(layout.usage_chart, baseline);
@@ -10985,7 +11051,7 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
                 .list_rows
                 .contains((layout.search.x, layout.search.y).into())
         );
-        view.searching = false;
+        view.search.blur();
         key(&mut view, KeyCode::Char('r'));
         view.set_active_panel(Panel::TaskDetails);
         let rename = view.center_layout(area);
@@ -11021,7 +11087,7 @@ fn session_search_keeps_selection_visible_and_mouse_rows_aligned() {
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     let baseline = view.center_layout(area).list;
-    view.searching = true;
+    view.search.focus();
     view.render(area, &mut buf);
     let layout = view.center_layout(area);
     assert_eq!(layout.search.y, baseline.bottom() - 1);
@@ -11054,7 +11120,7 @@ fn session_search_keeps_selection_visible_and_mouse_rows_aligned() {
             target.1,
         ),
     );
-    assert_eq!(view.selected, 19);
+    assert_eq!(view.selected, target.0);
     click_mouse(
         &mut view,
         mouse(
@@ -11063,7 +11129,7 @@ fn session_search_keeps_selection_visible_and_mouse_rows_aligned() {
             layout.search.y,
         ),
     );
-    assert_eq!(view.selected, 19);
+    assert_eq!(view.selected, target.0);
 }
 
 #[path = "reading_interaction_tests.rs"]

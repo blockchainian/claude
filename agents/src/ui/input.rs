@@ -38,9 +38,7 @@ enum PasteTarget {
     Prompt(Rect),
     Title(Rect),
     Branch(Rect),
-    Search(Rect),
-    EventSearch(Rect),
-    EventDetailSearch(Rect),
+    Search(Panel),
     Question(Rect),
 }
 
@@ -197,10 +195,8 @@ impl View {
             self.help = false;
             return;
         }
-        if self.searching {
-            self.searching = false;
-            self.search.clear();
-            self.reconcile_selection();
+        if self.search_focused() {
+            self.edit_search(self.active_panel, search_input::SearchInput::blur);
             return;
         }
         if self.selected_draft.is_some() {
@@ -210,17 +206,10 @@ impl View {
         if self.prompt_focused() {
             return;
         }
-        if self.active_panel == Panel::EventDetail && self.event_detail.search.editing {
-            self.event_detail.search.editing = false;
-            return;
-        }
-        if self.active_panel == Panel::EventList && self.event_list.search.editing {
-            self.event_list.search.editing = false;
-            return;
-        }
-        if let Some(previous) = self.event_list.background_return.take() {
+        if let Some(mut previous) = self.event_list.background_return.take() {
             self.select_event(previous.event);
 
+            previous.search.input.blur();
             self.event_detail.search = previous.search;
             self.event_detail.scroll.borrow_mut().offset = previous.scroll;
         } else {
@@ -503,6 +492,17 @@ impl View {
             _ => self.mouse_panel_at(position),
         };
         if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            for panel in [Panel::TaskList, Panel::EventList, Panel::EventDetail] {
+                let rect = self.search_rect(panel);
+                if rect.contains(position) {
+                    self.set_active_panel(panel);
+                    self.edit_search(panel, |search| search.click(rect, mouse.column));
+                    return None;
+                }
+            }
+            if self.search_focused() {
+                self.edit_search(self.active_panel, search_input::SearchInput::blur);
+            }
             let viewport = self.viewport.borrow();
             self.pressed_task = viewport
                 .list_rows
@@ -649,22 +649,14 @@ impl View {
             }
             return Some(PasteTarget::Prompt(area));
         }
-        if self.searching && v.search.contains(at) {
-            return Some(PasteTarget::Search(v.search));
-        }
-        let row = super::event_list::search_input_rect(v.event_panel);
-        if self.event_list.search.editing && row.contains(at) {
-            return Some(PasteTarget::EventSearch(row));
-        }
-        let row = super::event_list::search_input_rect(v.event_detail);
-        if self.event_detail.search.editing && row.contains(at) {
-            return Some(PasteTarget::EventDetailSearch(row));
+        let panel = self.active_panel;
+        if self.search_focused() && self.search_rect(panel).contains(at) {
+            return Some(PasteTarget::Search(panel));
         }
         None
     }
 
     fn position_paste(&mut self, target: PasteTarget, mouse: MouseEvent) {
-        let search = format!("Search {PROMPT_MARKER} ");
         match target {
             PasteTarget::Terminal => unreachable!("terminal mouse handles paste"),
             PasteTarget::Prompt(area) => {
@@ -680,18 +672,9 @@ impl View {
                     .expect("branch editor")
                     .click_row_after(area, &format!("New branch {PROMPT_MARKER} "), mouse.column);
             }
-            PasteTarget::Search(area) => self.search.click_row_after(area, &search, mouse.column),
-            PasteTarget::EventSearch(area) => {
-                self.event_list
-                    .search
-                    .query
-                    .click_row_after(area, &search, mouse.column)
-            }
-            PasteTarget::EventDetailSearch(area) => {
-                self.event_detail
-                    .search
-                    .query
-                    .click_row_after(area, &search, mouse.column)
+            PasteTarget::Search(panel) => {
+                let rect = self.search_rect(panel);
+                self.edit_search(panel, |search| search.click(rect, mouse.column));
             }
             PasteTarget::Question(area) => {
                 self.position_question_paste(area, mouse.column, mouse.row);
@@ -944,7 +927,7 @@ impl View {
                 .is_some_and(|(button, _, _, dragged)| button == MouseButton::Right && !dragged)
             {
                 self.last_event_detail_click = None;
-                if self.selected_draft.is_some() {
+                if self.search_focused() || self.selected_draft.is_some() {
                     self.right_click();
                     return None;
                 }
@@ -965,9 +948,7 @@ impl View {
             }
             return None;
         }
-        if (self.active_panel == Panel::TaskDetails && self.rename_target.is_some())
-            || self.searching
-        {
+        if self.active_panel == Panel::TaskDetails && self.rename_target.is_some() {
             self.mouse_press = None;
             self.text_selection.borrow_mut().take();
             return None;
@@ -1602,8 +1583,7 @@ impl View {
         self.rename_target = Some(id);
         self.set_active_panel(Panel::TaskDetails);
         self.name_target = None;
-        self.search.clear();
-        self.searching = false;
+        self.edit_search(Panel::TaskList, search_input::SearchInput::close);
         None
     }
 
@@ -1762,16 +1742,11 @@ impl View {
             )
             && !self.prompt_focused()
             && self.title_editor().is_none()
-            && !self.searching
-            && !self.task_search_editing()
+            && !self.search_focused()
         {
             return None;
         }
-        if self.prompt_focused()
-            && self.input_disabled().is_none()
-            && !self.searching
-            && !self.task_search_editing()
-        {
+        if self.prompt_focused() && self.input_disabled().is_none() && !self.search_focused() {
             if key.code == KeyCode::Esc && self.selected_draft.is_some() {
                 self.confirm_draft_delete();
                 return None;
@@ -1812,8 +1787,7 @@ impl View {
         if self.active_panel == Panel::TaskList
             && self.confirm_dialog.is_none()
             && !self.help
-            && !self.task_search_editing()
-            && !self.searching
+            && !self.search_focused()
             && self
                 .selected_row()
                 .is_some_and(|session| !session.can_resume())
@@ -1880,79 +1854,22 @@ impl View {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Some(Action::Quit);
         }
-        if self.active_panel == Panel::EventDetail && self.event_detail.search.editing {
-            match key.code {
-                KeyCode::Esc => self.event_detail.search.clear(),
-                KeyCode::Enter => self.event_detail.search.editing = false,
-                _ => {
-                    self.event_detail.search.query.handle(key);
-                }
-            }
-            self.jump_event_detail_match();
+        let active = self.active_panel;
+        if self.search_focused() && self.edit_search(active, |search| search.handle_key(key)) {
             return None;
         }
-        if self.active_panel == Panel::EventList
-            && self.event_list.search.editing
-            && !(plain && key.code == KeyCode::Char(' '))
-        {
-            let selected_full = self
-                .event_list
-                .cursor
-                .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
-            match key.code {
-                KeyCode::Esc => {
-                    self.event_list.search.clear();
-                }
-                KeyCode::Enter => self.event_list.search.editing = false,
-                _ => {
-                    let before = self.event_list.search.query.text().to_owned();
-                    if self.event_list.search.query.handle(key) {
-                        if self.event_list.search.query.text() != before {
-                            self.rematch_event_at(selected_full);
-                        }
-                        return None;
-                    }
-                }
-            }
-            if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
-                self.rematch_event_at(selected_full);
+        if self.panel_search(active).is_some() {
+            if plain && key.code == KeyCode::Char('/') {
+                self.edit_search(active, search_input::SearchInput::focus);
                 return None;
             }
-        }
-        if self.searching {
-            let before = self.search.text().to_owned();
-            if self.search.handle(key) {
-                if self.search.text() != before {
-                    if (plain && matches!(key.code, KeyCode::Char(_)))
-                        || key.code == KeyCode::Backspace
-                    {
-                        let selectable = self.selectable_indices();
-                        let selected = selectable
-                            .iter()
-                            .copied()
-                            .find(|&i| self.rows.get(i).is_some_and(|s| self.matches_search(s)))
-                            .or_else(|| selectable.first().copied())
-                            .unwrap_or(usize::MAX);
-                        self.select(selected);
-                    } else {
-                        self.reconcile_selection();
-                    }
-                    self.viewport.borrow_mut().scroll = 0;
-                }
+            if key.code == KeyCode::Esc
+                && self
+                    .panel_search(active)
+                    .is_some_and(search_input::SearchInput::applied)
+            {
+                self.edit_search(active, search_input::SearchInput::close);
                 return None;
-            }
-            match key.code {
-                KeyCode::Esc => {
-                    self.search.clear();
-                    self.searching = false;
-                    self.reconcile_selection();
-                    return None;
-                }
-                KeyCode::F(3) => {
-                    self.searching = false;
-                    return None;
-                }
-                _ => {}
             }
         }
         if plain && key.code == KeyCode::Char('?') && key.kind == KeyEventKind::Press {
@@ -1961,22 +1878,6 @@ impl View {
         }
         if plain && matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
             self.set_filter(1 - self.status_filter);
-            return None;
-        }
-        if plain && key.code == KeyCode::Char('/') {
-            match self.active_panel {
-                Panel::TaskList => self.searching = true,
-                Panel::EventList => {
-                    self.event_list.search.editing = true;
-
-                    self.prepare_event_search();
-                }
-                Panel::EventDetail => {
-                    self.event_detail.search.editing = true;
-                    self.jump_event_detail_match();
-                }
-                _ => {}
-            }
             return None;
         }
         if plain
@@ -1996,7 +1897,7 @@ impl View {
                 }
             };
             self.cancel_event_detail_selection();
-            self.event_detail.search.clear();
+            self.edit_search(Panel::EventDetail, search_input::SearchInput::close);
             self.event_detail.scroll.borrow_mut().offset = 0;
             self.viewport.borrow_mut().event_detail_layout = None;
             self.refresh_transcript();
