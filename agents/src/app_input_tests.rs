@@ -490,7 +490,11 @@ fn app_creates_worktree_with_the_task_request() {
 
 #[test]
 fn registry_background_title_needs_and_delete_warning_reach_the_screen() {
+    let Some(clipboard) = paste_clipboard_directory() else {
+        return;
+    };
     let (directory, mut app, _path, _registry) = registry_app("bg");
+    fs::write(clipboard.join("text"), "original clipboard").unwrap();
     let state_path = directory.path().join("jobs/e772d00b/state.json");
     let mut state: serde_json::Value =
         serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
@@ -538,7 +542,13 @@ fn registry_background_title_needs_and_delete_warning_reach_the_screen() {
         "{rendered}"
     );
     app.handle_event(Event::Paste("blocked-paste-proof".into()));
-    assert!(!screen(&mut app).contains("blocked-paste-proof"));
+    let rendered = screen(&mut app);
+    assert!(!rendered.contains("blocked-paste-proof"));
+    assert!(rendered.contains("Cannot paste here"), "{rendered}");
+    assert_eq!(
+        fs::read_to_string(clipboard.join("text")).unwrap(),
+        "original clipboard"
+    );
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
     assert!(app.sessions[0].transcript.as_ref().unwrap().is_file());
 }
@@ -734,7 +744,7 @@ fn tab_pins_persist_independently_and_only_active_pins_expire() {
 }
 
 // Isolate the clipboard environment from tests running in other threads.
-fn paste_clipboard_directory() -> Option<PathBuf> {
+pub(super) fn paste_clipboard_directory() -> Option<PathBuf> {
     let thread = std::thread::current();
     let name = thread.name().unwrap();
     if std::env::var("AGENTS_PASTE_TEST").as_deref() == Ok(name) {
@@ -795,10 +805,11 @@ fn stray_paste_from_task_and_event_lists_focuses_prompt() {
 }
 
 #[test]
-fn stray_paste_under_help_is_copied_without_entering_help() {
+fn stray_paste_under_help_preserves_clipboard_without_entering_help() {
     let Some(clipboard) = paste_clipboard_directory() else {
         return;
     };
+    fs::write(clipboard.join("text"), "original clipboard").unwrap();
     let (_directory, mut app, _, _) = registry_app("bg");
     app.handle_event(Event::Key(KeyEvent::new(
         KeyCode::Char('?'),
@@ -807,27 +818,29 @@ fn stray_paste_under_help_is_copied_without_entering_help() {
     app.handle_event(Event::Paste("must-not-enter-help".into()));
     assert_eq!(
         fs::read_to_string(clipboard.join("text")).unwrap(),
-        "must-not-enter-help"
+        "original clipboard"
     );
     assert!(!screen(&mut app).contains("must-not-enter-help"));
+    assert!(screen(&mut app).contains("Cannot paste here"));
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
     assert!(!screen(&mut app).contains("must-not-enter-help"));
 }
 
 #[test]
-fn stray_paste_to_disabled_task_is_copied() {
+fn stray_paste_to_disabled_task_preserves_clipboard() {
     let Some(clipboard) = paste_clipboard_directory() else {
         return;
     };
+    fs::write(clipboard.join("text"), "original clipboard").unwrap();
     let (_directory, mut app, _, _) = registry_app("interactive");
     app.handle_event(Event::Paste("disabled dictation".into()));
     assert_eq!(
         fs::read_to_string(clipboard.join("text")).unwrap(),
-        "disabled dictation"
+        "original clipboard"
     );
     assert!(!app.view.pasting_prompt());
     assert!(!screen(&mut app).contains("disabled dictation"));
-    assert!(screen(&mut app).contains("Pasted text copied to the clipboard"));
+    assert!(screen(&mut app).contains("Cannot paste here"));
 }
 
 #[test]
@@ -840,4 +853,30 @@ fn stray_paste_image_path_becomes_an_attachment() {
     let rendered = screen(&mut app);
     assert!(rendered.contains("[Image #1]"), "{rendered}");
     assert!(!rendered.contains("paste image.png"));
+}
+
+#[test]
+fn stray_paste_to_frozen_draft_preserves_clipboard() {
+    let Some(clipboard) = paste_clipboard_directory() else {
+        return;
+    };
+    fs::write(clipboard.join("text"), "original clipboard").unwrap();
+    let (directory, mut app, _, _) = registry_app("bg");
+    let draft = app.view.add_draft(crate::ui::DraftSetup {
+        provider: ProviderId::Claude,
+        cwd: directory.path().to_owned(),
+        model: None,
+        effort: None,
+        branch: String::new(),
+    });
+    app.view
+        .draft_job_created(draft, "pending-draft-job".into());
+    app.handle_event(Event::Paste("frozen dictation".into()));
+    assert_eq!(
+        fs::read_to_string(clipboard.join("text")).unwrap(),
+        "original clipboard"
+    );
+    let rendered = screen(&mut app);
+    assert!(rendered.contains("Cannot paste here"), "{rendered}");
+    assert!(!rendered.contains("frozen dictation"));
 }

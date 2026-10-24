@@ -733,6 +733,10 @@ fn medium_and_large_event_double_click_focuses_list_and_keeps_preview_following(
 
 #[test]
 fn medium_and_large_list_and_detail_search_route_paste_without_changing_preview() {
+    let Some(clipboard) = super::input_tests::paste_clipboard_directory() else {
+        return;
+    };
+    std::fs::write(clipboard.join("text"), "original clipboard").unwrap();
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
         let (_directory, mut app) = fixture_with_double_click_ms(20);
         select_archive(&mut app);
@@ -776,6 +780,11 @@ fn medium_and_large_list_and_detail_search_route_paste_without_changing_preview(
         let rendered = lines(&buffer).join("\n");
         assert!(rendered.contains("Permanently delete"), "{rendered}");
         assert!(!rendered.contains("must-not-enter-confirmation"));
+        assert!(rendered.contains("Cannot paste here"), "{rendered}");
+        assert_eq!(
+            std::fs::read_to_string(clipboard.join("text")).unwrap(),
+            "original clipboard"
+        );
         key(&mut app, KeyCode::Esc);
     }
 }

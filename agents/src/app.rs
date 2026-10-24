@@ -685,12 +685,7 @@ impl App {
                 return false;
             }
             if !self.view.prepare_paste_prompt() {
-                match self.clipboard.copy(text) {
-                    Ok(()) => self
-                        .view
-                        .show_info("Pasted text copied to the clipboard".into()),
-                    Err(error) => self.view.show_error(format!("Cannot copy: {error}")),
-                }
+                self.view.show_info("Cannot paste here".into());
                 return false;
             }
             return self.paste(text);
