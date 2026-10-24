@@ -5,7 +5,7 @@ that lets Claude run codex threads on the shared local app-server daemon as
 supervised workers. Claude installs it as `codex`; Codex installs the communication
 client as `claude`. The Claude plugin adds one
 MCP server, `codex-manager`: Claude starts a thread, gives it follow-up
-prompts, answers its questions and approval requests, interrupts it, lists
+prompts, answers its questions, interrupts it, lists
 what is running, asks it for a code review, and gets woken when it finishes
 or has something to say. Codex reaches Claude through two tools,
 `notify` and `ask`, served by an MCP server this plugin ships.
@@ -70,12 +70,12 @@ with its app-server daemon running (`codex agents` starts one).
 
 | Tool | Does |
 |---|---|
-| `start(cwd, prompt, name?, model?, effort?)` | `thread/start` on the daemon (approval `on-request`, sandbox `workspace-write` with network access, and the `claude-client` MCP server in its config), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. Omit both `model` and `effort` to keep the daemon defaults, or pass both: `gpt-6.1-sol` with `medium`, or `gpt-6-luna` with `high`. Other pairs are refused. |
+| `start(cwd, prompt, name?, model?, effort?)` | `thread/start` on the daemon (approval `on-request` with `approvalsReviewer: "auto_review"`, sandbox `workspace-write` with network access, and the `claude-client` MCP server in its config), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. Omit both `model` and `effort` to keep the daemon defaults, or pass both: `gpt-6.1-sol` with `medium`, or `gpt-6-luna` with `high`. Other pairs are refused. |
 | `attach(thread)` | Take over a session that is already running elsewhere (the codex TUI, say), found by its thread id or exact name. `thread/resume` with nothing but the id subscribes to it, so its settings stay as its own client set them. After that `send`, `reply`, `interrupt`, `list` and the await command work on it. |
 | `send(threadId, prompt)` | `turn/start` on an existing thread. When a turn is still running the prompt is injected into it (the daemon's start-or-steer rule); the result says which happened. |
-| `reply(threadId, ask, reply, callId?)` | Answer what the thread is waiting for, quoting the request's text as `ask`: the reply becomes the result of its `ask` call, or, for an approval request, one of the decisions its inbox event listed. `callId` picks one when several are waiting. |
+| `reply(threadId, ask, reply, callId?)` | Answer what the thread is waiting for, quoting the request's text as `ask`: the reply becomes the result of its `ask` call. `callId` picks one when several are waiting. |
 | `interrupt(threadId)` | `turn/interrupt` the thread's current turn. |
-| `list(state?)` | The threads this Claude session started or attached, their `state`, and the unread inbox count per thread. State is `detached` first, then `waiting` for a pending ask or approval, otherwise `lastStatus`: `inProgress`, `completed`, `failed`, `interrupted`, `idle` (no turn yet), or `unavailable` (resume failed). Pass an array of states to include; omit for all threads, or pass `[]` for none. |
+| `list(state?)` | The threads this Claude session started or attached, their `state`, and the unread inbox count per thread. State is `detached` first, then `waiting` for a pending ask, otherwise `lastStatus`: `inProgress`, `completed`, `failed`, `interrupted`, `idle` (no turn yet), or `unavailable` (resume failed). Pass an array of states to include; omit for all threads, or pass `[]` for none. |
 | `detach(threadId)` | Release a thread no longer needed. A thread this session started gets `thread/archive`, together with its spawned agents, and a later `send` is refused. An attached session only gets `thread/unsubscribe`; it stays open in its own client, and a later `send` or `attach` subscribes again. Refused while a turn is running. |
 | `review(cwd, base, out, plan?, decisions?, name?, stance?, focus?)` | A read-only thread running codex's own review mode (`review/start`, its rubric and P0–P3 priorities) over the commits since `base`; the rendered review — an overall verdict and one finding per line with its file and lines — is saved to `out`. With `plan`, the reviewer reads the spec first and does not flag a behaviour change the spec asks for. With `decisions`, the reviewer also reads the rules decided during the run: it does not report one as a departure from the spec, and judges each on its own, tracing what reads the result, also in code the changes did not touch. `stance: "adversarial"` adds a challenge stance (`codex-manager/adversarial-review.md`): the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. `focus` names what it should weigh most. |
 
@@ -86,11 +86,11 @@ daemon's `searchTerm` filters titles. Sessions keep their name after they are
 closed, so when several share one, the only one that is open is taken; with
 none or several open, the name is refused with the candidates' ids.
 
-The daemon sends a thread's approval requests to every client subscribed to
-it, and the first answer settles them for all. So for an attached session the
-manager answers none of the daemon's requests, not even with an error: they
-stay with the client the session runs in. `notify` and `ask` do
-reach Claude, because they do not travel through the daemon's requests.
+Codex handles approvals through its own auto review for threads the manager
+starts. If the manager receives a command or file-change approval request,
+it replies `decline` immediately, including for attached sessions. These
+requests never enter Claude's inbox. `notify` and `ask` reach Claude through
+the tools server.
 
 ## Getting woken
 
@@ -118,7 +118,7 @@ node <plugin>/codex-manager/manager.mjs await --thread <id> [--timeout <s>]
 ```
 
 It prints the next unread inbox events as JSON lines and exits 0, which wakes
-Claude. Four kinds of event arrive:
+Claude. Three kinds of event arrive:
 
 - `{"kind":"completed","status":"completed|interrupted|failed","lastMessage":…}`
   from `turn/completed`. A codex turn is a whole task, so this fires once per
@@ -131,18 +131,13 @@ Claude. Four kinds of event arrive:
   server keeps the call open, so codex blocks inside the same turn until
   Claude calls `reply`; the reply text is what codex receives as the tool's
   result.
-- `{"kind":"approval","callId":…,"text":…,"decisions":[…],…}` when codex asks
-  to run a command or change files outside its sandbox
-  (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`).
-  Claude answers with `reply` and one of the listed decisions.
 
-An ask or approval that Claude does not answer within
-`CODEX_MANAGER_ASK_TIMEOUT` seconds (default 300) is answered for it: asks get
-"proceed on your own judgment", approvals get `decline`. While something is
+An ask that Claude does not answer within `CODEX_MANAGER_ASK_TIMEOUT`
+seconds (default 300) gets "proceed on your own judgment". While an ask is
 waiting, every tool result carries an `attention` list, one
 `{threadId, kind, callId, text}` per waiting request, and the Stop hook nudges
-once per stop. When the turn ends or a new one starts the daemon aborts
-whatever was still held, and the manager withdraws the open questions too.
+once per stop. When the turn ends or a new one starts, the manager withdraws
+the open questions.
 
 ## How a tool call finds its Claude session
 
@@ -176,8 +171,8 @@ blocks while a thread's turn is running and no `await` is waiting on it, and
 names the command to run. It does so on every stop, until one is running.
 
 If the daemon connection drops (a daemon restart, say) the MCP server
-reconnects with backoff while it has threads, `thread/resume`s them, and the
-daemon replays any request that was still waiting for an answer.
+reconnects with backoff while it has threads, `thread/resume`s them, and
+backfills turns that finished while disconnected.
 
 ## State
 
@@ -185,7 +180,7 @@ daemon replays any request that was still waiting for an answer.
 ~/.local/state/codex-manager/
   threads/<codex-thread-id>.json   the supervising Claude session and its manager's pid
   <claude-session-id>/
-    state.json                          threads: id, owner, name, cwd, turnId, lastStatus, waiting (held approvals), attached, review (out file)
+    state.json                          threads: id, owner, name, cwd, turnId, lastStatus, attached, review (out file)
     <codex-thread-id>.jsonl             the inbox, appended by the manager and the tools server
     <codex-thread-id>.cursor            byte offset of events delivered by await
     <codex-thread-id>.pending.cursor    byte offset of events delivered by Stop/SubagentStop
@@ -203,8 +198,7 @@ record and, when it differs, links `<current-id>/` to its own directory, so the
 await command and the Stop hook read the same inboxes. Because `claude
 --resume` keeps the id, a resumed session reconnects to its threads: the MCP
 server `thread/resume`s each recorded thread (which subscribes it to that
-thread's notifications and replays any pending approval) and backfills a
-`completed` event for turns that finished while Claude was away. Codex threads
+thread's notifications) and backfills a `completed` event for turns that finished while Claude was away. Codex threads
 outlive the Claude session: a running turn finishes on its own, and the daemon
 unloads a thread `thread_unload_delay_secs` after its last subscriber leaves
 (default 1800 s; this setup sets 60 s in `~/.codex/config.toml`). The daemon
@@ -249,8 +243,8 @@ npm run test:codex
 
 `tests/codex-manager.test.mjs` drives the MCP server and the `await`/`pending`
 readers against a fake daemon (`tests/helpers/fake-daemon.mjs`): thread start
-parameters, approval forwarding, completion delivery, the review tool, adoption on
-restart, reconnect after a dropped daemon connection, daemon-down error
+parameters, immediate approval decline without inbox events, completion
+delivery, the review tool, adoption on restart, reconnect after a dropped daemon connection, daemon-down error
 reporting, and attaching to a session by name or id. The tools server runs as
 a second child on the same state directory, called the way codex calls it:
 `notify`, `ask` answered by `reply`, ask timeout, cancelled and

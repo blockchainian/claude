@@ -274,9 +274,9 @@ test("SubagentStop blocks only its unwatched running threads and held replies", 
   try {
     await mkdir(home.dir, { recursive: true });
     const threads = [{ id: "thread-main", owner: "main" }, { id: "thread-agent", owner: "agent-a" },
-      { id: "thread-other", owner: "agent-b" }, { id: "thread-legacy" }].map((thread) => ({ ...thread, lastStatus: "inProgress",
-        waiting: [{ kind: "approval", callId: "c", since: 1, text: `approve ${thread.id}` }] }));
+      { id: "thread-other", owner: "agent-b" }, { id: "thread-legacy" }].map((thread) => ({ ...thread, lastStatus: "inProgress" }));
     await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ threads }));
+    for (const thread of threads) await writeFile(path.join(home.dir, `${thread.id}.ask.c.json`), JSON.stringify({ kind: "ask", callId: "c", since: 1, text: `question ${thread.id}` }));
     const stop = (active) => run(["pending"], { env: { CODEX_MANAGER_STATE_DIR: home.home },
       stdin: JSON.stringify({ session_id: session, hook_event_name: "SubagentStop", agent_id: "agent-a", stop_hook_active: active }) });
     for (const active of [false, true]) {
@@ -459,7 +459,7 @@ test("mcp initialize provides thread lifecycle instructions before tools are loa
     assert.equal(typeof result.instructions, "string");
     assert.match(result.instructions, /start.*await.*run_in_background/);
     assert.match(result.instructions, /no activity for a minute.*stuck.*pointed hint.*never steer.*faked tests/);
-    assert.match(result.instructions, /finished only.*turn completed.*not failed, interrupted.*waiting on an ask or approval.*checked and accepted.*no further message/);
+    assert.match(result.instructions, /finished only.*turn completed.*not failed, interrupted.*waiting on an ask.*checked and accepted.*no further message/);
     assert.match(result.instructions, /Detach it in that same turn/);
     assert.match(result.instructions, /Before ending a multi-thread run, list with state: \["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"\].*detach every finished one/);
     assert.match(result.instructions, /check list with state: \["waiting"\] for waiting requests before you reply.*already answered/);
@@ -492,6 +492,7 @@ test("mcp starts a thread that reaches Claude's tools over MCP, and relays compl
     const start = script.messages[2].params;
     assert.equal(start.cwd, path.resolve("plugins"));
     assert.equal(start.approvalPolicy, "on-request");
+    assert.equal(start.approvalsReviewer, "auto_review");
     assert.equal(start.sandbox, "workspace-write");
     assert.equal(start.ephemeral, false);
     assert.equal(start.serviceName, "codex-manager");
@@ -793,37 +794,24 @@ test("an attached session asks the Claude session that attached it", { timeout: 
   }
 });
 
-test("approval requests are forwarded to Claude and answered by decision; timeouts decline", { timeout: 20_000 }, async () => {
+test("approval requests are declined immediately without inbox events", { timeout: 10_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
   const { mcp, socket } = await startedThread(home, daemon, script);
   try {
-    send(socket, { id: 930, method: "item/commandExecution/requestApproval", params: { threadId: "thread-A", turnId: "turn-1", itemId: "item-cmd", approvalId: null, command: "rm -rf build", cwd: "/repo", reason: "outside the sandbox", availableDecisions: ["accept", { acceptWithExecpolicyAmendment: {} }, "decline"] } });
-    const inbox = path.join(home.dir, "thread-A.jsonl");
-    await waitFor(() => inboxLines(inbox).some((line) => line.kind === "approval"));
-    const line = inboxLines(inbox).find((line) => line.kind === "approval");
-    assert.equal(line.callId, "item-cmd");
-    assert.equal(line.command, "rm -rf build");
-    assert.equal(line.reason, "outside the sandbox");
-    assert.deepEqual(line.decisions, ["accept", "decline"]);
-
-    const bad = await mcp.call("reply", { threadId: "thread-A", ask: "the request", reply: "acceptForSession" });
-    assert.equal(bad.isError, true);
-    assert.match(bad.text, /accept, decline/);
-    const ok = await mcp.call("reply", { threadId: "thread-A", ask: "the request", reply: "accept" });
-    assert.equal(ok.isError, false, ok.text);
-    await waitFor(() => script.messages.some((message) => message.id === 930));
-    assert.deepEqual(script.messages.find((message) => message.id === 930).result, { decision: "accept" });
-
-    send(socket, { id: 931, method: "item/fileChange/requestApproval", params: { threadId: "thread-A", turnId: "turn-1", itemId: "item-fc", reason: "writes outside cwd", grantRoot: "/etc" } });
-    await waitFor(() => inboxLines(inbox).filter((line) => line.kind === "approval").length === 2);
-    const fileChange = inboxLines(inbox).filter((line) => line.kind === "approval")[1];
-    assert.equal(fileChange.grantRoot, "/etc");
-    assert.deepEqual(fileChange.decisions, ["accept", "acceptForSession", "decline", "cancel"]);
-    await mcp.call("reply", { threadId: "thread-A", ask: "the request", reply: "decline" });
-    await waitFor(() => script.messages.some((message) => message.id === 931));
-    assert.deepEqual(script.messages.find((message) => message.id === 931).result, { decision: "decline" });
+    for (const [id, method] of [[930, "item/commandExecution/requestApproval"], [931, "item/fileChange/requestApproval"]]) {
+      send(socket, { id, method, params: { threadId: "thread-A", turnId: "turn-1", itemId: `item-${id}` } });
+      await waitFor(() => script.messages.some((message) => message.id === id), { timeout: 1000 });
+      assert.deepEqual(script.messages.find((message) => message.id === id).result, { decision: "decline" });
+    }
+    assert.deepEqual(inboxLines(path.join(home.dir, "thread-A.jsonl")), []);
+    const listed = await mcp.call("list", {});
+    assert.deepEqual(listed.json.threads[0].waiting, []);
+    assert.equal(listed.json.threads[0].state, "inProgress");
+    assert.equal(listed.json.attention, undefined);
+    const state = JSON.parse(await readFile(path.join(home.dir, "state.json"), "utf8"));
+    assert.equal(state.threads[0].waiting, undefined);
   } finally {
     await mcp.close();
     await daemon.close();
@@ -836,7 +824,8 @@ test("pending blocks once for an unanswered ask and not again while the stop hoo
   try {
     const env = { CODEX_MANAGER_STATE_DIR: home.home };
     await mkdir(home.dir, { recursive: true });
-    await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ updatedAt: 1, threads: [{ id: "thread-C", lastStatus: "inProgress", waiting: [{ kind: "ask", callId: "c", since: 1, text: "which one?" }] }] }));
+    await writeFile(path.join(home.dir, "state.json"), JSON.stringify({ updatedAt: 1, threads: [{ id: "thread-C", lastStatus: "inProgress" }] }));
+    await writeFile(path.join(home.dir, "thread-C.ask.c.json"), JSON.stringify({ kind: "ask", callId: "c", since: 1, text: "which one?" }));
     await writeFile(path.join(home.dir, `thread-C.await.${process.pid}`), "");
     const first = await run(["pending"], { env, stdin: JSON.stringify({ session_id: session, stop_hook_active: false }) });
     assert.equal(first.code, 0, first.stderr);
@@ -991,25 +980,6 @@ test("server requests for threads this session does not own are rejected without
   }
 });
 
-test("an unanswered approval times out with decline", { timeout: 20_000 }, async () => {
-  const home = await tempHome();
-  const script = daemonScript();
-  const daemon = await fakeDaemon(script.handler);
-  const mcp = new McpChild(home.home, daemon.socketPath, { CODEX_MANAGER_ASK_TIMEOUT: "1" });
-  try {
-    await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
-    await mcp.call("start", { cwd: ".", prompt: "work" });
-    const [socket] = script.sockets;
-    send(socket, { id: 950, method: "item/fileChange/requestApproval", params: { threadId: "thread-A", turnId: "turn-1", itemId: "item-fc" } });
-    await waitFor(() => script.messages.some((message) => message.id === 950), { timeout: 5000 });
-    assert.deepEqual(script.messages.find((message) => message.id === 950).result, { decision: "decline" });
-  } finally {
-    await mcp.close();
-    await daemon.close();
-    await home.close();
-  }
-});
-
 test("several waiting requests are answered by callId, and a finished turn withdraws what is left", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();
@@ -1018,16 +988,15 @@ test("several waiting requests are answered by callId, and a finished turn withd
   const tools = new ToolsChild(home.home);
   try {
     const asking = tools.tool("ask", "thread-A", "ask-1", "first?");
-    send(socket, { id: 961, method: "item/commandExecution/requestApproval", params: { threadId: "thread-A", turnId: "turn-1", itemId: "cmd-1", command: "make deploy" } });
+    const second = tools.tool("ask", "thread-A", "ask-2", "second?");
     await waitFor(() => inboxLines(path.join(home.dir, "thread-A.jsonl")).length === 2);
     const ambiguous = await mcp.call("reply", { threadId: "thread-A", ask: "the request", reply: "yes" });
     assert.equal(ambiguous.isError, true);
     assert.match(ambiguous.text, /ask-1/);
-    assert.match(ambiguous.text, /cmd-1/);
-    const answered = await mcp.call("reply", { threadId: "thread-A", callId: "cmd-1", ask: "the request", reply: "accept" });
+    assert.match(ambiguous.text, /ask-2/);
+    const answered = await mcp.call("reply", { threadId: "thread-A", callId: "ask-2", ask: "second?", reply: "yes" });
     assert.equal(answered.isError, false, answered.text);
-    await waitFor(() => script.messages.some((message) => message.id === 961));
-    assert.deepEqual(script.messages.find((message) => message.id === 961).result, { decision: "accept" });
+    assert.equal((await second).text, "yes");
 
     send(socket, { method: "turn/completed", params: { threadId: "thread-A", turn: { id: "turn-1", status: "interrupted" } } });
     const withdrawn = await asking;
@@ -1098,6 +1067,7 @@ test("review starts a read-only thread, runs codex's review mode on a base sha, 
     const start = script.messages[2].params;
     assert.equal(start.cwd, path.resolve("plugins"));
     assert.equal(start.sandbox, "read-only");
+    assert.equal(start.approvalsReviewer, "auto_review");
     assert.equal(start.dynamicTools, undefined);
     const started = script.messages[4].params;
     assert.equal(started.threadId, "thread-A");
@@ -1226,10 +1196,8 @@ for (const check of ["state precedence", "state filter"]) {
   test(`list exposes ${check} without changing stored history`, { timeout: 10_000 }, async () => {
     const home = await tempHome();
     await mkdir(home.dir, { recursive: true });
-    const approval = { kind: "approval", callId: "approval", since: 1, text: "allow?" };
     const threads = [
-      { id: "detached", detached: true, lastStatus: "inProgress", waiting: [approval] },
-      { id: "approval", lastStatus: "inProgress", waiting: [approval] },
+      { id: "detached", detached: true, lastStatus: "inProgress", waiting: [] },
       { id: "ask", lastStatus: "inProgress", waiting: [] },
       ...["inProgress", "completed", "failed", "interrupted", "idle", "unavailable"].map(lastStatus => ({ id: lastStatus, lastStatus, waiting: [] }))
     ];
@@ -1243,9 +1211,9 @@ for (const check of ["state precedence", "state filter"]) {
       assert.equal(all.isError, false, all.text);
       const states = ["detached", "waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"];
       if (check === "state precedence") {
-        assert.deepEqual(all.json.threads.map(thread => thread.state), ["detached", "waiting", "waiting", ...states.slice(2)]);
+        assert.deepEqual(all.json.threads.map(thread => thread.state), ["detached", "waiting", ...states.slice(2)]);
         assert.deepEqual(all.json.threads.map(thread => thread.id), threads.map(thread => thread.id));
-        assert.equal(all.json.threads[2].waiting[0].callId, "question");
+        assert.equal(all.json.threads[1].waiting[0].callId, "question");
       } else {
         for (const state of [...states.map(value => [value]), states.slice(1), states, [], ["waiting", "completed"]]) {
           const filtered = await mcp.call("list", { state });
@@ -1384,7 +1352,7 @@ test("attach finds a session by name across pages, subscribes without changing i
       await: `node ${JSON.stringify(manager)} await --thread thread-5`,
       note: attached.json.note
     });
-    assert.match(attached.json.note, /Approvals and questions stay with the client/);
+    assert.match(attached.json.note, /calls notify or ask/);
 
     const lists = script.messages.filter((message) => message.method === "thread/list");
     assert.deepEqual(lists.map((message) => message.params.cursor), [undefined, "2", "4", "6"]);
@@ -1394,7 +1362,7 @@ test("attach finds a session by name across pages, subscribes without changing i
     assert.equal(script.messages.some((message) => message.method === "thread/start"), false);
 
     const state = JSON.parse(await readFile(path.join(home.dir, "state.json"), "utf8"));
-    assert.deepEqual(state.threads, [{ id: "thread-5", name: "slow-requests", cwd: "/repo/e", turnId: "turn-live", lastStatus: "inProgress", waiting: [], attached: true }]);
+    assert.deepEqual(state.threads, [{ id: "thread-5", name: "slow-requests", cwd: "/repo/e", turnId: "turn-live", lastStatus: "inProgress", attached: true }]);
 
     const sent = await mcp.call("send", { threadId: "thread-5", prompt: "steer: use the index instead" });
     assert.equal(sent.isError, false, sent.text);
@@ -1530,7 +1498,7 @@ test("attach records nothing when the daemon cannot resume the session", { timeo
   }
 });
 
-test("requests the daemon sends for an attached session are left to the client it runs in, also after a restart", { timeout: 20_000 }, async () => {
+test("attached sessions decline approvals without inbox events, also after a restart", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();
   script.threads = sessionsOnDaemon();
@@ -1540,19 +1508,21 @@ test("requests the daemon sends for an attached session are left to the client i
   const mcp = await mcpChild(home, daemon, env);
   let restarted = false;
   const inbox = path.join(home.dir, "thread-5.jsonl");
-  const silentOn = async (socket, firstId) => {
+  const declineOn = async (socket, firstId) => {
     send(socket, { id: firstId, method: "item/commandExecution/requestApproval", params: { threadId: "thread-5", turnId: "turn-live", itemId: "item-cmd", command: "rm -rf build" } });
     send(socket, { id: firstId + 1, method: "item/fileChange/requestApproval", params: { threadId: "thread-5", turnId: "turn-live", itemId: "item-fc" } });
     send(socket, { id: firstId + 2, method: "item/tool/call", params: { threadId: "thread-5", turnId: "turn-live", callId: "call-1", tool: "create_thread", arguments: {} } });
-    // Longer than the ask timeout, so a held request would have been answered by now.
-    await new Promise((resolve) => setTimeout(resolve, 1600));
-    assert.deepEqual(script.messages.filter((message) => message.id >= firstId && message.method === undefined), []);
+    await waitFor(() => script.messages.filter((message) => message.id >= firstId && message.method === undefined).length === 2, { timeout: 1000 });
+    assert.deepEqual(script.messages.filter((message) => message.id >= firstId && message.method === undefined), [
+      { id: firstId, result: { decision: "decline" } },
+      { id: firstId + 1, result: { decision: "decline" } }
+    ]);
     assert.deepEqual(inboxLines(inbox), []);
   };
   try {
     await mcp.call("attach", { thread: "slow-requests" });
     const [socket] = script.sockets;
-    await silentOn(socket, 970);
+    await declineOn(socket, 970);
     const listed = await mcp.call("list", {});
     assert.deepEqual(listed.json.threads[0].waiting, []);
     assert.equal(listed.json.attention, undefined);
@@ -1565,7 +1535,7 @@ test("requests the daemon sends for an attached session are left to the client i
       assert.equal(adopted.json.threads[0].attached, true);
       assert.equal(script.messages.filter((message) => message.method === "thread/resume").length, 2);
       await waitFor(() => script.sockets.size === 2);
-      await silentOn([...script.sockets][1], 980);
+      await declineOn([...script.sockets][1], 980);
     } finally {
       await later.close();
     }

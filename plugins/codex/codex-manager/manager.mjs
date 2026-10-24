@@ -22,12 +22,7 @@ const usage = `usage:
   manager.mjs pending                               Stop hook: block on undelivered events and unwatched threads
   manager.mjs owner                                 PostToolUse hook: record the thread's starting agent`;
 
-const DEFAULT_DECISIONS = ["accept", "acceptForSession", "decline", "cancel"];
 const MODEL_EFFORTS = Object.freeze({ "gpt-6.1-sol": ["medium"], "gpt-6-luna": ["high"] });
-const APPROVALS = {
-  "item/commandExecution/requestApproval": ["command", "cwd", "reason"],
-  "item/fileChange/requestApproval": ["reason", "grantRoot"]
-};
 // Codex gives up on a tool call after its own timeout, so that one has to outlast the wait for Claude's answer.
 const TOOL_TIMEOUT_MARGIN_SECONDS = 60;
 const FORWARDED_ENV = ["CODEX_MANAGER_STATE_DIR", "CODEX_MANAGER_ASK_TIMEOUT"];
@@ -141,7 +136,7 @@ async function runPending() {
   // A held ask is nudged once per stop; when the hook itself caused this stop, only new events count.
   if (!hook.stop_hook_active) {
     for (const thread of threads) {
-      for (const waiting of [...(thread.waiting ?? []), ...store.asks(thread.id)]) {
+      for (const waiting of store.asks(thread.id)) {
         sections.push(`codex thread ${thread.id} is waiting for reply since ${new Date(waiting.since).toISOString()} (${waiting.kind} ${waiting.callId}): ${waiting.text}`);
       }
     }
@@ -167,7 +162,6 @@ class Manager {
     this.client = undefined;
     this.connecting = undefined;
     this.lastMessages = new Map();
-    this.held = new Map();
     this.reconnectAttempt = 0;
   }
 
@@ -200,9 +194,9 @@ class Manager {
     writeSupervisor(threadId, { sessionId: this.store.sessionId, pid: process.pid });
   }
 
-  /** What the thread is waiting on: approvals held for the daemon, and questions codex keeps on disk. */
+  /** Questions codex keeps on disk while waiting for Claude. */
   waiting(thread) {
-    return [...(thread.waiting ?? []), ...this.store.asks(thread.id)];
+    return this.store.asks(thread.id);
   }
 
   dropThread(threadId) {
@@ -247,9 +241,6 @@ class Manager {
   onDisconnect(client, error) {
     if (this.client !== client) return;
     this.client = undefined;
-    // Held approvals die with the connection; the daemon replays them on resume, with the deadline kept in state.
-    for (const entries of this.held.values()) for (const entry of entries) clearTimeout(entry.timer);
-    this.held.clear();
     log(`daemon connection lost: ${error.message}`);
     this.scheduleReconnect();
   }
@@ -306,8 +297,8 @@ class Manager {
       }
       if (!latest) continue;
       if (latest.id === thread.turnId && latest.status === thread.lastStatus) continue;
-      if (latest.status === "inProgress") this.updateThread(thread.id, { turnId: latest.id, lastStatus: "inProgress", error: undefined, waiting: latest.id === thread.turnId ? thread.waiting : [] });
-      else if (latest.id === thread.turnId && thread.lastStatus !== "inProgress") this.updateThread(thread.id, { lastStatus: latest.status, error: undefined, waiting: [] });
+      if (latest.status === "inProgress") this.updateThread(thread.id, { turnId: latest.id, lastStatus: "inProgress", error: undefined });
+      else if (latest.id === thread.turnId && thread.lastStatus !== "inProgress") this.updateThread(thread.id, { lastStatus: latest.status, error: undefined });
       else this.recordCompletion(thread.id, latest);
     }
   }
@@ -330,17 +321,12 @@ class Manager {
     this.lastMessages.delete(threadId);
     this.store.append(threadId, { kind: "completed", turnId: turn.id, status: turn.status, lastMessage, error: turn.error?.message });
     this.forget(threadId);
-    this.updateThread(threadId, { turnId: turn.id, lastStatus: turn.status, error: undefined, waiting: [] });
+    this.updateThread(threadId, { turnId: turn.id, lastStatus: turn.status, error: undefined });
   }
 
-  /** The daemon aborts a thread's held requests when its turn ends or a new one starts, and its questions go with them. */
+  /** Withdraws open questions when a turn ends or a new one starts. */
   forget(threadId) {
     for (const ask of this.store.asks(threadId)) this.store.removeAsk(threadId, ask.callId);
-    for (const [callId, entries] of this.held) {
-      if (entries[0]?.threadId !== threadId) continue;
-      for (const entry of entries) clearTimeout(entry.timer);
-      this.held.delete(callId);
-    }
   }
 
   onNotification({ method, params = {} }) {
@@ -353,7 +339,7 @@ class Manager {
     } else if (method === "turn/started") {
       const thread = this.thread(threadId);
       if (params.turn?.id !== thread.turnId) this.forget(threadId);
-      this.updateThread(threadId, { turnId: params.turn?.id, lastStatus: "inProgress", waiting: params.turn?.id === thread.turnId ? thread.waiting : [] });
+      this.updateThread(threadId, { turnId: params.turn?.id, lastStatus: "inProgress" });
     } else if (method === "turn/completed") {
       this.recordCompletion(threadId, params.turn);
     }
@@ -363,51 +349,12 @@ class Manager {
     const { id, method, params = {} } = message;
     const reject = (text) => client.send({ id, error: { code: -32601, message: text } });
     if (!this.owns(params.threadId)) return reject(`codex-manager does not own thread ${params.threadId}`);
-    // Every subscriber receives an attached session's requests and the first answer settles them, errors included.
+    if (method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval") {
+      return client.send({ id, result: { decision: "decline" } });
+    }
+    // Other requests for attached sessions stay with the client the session runs in.
     if (this.thread(params.threadId).attached) return undefined;
-    const fields = APPROVALS[method];
-    if (fields) {
-      const details = Object.fromEntries(fields.filter((field) => params[field] != null).map((field) => [field, params[field]]));
-      const text = [method.split("/")[1], details.command, details.reason].filter(Boolean).join(": ");
-      // Amendment decisions carry payloads Claude cannot compose from a word; only plain ones are offered.
-      const offered = params.availableDecisions?.filter((decision) => typeof decision === "string");
-      const decisions = offered?.length ? offered : DEFAULT_DECISIONS;
-      return this.hold(client, id, params.threadId, { kind: "approval", callId: params.approvalId ?? params.itemId, turnId: params.turnId, text, decisions, ...details });
-    }
     return reject(`codex-manager does not handle ${method}`);
-  }
-
-  /** Parks an approval request until Claude replies or the ask timeout declines it. */
-  hold(client, id, threadId, event) {
-    const thread = this.thread(threadId);
-    const waiting = thread.waiting ?? [];
-    const known = waiting.find((entry) => entry.callId === event.callId);
-    if (!known) this.store.append(threadId, event);
-    const since = known?.since ?? Date.now();
-    const remaining = Math.max(0, since + askTimeoutSeconds() * 1000 - Date.now());
-    const timer = setTimeout(() => this.expire(threadId, event), remaining).unref();
-    // A replayed request keeps its earlier copies so every daemon request id gets the one answer.
-    this.held.set(event.callId, [...(this.held.get(event.callId) ?? []), { client, id, threadId, timer }]);
-    if (!known) {
-      const { turnId: _turnId, ...record } = event;
-      this.updateThread(threadId, { waiting: [...waiting, { ...record, since }] });
-    }
-  }
-
-  expire(threadId, event) {
-    const seconds = askTimeoutSeconds();
-    log(`${event.kind} ${event.callId} on thread ${threadId} timed out after ${seconds}s`);
-    this.answer(threadId, event.callId, { decision: "decline" });
-  }
-
-  answer(threadId, callId, result) {
-    for (const entry of this.held.get(callId) ?? []) {
-      clearTimeout(entry.timer);
-      entry.client.send({ id: entry.id, result });
-    }
-    this.held.delete(callId);
-    const thread = this.state().threads.find((candidate) => candidate.id === threadId);
-    if (thread?.waiting?.some((entry) => entry.callId === callId)) this.updateThread(threadId, { waiting: thread.waiting.filter((entry) => entry.callId !== callId) });
   }
 
   attention() {
@@ -416,7 +363,7 @@ class Manager {
   }
 
   async startThread(client, { cwd, name, sandbox, claudeTools, record, model, effort }) {
-    const params = { cwd, approvalPolicy: "on-request", sandbox, serviceName: "codex-manager", ephemeral: false };
+    const params = { cwd, approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandbox, serviceName: "codex-manager", ephemeral: false };
     if (sandbox === "workspace-write") params.config = { "sandbox_workspace_write.network_access": true };
     if (claudeTools) params.config = { ...params.config, "mcp_servers.claude-client": claudeToolsServer() };
     if (model !== undefined) {
@@ -426,7 +373,7 @@ class Manager {
     const started = await client.request("thread/start", params);
     const threadId = started.thread.id;
     if (name) await client.request("thread/name/set", { threadId, name });
-    this.updateThread(threadId, { name: name ?? null, cwd, turnId: null, lastStatus: "idle", waiting: [], ...record });
+    this.updateThread(threadId, { name: name ?? null, cwd, turnId: null, lastStatus: "idle", ...record });
     return threadId;
   }
 
@@ -440,7 +387,7 @@ class Manager {
     const absolute = path.resolve(cwd);
     const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", claudeTools: true, model, effort });
     const turn = await this.startTurn(client, threadId, prompt);
-    return { threadId, turnId: turn.id, name: name ?? null, cwd: absolute, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when codex finishes the turn, calls notify or ask, or needs an approval." };
+    return { threadId, turnId: turn.id, name: name ?? null, cwd: absolute, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when codex finishes the turn, calls notify or ask." };
   }
 
   /** Runs codex's own review mode (its rubric and priorities) over the commits since base; the rendered review lands in out. */
@@ -489,7 +436,7 @@ class Manager {
     const found = await this.findThread(client, thread);
     if (!this.owns(found.id)) {
       // Recorded before the resume so a turn that ends right behind the response is not missed.
-      this.updateThread(found.id, { name: found.name ?? null, cwd: found.cwd, turnId: null, lastStatus: "idle", waiting: [], attached: true });
+      this.updateThread(found.id, { name: found.name ?? null, cwd: found.cwd, turnId: null, lastStatus: "idle", attached: true });
       let latest;
       try {
         latest = await this.subscribe(client, found.id);
@@ -500,7 +447,7 @@ class Manager {
       if (latest && this.thread(found.id).turnId === null) this.updateThread(found.id, { turnId: latest.id, lastStatus: latest.status });
     } else await this.listenAgain(client, found.id);
     const { name, cwd, lastStatus, attached } = this.thread(found.id);
-    return { threadId: found.id, name, cwd, attached: Boolean(attached), lastStatus, await: awaitCommand(found.id), note: "Give it a prompt with send, then run the await command with run_in_background; it exits when codex finishes a turn. Approvals and questions stay with the client the session runs in." };
+    return { threadId: found.id, name, cwd, attached: Boolean(attached), lastStatus, await: awaitCommand(found.id), note: "Give it a prompt with send, then run the await command with run_in_background; it exits when codex finishes a turn. It also exits when codex calls notify or ask." };
   }
 
   async startTurn(client, threadId, prompt) {
@@ -529,14 +476,8 @@ class Manager {
     if (!callId && waiting.length > 1) throw new Error(`thread ${threadId} has several requests waiting; pass callId: ${waiting.map((entry) => `${entry.callId} (${entry.kind})`).join(", ")}`);
     const target = callId ? waiting.find((entry) => entry.callId === callId) : waiting[0];
     if (!target) throw new Error(`thread ${threadId} has no waiting request ${callId}`);
-    const { kind, decisions } = target;
-    if (kind === "ask") {
-      this.store.writeReply(threadId, target.callId, text);
-    } else {
-      if (!this.held.has(target.callId)) throw new Error(`request ${target.callId} was not replayed by the daemon; its turn has probably ended`);
-      if (!decisions.includes(text)) throw new Error(`approval reply must be one of: ${decisions.join(", ")}`);
-      this.answer(threadId, target.callId, { decision: text });
-    }
+    const { kind } = target;
+    this.store.writeReply(threadId, target.callId, text);
     return { threadId, callId: target.callId, kind, answered: true, await: awaitCommand(threadId) };
   }
 
@@ -609,15 +550,15 @@ function reviewInstructions(base, plan, decisions, stance, focus) {
   return `Review the code changes since commit ${base}. Run \`git diff ${base}\` to inspect the changes.${spec}${decided}${adversarial}${focused}${close}Provide prioritized, actionable findings.`;
 }
 
-const INSTRUCTIONS = `Create a thread with start, then run the returned await command with run_in_background. A thread with no activity for a minute, however long it has run, is stuck: send it a pointed hint, and never steer it toward faked tests or workarounds, in a hint or an answer. A thread is finished only when its turn completed (not failed, interrupted, or waiting on an ask or approval), you have checked and accepted its result, and you plan no further message. Detach it in that same turn; a thread you started is then archived and takes no further send. Before ending a multi-thread run, list with state: ["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] and detach every finished one. When a thread asks, check list with state: ["waiting"] for waiting requests before you reply: await can return an ask already answered.`;
+const INSTRUCTIONS = `Create a thread with start, then run the returned await command with run_in_background. A thread with no activity for a minute, however long it has run, is stuck: send it a pointed hint, and never steer it toward faked tests or workarounds, in a hint or an answer. A thread is finished only when its turn completed (not failed, interrupted, or waiting on an ask), you have checked and accepted its result, and you plan no further message. Detach it in that same turn; a thread you started is then archived and takes no further send. Before ending a multi-thread run, list with state: ["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] and detach every finished one. When a thread asks, check list with state: ["waiting"] for waiting requests before you reply: await can return an ask already answered.`;
 
 const TOOLS = [
   { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task; returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute checkout or worktree root, not a subdirectory." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation: its goal, the files involved, test-first, the gate, and commit+push." }, name: { type: "string", description: "Short human-readable thread name." }, model: { type: "string", enum: Object.keys(MODEL_EFFORTS), description: "Worker model; supply effort with it, or omit both for daemon defaults." }, effort: { type: "string", enum: [...new Set(Object.values(MODEL_EFFORTS).flat())], description: `Required effort for the selected model; supply model with it. ${Object.entries(MODEL_EFFORTS).map(([model, efforts]) => `${model} allows ${efforts.join(" or ")}`).join("; ")}.` } }, required: ["cwd", "prompt"] } },
-  { name: "attach", description: "Take over a codex session already running elsewhere, found by its thread id or exact name, so that send, interrupt and the await command work on it. Its approvals stay with the client it runs in.", inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or exact session name." } }, required: ["thread"] } },
+  { name: "attach", description: "Take over a codex session already running elsewhere, found by its thread id or exact name, so that send, interrupt and the await command work on it.", inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or exact session name." } }, required: ["thread"] } },
   { name: "send", description: "Send a follow-up prompt to a codex thread: it starts a new turn when the thread is idle and is injected into the running turn otherwise. Keep follow-ups small and related, at most three items; start a new thread for unrelated work.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, prompt: { type: "string" } }, required: ["threadId", "prompt"] } },
-  { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. Pass the request's text as ask and your answer as reply. The reply becomes the result of its ask call or, for an approval request, one of the decisions its inbox event listed. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, ask: { type: "string", description: "The waiting request's text, verbatim: the ask question or the approval description." }, reply: { type: "string", description: "The answer; for an approval, one of its listed decisions." } }, required: ["threadId", "ask", "reply"] } },
+  { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. Pass the request's text as ask and your answer as reply. The reply becomes the result of its ask call. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, ask: { type: "string", description: "The waiting request's text, verbatim: the ask question." }, reply: { type: "string", description: "The answer to its question." } }, required: ["threadId", "ask", "reply"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
-  { name: "list", description: "List the codex threads this session started or attached, with each one's state, what it is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: { state: { type: "array", items: { type: "string", enum: ["detached", "waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] }, description: "Return only threads in these states; omit for all threads. Detached takes precedence over waiting on an ask or approval, then the last turn status applies." } } } },
+  { name: "list", description: "List the codex threads this session started or attached, with each one's state, what it is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: { state: { type: "array", items: { type: "string", enum: ["detached", "waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] }, description: "Return only threads in these states; omit for all threads. Detached takes precedence over waiting on an ask, then the last turn status applies." } } } },
   { name: "detach", description: "Release a thread you no longer need. A thread you started is archived with its spawned agents and takes no further send; an attached session stays open in its own client, and send or attach takes it back. Refused while a turn is running.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "review", description: "Review the commits since a base sha in a read-only thread with codex's built-in review mode, and save the rendered review, priority-tagged findings with an overall verdict, to a file. Pass `stance: \"adversarial\"` for a challenge review. Returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute path of the checkout to review." }, base: { type: "string", description: "Commit the changes start after (excluded)." }, plan: { type: "string", description: "Path of the plan or spec the changes implement, relative to cwd." }, decisions: { type: "string", description: "Path of the file listing the rules decided while the changes were built, relative to cwd or absolute." }, out: { type: "string", description: "File that receives the review text." }, name: { type: "string", description: "Short human-readable thread name." }, stance: { type: "string", enum: ["adversarial"], description: "adversarial: the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. Omit for the plain review." }, focus: { type: "string", description: "What the reviewer should weigh most, in a phrase." } }, required: ["cwd", "base", "out"] } }
 ];
