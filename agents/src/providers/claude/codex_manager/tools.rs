@@ -44,7 +44,7 @@ pub(super) const RULES: &[ToolRule] = &[
     },
     ToolRule {
         name: "interrupt",
-        output: Some((Pick::With(turn_output), Format::Text)),
+        output: Some((Pick::With(thread_id_output), Format::Text)),
         title: &[Pick::Field(Source::Input, "/threadId")],
         ..DEFAULT_RULE
     },
@@ -67,18 +67,6 @@ fn thread_id_output(data: &ToolData<'_>) -> Option<Body> {
         Format::Text,
         true,
     );
-    sections.extend(attention_sections(data));
-    Some(Body::Sections(sections))
-}
-
-fn turn_output(data: &ToolData<'_>) -> Option<Body> {
-    let result = data.result.filter(|result| !result.error)?;
-    let mut turn = result.structured.clone();
-    turn.as_object_mut()?.shift_remove("attention");
-    let mut sections = vec![Section::Structured {
-        label: "output".into(),
-        text: turn.to_string(),
-    }];
     sections.extend(attention_sections(data));
     Some(Body::Sections(sections))
 }
@@ -368,44 +356,33 @@ mod tests {
     }
 
     #[test]
-    fn turn_results_are_structured_without_duplicate_attention() {
-        for source in [
-            include_str!("../../../../tests/fixtures/claude-manager-send-result.jsonl"),
-            include_str!("../../../../tests/fixtures/claude-manager-interrupt-result.jsonl"),
-            include_str!("../../../../tests/fixtures/claude-manager-reply.jsonl"),
-        ] {
-            let records: Vec<Value> = source
+    fn interrupt_shows_only_the_thread_id() {
+        let records: Vec<Value> =
+            include_str!("../../../../tests/fixtures/claude-manager-interrupt-result.jsonl")
                 .lines()
                 .map(|line| serde_json::from_str(line).unwrap())
                 .collect();
-            let call = &records[0]["message"]["content"][0];
-            let content = &records[1]["message"]["content"][0]["content"];
-            let result = ToolResult {
-                source: None,
-                content: content.clone(),
-                structured: serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap(),
-                error: false,
-            };
-            let data = ToolData {
-                input: &call["input"],
-                result: Some(&result),
-            };
-            // The shared turn builder receives the actual result payload, including attention.
-            let Some(Body::Sections(sections)) =
-                Some(output(rule("codex-manager.interrupt").output, &data))
-            else {
-                panic!("expected turn output")
-            };
-            let Section::Structured { text, .. } = &sections[0] else {
-                panic!("expected structured turn, got {sections:?}")
-            };
-            let shown: Value = serde_json::from_str(text).unwrap();
-            let mut expected = result.structured.clone();
-            expected.as_object_mut().unwrap().shift_remove("attention");
-            assert_eq!(shown, expected);
-            assert!(shown.get("attention").is_none());
-            assert_eq!(&sections[1..], attention_sections(&data));
-        }
+        let call = &records[0]["message"]["content"][0];
+        let content = &records[1]["message"]["content"][0]["content"];
+        let result = ToolResult {
+            source: None,
+            content: content.clone(),
+            structured: serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap(),
+            error: false,
+        };
+        let data = ToolData {
+            input: &call["input"],
+            result: Some(&result),
+        };
+        let Body::Sections(sections) = output(rule("codex-manager.interrupt").output, &data)
+        else {
+            panic!("expected interrupt output")
+        };
+        assert_eq!(
+            sections[0],
+            text_section("output", "01a15fdd-d240-79e2-bb1e-a7d1f31b35c2")
+        );
+        assert_eq!(&sections[1..], attention_sections(&data));
     }
 
     #[test]
