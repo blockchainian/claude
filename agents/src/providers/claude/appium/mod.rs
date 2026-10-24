@@ -37,7 +37,7 @@ pub(crate) const SERVER: McpServer = McpServer {
             aliases: &["appium_find_elements"],
             title: &[Pick::Field(Source::Input, "/selector")],
             input: Some((Pick::With(find_input), Format::Table)),
-            output: Some((Pick::Field(Source::Result, "/elements"), Format::Table)),
+            output: Some((Pick::With(element_ids), Format::Text)),
             ..DEFAULT_RULE
         },
         ToolRule {
@@ -172,6 +172,17 @@ fn screenshot(data: &ToolData<'_>) -> Option<Body> {
 
 fn find_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     other_fields(data, &["selector"])
+}
+
+/// The found elements' ids, one per line.
+fn element_ids(data: &ToolData<'_>) -> Option<Body> {
+    let result = data.result.filter(|result| !result.error)?;
+    let ids: Vec<_> = result.structured["elements"]
+        .as_array()?
+        .iter()
+        .filter_map(|element| element["elementId"].as_str())
+        .collect();
+    Some(Body::Sections(vec![text_section("output", &ids.join("\n"))]))
 }
 
 /// The gesture, with the point it touched when it was given coordinates.
@@ -326,10 +337,8 @@ mod tests {
         );
         assert_eq!(
             output_text(&calls[6]),
-            "| elementId |\n\
-             | --- |\n\
-             | 42010000\\-0000\\-0000\\-BE14\\-000000000000 |\n\
-             | B3010000\\-0000\\-0000\\-BE14\\-000000000000 |"
+            "42010000-0000-0000-BE14-000000000000\n\
+             B3010000-0000-0000-BE14-000000000000"
         );
         assert_eq!(
             output_text(&calls[8]),
