@@ -509,6 +509,11 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         ..DEFAULT_RULE
     },
     ToolRule {
+        name: "claude-in-chrome find",
+        input: Some((Pick::Field(Source::Input, "/query"), Format::Text)),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
         name: "claude-client ask_claude",
         input: Some((Pick::Field(Source::Input, "/text"), Format::Markdown)),
         output: Some((Pick::With(mcp_markdown_output), Format::Text)),
@@ -1747,6 +1752,28 @@ mod tests {
                 "Already formatted JavaScript stays unchanged"
             );
         }
+    }
+
+    #[test]
+    fn chrome_find_shows_only_its_query() {
+        let input = serde_json::json!({
+            "query": "Refresh link near the calendar/summary panel",
+            "tabId": 665979853
+        });
+        let shown = super::presentation(
+            "mcp__claude-in-chrome__find",
+            &super::ToolData {
+                input: &input,
+                result: None,
+            },
+        );
+        assert_eq!(
+            shown.input,
+            [crate::event::Section::Prose {
+                text: "Refresh link near the calendar/summary panel".into(),
+                markdown: false,
+            }]
+        );
     }
 
     #[test]
