@@ -9,7 +9,7 @@ pub(super) struct ImageSpan {
 }
 
 impl LineEdit {
-    pub(in crate::ui) fn stored_input(&self) -> crate::state::StoredDraftInput {
+    pub(crate) fn stored_input(&self) -> crate::state::StoredDraftInput {
         self.preserve_images();
         crate::state::StoredDraftInput {
             text: self.text.clone(),
@@ -17,7 +17,7 @@ impl LineEdit {
         }
     }
 
-    pub(in crate::ui) fn restore_input(input: &crate::state::StoredDraftInput) -> Self {
+    pub(crate) fn restore_input(input: &crate::state::StoredDraftInput) -> Self {
         let mut edit = Self::default();
         edit.set_text(&input.text);
         let mut offset = 0;
@@ -47,7 +47,7 @@ impl LineEdit {
         edit
     }
 
-    pub(in crate::ui) fn insert_image(&mut self, image: ImageAttachment) {
+    pub(crate) fn insert_image(&mut self, image: ImageAttachment) {
         self.delete_selection();
         let number = self.images.len() + 1;
         let label = format!("[Image #{number}]");
@@ -61,20 +61,20 @@ impl LineEdit {
         self.align_cursor();
     }
 
-    pub(in crate::ui) fn image_paths(&self) -> Vec<PathBuf> {
+    pub(crate) fn image_paths(&self) -> Vec<PathBuf> {
         self.images
             .iter()
             .map(|span| span.image.path().to_owned())
             .collect()
     }
 
-    pub(in crate::ui) fn preserve_images(&self) {
+    pub(crate) fn preserve_images(&self) {
         for span in &self.images {
             span.image.preserve();
         }
     }
 
-    pub(in crate::ui) fn prompt_text(&self) -> String {
+    pub(crate) fn prompt_text(&self) -> String {
         let mut text = self.text.clone();
         for span in self.images.iter().rev() {
             text.replace_range(span.range.clone(), "");
@@ -82,7 +82,7 @@ impl LineEdit {
         text
     }
 
-    pub(in crate::ui) fn append_editor(&mut self, editor: Self) {
+    pub(crate) fn append_editor(&mut self, editor: Self) {
         self.clear_selection();
         self.end();
         let offset = self.cursor;

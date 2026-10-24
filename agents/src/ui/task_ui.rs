@@ -1,10 +1,10 @@
 //! Per-task interface state parked while another task is shown.
 
 use super::{
-    SectionScroll, draft_controls::Selector, event_search::EventMatches, line_edit::LineEdit,
-    prompt_box::PromptBox, question_view::QuestionView,
+    SectionScroll, draft_controls::Selector, event_search::EventMatches, prompt_box::PromptBox,
+    question_view::QuestionView,
 };
-use crate::{event::Event, model::EventSort};
+use crate::{event::Event, line_edit::LineEdit, model::EventSort};
 
 #[derive(Default)]
 pub(super) struct TaskUi {

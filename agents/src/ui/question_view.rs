@@ -1,7 +1,7 @@
 //! Provider-neutral question pages and their collected answer.
-use super::line_edit::LineEdit;
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crate::ask::{Answer, Ask, AskKind, Question, QuestionAnswer};
+use crate::line_edit::LineEdit;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     buffer::Buffer,

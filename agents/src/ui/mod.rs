@@ -27,7 +27,6 @@ mod hyperlink;
 mod inline_images;
 mod input;
 mod key_name;
-mod line_edit;
 mod line_truncation;
 pub(crate) mod links;
 mod markdown;
@@ -72,6 +71,7 @@ pub use style::light_background;
 pub use style::set_light_background;
 pub(crate) use timeline::timeline_seconds;
 
+use crate::line_edit;
 use crate::model::{Action, Grouping, Session, SessionStatus};
 use crate::providers::{Capabilities, ProviderId, SessionKey};
 use crate::state::TaskPins;

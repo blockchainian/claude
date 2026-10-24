@@ -5,6 +5,7 @@ mod clipboard;
 mod event;
 mod images;
 mod jsonl;
+mod line_edit;
 mod model;
 mod processes;
 mod providers;

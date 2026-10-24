@@ -1,5 +1,5 @@
-use super::line_edit::LineEdit;
 use super::render::{render_input_row, row};
+use crate::line_edit::LineEdit;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{buffer::Buffer, layout::Rect};
 use unicode_width::UnicodeWidthStr;

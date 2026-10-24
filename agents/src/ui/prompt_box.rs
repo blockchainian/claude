@@ -1,5 +1,5 @@
-use super::line_edit::LineEdit;
 use super::*;
+use crate::line_edit::LineEdit;
 
 #[path = "prompt_images.rs"]
 mod prompt_images;
@@ -257,7 +257,7 @@ impl PromptBox {
     }
 
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> Option<PromptAction> {
-        let key = super::line_edit::normalize_key(key);
+        let key = crate::line_edit::normalize_key(key);
         if key.kind == KeyEventKind::Release {
             return None;
         }
