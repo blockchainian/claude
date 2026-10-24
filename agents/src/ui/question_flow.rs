@@ -162,7 +162,7 @@ impl View {
         }
         let view = self.questions.views.get_mut(&id).expect("visible question");
         let before = view.stored();
-        let outcome = view.key(key);
+        let outcome = view.key(key, &mut self.kill_buffer);
         self.questions.changed(&id, before);
         Some(self.question_outcome(id, outcome))
     }

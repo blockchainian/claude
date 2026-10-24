@@ -1,5 +1,7 @@
 //! Command center adapted from OpenAI Codex's TUI (Apache-2.0).
 pub(crate) mod commits;
+mod composer_images;
+use composer_images::{Composer, ComposerImages};
 mod draft_controls;
 #[cfg(test)]
 mod draft_flow_tests;
@@ -291,8 +293,9 @@ pub struct View {
     event_order: Vec<usize>,
     last_update: DateTime<Utc>,
     event_detail: task_ui::EventDetail,
+    kill_buffer: crate::line_edit::KillBuffer,
     input_box: prompt_box::PromptBox,
-    prompt_history: std::rc::Rc<RefCell<Vec<line_edit::LineEdit>>>,
+    prompt_history: std::rc::Rc<RefCell<Vec<Composer>>>,
     questions: question_flow::Questions,
     capabilities: HashMap<ProviderId, Capabilities>,
     rows: Vec<Session>,
@@ -450,6 +453,7 @@ impl View {
             status_filter: 0,
             tab_selections: vec![None; TASK_FILTERS.len()],
             search: search_input::SearchInput::default(),
+            kill_buffer: crate::line_edit::KillBuffer::default(),
             rename_target: None,
             name_target: None,
             stopping_prompt: None,
@@ -529,7 +533,7 @@ impl View {
             {
                 image.preserve();
             }
-            self.input_box.editor.insert_image(image);
+            self.input_box.editor.insert_placeholder(image);
         }
     }
 
@@ -542,6 +546,7 @@ impl View {
     }
 
     pub(crate) fn handle_paste(&mut self, text: &str) -> bool {
+        self.kill_buffer.begin_stroke();
         if self.frozen_draft() {
             return false;
         }

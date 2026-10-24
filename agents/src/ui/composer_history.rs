@@ -2,16 +2,16 @@ use super::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub(super) type History = Rc<RefCell<Vec<LineEdit>>>;
+pub(super) type History = Rc<RefCell<Vec<Composer>>>;
 
 #[derive(Default)]
 pub(super) struct Recall {
     position: Option<usize>,
-    draft: Option<LineEdit>,
+    draft: Option<Composer>,
 }
 
 pub(super) struct Search {
-    original: LineEdit,
+    original: Composer,
     pub(super) query: LineEdit,
     position: Option<usize>,
 }
@@ -90,7 +90,7 @@ impl PromptBox {
         self.search_history(false, true);
     }
 
-    pub(super) fn history_key(&mut self, key: KeyEvent) -> bool {
+    pub(super) fn history_key(&mut self, key: KeyEvent, kills: &mut crate::line_edit::KillBuffer) -> bool {
         let control = key.modifiers == KeyModifiers::CONTROL;
         if self.search.is_none() {
             if control && key.code == KeyCode::Char('r') {
@@ -122,7 +122,7 @@ impl PromptBox {
             }
             _ => {
                 let search = self.search.as_mut().expect("history search");
-                if search.query.handle(key) {
+                if search.query.handle(key, kills) {
                     self.search_history(false, true);
                 }
             }

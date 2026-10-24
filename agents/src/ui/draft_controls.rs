@@ -772,7 +772,7 @@ impl View {
             return Some(self.apply_choice(selected));
         }
         if let Some(editor) = selector.active_editor() {
-            editor.handle(key);
+            editor.handle(key, &mut self.kill_buffer);
             return Some(None);
         }
         let code = super::navigation::list_navigation(key)?;
@@ -1048,7 +1048,7 @@ mod tests {
         view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
         let selector = view.selector.as_ref().unwrap();
         let selected = selector.selected;
-        let caret = selector.branch_editor().unwrap().window(80).1;
+        let caret = selector.branch_editor().unwrap().window(80).caret_column;
         let branch = view.selected_draft().unwrap().branch.clone();
         view.set_active_panel(Panel::Prompt);
         assert_eq!(view.selected_draft().unwrap().branch, branch);
@@ -1066,7 +1066,7 @@ mod tests {
         let selector = view.selector.as_ref().unwrap();
         assert_eq!(selector.selected, selected);
         assert_eq!(selector.branch_editor().unwrap().text(), "feature/half");
-        assert_eq!(selector.branch_editor().unwrap().window(80).1, caret);
+        assert_eq!(selector.branch_editor().unwrap().window(80).caret_column, caret);
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(
             view.selected_draft().unwrap().branch,

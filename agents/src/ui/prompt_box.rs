@@ -30,9 +30,9 @@ pub(super) enum PromptAction {
 
 #[derive(Default)]
 pub(super) struct PromptBox {
-    pending_editor: Option<LineEdit>,
+    pending_editor: Option<Composer>,
     mouse: prompt_mouse::PromptMouse,
-    pub(super) editor: LineEdit,
+    pub(super) editor: Composer,
     pub(super) state: SendState,
     pub(super) submitting: bool,
     pub(super) history: composer_history::History,
@@ -123,11 +123,11 @@ impl PromptBox {
             .set((usize::from(width), usize::from(inset)));
         let positions = self
             .editor
-            .visual_positions(usize::from(width), usize::from(inset));
-        let row_count = positions.last().expect("end caret").2 + 1;
+            .caret_stops(line_edit::Wrap { width: usize::from(width), first_row_inset: usize::from(inset) });
+        let row_count = positions.last().expect("end caret").row + 1;
         let mut lines = vec![String::new(); row_count];
         let mut caret = (0, 0);
-        for &(index, column, row) in &positions {
+        for &line_edit::CaretStop { byte: index, column, row } in &positions {
             if index == self.editor.cursor() {
                 caret = (column as u16, row);
             }
@@ -256,7 +256,7 @@ impl PromptBox {
         }
     }
 
-    pub(super) fn handle_key(&mut self, key: KeyEvent) -> Option<PromptAction> {
+    pub(super) fn handle_key(&mut self, key: KeyEvent, kills: &mut crate::line_edit::KillBuffer) -> Option<PromptAction> {
         let key = crate::line_edit::normalize_key(key);
         if key.kind == KeyEventKind::Release {
             return None;
@@ -264,7 +264,7 @@ impl PromptBox {
         if self.editor.selection_key(key) {
             return None;
         }
-        if self.history_key(key) {
+        if self.history_key(key, kills) {
             return None;
         }
         let vertical = match (key.code, key.modifiers) {
@@ -278,7 +278,7 @@ impl PromptBox {
         };
         if let Some(down) = vertical {
             let (width, inset) = self.text_width.get();
-            if !self.editor.move_vertical(width, inset, down) {
+            if !self.editor.move_row(line_edit::Wrap { width, first_row_inset: inset }, if down { line_edit::Vertical::Down } else { line_edit::Vertical::Up }) {
                 self.recall_history(down);
             }
             return None;
@@ -310,7 +310,7 @@ impl PromptBox {
                 return Some(PromptAction::Submit(self.editor.prompt_text()));
             }
         } else {
-            self.editor.handle(key);
+            self.editor.handle(key, kills);
         }
         None
     }
@@ -325,7 +325,11 @@ mod tests {
         PromptBox::default()
     }
     fn key(editor: &mut PromptBox, code: KeyCode) -> Option<PromptAction> {
-        editor.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+        let mut kills = crate::line_edit::KillBuffer::default();
+        {
+            kills.begin_stroke();
+            editor.handle_key(KeyEvent::new(code, KeyModifiers::NONE), &mut kills)
+        }
     }
     fn rendered(editor: &PromptBox, width: u16, disabled: Option<&str>) -> String {
         let area = Rect::new(0, 0, width, editor.height(width, "Task"));
@@ -467,22 +471,36 @@ mod tests {
 
     #[test]
     fn control_c_clears_then_quits() {
+        let mut kills = crate::line_edit::KillBuffer::default();
         let mut editor = focused();
         editor.paste(REAL_TEXT);
         let clear = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert_eq!(editor.handle_key(clear), None);
+        assert_eq!({
+            kills.begin_stroke();
+            editor.handle_key(clear, &mut kills)
+        }, None);
         assert!(editor.editor.is_empty());
-        assert_eq!(editor.handle_key(clear), Some(PromptAction::Quit));
+        assert_eq!({
+            kills.begin_stroke();
+            editor.handle_key(clear, &mut kills)
+        }, Some(PromptAction::Quit));
     }
 
     #[test]
     fn escape_clears_then_stops_and_keeps_focus() {
+        let mut kills = crate::line_edit::KillBuffer::default();
         let mut editor = focused();
         editor.paste(REAL_TEXT);
         let escape = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        assert_eq!(editor.handle_key(escape), None);
+        assert_eq!({
+            kills.begin_stroke();
+            editor.handle_key(escape, &mut kills)
+        }, None);
         assert!(editor.editor.is_empty());
-        assert_eq!(editor.handle_key(escape), Some(PromptAction::Stop));
+        assert_eq!({
+            kills.begin_stroke();
+            editor.handle_key(escape, &mut kills)
+        }, Some(PromptAction::Stop));
     }
 
     #[test]
@@ -600,14 +618,21 @@ mod tests {
 
     #[test]
     fn release_events_do_not_edit_or_submit() {
+        let mut kills = crate::line_edit::KillBuffer::default();
         let mut editor = focused();
         editor.paste(REAL_TEXT);
         let mut release = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         release.kind = KeyEventKind::Release;
-        assert_eq!(editor.handle_key(release), None);
+        assert_eq!({
+            kills.begin_stroke();
+            editor.handle_key(release, &mut kills)
+        }, None);
         assert_eq!(editor.state, SendState::Ready);
         release.code = KeyCode::Backspace;
-        editor.handle_key(release);
+        {
+            kills.begin_stroke();
+            editor.handle_key(release, &mut kills)
+        };
         assert_eq!(editor.editor.text(), REAL_TEXT);
     }
 

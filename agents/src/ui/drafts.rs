@@ -54,7 +54,7 @@ impl Draft {
 }
 
 impl Session {
-    fn from_draft(draft: &Draft, input: &line_edit::LineEdit) -> Self {
+    fn from_draft(draft: &Draft, input: &Composer) -> Self {
         let name = draft.name.as_ref().expect("named draft row").clone();
         Self {
             id: draft.key(),
@@ -578,7 +578,7 @@ impl View {
                 error = Some("Selected branch is missing".into());
             }
             let mut input = prompt_box::PromptBox::default();
-            input.editor = line_edit::LineEdit::restore_input(&value.input);
+            input.editor = Composer::restore_input(&value.input);
             self.drafts.push(Draft {
                 id,
                 defaults: crate::tasks::TaskDefaults::default(),

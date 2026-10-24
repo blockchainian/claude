@@ -22,7 +22,7 @@ impl PromptBox {
             if !draft.is_empty() {
                 sent.end();
                 sent.insert("\n");
-                sent.append_editor(draft);
+                sent.append(draft);
             }
             self.editor = sent;
         }

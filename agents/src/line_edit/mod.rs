@@ -1,10 +1,12 @@
-use std::cell::{Cell, RefCell};
-
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
+mod kill_buffer;
 mod selection;
+
+pub(crate) use kill_buffer::{Direction, KillBuffer};
+mod layout;
+pub(crate) use layout::{CaretStop, Vertical, Window, Wrap};
 
 /// CSI-u can report an ASCII control code instead of its letter and Control modifier.
 pub(crate) fn normalize_key(mut key: KeyEvent) -> KeyEvent {
@@ -15,39 +17,25 @@ pub(crate) fn normalize_key(mut key: KeyEvent) -> KeyEvent {
     key
 }
 
-mod images;
+mod placeholders;
 
-thread_local! {
-    /// Text saved by the most recent kill operation.
-    static KILL_BUFFER: RefCell<String> = const { RefCell::new(String::new()) };
-    /// Text removed by kills performed while handling one key.
-    static KEY_KILLS: RefCell<Option<(String, bool)>> = const { RefCell::new(None) };
-    static KEY_HAS_KILL: Cell<bool> = const { Cell::new(false) };
-    static PREVIOUS_KEY_WAS_KILL: Cell<bool> = const { Cell::new(false) };
+pub(crate) trait Placeholder: Clone {
+    /// Label of the `ordinal`-th placeholder in text order, counting from 1.
+    fn label(ordinal: usize) -> String;
 }
 
-/// Saves the text removed while handling this key.
-pub(crate) fn finish_key() {
-    let was_kill = KEY_HAS_KILL.replace(false);
-    if let Some((text, backward)) = KEY_KILLS.take() {
-        KILL_BUFFER.with_borrow_mut(|buffer| {
-            if PREVIOUS_KEY_WAS_KILL.get() {
-                if backward {
-                    *buffer = text + buffer.as_str();
-                } else {
-                    buffer.push_str(&text);
-                }
-            } else {
-                *buffer = text;
-            }
-        });
+#[derive(Clone)]
+pub(crate) enum NoPlaceholder {}
+
+impl Placeholder for NoPlaceholder {
+    fn label(_: usize) -> String {
+        unreachable!()
     }
-    PREVIOUS_KEY_WAS_KILL.set(was_kill);
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct LineEdit {
-    images: Vec<images::ImageSpan>,
+#[derive(Clone)]
+pub(crate) struct LineEdit<P: Placeholder = NoPlaceholder> {
+    placed: Vec<placeholders::Placed<P>>,
     selection: Option<(usize, usize)>,
     text: String,
     /// Byte offset at a grapheme boundary.
@@ -55,128 +43,19 @@ pub(crate) struct LineEdit {
     preferred_column: Option<usize>,
 }
 
-impl LineEdit {
-    /// Caret stops as (byte offset, display column, visual row). The first row starts
-    /// after `inset` columns of label; later rows wrap at the full width. A newline never
-    /// wraps, so a row filled to the width adds no blank row before the next line.
-    pub(crate) fn visual_positions(
-        &self,
-        width: usize,
-        inset: usize,
-    ) -> Vec<(usize, usize, usize)> {
-        let width = width.max(1);
-        let mut positions = Vec::new();
-        let (mut column, mut row, mut row_start) = (inset.min(width - 1), 0, inset.min(width - 1));
-        for (index, grapheme) in self.text.grapheme_indices(true) {
-            let columns = grapheme.width();
-            let newline = grapheme == "\n" || grapheme == "\r\n";
-            if !newline && column > row_start && column + columns.max(1) > width {
-                row += 1;
-                column = 0;
-                row_start = 0;
-            }
-            positions.push((index, column, row));
-            if newline {
-                row += 1;
-                column = 0;
-                row_start = 0;
-            } else {
-                column += columns.min(width);
-            }
+impl<P: Placeholder> Default for LineEdit<P> {
+    fn default() -> Self {
+        Self {
+            placed: Vec::new(),
+            selection: None,
+            text: String::new(),
+            cursor: 0,
+            preferred_column: None,
         }
-        if column >= width {
-            row += 1;
-            column = 0;
-        }
-        positions.push((self.text.len(), column, row));
-        positions
     }
+}
 
-    /// Places the caret after the displayed grapheme, or at the visible line's end.
-    pub(crate) fn click_after(&mut self, width: usize, inset: usize, column: usize, row: usize) {
-        let positions = self.visual_positions(width, inset);
-        let row = row.min(positions.last().expect("end caret").2);
-        let &(byte, x, _) = positions
-            .iter()
-            .rfind(|p| p.2 == row && p.1 <= column)
-            .or_else(|| positions.iter().find(|p| p.2 == row))
-            .expect("visual row has caret");
-        let mut offset = byte;
-        if let Some(grapheme) = self.text[byte..].graphemes(true).next()
-            && grapheme != "\n"
-            && grapheme != "\r\n"
-            && column >= x
-        {
-            offset += grapheme.len();
-        }
-        self.set_cursor(self.caret_boundary(offset, true));
-    }
-
-    pub(crate) fn click_row_after(
-        &mut self,
-        area: ratatui::layout::Rect,
-        prefix: &str,
-        column: u16,
-    ) {
-        let width = usize::from(area.width).saturating_sub(prefix.width());
-        if width == 0 {
-            self.set_cursor(self.text.len());
-            return;
-        }
-        let (visible, _) = self.window(width);
-        let start = visible.as_ptr() as usize - self.text.as_ptr() as usize;
-        let column = usize::from(column.saturating_sub(area.x)).saturating_sub(prefix.width());
-        let mut end = start;
-        let mut x = 0;
-        for grapheme in visible.graphemes(true) {
-            end += grapheme.len();
-            x += grapheme.width();
-            if column < x {
-                break;
-            }
-        }
-        if column >= visible.width() {
-            end = self.text.len();
-        }
-        self.set_cursor(self.caret_boundary(end, true));
-    }
-
-    /// Returns false when the caret is already on the requested boundary row.
-    pub(crate) fn move_vertical(&mut self, width: usize, inset: usize, down: bool) -> bool {
-        // Columns count from the text's start on every row, so the label's inset on the
-        // first row does not shift the column the caret keeps.
-        let inset = inset.min(width.max(1) - 1);
-        let positions: Vec<_> = self
-            .visual_positions(width, inset)
-            .into_iter()
-            .map(|(index, column, row)| (index, column - if row == 0 { inset } else { 0 }, row))
-            .collect();
-        let &(_, column, row) = positions
-            .iter()
-            .find(|p| p.0 == self.cursor)
-            .expect("caret boundary");
-        let target_row = if down {
-            if row == positions.last().expect("end caret").2 {
-                return false;
-            }
-            row + 1
-        } else {
-            let Some(row) = row.checked_sub(1) else {
-                return false;
-            };
-            row
-        };
-        let column = *self.preferred_column.get_or_insert(column);
-        self.cursor = positions
-            .iter()
-            .rfind(|p| p.2 == target_row && p.1 <= column)
-            .or_else(|| positions.iter().find(|p| p.2 == target_row))
-            .expect("visual row has caret")
-            .0;
-        self.cursor = self.caret_boundary(self.cursor, down);
-        true
-    }
-
+impl<P: Placeholder> LineEdit<P> {
     pub(crate) fn cursor(&self) -> usize {
         self.cursor
     }
@@ -189,7 +68,7 @@ impl LineEdit {
     }
     pub(crate) fn set_text(&mut self, text: &str) {
         self.preferred_column = None;
-        self.images.clear();
+        self.placed.clear();
         self.text = text.into();
         self.end();
         self.clear_selection();
@@ -198,20 +77,19 @@ impl LineEdit {
         self.set_text("");
     }
     pub(crate) fn insert(&mut self, text: impl ToString) {
-        PREVIOUS_KEY_WAS_KILL.set(false);
         if self.selection_range().is_some() {
             self.replace_selection(text);
             return;
         }
         self.preferred_column = None;
         let text = text.to_string();
-        let range = self.replace_images(self.cursor..self.cursor, &text);
+        let range = self.replace_placeholders(self.cursor..self.cursor, &text);
         self.cursor = range.start + text.len();
         self.align_cursor();
     }
     // Insertion or deletion can join the graphemes on either side of the edit.
     fn align_cursor(&mut self) {
-        self.relabel_images();
+        self.relabel_placeholders();
         self.cursor = self.caret_boundary(self.cursor, true);
     }
     pub(crate) fn left(&mut self) {
@@ -265,13 +143,13 @@ impl LineEdit {
     pub(crate) fn backspace(&mut self) {
         let end = self.cursor;
         self.left();
-        self.cursor = self.replace_images(self.cursor..end, "").start;
+        self.cursor = self.replace_placeholders(self.cursor..end, "").start;
         self.align_cursor();
     }
     pub(crate) fn delete(&mut self) {
         let start = self.cursor;
         self.right();
-        self.cursor = self.replace_images(start..self.cursor, "").start;
+        self.cursor = self.replace_placeholders(start..self.cursor, "").start;
         self.align_cursor();
     }
     pub(crate) fn word_left(&mut self) {
@@ -310,7 +188,7 @@ impl LineEdit {
         if !self.remove_empty_line(false) {
             let start = self.cursor;
             self.line_end();
-            self.cursor = self.replace_images(start..self.cursor, "").start;
+            self.cursor = self.replace_placeholders(start..self.cursor, "").start;
             self.remove_empty_line(false);
         }
         self.align_cursor();
@@ -320,7 +198,7 @@ impl LineEdit {
         if !self.remove_empty_line(true) {
             let end = self.cursor;
             self.line_start();
-            self.cursor = self.replace_images(self.cursor..end, "").start;
+            self.cursor = self.replace_placeholders(self.cursor..end, "").start;
             self.remove_empty_line(true);
         }
         self.align_cursor();
@@ -342,7 +220,7 @@ impl LineEdit {
                 (_, Some(len)) => self.cursor..self.cursor + len,
                 _ => return false,
             };
-            self.cursor = self.replace_images(range, "").start;
+            self.cursor = self.replace_placeholders(range, "").start;
             return true;
         }
         false
@@ -350,80 +228,33 @@ impl LineEdit {
     pub(crate) fn kill_word_back(&mut self) {
         let end = self.cursor;
         self.word_left();
-        self.cursor = self.replace_images(self.cursor..end, "").start;
+        self.cursor = self.replace_placeholders(self.cursor..end, "").start;
         self.align_cursor();
     }
     pub(crate) fn kill_word_forward(&mut self) {
         let start = self.cursor;
         self.word_right();
-        self.cursor = self.replace_images(start..self.cursor, "").start;
+        self.cursor = self.replace_placeholders(start..self.cursor, "").start;
         self.align_cursor();
     }
-    pub(crate) fn window(&self, available_cols: usize) -> (&str, u16) {
-        let cols = available_cols.min(usize::from(u16::MAX));
-        if cols == 0 {
-            return ("", 0);
-        }
-        let caret_width = self.text[self.cursor..]
-            .graphemes(true)
-            .next()
-            .map_or(1, |g| g.width().max(1));
-        let mut start = self.cursor;
-        let mut caret = 0;
-        for (i, g) in self.text[..self.cursor].grapheme_indices(true).rev() {
-            if caret + g.width() > cols.saturating_sub(caret_width) {
-                break;
-            }
-            caret += g.width();
-            start = i;
-        }
-        let mut end = start;
-        let mut width = 0;
-        for g in self.text[start..].graphemes(true) {
-            if width + g.width() > cols {
-                break;
-            }
-            width += g.width();
-            end += g.len();
-        }
-        (&self.text[start..end], caret as u16)
-    }
     /// Saves the removed text, joined in text order with earlier kills of this key.
-    fn kill(&mut self, delete: fn(&mut Self)) {
+    fn kill(&mut self, delete: fn(&mut Self), kills: &mut KillBuffer) {
         let (before, cursor) = (self.text.clone(), self.cursor);
         delete(self);
-        KEY_HAS_KILL.set(true);
         // Every kill leaves the caret where its removed text started.
         let removed = &before[self.cursor..self.cursor + before.len() - self.text.len()];
-        let backward = self.cursor < cursor;
-        if removed.is_empty() {
-            return;
-        }
-        KEY_KILLS.with_borrow_mut(|kills| {
-            if let Some((earlier, earlier_backward)) = kills {
-                if self.cursor == cursor {
-                    earlier.push_str(removed);
-                } else {
-                    *earlier = removed.to_owned() + earlier.as_str();
-                }
-                *earlier_backward |= backward;
-            } else {
-                *kills = Some((removed.to_owned(), backward));
-            }
-        });
+        let direction = if self.cursor < cursor {
+            Direction::Backward
+        } else {
+            Direction::Forward
+        };
+        kills.push(removed, direction);
     }
-    pub(crate) fn handle(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle(&mut self, key: KeyEvent, kills: &mut KillBuffer) -> bool {
         if key.kind == KeyEventKind::Release {
             return false;
         }
         let modifiers = key.modifiers - KeyModifiers::SHIFT;
-        if !matches!(
-            (key.code, modifiers),
-            (KeyCode::Char('k' | 'u' | 'w'), KeyModifiers::CONTROL)
-                | (KeyCode::Char('d'), KeyModifiers::ALT)
-        ) {
-            PREVIOUS_KEY_WAS_KILL.set(false);
-        }
         match (key.code, modifiers) {
             (KeyCode::Char('h'), KeyModifiers::CONTROL)
             | (KeyCode::Backspace, KeyModifiers::NONE) => self.backspace(),
@@ -442,12 +273,12 @@ impl LineEdit {
             (KeyCode::End, KeyModifiers::NONE) => self.end(),
             (KeyCode::Char('b'), KeyModifiers::ALT) => self.word_left(),
             (KeyCode::Char('f'), KeyModifiers::ALT) => self.word_right(),
-            (KeyCode::Char('k'), KeyModifiers::CONTROL) => self.kill(Self::kill_to_end),
-            (KeyCode::Char('u'), KeyModifiers::CONTROL) => self.kill(Self::kill_to_start),
-            (KeyCode::Char('w'), KeyModifiers::CONTROL) => self.kill(Self::kill_word_back),
-            (KeyCode::Char('d'), KeyModifiers::ALT) => self.kill(Self::kill_word_forward),
+            (KeyCode::Char('k'), KeyModifiers::CONTROL) => self.kill(Self::kill_to_end, kills),
+            (KeyCode::Char('u'), KeyModifiers::CONTROL) => self.kill(Self::kill_to_start, kills),
+            (KeyCode::Char('w'), KeyModifiers::CONTROL) => self.kill(Self::kill_word_back, kills),
+            (KeyCode::Char('d'), KeyModifiers::ALT) => self.kill(Self::kill_word_forward, kills),
             (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
-                KILL_BUFFER.with_borrow(|text| self.insert(text.clone()));
+                self.insert(kills.text());
             }
             (KeyCode::Char(c), KeyModifiers::NONE) if !c.is_control() => self.insert(c),
             _ => return false,
@@ -531,24 +362,8 @@ mod tests {
     }
 
     #[test]
-    fn windows_keep_wide_caret_visible() {
-        let mut e = edit("a你好b");
-        assert_eq!(e.window(4), ("好b", 3));
-        e.left();
-        assert_eq!(e.window(4), ("好b", 2));
-        e.left();
-        assert_eq!(e.window(4), ("你好", 2));
-        e.home();
-        assert_eq!(e.window(4), ("a你", 0));
-        assert_eq!(e.window(0), ("", 0));
-        e.set_text("你好");
-        assert_eq!(e.window(1), ("", 0));
-        e.set_text("e\u{301}👨‍👩‍👧‍👦");
-        assert_eq!(e.window(4), ("e\u{301}👨‍👩‍👧‍👦", 3));
-    }
-
-    #[test]
     fn key_map_applies_each_edit() {
+        let mut kills = KillBuffer::default();
         for (keys, modifiers, text, cursor) in [
             (vec![KeyCode::Backspace], KeyModifiers::NONE, "onetwo", 3),
             (vec![KeyCode::Char('h')], KeyModifiers::CONTROL, "onetwo", 3),
@@ -598,7 +413,10 @@ mod tests {
                 e.home();
                 e.word_right();
                 e.right();
-                assert!(e.handle(KeyEvent::new(code, modifiers)));
+                assert!({
+                    kills.begin_stroke();
+                    e.handle(KeyEvent::new(code, modifiers), &mut kills)
+                });
                 assert_eq!(
                     (e.text(), e.cursor),
                     (text, cursor),
@@ -610,8 +428,11 @@ mod tests {
 
     #[test]
     fn line_keys_step_through_lines() {
-        let control =
-            |e: &mut LineEdit, c| e.handle(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+        let mut kills = KillBuffer::default();
+        let mut control = |e: &mut LineEdit, c| {
+            kills.begin_stroke();
+            e.handle(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL), &mut kills)
+        };
         let mut e = edit("one\r\ntwo\nthree");
         e.set_cursor("one\r\ntw".len());
         for cursor in ["one\r\n".len(), 0, 0] {
@@ -641,82 +462,88 @@ mod tests {
 
     #[test]
     fn kills_feed_the_shared_buffer_and_ctrl_y_pastes() {
-        let press = |e: &mut LineEdit, c, modifiers| {
-            assert!(e.handle(KeyEvent::new(KeyCode::Char(c), modifiers)));
-            finish_key();
+        let mut kills = KillBuffer::default();
+        let press = |kills: &mut KillBuffer, e: &mut LineEdit, c, modifiers| {
+            assert!({
+                kills.begin_stroke();
+                e.handle(KeyEvent::new(KeyCode::Char(c), modifiers), kills)
+            });
         };
         let mut e = edit("one two");
-        press(&mut e, 'w', KeyModifiers::CONTROL);
+        press(&mut kills, &mut e, 'w', KeyModifiers::CONTROL);
         assert_eq!(e.text(), "one ");
         let mut other = edit("one ");
-        press(&mut other, 'y', KeyModifiers::CONTROL);
+        press(&mut kills, &mut other, 'y', KeyModifiers::CONTROL);
         assert_eq!(other.text(), "one two");
 
         e.set_text("one two three");
         e.end();
-        e.kill(LineEdit::kill_word_back);
-        e.kill(LineEdit::kill_word_back);
-        finish_key();
+        kills.begin_stroke();
+        e.kill(LineEdit::kill_word_back, &mut kills);
+        e.kill(LineEdit::kill_word_back, &mut kills);
         assert_eq!(e.text(), "one ");
-        press(&mut e, 'y', KeyModifiers::CONTROL);
+        press(&mut kills, &mut e, 'y', KeyModifiers::CONTROL);
         assert_eq!(e.text(), "one two three");
 
         let mut empty = edit("keep");
-        KILL_BUFFER.set(String::new());
-        press(&mut empty, 'y', KeyModifiers::CONTROL);
+        kills = KillBuffer::default();
+        press(&mut kills, &mut empty, 'y', KeyModifiers::CONTROL);
         assert_eq!(empty.text(), "keep");
     }
 
     #[test]
     fn consecutive_kills_join_until_a_non_kill_key() {
-        let press = |e: &mut LineEdit, code, modifiers| {
-            assert!(e.handle(KeyEvent::new(code, modifiers)));
-            finish_key();
+        let mut kills = KillBuffer::default();
+        let press = |kills: &mut KillBuffer, e: &mut LineEdit, code, modifiers| {
+            assert!({
+                kills.begin_stroke();
+                e.handle(KeyEvent::new(code, modifiers), kills)
+            });
         };
         let ctrl = KeyModifiers::CONTROL;
         let alt = KeyModifiers::ALT;
         let mut e = edit("foo bar baz");
-        press(&mut e, KeyCode::Char('w'), ctrl);
-        press(&mut e, KeyCode::Char('w'), ctrl);
-        press(&mut e, KeyCode::Char('y'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('w'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('w'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('y'), ctrl);
         assert_eq!(e.text(), "foo bar baz");
 
         let mut e = edit("one two three");
         e.set_cursor("one ".len());
-        press(&mut e, KeyCode::Char('k'), ctrl);
-        press(&mut e, KeyCode::Char('k'), ctrl);
-        press(&mut e, KeyCode::Char('y'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('k'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('k'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('y'), ctrl);
         assert_eq!(e.text(), "one two three");
 
         let mut e = edit("foo bar baz");
         e.set_cursor("foo ".len());
-        press(&mut e, KeyCode::Char('w'), ctrl);
-        press(&mut e, KeyCode::Char('d'), alt);
-        press(&mut e, KeyCode::Char('y'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('w'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('d'), alt);
+        press(&mut kills, &mut e, KeyCode::Char('y'), ctrl);
         assert_eq!(e.text(), "foo bar baz");
 
         let mut e = edit("foo bar baz");
-        press(&mut e, KeyCode::Char('w'), ctrl);
-        press(&mut e, KeyCode::Home, KeyModifiers::NONE);
+        press(&mut kills, &mut e, KeyCode::Char('w'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Home, KeyModifiers::NONE);
         for _ in 0..4 {
-            press(&mut e, KeyCode::Right, KeyModifiers::NONE);
+            press(&mut kills, &mut e, KeyCode::Right, KeyModifiers::NONE);
         }
-        press(&mut e, KeyCode::Char('w'), ctrl);
-        press(&mut e, KeyCode::Char('y'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('w'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('y'), ctrl);
         assert_eq!(e.text(), "foo bar ");
 
         let mut e = edit("foo bar baz");
-        press(&mut e, KeyCode::Char('w'), ctrl);
-        press(&mut e, KeyCode::Char('x'), KeyModifiers::NONE);
-        press(&mut e, KeyCode::Char('w'), ctrl);
-        press(&mut e, KeyCode::Char('y'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('w'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('x'), KeyModifiers::NONE);
+        press(&mut kills, &mut e, KeyCode::Char('w'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('y'), ctrl);
         assert_eq!(e.text(), "foo bar x");
 
         let mut e = edit("foo bar baz");
-        press(&mut e, KeyCode::Char('w'), ctrl);
-        press(&mut e, KeyCode::Char('y'), ctrl);
-        press(&mut e, KeyCode::Char('w'), ctrl);
-        press(&mut e, KeyCode::Char('y'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('w'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('y'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('w'), ctrl);
+        press(&mut kills, &mut e, KeyCode::Char('y'), ctrl);
         assert_eq!(e.text(), "foo bar baz");
     }
 
@@ -767,6 +594,7 @@ mod tests {
 
     #[test]
     fn key_map_consumes_editing_only() {
+        let mut kills = KillBuffer::default();
         for (code, modifiers) in [
             (KeyCode::Backspace, KeyModifiers::NONE),
             (KeyCode::Delete, KeyModifiers::NONE),
@@ -784,25 +612,40 @@ mod tests {
         .chain("bfd".chars().map(|c| (KeyCode::Char(c), KeyModifiers::ALT)))
         {
             assert!(
-                edit("hello world").handle(KeyEvent::new(code, modifiers)),
+                {
+                    kills.begin_stroke();
+                    edit("hello world").handle(KeyEvent::new(code, modifiers), &mut kills)
+                },
                 "{code:?}"
             );
         }
         for code in [KeyCode::Esc, KeyCode::Enter, KeyCode::Up, KeyCode::Down] {
-            assert!(!edit("").handle(KeyEvent::new(code, KeyModifiers::NONE)));
+            assert!(!{
+                kills.begin_stroke();
+                edit("").handle(KeyEvent::new(code, KeyModifiers::NONE), &mut kills)
+            });
         }
         for modifiers in [
             KeyModifiers::CONTROL,
             KeyModifiers::SUPER,
             KeyModifiers::ALT | KeyModifiers::CONTROL,
         ] {
-            assert!(!edit("").handle(KeyEvent::new(KeyCode::Char('c'), modifiers)));
+            assert!(!{
+                kills.begin_stroke();
+                edit("").handle(KeyEvent::new(KeyCode::Char('c'), modifiers), &mut kills)
+            });
         }
         let mut e = edit("");
-        assert!(e.handle(KeyEvent::new(KeyCode::Char('你'), KeyModifiers::SHIFT)));
+        assert!({
+            kills.begin_stroke();
+            e.handle(KeyEvent::new(KeyCode::Char('你'), KeyModifiers::SHIFT), &mut kills)
+        });
         assert_eq!(e.text(), "你");
         let mut release = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
         release.kind = KeyEventKind::Release;
-        assert!(!e.handle(release));
+        assert!(!{
+            kills.begin_stroke();
+            e.handle(release, &mut kills)
+        });
     }
 }

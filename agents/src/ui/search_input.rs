@@ -45,14 +45,14 @@ impl SearchInput {
 
     /// False means the key goes on to the panel: unfocused or not a search key.
     /// Enter blurs, Esc closes, and everything else goes to `LineEdit::handle`.
-    pub fn handle_key(&mut self, key: KeyEvent) -> bool {
+    pub fn handle_key(&mut self, key: KeyEvent, kills: &mut crate::line_edit::KillBuffer) -> bool {
         if !self.focused {
             return false;
         }
         match key.code {
             KeyCode::Enter => self.blur(),
             KeyCode::Esc => self.close(),
-            _ => return self.query.handle(key),
+            _ => return self.query.handle(key, kills),
         }
         true
     }
@@ -69,9 +69,9 @@ impl SearchInput {
             return None;
         }
         let prompt_width = SEARCH_PROMPT.width();
-        let (_, caret) = self
+        let caret = self
             .query
-            .window(usize::from(row.width).saturating_sub(prompt_width));
+            .window(usize::from(row.width).saturating_sub(prompt_width)).caret_column;
         let column =
             (prompt_width + usize::from(caret)).min(usize::from(row.width.saturating_sub(1)));
         Some((row.x + column as u16, row.y))
@@ -79,7 +79,7 @@ impl SearchInput {
 
     pub fn click(&mut self, row: Rect, column: u16) {
         self.focused = true;
-        self.query.click_row_after(row, SEARCH_PROMPT, column);
+        super::render::click_input_row(&mut self.query, row, SEARCH_PROMPT, column);
     }
 
     #[cfg(test)]

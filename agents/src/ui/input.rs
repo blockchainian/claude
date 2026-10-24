@@ -663,14 +663,11 @@ impl View {
                 self.prepare_prompt();
                 self.input_box.paste_mouse(area, &self.input_label(), mouse);
             }
-            PasteTarget::Title(area) => self.rename.click_row_after(area, "", mouse.column),
+            PasteTarget::Title(area) => render::click_input_row(&mut self.rename, area, "", mouse.column),
             PasteTarget::Branch(area) => {
                 let selector = self.selector.as_mut().expect("branch selector");
                 selector.selected = selector.len() - 1;
-                selector
-                    .active_editor()
-                    .expect("branch editor")
-                    .click_row_after(area, &format!("New branch {PROMPT_MARKER} "), mouse.column);
+                render::click_input_row(selector.active_editor().expect("branch editor"), area, &format!("New branch {PROMPT_MARKER} "), mouse.column);
             }
             PasteTarget::Search(panel) => {
                 let rect = self.search_rect(panel);
@@ -1592,9 +1589,9 @@ impl View {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
+        self.kill_buffer.begin_stroke();
         let focus = self.task_focus();
         let action = self.handle_key_event(key);
-        line_edit::finish_key();
         if self.task_focus() != focus {
             self.set_active_panel(self.active_panel);
         }
@@ -1752,7 +1749,7 @@ impl View {
                     };
                 }
                 _ => {
-                    self.rename.handle(key);
+                    self.rename.handle(key, &mut self.kill_buffer);
                 }
             }
             return None;
@@ -1789,7 +1786,7 @@ impl View {
                 return None;
             }
             self.input_box.history = self.prompt_history.clone();
-            return match self.input_box.handle_key(key) {
+            return match self.input_box.handle_key(key, &mut self.kill_buffer) {
                 Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),
                 Some(prompt_box::PromptAction::Stop) => self.stop_from_input(),
                 Some(prompt_box::PromptAction::Submit(text)) => {
@@ -1879,8 +1876,13 @@ impl View {
             return Some(Action::Quit);
         }
         let active = self.active_panel;
-        if self.search_focused() && self.edit_search(active, |search| search.handle_key(key)) {
-            return None;
+        if self.search_focused() {
+            let mut kills = std::mem::take(&mut self.kill_buffer);
+            let handled = self.edit_search(active, |search| search.handle_key(key, &mut kills));
+            self.kill_buffer = kills;
+            if handled {
+                return None;
+            }
         }
         if self.panel_search(active).is_some() {
             if plain && key.code == KeyCode::Char('/') {

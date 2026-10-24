@@ -128,9 +128,9 @@ fn middle_paste_title_and_search_use_the_clicked_editor() {
                 _ => &view.event_detail.search.input,
             };
             assert_eq!(input.text(), "贴🦀");
-            let mut editor = super::super::line_edit::LineEdit::default();
+            let mut editor: crate::line_edit::LineEdit = super::super::line_edit::LineEdit::default();
             editor.set_text("贴🦀");
-            let (_, caret) = editor.window(usize::from(area.width.saturating_sub(9)));
+            let caret = editor.window(usize::from(area.width.saturating_sub(9))).caret_column;
             assert_eq!(input.caret(area), Some((area.x + 9 + caret, area.y)));
         }
     }
@@ -193,10 +193,10 @@ fn middle_paste_wrapped_rows_and_blank_rows_keep_line_ends() {
 
 #[test]
 fn middle_paste_narrow_input_uses_content_end() {
-    let mut editor = crate::ui::line_edit::LineEdit::default();
+    let mut editor: crate::line_edit::LineEdit = crate::ui::line_edit::LineEdit::default();
     editor.set_text("剪贴板");
     editor.home();
-    editor.click_row_after(Rect::new(0, 0, 2, 1), "Search ❯ ", 1);
+    render::click_input_row(&mut editor, Rect::new(0, 0, 2, 1), "Search ❯ ", 1);
     editor.insert("贴🦀");
     assert_eq!(editor.text(), "剪贴板贴🦀");
     assert_eq!(editor.cursor(), "剪贴板贴🦀".len());

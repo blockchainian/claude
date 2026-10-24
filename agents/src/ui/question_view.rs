@@ -314,7 +314,7 @@ impl QuestionView {
         }
     }
 
-    pub(super) fn key(&mut self, key: KeyEvent) -> Option<Outcome> {
+    pub(super) fn key(&mut self, key: KeyEvent, kills: &mut crate::line_edit::KillBuffer) -> Option<Outcome> {
         if key.kind == KeyEventKind::Release {
             return None;
         }
@@ -353,7 +353,7 @@ impl QuestionView {
                 KeyCode::Up | KeyCode::Down | KeyCode::Tab | KeyCode::BackTab => {}
                 _ => {
                     let page = &mut self.pages[self.page];
-                    page.other.handle(key);
+                    page.other.handle(key, kills);
                     page.other_checked |= !page.other.is_empty();
                     return None;
                 }
@@ -512,7 +512,8 @@ impl QuestionView {
         let start = 5 + self.other_check().width() as u16;
         let focus = self.questions()[self.page].options.len();
         self.set_focus(focus);
-        self.pages[self.page].other.click_row_after(
+        super::render::click_input_row(
+            &mut self.pages[self.page].other,
             Rect::new(area.x + start, row, area.width.saturating_sub(start), 1),
             "",
             column,
@@ -674,8 +675,7 @@ impl QuestionView {
             } else {
                 Span::raw(
                     page.other
-                        .window(usize::from(width.saturating_sub(5 + check.width() as u16)))
-                        .0
+                        .window(usize::from(width.saturating_sub(5 + check.width() as u16))).text
                         .to_owned(),
                 )
             };
@@ -740,9 +740,9 @@ impl QuestionView {
         let focus = self.pages[self.page].focus;
         let row = rows.iter().position(|&row| row == Some(focus))?;
         let start = 5 + self.other_check().width() as u16;
-        let (_, caret) = self.pages[self.page]
+        let caret = self.pages[self.page]
             .other
-            .window(usize::from(area.width.saturating_sub(start)));
+            .window(usize::from(area.width.saturating_sub(start))).caret_column;
         Some((
             area.x + (start + caret).min(area.width - 1),
             area.y + row as u16,
@@ -807,7 +807,11 @@ mod tests {
     }
 
     fn press(view: &mut QuestionView, code: KeyCode) -> Option<Outcome> {
-        view.key(KeyEvent::new(code, KeyModifiers::NONE))
+        let mut kills = crate::line_edit::KillBuffer::default();
+        {
+            kills.begin_stroke();
+            view.key(KeyEvent::new(code, KeyModifiers::NONE), &mut kills)
+        }
     }
 
     fn submitted(outcome: Option<Outcome>) -> Answer {
@@ -1232,12 +1236,19 @@ mod tests {
 
     #[test]
     fn ask_view_release_and_modified_digits_do_not_submit() {
+        let mut kills = crate::line_edit::KillBuffer::default();
         let mut view = QuestionView::new(fixture("Single"));
         let mut key = KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE);
         key.kind = KeyEventKind::Release;
-        assert!(view.key(key).is_none());
+        assert!({
+            kills.begin_stroke();
+            view.key(key, &mut kills)
+        }.is_none());
         assert!(
-            view.key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::CONTROL))
+            {
+                kills.begin_stroke();
+                view.key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::CONTROL), &mut kills)
+            }
                 .is_none()
         );
         assert_eq!(

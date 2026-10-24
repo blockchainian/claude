@@ -226,7 +226,7 @@ fn image_only_prompt_counts_as_nonempty_for_ctrl_w() {
     let (mut view, _) = event_fixture();
     view.rows[view.selected].process = None;
     view.set_active_panel(Panel::Prompt);
-    view.input_box.editor.insert_image(
+    view.input_box.editor.insert_placeholder(
         crate::images::ImageAttachment::from_image(
             image::load_from_memory(&crate::images::fixture_png()).unwrap(),
         )

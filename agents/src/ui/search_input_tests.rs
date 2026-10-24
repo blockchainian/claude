@@ -8,23 +8,34 @@ fn key(code: KeyCode) -> KeyEvent {
 
 #[test]
 fn search_input_characters_and_spaces_are_consumed() {
+        let mut kills = crate::line_edit::KillBuffer::default();
     let mut input = SearchInput::default();
     input.focus();
     for character in "a 你/".chars() {
-        assert!(input.handle_key(key(KeyCode::Char(character))));
+        assert!({
+            kills.begin_stroke();
+            input.handle_key(key(KeyCode::Char(character)), &mut kills)
+        });
     }
     assert_eq!(input.text(), "a 你/");
-    assert!(input.handle_key(key(KeyCode::Backspace)));
+    assert!({
+        kills.begin_stroke();
+        input.handle_key(key(KeyCode::Backspace), &mut kills)
+    });
     assert_eq!(input.text(), "a 你");
 }
 
 #[test]
 fn search_input_up_and_down_pass_through() {
+        let mut kills = crate::line_edit::KillBuffer::default();
     let mut input = SearchInput::default();
     input.set_text("query");
     input.focus();
     for code in [KeyCode::Up, KeyCode::Down] {
-        assert!(!input.handle_key(key(code)));
+        assert!(!{
+            kills.begin_stroke();
+            input.handle_key(key(code), &mut kills)
+        });
         assert_eq!(input.text(), "query");
         assert!(input.focused());
     }
@@ -32,10 +43,14 @@ fn search_input_up_and_down_pass_through() {
 
 #[test]
 fn search_input_enter_blurs_and_keeps_query() {
+        let mut kills = crate::line_edit::KillBuffer::default();
     let mut input = SearchInput::default();
     input.focus();
     input.insert("query");
-    assert!(input.handle_key(key(KeyCode::Enter)));
+    assert!({
+        kills.begin_stroke();
+        input.handle_key(key(KeyCode::Enter), &mut kills)
+    });
     assert!(!input.focused());
     assert!(input.applied());
     assert_eq!(input.text(), "query");
@@ -43,10 +58,14 @@ fn search_input_enter_blurs_and_keeps_query() {
 
 #[test]
 fn search_input_escape_clears_and_blurs() {
+        let mut kills = crate::line_edit::KillBuffer::default();
     let mut input = SearchInput::default();
     input.set_text("query");
     input.focus();
-    assert!(input.handle_key(key(KeyCode::Esc)));
+    assert!({
+        kills.begin_stroke();
+        input.handle_key(key(KeyCode::Esc), &mut kills)
+    });
     assert!(!input.focused());
     assert!(!input.applied());
     assert_eq!(input.text(), "");
@@ -54,6 +73,7 @@ fn search_input_escape_clears_and_blurs() {
 
 #[test]
 fn search_input_unfocused_keys_pass_through() {
+        let mut kills = crate::line_edit::KillBuffer::default();
     let mut input = SearchInput::default();
     for text in ["", "query"] {
         input.set_text(text);
@@ -74,7 +94,10 @@ fn search_input_unfocused_keys_pass_through() {
             KeyCode::Tab,
             KeyCode::F(3),
         ] {
-            assert!(!input.handle_key(key(code)), "{code:?}");
+            assert!(!{
+                kills.begin_stroke();
+                input.handle_key(key(code), &mut kills)
+            }, "{code:?}");
             assert_eq!(input.text(), text);
             assert!(!input.focused());
         }
@@ -83,6 +106,7 @@ fn search_input_unfocused_keys_pass_through() {
 
 #[test]
 fn search_input_focus_moves_caret_to_end_and_blur_preserves_text() {
+        let mut kills = crate::line_edit::KillBuffer::default();
     let row = Rect::new(3, 4, 30, 1);
     let mut input = SearchInput::default();
     assert!(!input.applied());
@@ -93,7 +117,10 @@ fn search_input_focus_moves_caret_to_end_and_blur_preserves_text() {
     input.set_text("你好a");
     input.focus();
     assert_eq!(input.caret(row), Some((17, 4)));
-    assert!(input.handle_key(key(KeyCode::Home)));
+    assert!({
+        kills.begin_stroke();
+        input.handle_key(key(KeyCode::Home), &mut kills)
+    });
     input.blur();
     assert_eq!(input.text(), "你好a");
     assert_eq!(input.caret(row), None);
@@ -118,12 +145,19 @@ fn search_input_click_positions_by_display_column() {
 
 #[test]
 fn search_input_click_preserves_the_current_horizontal_window() {
+        let mut kills = crate::line_edit::KillBuffer::default();
     let row = Rect::new(3, 4, 14, 1);
     let mut input = SearchInput::default();
     input.set_text("abcdefghijklmnop");
     input.focus();
-    assert!(input.handle_key(key(KeyCode::Home)));
-    assert!(input.handle_key(key(KeyCode::Right)));
+    assert!({
+        kills.begin_stroke();
+        input.handle_key(key(KeyCode::Home), &mut kills)
+    });
+    assert!({
+        kills.begin_stroke();
+        input.handle_key(key(KeyCode::Right), &mut kills)
+    });
     input.blur();
     input.click(row, row.x + 10);
     assert!(input.focused());

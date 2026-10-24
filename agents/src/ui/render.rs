@@ -40,9 +40,9 @@ pub(super) fn line(text: impl Into<Line<'static>>, area: Rect, buf: &mut Buffer)
             .render(row(area, 0, 1), buf);
     }
 }
-fn input_row(prompt: &str, edit: &line_edit::LineEdit, area: Rect) -> (Line<'static>, u16) {
+fn input_row<P: line_edit::Placeholder>(prompt: &str, edit: &line_edit::LineEdit<P>, area: Rect) -> (Line<'static>, u16) {
     let prompt_width = prompt.width();
-    let (text, caret) = edit.window(usize::from(area.width).saturating_sub(prompt_width));
+    let line_edit::Window { text, caret_column: caret } = edit.window(usize::from(area.width).saturating_sub(prompt_width));
     (
         Line::from(vec![
             Span::styled(
@@ -58,9 +58,15 @@ fn input_row(prompt: &str, edit: &line_edit::LineEdit, area: Rect) -> (Line<'sta
     )
 }
 
-pub(super) fn render_input_row(
+pub(super) fn click_input_row<P: line_edit::Placeholder>(editor: &mut line_edit::LineEdit<P>, area: Rect, prefix: &str, column: u16) {
+    let columns = usize::from(area.width).saturating_sub(prefix.width());
+    let column = usize::from(column.saturating_sub(area.x)).saturating_sub(prefix.width());
+    editor.place_caret_in_window(columns, column);
+}
+
+pub(super) fn render_input_row<P: line_edit::Placeholder>(
     prompt: &str,
-    edit: &line_edit::LineEdit,
+    edit: &line_edit::LineEdit<P>,
     area: Rect,
     buf: &mut Buffer,
 ) {
@@ -400,7 +406,7 @@ impl View {
             if input.is_empty() {
                 return None;
             }
-            let (_, caret) = editor.window(usize::from(input.width));
+            let caret = editor.window(usize::from(input.width)).caret_column;
             return Some((input.x + caret, input.y));
         }
         let layout = self.center_layout(area);
@@ -1083,7 +1089,7 @@ impl View {
                 editor.text().width() + 1
             };
             let input_width = display_width.min(width);
-            let (text, _) = editor.window(input_width);
+            let text = editor.window(input_width).text;
             let (text, style) = if placeholder {
                 ("New task", Style::default().dim())
             } else {
@@ -1888,7 +1894,9 @@ impl View {
             if title_columns.is_some()
                 && offset >= scroll
                 && offset < scroll + available
-                && !(budget.is_none() && total - scroll > available && offset + 1 == scroll + available)
+                && !(budget.is_none()
+                    && total - scroll > available
+                    && offset + 1 == scroll + available)
             {
                 background_titles.push(area.y + (offset - scroll) as u16);
             }
@@ -2203,7 +2211,9 @@ fn rule(area: Rect, buf: &mut Buffer) {
 
 /// Turns the light line pieces of a rule heavy and colors them for attention, leaving its labels.
 fn heavy_rule(area: Rect, buf: &mut Buffer) {
-    let style = Style::default().not_dim().patch(style::attention_title_style());
+    let style = Style::default()
+        .not_dim()
+        .patch(style::attention_title_style());
     for x in area.left()..area.right() {
         let cell = &mut buf[(x, area.y)];
         let heavy = match cell.symbol() {
@@ -2385,7 +2395,11 @@ fn render_background_box(
         })
         .collect::<Vec<_>>();
     Paragraph::new(output).render(
-        Rect { y: box_area.y + 1, height: box_area.height.saturating_sub(1), ..box_area },
+        Rect {
+            y: box_area.y + 1,
+            height: box_area.height.saturating_sub(1),
+            ..box_area
+        },
         buf,
     );
     columns
@@ -2569,43 +2583,80 @@ mod background_title_tests {
 
     #[test]
     fn background_child_status_uses_task_list_glyph_and_color() {
-        assert_ne!(View::status_indicator(SessionStatus::Working).content,
-            View::status_indicator(SessionStatus::Ready).content);
+        assert_ne!(
+            View::status_indicator(SessionStatus::Working).content,
+            View::status_indicator(SessionStatus::Ready).content
+        );
         for status in [SessionStatus::Working, SessionStatus::Ready] {
             let area = Rect::new(0, 0, 40, 2);
             let mut buf = Buffer::empty(area);
             render_background_box("Child", status, Some("35s"), vec![], area, 0, &mut buf);
             let expected = View::status_indicator(status);
-            let cell = buf.content.iter().find(|cell| cell.symbol() == expected.content).unwrap();
+            let cell = buf
+                .content
+                .iter()
+                .find(|cell| cell.symbol() == expected.content)
+                .unwrap();
             assert_eq!(cell.fg, expected.style.fg.unwrap());
             assert!(!cell.modifier.contains(ratatui::style::Modifier::DIM));
-            assert!(!buf.content.iter().any(|cell| cell.symbol().chars().any(|c| ('\u{2500}'..='\u{257f}').contains(&c))));
+            assert!(!buf.content.iter().any(|cell| {
+                cell.symbol()
+                    .chars()
+                    .any(|c| ('\u{2500}'..='\u{257f}').contains(&c))
+            }));
         }
     }
 
     #[test]
     fn background_output_rows_share_title_center() {
-        for (width, title) in [160, 120, 90].into_iter().flat_map(|w| ["后台命令", "Working child"].map(|t| (w, t))) {
+        for (width, title) in [160, 120, 90]
+            .into_iter()
+            .flat_map(|w| ["后台命令", "Working child"].map(|t| (w, t)))
+        {
             let area = Rect::new(7, 3, width, 5);
             let long = "中文输出".repeat(80);
-            let output = ["python3, git status", "已推送，开始干净安装。", long.as_str()];
+            let output = [
+                "python3, git status",
+                "已推送，开始干净安装。",
+                long.as_str(),
+            ];
             let mut buf = Buffer::empty(area);
-            render_background_box(title, SessionStatus::Working, Some("35s"),
-                output.iter().map(|s| Line::from(s.to_string())).collect(), area, 2, &mut buf);
-            let title_start = (area.x..area.right()).find(|&x| buf[(x, area.y)].symbol() == "●").unwrap();
+            render_background_box(
+                title,
+                SessionStatus::Working,
+                Some("35s"),
+                output.iter().map(|s| Line::from(s.to_string())).collect(),
+                area,
+                2,
+                &mut buf,
+            );
+            let title_start = (area.x..area.right())
+                .find(|&x| buf[(x, area.y)].symbol() == "●")
+                .unwrap();
             let title_center = 2 * title_start + format!("● {title}").width() as u16;
             for (index, source) in output.iter().enumerate() {
                 let y = area.y + 1 + index as u16;
-                let expected = truncate_line_to_width(Line::from(source.to_string()), width as usize);
+                let expected =
+                    truncate_line_to_width(Line::from(source.to_string()), width as usize);
                 let expected_text = expected.to_string();
-                let start = (area.x..area.right()).find(|&x| buf[(x, y)].symbol() != " ").unwrap();
+                let start = (area.x..area.right())
+                    .find(|&x| buf[(x, y)].symbol() != " ")
+                    .unwrap();
                 let end = start + expected_text.width() as u16;
                 let left = start - area.x;
                 let right = area.right().saturating_sub(end);
-                assert!(left.abs_diff(right) <= 1, "width {width}, row {index}: {left} vs {right}");
-                assert!(title_center.abs_diff(start + end) <= 1, "width {width}, row {index}: title center differs");
-                let actual: String = (start..end).filter(|&x| x == start || buf[(x - 1, y)].symbol().width() < 2)
-                    .map(|x| buf[(x, y)].symbol()).collect();
+                assert!(
+                    left.abs_diff(right) <= 1,
+                    "width {width}, row {index}: {left} vs {right}"
+                );
+                assert!(
+                    title_center.abs_diff(start + end) <= 1,
+                    "width {width}, row {index}: title center differs"
+                );
+                let actual: String = (start..end)
+                    .filter(|&x| x == start || buf[(x - 1, y)].symbol().width() < 2)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect();
                 assert_eq!(actual, expected_text);
             }
         }
@@ -2617,7 +2668,15 @@ mod background_title_tests {
             for time in [None, Some("35s")] {
                 let area = Rect::new(0, 0, 40, 2);
                 let mut buf = Buffer::empty(area);
-                render_background_box(title, SessionStatus::Working, time, vec![Line::from("output")], area, 0, &mut buf);
+                render_background_box(
+                    title,
+                    SessionStatus::Working,
+                    time,
+                    vec![Line::from("output")],
+                    area,
+                    0,
+                    &mut buf,
+                );
                 let text: String = buf.content[..40]
                     .iter()
                     .enumerate()
@@ -2753,7 +2812,7 @@ mod title_input_tests {
                     let input = view.viewport.borrow().title_input;
                     assert!(input.x >= rule.x && input.right() <= rule.right());
                     if !input.is_empty() {
-                        let (visible, caret) = view.rename.window(usize::from(input.width));
+                        let line_edit::Window { text: visible, caret_column: caret } = view.rename.window(usize::from(input.width));
                         assert!(caret < input.width);
                         if !text.is_empty() {
                             let mut expected = Buffer::empty(input);

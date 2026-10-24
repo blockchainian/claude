@@ -1,7 +1,7 @@
 use super::*;
 use std::ops::Range;
 
-impl LineEdit {
+impl<P: Placeholder> LineEdit<P> {
     fn assert_boundary(&self, offset: usize) {
         assert!(
             offset == self.text.len()
@@ -16,7 +16,7 @@ impl LineEdit {
     pub(crate) fn set_cursor(&mut self, offset: usize) {
         self.assert_boundary(offset);
         self.home();
-        self.cursor = self.image_caret(offset);
+        self.cursor = self.placeholder_caret(offset);
         self.clear_selection();
     }
 
@@ -33,7 +33,7 @@ impl LineEdit {
     pub(crate) fn selection_range(&self) -> Option<Range<usize>> {
         let (anchor, end) = self.selection?;
         (anchor != end).then(|| {
-            self.image_boundary(anchor.min(end), false)..self.image_boundary(anchor.max(end), true)
+            self.placeholder_boundary(anchor.min(end), false)..self.placeholder_boundary(anchor.max(end), true)
         })
     }
 
@@ -50,7 +50,7 @@ impl LineEdit {
             return false;
         };
         let text = text.to_string();
-        let range = self.replace_images(range, &text);
+        let range = self.replace_placeholders(range, &text);
         self.cursor = range.start + text.len();
         self.align_cursor();
         self.set_cursor(self.cursor);

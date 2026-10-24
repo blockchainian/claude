@@ -3232,7 +3232,9 @@ fn task_details_folder_and_pr_use_rule_styles_and_keep_links() {
             assert_eq!(cell.style(), reference.style());
             if x == pr.x {
                 assert!(cell.symbol().contains("\x1b]8;;"));
-                assert!(cell_text(cell.symbol()).contains(crate::ui::link_path(url).to_str().unwrap()));
+                assert!(
+                    cell_text(cell.symbol()).contains(crate::ui::link_path(url).to_str().unwrap())
+                );
             }
         }
         assert!(buf[(folder.x, y)].symbol().contains("\x1b[4:4m"));
@@ -3246,7 +3248,9 @@ fn task_details_folder_and_pr_use_rule_styles_and_keep_links() {
                 &mut view,
                 mouse(MouseEventKind::Down(MouseButton::Left), folder.x, y)
             ),
-            Some(Action::Open(crate::ui::links::LinkTarget::Path(crate::test_project())))
+            Some(Action::Open(crate::ui::links::LinkTarget::Path(
+                crate::test_project()
+            )))
         );
         assert_eq!(
             click_mouse(
@@ -3513,12 +3517,16 @@ fn task_details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
         );
         assert_eq!(
             click_text(&mut view, &rendered, path),
-            Some(Action::Open(crate::ui::links::LinkTarget::Path(dir.path().join(path))))
+            Some(Action::Open(crate::ui::links::LinkTarget::Path(
+                dir.path().join(path)
+            )))
         );
     }
     assert_eq!(
         click_text(&mut view, &rendered, "reports/queued.md"),
-        Some(Action::Open(crate::ui::links::LinkTarget::Path(dir.path().join("reports/queued.md"))))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            dir.path().join("reports/queued.md")
+        )))
     );
     view.rows[view.selected].queued.clear();
     view.rows[view.selected].prompt = "Prompt row  \n".repeat(20);
@@ -4353,7 +4361,9 @@ fn task_details_queued_messages_keep_links_selection_and_copy() {
     let rendered = screen(&view, 120, 50);
     assert_eq!(
         click_text(&mut view, &rendered, "report"),
-        Some(Action::Open(crate::ui::links::LinkTarget::Path("https://example.com/report".into())))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            "https://example.com/report".into()
+        )))
     );
     assert_eq!(
         double_click_text(&mut view, &rendered, "Queued first"),
@@ -4611,7 +4621,13 @@ fn background_box_dims_title_but_not_indicator_or_output() {
         .find(|y| buf[(14, *y)].symbol() == "●")
         .expect("background indicator");
     assert!(!buf[(14, top)].modifier.contains(Modifier::DIM));
-    assert_eq!(buf[(14, top)].fg, View::status_indicator(SessionStatus::Working).style.fg.unwrap());
+    assert_eq!(
+        buf[(14, top)].fg,
+        View::status_indicator(SessionStatus::Working)
+            .style
+            .fg
+            .unwrap()
+    );
     assert_eq!(cell_text(buf[(16, top)].symbol()), "R");
     assert!(buf[(16, top)].modifier.contains(Modifier::DIM));
     let (tool_view, _) = open_tool_fixture();
@@ -5295,7 +5311,11 @@ fn dashboard_event_list_fills_rows_next_to_rules() {
             );
             assert_eq!(
                 view.event_read_count(area),
-                if search { crate::event::ALL_EVENTS } else { 100 }
+                if search {
+                    crate::event::ALL_EVENTS
+                } else {
+                    100
+                }
             );
             if crate::ui::render::ScreenLayout::for_width(width)
                 == crate::ui::render::ScreenLayout::Large
@@ -5442,7 +5462,10 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
                 .ends_with("25s")
         );
         assert_eq!(
-            text(y, left + 1, right).trim_end_matches([' ', '╶', '─']).chars().count() as u16,
+            text(y, left + 1, right)
+                .trim_end_matches([' ', '╶', '─'])
+                .chars()
+                .count() as u16,
             right - left - 2 - u16::from(width < 150),
             "background time at {width}"
         );
@@ -5451,7 +5474,8 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
             for x in [left + 1, right - 1] {
                 let background_tail = x == right - 1 && ["╶", "─"].contains(&buf[(x, y)].symbol());
                 assert!(
-                    buf[(x, y)].symbol() == " " || background_tail
+                    buf[(x, y)].symbol() == " "
+                        || background_tail
                         || x == left + 1 && buf[(x, y)].symbol() == "╴",
                     "padding ({x}, {y}) at {width}"
                 );
@@ -5691,9 +5715,7 @@ fn codex_inner_task_event_snapshot() {
     view.rows[0].id.provider = crate::providers::ProviderId::Codex;
     view.event_session = Some(view.rows[0].id.clone());
     let dir = tempfile::tempdir().unwrap();
-    let provider = crate::providers::codex::CodexProvider::new(
-        dir.path().to_owned(),
-    );
+    let provider = crate::providers::codex::CodexProvider::new(dir.path().to_owned());
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-inner");
     view.event_panel.clear();
     for (index, fixture) in [
@@ -6799,7 +6821,10 @@ mod event_search {
         let start = text(&buf).find("plain timeout bold").unwrap() as u16;
         for x in start + 6..start + 13 {
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buf[(x, 0)].fg, crate::ui::style::assistant_style().fg.unwrap());
+            assert_eq!(
+                buf[(x, 0)].fg,
+                crate::ui::style::assistant_style().fg.unwrap()
+            );
         }
         key(&mut view, KeyCode::Enter);
         let buf = panel(&view, now);
@@ -6865,7 +6890,10 @@ mod event_search {
         assert!(text(&buf).contains("plain café link"));
         let start = text(&buf).find("plain café link").unwrap() as u16;
         for x in start + 6..start + 10 {
-            assert_eq!(buf[(x, 0)].fg, crate::ui::style::assistant_style().fg.unwrap());
+            assert_eq!(
+                buf[(x, 0)].fg,
+                crate::ui::style::assistant_style().fg.unwrap()
+            );
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
         }
         assert!(!buf[(start + 11, 0)].modifier.contains(Modifier::UNDERLINED));
@@ -6991,12 +7019,15 @@ mod input_row {
         };
         event_panel.event_list.search.input.set_text(query);
         if left {
-            task.search.handle_key(KeyCode::Left.into());
+            let mut kills = crate::line_edit::KillBuffer::default();
+            kills.begin_stroke();
+            task.search.handle_key(KeyCode::Left.into(), &mut kills);
+            kills.begin_stroke();
             event_panel
                 .event_list
                 .search
                 .input
-                .handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+                .handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), &mut kills);
         }
         let mut task_buf = Buffer::empty(area);
         task.render_at(area, &mut task_buf, now);
@@ -7061,27 +7092,25 @@ mod input_row {
                     let (_, task_row, _, event_row, task, event_panel) =
                         rendered_inputs(width, query, left);
                     let area = Rect::new(3, 2, width, 40);
-                    let mut editor = super::super::line_edit::LineEdit::default();
+                    let mut editor: crate::line_edit::LineEdit = super::super::line_edit::LineEdit::default();
                     editor.set_text(query);
                     if left {
                         editor.left();
                     }
                     let expected = (9 + editor
-                        .window(usize::from(task_row.width.saturating_sub(9)))
-                        .1)
+                        .window(usize::from(task_row.width.saturating_sub(9))).caret_column)
                         .min(task_row.width.saturating_sub(1));
                     assert_eq!(
                         task.cursor_pos(area),
                         Some((task_row.x + expected, task_row.y))
                     );
-                    let mut editor = super::super::line_edit::LineEdit::default();
+                    let mut editor: crate::line_edit::LineEdit = super::super::line_edit::LineEdit::default();
                     editor.set_text(query);
                     if left {
                         editor.left();
                     }
                     let event_expected = (9 + editor
-                        .window(usize::from(event_row.width.saturating_sub(9)))
-                        .1)
+                        .window(usize::from(event_row.width.saturating_sub(9))).caret_column)
                         .min(event_row.width.saturating_sub(1));
                     assert_eq!(
                         event_panel.cursor_pos(area),
@@ -7991,8 +8020,14 @@ fn assert_question_details_snapshot(name: &str, rendered: &str) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/ui_snapshots")
         .join(name);
-    let rendered = rendered.lines().map(str::trim_end).collect::<Vec<_>>()
-        .join("\n").trim_end().to_owned() + "\n";
+    let rendered = rendered
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end()
+        .to_owned()
+        + "\n";
     if std::env::var_os("UPDATE_EVENT_DETAIL_SNAPSHOT").is_some() {
         std::fs::write(&path, &rendered).unwrap();
     }
@@ -8080,10 +8115,12 @@ fn pending_question_details_wrap_the_complete_question() {
         "{rendered}"
     );
     assert!(
-        rendered
-            .split_whitespace()
-            .collect::<String>()
-            .contains(&question.replace('`', "").split_whitespace().collect::<String>()),
+        rendered.split_whitespace().collect::<String>().contains(
+            &question
+                .replace('`', "")
+                .split_whitespace()
+                .collect::<String>()
+        ),
         "{rendered}"
     );
     assert!(!rendered.contains('…'), "{rendered}");
@@ -8146,9 +8183,7 @@ fn pending_question_event_uses_model_color() {
     use crate::providers::Provider;
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let dir = tempfile::tempdir().unwrap();
-    let codex = crate::providers::codex::CodexProvider::new(
-        dir.path().to_owned(),
-    );
+    let codex = crate::providers::codex::CodexProvider::new(dir.path().to_owned());
     for fixture in [
         "tests/fixtures/claude-questions-pending.jsonl",
         "tests/fixtures/codex-input/default-pending.jsonl",
@@ -8866,7 +8901,9 @@ fn task_event_click_on_a_shortened_tool_path_opens_the_full_path() {
     assert!(!list.contains(path), "{list}");
     assert_eq!(
         click_text(&mut view, &list, "report.md"),
-        Some(Action::Open(crate::ui::links::LinkTarget::Path(path.into())))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            path.into()
+        )))
     );
     assert_eq!(view.visible_event(), view.event_panel.get(7));
     let (x, y) = rendered_cell(&list, "report.md");
@@ -8897,15 +8934,17 @@ fn task_event_click_on_a_path_in_free_tool_text_opens_the_full_path() {
     assert!(!list.contains(path), "{list}");
     assert_eq!(
         click_text(&mut view, &list, "plan.md"),
-        Some(Action::Open(crate::ui::links::LinkTarget::Path(path.into())))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            path.into()
+        )))
     );
 }
 
 #[test]
 fn task_event_click_on_an_image_placeholder_opens_the_image() {
     let (mut view, now) = event_fixture();
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/claude-read-image.jsonl");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-read-image.jsonl");
     let bytes = std::fs::read(&path).unwrap();
     let source = crate::images::ImageSource::Record {
         record: crate::event::SourceRecord {
@@ -8942,7 +8981,9 @@ fn open_event_links_its_wrapped_path() {
     assert!(open.contains("another-long-directory"), "{open}");
     assert_eq!(
         click_text(&mut view, &open, "another-long-directory"),
-        Some(Action::Open(crate::ui::links::LinkTarget::Path(path.into())))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            path.into()
+        )))
     );
     assert_eq!(click_text(&mut view, &open, "see"), None);
 }
@@ -8965,7 +9006,9 @@ fn task_details_prompt_links_its_shortened_path_and_image_placeholder() {
     assert!(rendered.contains("report.md"), "{rendered}");
     assert_eq!(
         click_text(&mut view, &rendered, "report.md"),
-        Some(Action::Open(crate::ui::links::LinkTarget::Path(path.into())))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            path.into()
+        )))
     );
     assert_eq!(
         click_text(&mut view, &rendered, "[Image #1]"),
@@ -8993,7 +9036,9 @@ fn task_details_relative_paths_link_only_when_they_exist() {
     let rendered = screen(&view, 120, 40);
     assert_eq!(
         click_text(&mut view, &rendered, "src/main.rs"),
-        Some(Action::Open(crate::ui::links::LinkTarget::Path(dir.path().join("src/main.rs"))))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            dir.path().join("src/main.rs")
+        )))
     );
     assert_eq!(click_text(&mut view, &rendered, "and/or"), None);
     view.last_copy_click = None;
@@ -9021,7 +9066,12 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
         .borrow()
         .task_details_links
         .iter()
-        .find(|(_, target)| crate::ui::link_path(target).to_str().unwrap().starts_with("vscode://"))
+        .find(|(_, target)| {
+            crate::ui::link_path(target)
+                .to_str()
+                .unwrap()
+                .starts_with("vscode://")
+        })
         .unwrap()
         .clone();
     let (x, y) = (rect.x, rect.y);
@@ -9047,8 +9097,14 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
         .task_details_links
         .iter()
         .find(|(_, target)| {
-            !crate::ui::link_path(target).to_str().unwrap().starts_with("vscode://")
-                && !crate::ui::link_path(target).to_str().unwrap().ends_with("todo.md")
+            !crate::ui::link_path(target)
+                .to_str()
+                .unwrap()
+                .starts_with("vscode://")
+                && !crate::ui::link_path(target)
+                    .to_str()
+                    .unwrap()
+                    .ends_with("todo.md")
         })
         .unwrap()
         .clone();
@@ -9058,7 +9114,9 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
             &mut view,
             mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1)
         ),
-        Some(Action::Open(crate::ui::links::LinkTarget::Path(dir.path().to_owned())))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            dir.path().to_owned()
+        )))
     );
     assert_eq!(
         click_text(&mut view, &rendered, "todo.md"),
@@ -9082,8 +9140,14 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
         .task_details_links
         .iter()
         .find(|(_, target)| {
-            !crate::ui::link_path(target).to_str().unwrap().starts_with("vscode://")
-                && !crate::ui::link_path(target).to_str().unwrap().ends_with("todo.md")
+            !crate::ui::link_path(target)
+                .to_str()
+                .unwrap()
+                .starts_with("vscode://")
+                && !crate::ui::link_path(target)
+                    .to_str()
+                    .unwrap()
+                    .ends_with("todo.md")
         })
         .unwrap()
         .clone();
@@ -9091,7 +9155,9 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
     let cwd_cell = mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1);
     assert_eq!(
         click_mouse(&mut view, cwd_cell),
-        Some(Action::Open(crate::ui::links::LinkTarget::Path(crate::test_project())))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            crate::test_project()
+        )))
     );
     // Below 100 columns task details move below the task list.
     screen(&view, 99, 40);
@@ -9123,7 +9189,9 @@ fn project_group_header_opens_its_directory() {
     );
     assert_eq!(
         view.flush_pending_click(Instant::now() + view.double_click_interval),
-        Some(Action::Open(crate::ui::links::LinkTarget::Path(crate::test_project())))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            crate::test_project()
+        )))
     );
     let selected = view.selected;
     assert_eq!(
@@ -9832,7 +9900,9 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
         }
         assert_eq!(
             click_text(&mut view, &rendered, sha),
-            Some(Action::Open(crate::ui::links::LinkTarget::Path(target.clone())))
+            Some(Action::Open(crate::ui::links::LinkTarget::Path(
+                target.clone()
+            )))
         );
         assert_eq!(view.visible_event(), view.event_panel.get(7));
         assert_eq!(click_text(&mut view, &rendered, "deadbeef"), None);
@@ -9840,7 +9910,9 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
         let rendered = event_screen(&view, 120, 40, now);
         assert_eq!(
             click_text(&mut view, &rendered, sha),
-            Some(Action::Open(crate::ui::links::LinkTarget::Path(target.clone())))
+            Some(Action::Open(crate::ui::links::LinkTarget::Path(
+                target.clone()
+            )))
         );
         view.select_fixture_event(None);
     }
@@ -9860,7 +9932,12 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
             .borrow()
             .event_links
             .iter()
-            .find(|(_, url)| crate::ui::link_path(url).to_str().unwrap().ends_with(&format!("&sha={full}")))
+            .find(|(_, url)| {
+                crate::ui::link_path(url)
+                    .to_str()
+                    .unwrap()
+                    .ends_with(&format!("&sha={full}"))
+            })
             .cloned();
         if let Some((rect, target)) = link {
             // The tool title repeats the SHA; click its linked body occurrence.
@@ -10714,9 +10791,11 @@ mod event_navigation {
                 let current = events.len() / 2;
                 view.select_fixture_event(Some(events[current].clone()));
                 let key = KeyEvent::new(code, modifiers);
-                let mut editor = super::super::line_edit::LineEdit::default();
+                let mut editor: crate::line_edit::LineEdit = super::super::line_edit::LineEdit::default();
                 editor.set_text("a");
-                let consumed = view.search_focused() && editor.handle(key);
+                let mut kills = crate::line_edit::KillBuffer::default();
+                kills.begin_stroke();
+                let consumed = view.search_focused() && editor.handle(key, &mut kills);
                 if consumed {
                     view.handle_key(key);
                     assert_eq!(view.event_list.search.input.text(), editor.text());
@@ -11177,7 +11256,12 @@ fn assert_session_search_keeps_model_on_border(focused: bool) {
             .collect();
         assert_eq!(query.trim(), "Search ❯ a");
         for (rect, field) in targets {
-            assert!(view.viewport.borrow().field_targets.contains(&(rect, field)));
+            assert!(
+                view.viewport
+                    .borrow()
+                    .field_targets
+                    .contains(&(rect, field))
+            );
             for x in rect.x..rect.right() {
                 assert_eq!(after[(x, rect.y)], before[(x, rect.y)]);
             }
@@ -11432,9 +11516,7 @@ fn task_details_model_has_no_prefix() {
 fn weekly_usage_view() -> View {
     let mut view = fixture();
     let hub = crate::sessions::Hub::new(vec![
-        Box::new(crate::providers::codex::CodexProvider::new(
-            PathBuf::new(),
-        )),
+        Box::new(crate::providers::codex::CodexProvider::new(PathBuf::new())),
         Box::new(crate::providers::claude::ClaudeProvider::new(PathBuf::new())),
     ]);
     view.provider_names = hub.display_names();
@@ -11936,9 +12018,7 @@ fn recorded_agent_settings_use_the_picker_catalog_and_shared_effort() {
         include_str!("../../tests/fixtures/codex-models-cache.json"),
     )
     .unwrap();
-    let provider = crate::providers::codex::CodexProvider::new(
-        directory.path().into(),
-    );
+    let provider = crate::providers::codex::CodexProvider::new(directory.path().into());
     let mut row = session("settings", "Settings", SessionStatus::Ready, 0);
     row.id.provider = ProviderId::Codex;
     row.transcript = Some(

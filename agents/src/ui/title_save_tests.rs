@@ -129,9 +129,11 @@ fn activating_task_details_again_keeps_title_editing() {
 fn task_title_and_focus_park_across_task_switches() {
     let (_directory, mut view, id, _) = editing_title(200);
     view.rename.set_text("Half title");
+    let mut kills = crate::line_edit::KillBuffer::default();
+    kills.begin_stroke();
     view.rename
-        .handle(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-    let caret = view.rename.window(80).1;
+        .handle(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), &mut kills);
+    let caret = view.rename.window(80).caret_column;
     view.set_active_panel(Panel::TaskList);
     assert_eq!(view.take_pending_action(), None);
     let other = view.rows.iter().position(|row| row.id != id).unwrap();
@@ -142,7 +144,7 @@ fn task_title_and_focus_park_across_task_switches() {
     view.select(original);
     assert_eq!(view.active_panel, Panel::TaskDetails);
     assert_eq!(view.rename.text(), "Half title");
-    assert_eq!(view.rename.window(80).1, caret);
+    assert_eq!(view.rename.window(80).caret_column, caret);
     assert!(view.title_editor().is_some());
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
@@ -270,7 +272,7 @@ fn task_return_routes_restore_parked_title_and_caret() {
         for _ in 0..4 {
             key(&mut view, KeyCode::Left);
         }
-        let caret = view.rename.window(80).1;
+        let caret = view.rename.window(80).caret_column;
         let second = view
             .rows
             .iter()
@@ -348,7 +350,7 @@ fn task_return_routes_restore_parked_title_and_caret() {
         };
         assert_eq!(view.active_panel, expected_panel, "{route}");
         assert_eq!(view.rename.text(), "AlphaBeta", "{route}");
-        assert_eq!(view.rename.window(80).1, caret, "{route}");
+        assert_eq!(view.rename.window(80).caret_column, caret, "{route}");
         view.set_active_panel(Panel::TaskDetails);
         assert_eq!(key(&mut view, KeyCode::Char('X')), None);
         assert_eq!(view.rename.text(), "AlphaXBeta", "{route}");
