@@ -45,7 +45,7 @@ test("Claude client packages only Codex's communication server and excludes Clau
   assert.deepEqual(Object.keys(codex.mcpServers), ["claude-client"]);
   assert.deepEqual(codex.mcpServers["claude-client"], {
     command: "node",
-    args: ["codex-manager/manager.mjs", "claude"],
+    args: ["claude-client/client.mjs", "mcp"],
     cwd: "./",
     tool_timeout_sec: 360,
     default_tools_approval_mode: "approve",
