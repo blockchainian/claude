@@ -24,7 +24,7 @@ pub(super) const RULES: &[ToolRule] = &[
     },
     ToolRule {
         name: "send",
-        output: Some((Pick::With(turn_output), Format::Text)),
+        output: Some((Pick::With(note_output), Format::Text)),
         title: &[Pick::Field(Source::Input, "/threadId")],
         input: Some((Pick::Field(Source::Input, "/prompt"), Format::Markdown)),
         ..DEFAULT_RULE
@@ -79,6 +79,20 @@ fn turn_output(data: &ToolData<'_>) -> Option<Body> {
         label: "output".into(),
         text: turn.to_string(),
     }];
+    sections.extend(attention_sections(data));
+    Some(Body::Sections(sections))
+}
+
+/// The note codex-manager attaches to a sent prompt, such as a steer into a running turn.
+fn note_output(data: &ToolData<'_>) -> Option<Body> {
+    let result = data.result.filter(|result| !result.error)?;
+    let mut sections: Vec<Section> = text(&result.structured, "note")
+        .map(|note| Section::Prose {
+            text: note.to_owned(),
+            markdown: false,
+        })
+        .into_iter()
+        .collect();
     sections.extend(attention_sections(data));
     Some(Body::Sections(sections))
 }
@@ -382,7 +396,7 @@ mod tests {
             };
             // The shared turn builder receives the actual result payload, including attention.
             let Some(Body::Sections(sections)) =
-                Some(output(rule("codex-manager.send").output, &data))
+                Some(output(rule("codex-manager.interrupt").output, &data))
             else {
                 panic!("expected turn output")
             };
@@ -396,6 +410,36 @@ mod tests {
             assert!(shown.get("attention").is_none());
             assert_eq!(&sections[1..], attention_sections(&data));
         }
+    }
+
+    #[test]
+    fn codex_manager_send_shows_only_the_note() {
+        let records: Vec<Value> =
+            include_str!("../../../../tests/fixtures/claude-manager-send-result.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let content = &records[1]["message"]["content"][0]["content"];
+        let result = ToolResult {
+            source: None,
+            content: content.clone(),
+            structured: serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap(),
+            error: false,
+        };
+        let data = ToolData {
+            input: &records[0]["message"]["content"][0]["input"],
+            result: Some(&result),
+        };
+        let Body::Sections(sections) = output(rule("codex-manager.send").output, &data) else {
+            panic!("expected send output")
+        };
+        assert_eq!(
+            sections,
+            [Section::Prose {
+                text: result.structured["note"].as_str().unwrap().to_owned(),
+                markdown: false,
+            }]
+        );
     }
 
     #[test]
