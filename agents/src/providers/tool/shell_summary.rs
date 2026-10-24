@@ -366,6 +366,12 @@ fn scan(
             i += 1;
             continue;
         }
+        // A word-leading `~` or `~/` expands to one home-directory word.
+        let home = c == '~'
+            && word.is_empty()
+            && chars
+                .get(i + 1)
+                .is_none_or(|next| *next == '/' || next.is_whitespace());
         if single
             && ((quote.is_none()
                 && !(words.first().is_some_and(|w| w == "rg")
@@ -384,11 +390,11 @@ fn scan(
                         | '?'
                         | '['
                         | ']'
-                        | '~'
                         | '#'
                         | '\n'
                         | '\r'
                 ))
+                || (quote.is_none() && c == '~' && !home)
                 || (quote != Some('\'') && matches!(c, '$' | '`')))
         {
             return None;
