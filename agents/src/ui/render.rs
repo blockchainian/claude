@@ -762,7 +762,9 @@ impl View {
             buf,
             now,
         );
-        let borrowed = !layout.list.is_empty();
+        // The chart canvas includes the search row and retains the panel edges.
+        let list = layout.usage_chart;
+        let borrowed = !list.is_empty();
         self.render_title_rule(
             edge(layout.task_details, layout.task_details.bottom()),
             !borrowed,
@@ -770,11 +772,11 @@ impl View {
         );
         if borrowed {
             let y = if layout.kind == ScreenLayout::Small {
-                layout.list.y.saturating_sub(1)
+                list.y.saturating_sub(1)
             } else {
-                layout.list.bottom()
+                list.bottom()
             };
-            self.render_task_model(edge(layout.list, y), Rect::default(), true, buf);
+            self.render_task_model(edge(list, y), Rect::default(), true, buf);
         }
     }
 

@@ -10979,6 +10979,63 @@ fn claude_agent_display_from_real_records() {
     }
 }
 
+fn assert_session_search_keeps_model_on_border(focused: bool) {
+    for width in [120, 200] {
+        let mut row = session("model", "Model task", SessionStatus::Ready, 0);
+        row.model = Some("claude-opus-5-5".into());
+        row.effort = Some("medium".into());
+        let mut view = test_view(Grouping::Project, false);
+        view.set_sessions(vec![row], false);
+        let area = Rect::new(0, 0, width, 40);
+        let now = Utc::now();
+        let border_y = view.center_layout(area).list.bottom();
+        let mut before = Buffer::empty(area);
+        view.render_at(area, &mut before, now);
+        let targets = view
+            .viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .filter(|(_, field)| matches!(field, Field::Model | Field::Effort))
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(targets.len(), 2);
+        for (rect, _) in &targets {
+            assert_eq!(rect.y, border_y);
+        }
+
+        view.search.focus();
+        view.search.insert("a");
+        if !focused {
+            view.search.blur();
+        }
+        let search = view.center_layout(area).search;
+        assert_eq!(search.bottom(), border_y);
+        let mut after = Buffer::empty(area);
+        view.render_at(area, &mut after, now);
+        let query: String = (search.x..search.right())
+            .map(|x| cell_text(after[(x, search.y)].symbol()))
+            .collect();
+        assert_eq!(query.trim(), if focused { "Search ❯ a" } else { "a" });
+        for (rect, field) in targets {
+            assert!(view.viewport.borrow().field_targets.contains(&(rect, field)));
+            for x in rect.x..rect.right() {
+                assert_eq!(after[(x, rect.y)], before[(x, rect.y)]);
+            }
+        }
+    }
+}
+
+#[test]
+fn session_search_blurred_keeps_model_on_border() {
+    assert_session_search_keeps_model_on_border(false);
+}
+
+#[test]
+fn session_search_focused_keeps_model_on_border() {
+    assert_session_search_keeps_model_on_border(true);
+}
+
 #[test]
 fn session_search_overlays_bottom_of_unchanged_usage_chart() {
     for (width, height) in [(200, 50), (120, 45), (80, 12), (60, 6)] {
