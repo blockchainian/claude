@@ -47,6 +47,24 @@ pub(crate) enum ImageSource {
     },
 }
 
+impl Image {
+    /// An image file on disk, labelled by its path; `None` when no file is there.
+    pub(crate) fn file(path: PathBuf) -> Option<Self> {
+        let metadata = std::fs::metadata(&path).ok()?;
+        if !metadata.is_file() {
+            return None;
+        }
+        Some(Self {
+            label: path.to_string_lossy().into_owned(),
+            source: ImageSource::File {
+                path,
+                len: metadata.len(),
+                modified: metadata.modified().ok()?,
+            },
+        })
+    }
+}
+
 impl ImageSource {
     /// Returns the file itself, or persists decoded record bytes for opening.
     pub(crate) fn local_file(&self) -> io::Result<PathBuf> {

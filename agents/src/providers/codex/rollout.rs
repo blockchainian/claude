@@ -922,18 +922,7 @@ fn image_file(value: &str) -> Option<Image> {
     } else {
         PathBuf::from(value)
     };
-    let metadata = std::fs::metadata(&path).ok()?;
-    if !metadata.is_file() {
-        return None;
-    }
-    Some(Image {
-        label: path.to_string_lossy().into_owned(),
-        source: ImageSource::File {
-            path,
-            len: metadata.len(),
-            modified: metadata.modified().ok()?,
-        },
-    })
+    Image::file(path)
 }
 
 fn record_turn(record: &Value) -> Option<&str> {
@@ -2727,7 +2716,9 @@ fn events_with_images<'a>(
                                 }),
                                 "input_image" => {
                                     let url = block["image_url"].as_str()?;
-                                    if seen_images.contains(&url) { return None; }
+                                    if seen_images.contains(&url) {
+                                        return None;
+                                    }
                                     seen_images.push(url);
                                     (!(payload["name"] == "wait"
                                         && image_hashes[offset]
@@ -4005,8 +3996,17 @@ mod tests {
             let call = &completed_tool(&record).unwrap().unwrap().calls[0];
             assert_eq!(call.output.as_ref().unwrap().len(), 2, "{}", call.name);
             assert_eq!(call.input.len(), 1);
-            assert!(matches!(&call.input[0], Section::Structured { label, text }
-                if label == "input" && serde_json::from_str::<Value>(text).unwrap() == record["payload"]["item"]["arguments"]));
+            if record["payload"]["item"]["server"] == "appium-mcp" {
+                assert!(
+                    matches!(&call.input[0], Section::Markdown { text, .. }
+                    if text.contains("platform") && !text.contains("action")),
+                    "appium session calls title their action and table the rest: {:?}",
+                    call.input
+                );
+            } else {
+                assert!(matches!(&call.input[0], Section::Structured { label, text }
+                    if label == "input" && serde_json::from_str::<Value>(text).unwrap() == record["payload"]["item"]["arguments"]));
+            }
             let result = &record["payload"]["item"]["result"];
             assert!(
                 matches!(&call.output.as_ref().unwrap()[0], Section::Text { text, .. }
@@ -4223,10 +4223,7 @@ mod tests {
         let call = response_tool_call(&payload, Some(output));
         assert_eq!(
             call.output.unwrap(),
-            vec![text_section(
-                "output",
-                "Chat about this"
-            )]
+            vec![text_section("output", "Chat about this")]
         );
         assert!(call.is_error);
     }
@@ -4635,7 +4632,10 @@ mod tests {
         assert!(!item["result"].as_str().unwrap().is_empty());
         let call = completed_tool(&record).unwrap().unwrap().calls.remove(0);
         let [Section::Structured { label, text }] = call.input.as_slice() else {
-            panic!("expected structured image generation input: {:?}", call.input);
+            panic!(
+                "expected structured image generation input: {:?}",
+                call.input
+            );
         };
         assert_eq!(label, "input");
         let input: Value = serde_json::from_str(text).unwrap();

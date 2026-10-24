@@ -1,8 +1,9 @@
 //! Session sources: the live registry and transcripts.
 
-mod tools;
+mod appium;
 mod claude_in_chrome;
 mod computer_use;
+mod tools;
 
 mod account;
 mod api;
@@ -44,8 +45,8 @@ mod weekly_usage;
 
 use crate::model::{Action, Process, Session, SessionStatus};
 use crate::providers::{
-    Capabilities, Provider, ProviderId, SessionAction, SessionInput, SessionKey, Snapshot, Supervision,
-    SupervisionState, TerminalCommand, TerminalInput,
+    Capabilities, Provider, ProviderId, SessionAction, SessionInput, SessionKey, Snapshot,
+    Supervision, SupervisionState, TerminalCommand, TerminalInput,
 };
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
@@ -1268,7 +1269,10 @@ impl Provider for ClaudeProvider {
         if supervision.session.provider != ProviderId::Codex {
             return Err(io::ErrorKind::Unsupported.into());
         }
-        let state = self.codex_manager.clone().ok_or(io::ErrorKind::Unsupported)?;
+        let state = self
+            .codex_manager
+            .clone()
+            .ok_or(io::ErrorKind::Unsupported)?;
         let config = self.config_dir.clone();
         let supervision = supervision.clone();
         Ok(Box::new(move || {
@@ -1277,7 +1281,8 @@ impl Provider for ClaudeProvider {
                 std::slice::from_ref(&supervision.supervisor),
             )?;
             if current.iter().any(|current| {
-                current.session == supervision.session && current.state == SupervisionState::Detached
+                current.session == supervision.session
+                    && current.state == SupervisionState::Detached
             }) {
                 return Ok(());
             }
@@ -2354,5 +2359,10 @@ mod delete_live_tests {
 
 pub(crate) const TOOL_RULES: super::tool::ToolRules = super::tool::ToolRules {
     native: tools::RULES,
-    servers: &[codex_manager::SERVER, claude_in_chrome::SERVER, computer_use::SERVER],
+    servers: &[
+        appium::SERVER,
+        codex_manager::SERVER,
+        claude_in_chrome::SERVER,
+        computer_use::SERVER,
+    ],
 };

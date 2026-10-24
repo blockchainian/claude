@@ -1,0 +1,345 @@
+use crate::event::Section;
+use crate::images::Image;
+use crate::providers::{mcp::McpServer, tool::*};
+use serde_json::Value;
+
+pub(crate) const SERVER: McpServer = McpServer {
+    name: "appium-mcp",
+    tools: &[
+        ToolRule {
+            name: "select_device",
+            title: &[Pick::With(device_title)],
+            input: Some((Pick::With(device_input), Format::Table)),
+            output: Some((Pick::Field(Source::Result, "/message"), Format::Text)),
+            ..DEFAULT_RULE
+        },
+        ToolRule {
+            name: "appium_prepare_ios_real_device",
+            title: &[Pick::Field(Source::Result, "/mode")],
+            input: Some((Pick::Field(Source::Input, "/udid"), Format::Text)),
+            output: Some((Pick::With(recommended_profiles), Format::Table)),
+            ..DEFAULT_RULE
+        },
+        ToolRule {
+            name: "appium_session_management",
+            title: &[Pick::Field(Source::Input, "/action")],
+            input: Some((Pick::With(session_input), Format::Text)),
+            ..DEFAULT_RULE
+        },
+        ToolRule {
+            name: "appium_screenshot",
+            input: Some((Pick::With(screenshot_input), Format::Table)),
+            output: Some((Pick::With(screenshot), Format::Text)),
+            ..DEFAULT_RULE
+        },
+        ToolRule {
+            name: "appium_find_element",
+            aliases: &["appium_find_elements"],
+            title: &[Pick::Field(Source::Input, "/selector")],
+            input: Some((Pick::With(find_input), Format::Table)),
+            output: Some((Pick::Field(Source::Result, "/elements"), Format::Table)),
+            ..DEFAULT_RULE
+        },
+        ToolRule {
+            name: "appium_gesture",
+            title: &[Pick::With(gesture_title)],
+            input: Some((Pick::With(gesture_input), Format::Table)),
+            ..DEFAULT_RULE
+        },
+        ToolRule {
+            name: "appium_get_page_source",
+            input: Some((Pick::With(page_source_input), Format::Code("xpath"))),
+            ..DEFAULT_RULE
+        },
+        ToolRule {
+            name: "appium_get_element_attribute",
+            title: &[Pick::Field(Source::Input, "/attribute")],
+            input: Some((Pick::With(attribute_input), Format::Table)),
+            output: Some((Pick::With(attribute_value), Format::Text)),
+            ..DEFAULT_RULE
+        },
+        ToolRule {
+            name: "appium_get_text",
+            aliases: &["appium_get_active_element"],
+            input: Some((Pick::With(element_input), Format::Table)),
+            ..DEFAULT_RULE
+        },
+        ToolRule {
+            name: "appium_set_value",
+            title: &[Pick::Field(Source::Input, "/text")],
+            input: Some((Pick::With(set_value_input), Format::Table)),
+            ..DEFAULT_RULE
+        },
+        ToolRule {
+            name: "appium_orientation",
+            title: &[Pick::Field(Source::Input, "/action")],
+            input: Some((Pick::With(orientation_input), Format::Table)),
+            ..DEFAULT_RULE
+        },
+    ],
+};
+
+/// The input fields no title or other pick shows, without the session every call carries;
+/// a lone element id is shown bare.
+fn other_fields(data: &ToolData<'_>, shown: &[&str]) -> Option<Vec<Section>> {
+    let mut rest = data.input.as_object()?.clone();
+    for key in shown.iter().chain(&["sessionId"]) {
+        rest.shift_remove(*key);
+    }
+    if rest.is_empty() {
+        return Some(Vec::new());
+    }
+    if rest.len() == 1
+        && let Some(element) = rest.get("elementUUID").and_then(Value::as_str)
+    {
+        return Some(vec![Section::Prose {
+            text: element.into(),
+            markdown: false,
+        }]);
+    }
+    Some(picked_sections(
+        &Value::Object(rest),
+        "/input",
+        Format::Table,
+        false,
+    ))
+}
+
+fn device_title(data: &ToolData<'_>) -> Option<String> {
+    let parts: Vec<_> = ["platform", "iosDeviceType"]
+        .into_iter()
+        .filter_map(|field| text(data.input, field))
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
+fn device_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    other_fields(data, &["platform", "iosDeviceType"])
+}
+
+/// The recommended provisioning profiles, by name, team and expiry.
+fn recommended_profiles(data: &ToolData<'_>) -> Option<Body> {
+    let result = data.result.filter(|result| !result.error)?;
+    let profiles: Vec<_> = result.structured["recommendedProfiles"]
+        .as_array()?
+        .iter()
+        .map(|profile| {
+            serde_json::json!({
+                "name": profile["name"],
+                "teamName": profile["teamName"],
+                "expiresAt": profile["expiresAt"],
+            })
+        })
+        .collect();
+    Some(Body::Sections(picked_sections(
+        &Value::Array(profiles),
+        "/recommendedProfiles",
+        Format::Table,
+        true,
+    )))
+}
+
+/// The app a new session launches; other session calls show their remaining fields.
+fn session_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    let capabilities: Value = data.input["capabilities"]
+        .as_str()
+        .and_then(|text| serde_json::from_str(text).ok())
+        .unwrap_or_else(|| data.input["capabilities"].clone());
+    match capabilities["appium:bundleId"].as_str() {
+        Some(bundle) => Some(vec![Section::Prose {
+            text: bundle.into(),
+            markdown: false,
+        }]),
+        None => other_fields(data, &["action"]),
+    }
+}
+
+fn screenshot_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    other_fields(data, &[])
+}
+
+/// The saved screenshot itself in place of the sentence naming its file.
+fn screenshot(data: &ToolData<'_>) -> Option<Body> {
+    let result = data.result.filter(|result| !result.error)?;
+    let path = result
+        .text()
+        .trim()
+        .strip_prefix("Screenshot saved successfully to: ")?
+        .to_owned();
+    let image = Image::file(path.into())?;
+    Some(Body::Sections(vec![Section::Image(image)]))
+}
+
+fn find_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    other_fields(data, &["selector"])
+}
+
+/// The gesture, with the point it touched when it was given coordinates.
+fn gesture_title(data: &ToolData<'_>) -> Option<String> {
+    let action = text(data.input, "action")?;
+    let coordinate = |field: &str| match &data.input[field] {
+        Value::Number(number) => Some(number.to_string()),
+        Value::String(text) => Some(text.clone()),
+        _ => None,
+    };
+    Some(match (coordinate("x"), coordinate("y")) {
+        (Some(x), Some(y)) => format!("{action} ({x}, {y})"),
+        _ => action.to_owned(),
+    })
+}
+
+fn gesture_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    other_fields(data, &["action", "x", "y"])
+}
+
+/// The selector as code, since XPath filters run long.
+fn page_source_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    let selector = text(data.input, "selector")?;
+    let mut sections = vec![code_section("selector", "xpath", selector)];
+    sections.extend(other_fields(data, &["selector"])?);
+    Some(sections)
+}
+
+fn attribute_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    other_fields(data, &["attribute"])
+}
+
+/// The attribute's value without the sentences naming the element.
+fn attribute_value(data: &ToolData<'_>) -> Option<Body> {
+    let result = data.result.filter(|result| !result.error)?;
+    let text = result.text();
+    let value = text
+        .lines()
+        .find(|line| line.starts_with("Attribute \""))?
+        .split_once(": ")?
+        .1;
+    Some(Body::Sections(vec![text_section("output", value)]))
+}
+
+fn element_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    other_fields(data, &[])
+}
+
+fn set_value_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    other_fields(data, &["text"])
+}
+
+fn orientation_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    other_fields(data, &["action"])
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::event::{Section, ToolCall};
+
+    /// The recorded calls, with the screenshot pointed at a real image file.
+    fn calls(screenshot: &std::path::Path) -> Vec<ToolCall> {
+        let fixture = include_str!("../../../../tests/fixtures/claude-appium.jsonl")
+            .replace("/tmp/screenshot_1792876190968.png", screenshot.to_str().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("transcript.jsonl");
+        std::fs::write(&transcript, fixture).unwrap();
+        crate::providers::claude::event_reader::tail(&transcript, 200)
+            .unwrap()
+            .into_iter()
+            .flat_map(|event| event.calls)
+            .collect()
+    }
+
+    fn prose(text: &str) -> Vec<Section> {
+        vec![Section::Prose {
+            text: text.into(),
+            markdown: false,
+        }]
+    }
+
+    fn output_text(call: &ToolCall) -> String {
+        call.output
+            .iter()
+            .flatten()
+            .map(|section| match section {
+                Section::Text { text, .. } | Section::Markdown { text, .. } => text.clone(),
+                Section::Image(image) => format!("[image {}]", image.label),
+                other => format!("{other:?}"),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn appium_calls_title_their_key_field_and_show_only_what_matters() {
+        let dir = tempfile::tempdir().unwrap();
+        let screenshot = dir.path().join("screenshot.png");
+        image::RgbImage::new(2, 2).save(&screenshot).unwrap();
+        let calls = calls(&screenshot);
+        assert_eq!(
+            calls.iter().map(|call| call.title.as_str()).collect::<Vec<_>>(),
+            [
+                "ios real",
+                "discovery",
+                "create",
+                "",
+                "Playlists",
+                "tap",
+                "label CONTAINS[c] 'classic'",
+                "",
+                "label",
+                "tap (200, 85)",
+            ]
+        );
+        let input = |index: usize| calls[index].input.clone();
+        assert_eq!(input(0), Vec::new());
+        assert_eq!(input(1), prose("00000000-0000000000000000"));
+        assert_eq!(input(2), prose("com.amazon.mp3.AmazonCloudPlayer"));
+        assert_eq!(input(5), prose("A5000000-0000-0000-BE14-000000000000"));
+        assert_eq!(
+            input(7),
+            vec![super::code_section(
+                "selector",
+                "xpath",
+                "//*[contains(translate(@label,'CLASI','clasi'),'classic')]"
+            )]
+        );
+        assert_eq!(input(8), prose("42010000-0000-0000-BE14-000000000000"));
+        assert_eq!(input(9), Vec::new());
+        for index in [3, 4, 6] {
+            let sections = input(index);
+            let [Section::Markdown { text, .. }] = sections.as_slice() else {
+                panic!("input {index} must be a table: {sections:?}");
+            };
+            assert!(!text.contains("sessionId"), "{text}");
+        }
+
+        assert_eq!(
+            output_text(&calls[0]),
+            "✅ Device selected: 00000000-0000000000000000 (00000000-0000000000000000)"
+        );
+        assert_eq!(
+            output_text(&calls[1]),
+            "| name | teamName | expiresAt |\n\
+             | --- | --- | --- |\n\
+             | iOS Team Provisioning Profile\\: \\* | Example Team | 2027\\-09\\-06T21\\:27\\:06\\.000Z |"
+        );
+        assert_eq!(
+            output_text(&calls[3]),
+            format!("[image {}]", screenshot.display())
+        );
+        assert_eq!(
+            output_text(&calls[6]),
+            "| elementId |\n\
+             | --- |\n\
+             | 42010000\\-0000\\-0000\\-BE14\\-000000000000 |\n\
+             | B3010000\\-0000\\-0000\\-BE14\\-000000000000 |"
+        );
+        assert_eq!(
+            output_text(&calls[8]),
+            "ClassicalPrivate  •  51 songs  •  4 hrs 41 min"
+        );
+    }
+
+    #[test]
+    fn appium_screenshot_without_its_file_keeps_the_recorded_text() {
+        let calls = calls(std::path::Path::new("/nonexistent/screenshot.png"));
+        assert!(output_text(&calls[3]).starts_with("Screenshot saved successfully to: "));
+    }
+}
