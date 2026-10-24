@@ -205,7 +205,7 @@ pub(crate) enum Format {
     /// Formats source code in the given language as a code section.
     Code(&'static str),
     /// A JSON array as a Markdown table, one row per element and one column per field;
-    /// a JSON object or a single value is one row.
+    /// a JSON object is a single row.
     Table,
 }
 
@@ -515,7 +515,7 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
     ToolRule {
         name: "claude-in-chrome find",
         title: &[Pick::Field(Source::Input, "/query")],
-        input: Some((Pick::Field(Source::Input, "/tabId"), Format::Table)),
+        input: Some((Pick::Field(Source::Input, "/tabId"), Format::Text)),
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -524,7 +524,7 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
             Pick::Field(Source::Input, "/action_summary"),
             Pick::Field(Source::Input, "/action"),
         ],
-        input: Some((Pick::Field(Source::Input, "/tabId"), Format::Table)),
+        input: Some((Pick::Field(Source::Input, "/tabId"), Format::Text)),
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -1260,10 +1260,8 @@ fn table_cell(text: &str) -> String {
 /// scalars give a single column headed `name`.
 fn markdown_table(value: &Value, name: &str) -> Option<String> {
     let rows = match value {
-        Value::Array(rows) if !rows.is_empty() => rows.as_slice(),
-        Value::Array(_) | Value::Null => return None,
-        Value::Object(object) if object.is_empty() => return None,
-        _ => std::slice::from_ref(value),
+        Value::Object(object) if !object.is_empty() => std::slice::from_ref(value),
+        _ => value.as_array().filter(|rows| !rows.is_empty())?.as_slice(),
     };
     let cell = |value: &Value| {
         table_cell(
@@ -1778,12 +1776,10 @@ mod tests {
 
     #[test]
     fn chrome_find_and_computer_title_their_fields_and_show_the_rest() {
-        let table = |text: &str| {
-            vec![crate::event::Section::Markdown {
-                label: "tabId".into(),
-                text: text.into(),
-            }]
-        };
+        let tab = vec![crate::event::Section::Prose {
+            text: "665979853".into(),
+            markdown: false,
+        }];
         for (name, input, title, rest) in [
             (
                 "mcp__claude-in-chrome__find",
@@ -1792,7 +1788,7 @@ mod tests {
                     "tabId": 665979853
                 }),
                 "Refresh link near the calendar/summary panel",
-                table("| tabId |\n| --- |\n| 665979853 |"),
+                tab.clone(),
             ),
             (
                 "mcp__claude-in-chrome__computer",
@@ -1803,13 +1799,13 @@ mod tests {
                     "action_summary": "点搜索按钮执行航班搜索"
                 }),
                 "点搜索按钮执行航班搜索",
-                table("| tabId |\n| --- |\n| 665979853 |"),
+                tab.clone(),
             ),
             (
                 "mcp__claude-in-chrome__computer",
                 serde_json::json!({"action": "wait", "tabId": 665979853, "duration": 4}),
                 "wait",
-                table("| tabId |\n| --- |\n| 665979853 |"),
+                tab.clone(),
             ),
             (
                 "mcp__claude-in-chrome__computer",
