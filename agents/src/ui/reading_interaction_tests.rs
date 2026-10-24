@@ -353,9 +353,14 @@ fn event_detail_event_and_tool_times_share_the_list_clock_column() {
                 .unwrap();
             let duration = title.time.as_ref().unwrap();
             assert_eq!(clock(row.y).trim(), duration);
-            for x in columns.time.right()..width {
+            // Merged calls' titles end in the padding's edge rule.
+            for x in columns.time.right()..width - 1 {
                 assert_eq!(buf[(x, row.y)].symbol(), " ");
             }
+            assert_eq!(
+                buf[(width - 1, row.y)].symbol(),
+                if detail.sections.len() > 1 { "╶" } else { " " }
+            );
             assert_ne!(buf[(columns.time.right() - 1, row.y)].symbol(), " ");
             assert!(!title.line(columns).0.to_string().contains(duration));
         }

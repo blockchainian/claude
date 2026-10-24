@@ -152,8 +152,7 @@ fn advisor_list_row_uses_catalog_model_and_hides_encrypted_payload() {
 fn codex_agent_messages_show_routes_and_payload() {
     use crate::providers::Provider;
     let dir = tempfile::tempdir().unwrap();
-    let provider =
-        crate::providers::codex::CodexProvider::new(dir.path().into());
+    let provider = crate::providers::codex::CodexProvider::new(dir.path().into());
     let project = dir.path().join("projects/project");
     std::fs::create_dir_all(&project).unwrap();
     std::fs::write(
@@ -576,9 +575,7 @@ fn codex_fixture() -> (
         .unwrap()
         .execute_batch(include_str!("../../tests/fixtures/codex-state.sql"))
         .unwrap();
-    let mut provider = crate::providers::codex::CodexProvider::new(
-        dir.path().to_owned(),
-    );
+    let mut provider = crate::providers::codex::CodexProvider::new(dir.path().to_owned());
     let session = provider.refresh(1).sessions.remove(0);
     (dir, provider, session)
 }
@@ -1581,7 +1578,13 @@ fn diff_backgrounds_reach_terminal_edges_without_moving_text() {
                             );
                         }
                         // Padding changes only the background, preserving the centered text.
-                        if !layout.times.iter().any(|(time_row, _)| *time_row == source) {
+                        // Merged calls' titles also draw an edge rule in the padding.
+                        let edge_rule = layout.titles.len() > 1
+                            && layout.titles.iter().any(|(title_row, _)| *title_row == source)
+                            && (x == panel.x || x == panel.right() - 1);
+                        if !edge_rule
+                            && !layout.times.iter().any(|(time_row, _)| *time_row == source)
+                        {
                             assert_eq!(
                                 cell_text(buffer[(x, y)].symbol()),
                                 cell_text(before[(x, y)].symbol()),

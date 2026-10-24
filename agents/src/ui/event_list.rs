@@ -383,9 +383,17 @@ impl View {
         if layout.visible.last().copied()? + 1 != layout.lines.len() {
             return None;
         }
+        self.neighbor_event_title(self.event_list.cursor? + 1, layout)
+    }
+
+    fn neighbor_event_title(
+        &self,
+        index: usize,
+        layout: &EventDetailLayout,
+    ) -> Option<Line<'static>> {
         let width = usize::from(layout.columns.text.width);
         let session = self.selected_row()?;
-        let (_, event) = self.shown_event_rows().nth(self.event_list.cursor? + 1)?;
+        let (_, event) = self.shown_event_rows().nth(index)?;
         let title =
             super::tool_detail::event_detail_content(event, String::new(), Style::default())
                 .sections
@@ -580,15 +588,26 @@ impl View {
             })
             .collect::<Vec<_>>();
         let times = layout.times.clone();
-        // The section on the top row keeps its title on the top edge once its title scrolls off.
+        let call_titles: Vec<usize> = if shows_calls(event) && layout.titles.len() > 1 {
+            layout.titles.iter().map(|(row, _)| *row).collect()
+        } else {
+            Vec::new()
+        };
+        // The section on the top row keeps its title on the top edge once its title scrolls off;
+        // with the event's first row visible, the edge shows the preceding event's title instead.
         viewport.event_detail_footer_title = visible_rows.first().and_then(|&top| {
-            layout
-                .titles
-                .iter()
-                .rev()
-                .find(|(row, _)| *row <= top)
-                .filter(|(row, _)| *row < top)
-                .map(|(_, title)| (title.clone(), columns))
+            let title = if top == 0 {
+                self.neighbor_event_title(self.event_list.cursor?.checked_sub(1)?, &layout)?
+            } else {
+                layout
+                    .titles
+                    .iter()
+                    .rev()
+                    .find(|(row, _)| *row <= top)
+                    .filter(|(row, _)| *row < top)
+                    .map(|(_, title)| title.clone())?
+            };
+            Some((title, columns))
         });
         let drawn_images = layout.drawn_images(&visible_rows, body_area);
         layout.visible = visible_rows.clone();
@@ -621,6 +640,17 @@ impl View {
                     1,
                 );
                 Line::from(time).right_aligned().render(time_area, buf);
+            }
+        }
+        // Merged calls' titles reach into the pane padding, like the task details' background titles.
+        if areas.panel.x < columns.text.x && areas.panel.right() > columns.time.right() {
+            for row in call_titles {
+                if let Some(row) = visible_rows.iter().position(|&source| source == row) {
+                    let y = body_area.y + row as u16;
+                    for (x, cap) in [(areas.panel.x, "╴"), (areas.panel.right() - 1, "╶")] {
+                        buf[(x, y)].set_symbol(cap).set_style(Style::default().dim());
+                    }
+                }
             }
         }
         self.highlight_text_selection(text_selection::Panel::Event, buf);
@@ -2894,6 +2924,43 @@ pub(super) mod event_markdown {
             .iter()
             .map(|span| span.content.as_ref())
             .collect()
+    }
+
+    #[test]
+    fn merged_call_titles_carry_edge_rules_and_single_calls_do_not() {
+        for (calls, rules) in [(&["a", "b"][..], true), (&["a"][..], false)] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            for id in calls {
+                let record = serde_json::json!({
+                    "type":"assistant", "timestamp":"2026-10-06T16:39:01Z", "uuid":id,
+                    "message":{"id":"batch", "content":[
+                        {"type":"tool_use", "id":id, "name":"Read", "input":{"file_path":format!("/opt/{id}.rs")}}
+                    ]}
+                });
+                std::io::Write::write_all(&mut file, format!("{record}\n").as_bytes()).unwrap();
+            }
+            let events = crate::providers::claude::event_reader::tail(file.path(), 1).unwrap();
+            let view = View::new(Grouping::Project, false);
+            let panel = Rect::new(0, 0, 80, 12);
+            let content = panel.inner(ratatui::layout::Margin::new(1, 0));
+            let mut buffer = Buffer::empty(panel);
+            view.render_event_detail_content(
+                &events[0],
+                "12:34:56",
+                super::super::event_detail::EventDetailArea { panel, content },
+                &mut buffer,
+                Path::new("/"),
+                DateTime::UNIX_EPOCH,
+            );
+            let titles: Vec<u16> = (panel.y..panel.bottom())
+                .filter(|&y| buffer[(content.x, y)].symbol() == "R")
+                .collect();
+            assert_eq!(titles.len(), calls.len());
+            for y in titles {
+                let edges = [buffer[(panel.x, y)].symbol(), buffer[(panel.right() - 1, y)].symbol()];
+                assert_eq!(edges, if rules { ["╴", "╶"] } else { [" ", " "] }, "row {y}");
+            }
+        }
     }
 
     #[test]
