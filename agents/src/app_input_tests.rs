@@ -59,6 +59,16 @@ fn screen(app: &mut App) -> String {
         .collect()
 }
 
+fn assert_rejected_paste_is_error(app: &mut App) {
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(240, 40)).unwrap();
+    app.draw(&mut terminal).unwrap();
+    let column = 240 - "Cannot paste here".len() as u16;
+    let actual = terminal.backend().buffer()[(column, 39)].fg;
+    app.view.show_error("Cannot paste here".into());
+    app.draw(&mut terminal).unwrap();
+    assert_eq!(actual, terminal.backend().buffer()[(column, 39)].fg);
+}
+
 fn complete_input(app: &mut App, expected: &str) {
     let event = loop {
         let input = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -822,6 +832,7 @@ fn stray_paste_under_help_preserves_clipboard_without_entering_help() {
     );
     assert!(!screen(&mut app).contains("must-not-enter-help"));
     assert!(screen(&mut app).contains("Cannot paste here"));
+    assert_rejected_paste_is_error(&mut app);
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
     assert!(!screen(&mut app).contains("must-not-enter-help"));
 }
@@ -841,6 +852,7 @@ fn stray_paste_to_disabled_task_preserves_clipboard() {
     assert!(!app.view.pasting_prompt());
     assert!(!screen(&mut app).contains("disabled dictation"));
     assert!(screen(&mut app).contains("Cannot paste here"));
+    assert_rejected_paste_is_error(&mut app);
 }
 
 #[test]

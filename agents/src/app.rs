@@ -685,7 +685,7 @@ impl App {
                 return false;
             }
             if !self.view.prepare_paste_prompt() {
-                self.view.show_info("Cannot paste here".into());
+                self.view.show_error("Cannot paste here".into());
                 return false;
             }
             return self.paste(text);
