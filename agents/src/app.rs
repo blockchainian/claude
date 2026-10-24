@@ -1493,10 +1493,6 @@ impl App {
             Action::SendImages { id, text, images } => {
                 self.send_input(id, SessionInput::PromptWithImages { text, images })
             }
-            Action::PasteImage => match self.clipboard.image() {
-                Ok(image) => self.view.attach_image(image),
-                Err(error) => self.view.show_error(error.to_string()),
-            },
             Action::PasteText => match self.clipboard.text() {
                 Ok(text) => return self.paste(&text),
                 Err(error) => self.view.show_error(error.to_string()),

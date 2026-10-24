@@ -232,7 +232,6 @@ pub enum Action {
         id: SessionKey,
         skipped_at: Option<DateTime<Utc>>,
     },
-    PasteImage,
     PasteText,
     SendImages {
         id: SessionKey,

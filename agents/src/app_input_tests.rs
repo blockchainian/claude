@@ -314,9 +314,7 @@ fn codex_stop_refreshes_after_failure_and_reports_in_footer() {
     let db = rusqlite::Connection::open(&database).unwrap();
     db.execute_batch(include_str!("../tests/fixtures/codex-state.sql"))
         .unwrap();
-    let provider = crate::providers::codex::CodexProvider::new(
-        directory.path().to_owned(),
-    );
+    let provider = crate::providers::codex::CodexProvider::new(directory.path().to_owned());
     let mut app = App::new(
         Hub::new(vec![Box::new(provider)]),
         directory.path().to_owned(),
@@ -858,13 +856,13 @@ fn stray_paste_to_disabled_task_preserves_clipboard() {
 #[test]
 fn stray_paste_image_path_becomes_an_attachment() {
     let (directory, mut app, _, _) = registry_app("bg");
-    let image = directory.path().join("paste image.png");
+    let image = directory.path().join("paste image (test).png");
     fs::write(&image, crate::images::fixture_png()).unwrap();
-    app.handle_event(Event::Paste(format!("'{}'", image.display())));
+    app.handle_event(Event::Paste(format!("\"{}\"", image.display())));
     assert!(app.view.pasting_prompt());
     let rendered = screen(&mut app);
     assert!(rendered.contains("[Image #1]"), "{rendered}");
-    assert!(!rendered.contains("paste image.png"));
+    assert!(!rendered.contains("paste image (test).png"));
 }
 
 #[test]

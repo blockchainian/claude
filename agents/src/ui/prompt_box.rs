@@ -24,7 +24,6 @@ pub(super) enum SendState {
 #[derive(Debug, Eq, PartialEq)]
 pub(super) enum PromptAction {
     Submit(String),
-    PasteImage,
     Quit,
     Stop,
 }
@@ -261,12 +260,6 @@ impl PromptBox {
         let key = super::line_edit::normalize_key(key);
         if key.kind == KeyEventKind::Release {
             return None;
-        }
-        if key.code == KeyCode::Char('v')
-            && key.modifiers == KeyModifiers::CONTROL
-            && self.search.is_none()
-        {
-            return Some(PromptAction::PasteImage);
         }
         if self.editor.selection_key(key) {
             return None;

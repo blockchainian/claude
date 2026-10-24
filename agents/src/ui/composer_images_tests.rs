@@ -129,13 +129,19 @@ fn recalled_history_keeps_the_image_attachment() {
 }
 
 #[test]
+fn control_v_does_not_trigger_image_paste() {
+    let mut prompt = PromptBox::default();
+    assert_eq!(
+        prompt.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)),
+        None
+    );
+    assert!(prompt.editor.image_paths().is_empty());
+}
+
+#[test]
 fn image_only_submit_carries_an_attachment_without_placeholder_text() {
     let mut prompt = PromptBox::default();
     prompt.editor.insert_image(image());
-    assert_eq!(
-        prompt.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)),
-        Some(PromptAction::PasteImage)
-    );
     assert_eq!(
         prompt.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         Some(PromptAction::Submit(String::new()))

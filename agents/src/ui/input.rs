@@ -1646,11 +1646,39 @@ impl View {
                 (action, None) | (None, action) => action,
             };
         }
-        if key.code == KeyCode::Char('w') && key.modifiers == KeyModifiers::CONTROL {
+        if key.code == KeyCode::Char('w')
+            && key.modifiers == KeyModifiers::CONTROL
+            && !self.focused_editor_has_text()
+        {
             self.window_prefix = Some(key);
             return None;
         }
         self.handle_panel_key(key)
+    }
+
+    fn focused_editor_has_text(&self) -> bool {
+        if self.active_panel == Panel::TaskDetails
+            && let Some(editor) = self.selector.as_ref().and_then(Selector::branch_editor)
+        {
+            return !editor.is_empty();
+        }
+        if let Some(editor) = self.title_editor() {
+            return !editor.is_empty();
+        }
+        if self.search_focused() {
+            return self
+                .panel_search(self.active_panel)
+                .is_some_and(|search| !search.text().is_empty());
+        }
+        if self.active_panel == Panel::Prompt
+            && let Some(question) = self.active_question()
+            && let Some(editor) = question.focused_editor()
+        {
+            return !editor.is_empty();
+        }
+        self.prompt_focused()
+            && self.input_disabled().is_none()
+            && !self.input_box.editor.is_empty()
     }
 
     fn handle_panel_key(&mut self, key: KeyEvent) -> Option<Action> {
@@ -1758,7 +1786,6 @@ impl View {
             self.input_box.history = self.prompt_history.clone();
             return match self.input_box.handle_key(key) {
                 Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),
-                Some(prompt_box::PromptAction::PasteImage) => Some(Action::PasteImage),
                 Some(prompt_box::PromptAction::Stop) => self.stop_from_input(),
                 Some(prompt_box::PromptAction::Submit(text)) => {
                     let images = self.input_box.editor.image_paths();
