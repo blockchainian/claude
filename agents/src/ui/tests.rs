@@ -12220,3 +12220,97 @@ fn background_title_joints_preserve_every_existing_column() {
         }
     }
 }
+
+#[test]
+fn tool_image_caption_click_opens_transcript_image_without_graphics() {
+    use crate::providers::Provider;
+    for fixture in [
+        "claude-read-image.jsonl",
+        "mcp-claude/image.jsonl",
+        "codex-images/tool-mcp.jsonl",
+        "codex-images/tool-view.jsonl",
+    ] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(fixture);
+        let (mut view, now) = event_fixture();
+        let events = if fixture.starts_with("codex-images/") {
+            let directory = tempfile::tempdir().unwrap();
+            let provider = crate::providers::codex::CodexProvider::new(directory.path().into());
+            let mut session = view.rows[view.selected].clone();
+            session.transcript = Some(path.clone());
+            provider.event_panel(&session, usize::MAX, false).unwrap()
+        } else {
+            crate::providers::claude::event_reader::tail(&path, usize::MAX).unwrap()
+        };
+        let event = events
+            .into_iter()
+            .find(|event| {
+                event.calls.iter().any(|call| {
+                    call.output
+                        .iter()
+                        .flatten()
+                        .any(|section| matches!(section, crate::event::Section::Image(_)))
+                })
+            })
+            .expect("captured tool image");
+        let image = event
+            .calls
+            .iter()
+            .flat_map(|call| call.output.iter().flatten())
+            .find_map(|section| {
+                if let crate::event::Section::Image(image) = section {
+                    Some(image.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert!(view.inline_images.borrow().is_none());
+        view.select_fixture_event(Some(event));
+        let height = if fixture == "claude-read-image.jsonl" {
+            50
+        } else {
+            300
+        };
+        let rendered = event_screen(&view, 160, height, now);
+        let target = LinkTarget::Image(image.source.clone());
+        let (rect, _) = view
+            .viewport
+            .borrow()
+            .event_links
+            .iter()
+            .find(|(_, link)| *link == target)
+            .cloned()
+            .unwrap_or_else(|| panic!("{fixture}: image label has no drawn link\n{rendered}"));
+        assert_eq!(
+            click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y)
+            )
+            .or_else(|| view.flush_pending_click(Instant::now() + view.double_click_interval)),
+            Some(Action::Open(LinkTarget::Image(image.source.clone()))),
+            "{fixture}"
+        );
+
+        if fixture == "claude-read-image.jsonl" {
+            assert!(image.source.bytes().is_some());
+            let snapshot = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/ui_snapshots/tool_image_caption.txt");
+            if std::env::var_os("UPDATE_EVENT_DETAIL_SNAPSHOT").is_some() {
+                std::fs::write(&snapshot, &rendered).unwrap();
+            }
+            assert_eq!(rendered, std::fs::read_to_string(snapshot).unwrap());
+            view.set_inline_images(true, Some((8, 16)));
+            event_screen(&view, 160, 50, now);
+            let viewport = view.viewport.borrow();
+            assert!(
+                viewport
+                    .event_detail_images
+                    .iter()
+                    .any(|drawn| drawn.image == image.source)
+            );
+            assert!(!viewport.event_links.iter().any(|(_, link)| *link == target));
+        }
+    }
+}

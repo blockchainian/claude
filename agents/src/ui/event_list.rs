@@ -2038,6 +2038,11 @@ fn event_detail_parts_layout_with_images(
                 let id = layout.sources.len();
                 let mut maps = part.maps_in(&lines, cwd);
                 let first = layout.lines.len();
+                let caption_image = if image.is_none() {
+                    part.shown_image()
+                } else {
+                    None
+                };
                 if let Some((index, source, (width, _))) = image {
                     layout.images.push(DetailImage {
                         index,
@@ -2056,7 +2061,12 @@ fn event_detail_parts_layout_with_images(
                 if part.running() && width > 0 {
                     layout.running.push(first);
                 }
-                let mut links = if part.markdown()
+                let mut links = if let Some(image) = caption_image {
+                    vec![super::links::Link {
+                        range: 0..part.source.len(),
+                        target: super::links::LinkTarget::Image(image.source.clone()),
+                    }]
+                } else if part.markdown()
                     || (!shows_calls(event)
                         && (is_prose(&event.kind) || event.kind == Kind::QueuedUser))
                 {
