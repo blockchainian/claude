@@ -1,5 +1,5 @@
 use super::render::{render_input_row, row};
-use crate::line_edit::LineEdit;
+use crate::line_edit::Editor;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{buffer::Buffer, layout::Rect};
 use unicode_width::UnicodeWidthStr;
@@ -8,7 +8,7 @@ const SEARCH_PROMPT: &str = "Search ❯ ";
 
 #[derive(Default)]
 pub(crate) struct SearchInput {
-    query: LineEdit,
+    query: Editor,
     focused: bool,
 }
 
@@ -44,7 +44,7 @@ impl SearchInput {
     }
 
     /// False means the key goes on to the panel: unfocused or not a search key.
-    /// Enter blurs, Esc closes, and everything else goes to `LineEdit::handle`.
+    /// Enter blurs, Esc closes, and everything else goes to `Editor::handle_key`.
     pub fn handle_key(&mut self, key: KeyEvent, kills: &mut crate::line_edit::KillBuffer) -> bool {
         if !self.focused {
             return false;

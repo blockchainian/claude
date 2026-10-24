@@ -1,5 +1,5 @@
 use super::*;
-use crate::line_edit::LineEdit;
+use crate::line_edit::Editor;
 
 #[path = "prompt_images.rs"]
 mod prompt_images;
@@ -252,7 +252,7 @@ impl PromptBox {
             self.search_paste(text);
         } else {
             self.editor
-                .insert(text.replace("\r\n", "\n").replace('\r', "\n"));
+                .insert(&text.replace("\r\n", "\n").replace('\r', "\n"));
         }
     }
 
@@ -297,7 +297,7 @@ impl PromptBox {
                 .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT))
             || (key.code == KeyCode::Char('j') && key.modifiers.contains(KeyModifiers::CONTROL))
         {
-            self.editor.insert('\n');
+            self.editor.insert("\n");
         } else if key.code == KeyCode::Enter {
             if !self.editor.is_empty()
                 && (!self.submitting || matches!(self.state, SendState::Failed(_)))

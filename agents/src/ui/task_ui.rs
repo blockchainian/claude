@@ -4,7 +4,7 @@ use super::{
     SectionScroll, draft_controls::Selector, event_search::EventMatches, prompt_box::PromptBox,
     question_view::QuestionView,
 };
-use crate::{event::Event, line_edit::LineEdit, model::EventSort};
+use crate::{event::Event, line_edit::Editor, model::EventSort};
 
 #[derive(Default)]
 pub(super) struct TaskUi {
@@ -59,8 +59,8 @@ pub(super) struct Transcript {
 
 #[derive(Default)]
 pub(super) struct TaskDetails {
-    pub title: Option<LineEdit>,
-    pub branch: Option<LineEdit>,
+    pub title: Option<Editor>,
+    pub branch: Option<Editor>,
     pub selector: Option<Selector>,
     pub scroll: SectionScroll,
 }

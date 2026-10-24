@@ -1,5 +1,5 @@
 use crate::images::ImageAttachment;
-use crate::line_edit::{LineEdit, Placeholder};
+use crate::line_edit::{Editor, Placeholder};
 use crate::state::StoredDraftInput;
 use std::path::PathBuf;
 
@@ -9,7 +9,7 @@ impl Placeholder for ImageAttachment {
     }
 }
 
-pub(super) type Composer = LineEdit<ImageAttachment>;
+pub(super) type Composer = Editor<ImageAttachment>;
 
 pub(super) trait ComposerImages {
     fn image_paths(&self) -> Vec<PathBuf>;

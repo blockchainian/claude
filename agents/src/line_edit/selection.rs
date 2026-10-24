@@ -1,7 +1,7 @@
 use super::*;
 use std::ops::Range;
 
-impl<P: Placeholder> LineEdit<P> {
+impl<P: Placeholder> Editor<P> {
     fn assert_boundary(&self, offset: usize) {
         assert!(
             offset == self.text.len()
@@ -13,24 +13,30 @@ impl<P: Placeholder> LineEdit<P> {
         );
     }
 
-    pub(crate) fn set_cursor(&mut self, offset: usize) {
-        self.assert_boundary(offset);
+    /// Places the caret at a grapheme boundary, snaps outside placeholders and clears selection.
+    /// Panics if `byte` is not a grapheme boundary in the text.
+    pub fn set_cursor(&mut self, byte: usize) {
+        self.assert_boundary(byte);
         self.home();
-        self.cursor = self.placeholder_caret(offset);
+        self.cursor = self.placeholder_caret(byte);
         self.clear_selection();
     }
 
-    pub(crate) fn clear_selection(&mut self) {
+    /// Clears the selection without moving the caret.
+    pub fn clear_selection(&mut self) {
         self.selection = None;
     }
 
-    pub(crate) fn select(&mut self, anchor: usize, end: usize) {
+    /// Selects from anchor to head and places the caret outside any placeholder at head.
+    /// Panics if either offset is not a grapheme boundary in the text.
+    pub fn select(&mut self, anchor: usize, head: usize) {
         self.assert_boundary(anchor);
-        self.set_cursor(end);
-        self.selection = Some((anchor, end));
+        self.set_cursor(head);
+        self.selection = Some((anchor, head));
     }
 
-    pub(crate) fn selection_range(&self) -> Option<Range<usize>> {
+    /// Returns the nonempty selection range, widened to include whole placeholders.
+    pub fn selection(&self) -> Option<Range<usize>> {
         let (anchor, end) = self.selection?;
         (anchor != end).then(|| {
             self.placeholder_boundary(anchor.min(end), false)
@@ -38,8 +44,9 @@ impl<P: Placeholder> LineEdit<P> {
         })
     }
 
-    pub(crate) fn selected_text(&self) -> Option<&str> {
-        Some(&self.text[self.selection_range()?])
+    /// Returns the selected text, or None when the selection is empty.
+    pub fn selected_text(&self) -> Option<&str> {
+        Some(&self.text[self.selection()?])
     }
 
     pub(super) fn delete_selection(&mut self) -> bool {
@@ -47,7 +54,7 @@ impl<P: Placeholder> LineEdit<P> {
     }
 
     pub(super) fn replace_selection(&mut self, text: impl ToString) -> bool {
-        let Some(range) = self.selection_range() else {
+        let Some(range) = self.selection() else {
             return false;
         };
         let text = text.to_string();

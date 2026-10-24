@@ -12,7 +12,7 @@ pub(super) struct Recall {
 
 pub(super) struct Search {
     original: Composer,
-    pub(super) query: LineEdit,
+    pub(super) query: Editor,
     position: Option<usize>,
 }
 
@@ -96,7 +96,7 @@ impl PromptBox {
             if control && key.code == KeyCode::Char('r') {
                 self.search = Some(Search {
                     original: self.editor.clone(),
-                    query: LineEdit::default(),
+                    query: Editor::default(),
                     position: None,
                 });
                 return true;

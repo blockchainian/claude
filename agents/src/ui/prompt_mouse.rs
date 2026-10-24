@@ -81,7 +81,7 @@ impl PromptBox {
 
     pub(super) fn highlight_mouse_selection(&self, area: Rect, buf: &mut Buffer, start: usize) {
         use unicode_segmentation::UnicodeSegmentation;
-        let Some(range) = self.editor.selection_range() else {
+        let Some(range) = self.editor.selection() else {
             return;
         };
         let (width, inset) = self.text_width.get();

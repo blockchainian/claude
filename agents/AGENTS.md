@@ -16,6 +16,7 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 - src/activity.rs -- transcript turn membership for the event list
 - src/jsonl.rs -- a growing transcript read by complete lines, forward or backward
 - src/tasks.rs -- task worktrees, environment files and workspace trust
+- src/line_edit/ -- the readline-style line editor: commands, keymap, kill buffer, layout and placeholders
 - src/ui/ -- rendering, prompt input, drafts and the task event panels
 - tests/ -- real payload fixtures and rendered UI snapshots
 

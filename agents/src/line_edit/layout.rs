@@ -1,30 +1,43 @@
 use super::*;
 use unicode_width::UnicodeWidthStr;
 
+/// Wrapping width and the first row's reserved label columns.
 #[derive(Clone, Copy)]
-pub(crate) struct Wrap {
+pub struct Wrap {
+    /// Maximum display columns per row.
     pub width: usize,
+    /// Columns reserved before text on the first row.
     pub first_row_inset: usize,
 }
-pub(crate) struct CaretStop {
+/// A grapheme boundary expressed in byte and display coordinates.
+pub struct CaretStop {
+    /// Byte offset in the editor text.
     pub byte: usize,
+    /// Display column within the visual row.
     pub column: usize,
+    /// Zero-based visual row.
     pub row: usize,
 }
-pub(crate) struct Window<'a> {
+/// A visible slice of text and its caret column.
+pub struct Window<'a> {
+    /// Text visible within the available columns.
     pub text: &'a str,
+    /// Caret column relative to the visible text.
     pub caret_column: u16,
 }
-pub(crate) enum Vertical {
+/// Direction of movement between visual rows.
+pub enum Vertical {
+    /// Move to the preceding visual row.
     Up,
+    /// Move to the following visual row.
     Down,
 }
 
-impl<P: Placeholder> LineEdit<P> {
+impl<P: Placeholder> Editor<P> {
     /// Caret stops with byte offsets, display columns and visual rows. The first row starts
     /// after `first_row_inset` columns of label; later rows wrap at the full width. A newline never
     /// wraps, so a row filled to the width adds no blank row before the next line.
-    pub(crate) fn caret_stops(&self, wrap: Wrap) -> Vec<CaretStop> {
+    pub fn caret_stops(&self, wrap: Wrap) -> Vec<CaretStop> {
         let Wrap {
             width,
             first_row_inset: inset,
@@ -66,7 +79,7 @@ impl<P: Placeholder> LineEdit<P> {
     }
 
     /// Places the caret after the displayed grapheme, or at the visible line's end.
-    pub(crate) fn place_caret(&mut self, wrap: Wrap, column: usize, row: usize) {
+    pub fn place_caret(&mut self, wrap: Wrap, column: usize, row: usize) {
         let positions = self.caret_stops(wrap);
         let row = row.min(positions.last().expect("end caret").row);
         let &CaretStop {
@@ -87,7 +100,8 @@ impl<P: Placeholder> LineEdit<P> {
         self.set_cursor(self.caret_boundary(offset, true));
     }
 
-    pub(crate) fn place_caret_in_window(&mut self, columns: usize, column: usize) {
+    /// Places the caret after the displayed grapheme in a single-line window.
+    pub fn place_caret_in_window(&mut self, columns: usize, column: usize) {
         let width = columns;
         if width == 0 {
             self.set_cursor(self.text.len());
@@ -111,7 +125,7 @@ impl<P: Placeholder> LineEdit<P> {
     }
 
     /// Returns false when the caret is already on the requested boundary row.
-    pub(crate) fn move_row(&mut self, wrap: Wrap, direction: Vertical) -> bool {
+    pub fn move_row(&mut self, wrap: Wrap, direction: Vertical) -> bool {
         let Wrap {
             width,
             first_row_inset: inset,
@@ -158,7 +172,8 @@ impl<P: Placeholder> LineEdit<P> {
         true
     }
 
-    pub(crate) fn window(&self, columns: usize) -> Window<'_> {
+    /// Returns a single-line text window that keeps the caret visible.
+    pub fn window(&self, columns: usize) -> Window<'_> {
         let cols = columns.min(usize::from(u16::MAX));
         if cols == 0 {
             return Window {
@@ -198,8 +213,8 @@ impl<P: Placeholder> LineEdit<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn edit(text: &str) -> LineEdit {
-        let mut editor = LineEdit::default();
+    fn edit(text: &str) -> Editor {
+        let mut editor = Editor::default();
         editor.set_text(text);
         editor
     }
@@ -213,7 +228,7 @@ mod tests {
             },
             ("好b", 3)
         );
-        e.move_caret(crate::line_edit::Motion::Left);
+        e.move_caret(Motion::Left);
         assert_eq!(
             {
                 let window = e.window(4);
@@ -221,7 +236,7 @@ mod tests {
             },
             ("好b", 2)
         );
-        e.move_caret(crate::line_edit::Motion::Left);
+        e.move_caret(Motion::Left);
         assert_eq!(
             {
                 let window = e.window(4);
@@ -229,7 +244,7 @@ mod tests {
             },
             ("你好", 2)
         );
-        e.move_caret(crate::line_edit::Motion::TextStart);
+        e.move_caret(Motion::TextStart);
         assert_eq!(
             {
                 let window = e.window(4);

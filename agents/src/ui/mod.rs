@@ -321,7 +321,7 @@ pub struct View {
     name_target: Option<crate::model::DraftKey>,
     /// The prompt of the turn Esc is stopping, returned to its input once the stop lands.
     stopping_prompt: Option<(SessionKey, String)>,
-    rename: line_edit::LineEdit,
+    rename: line_edit::Editor,
     confirm_dialog: Option<ConfirmDialog>,
     reset_incidents: Vec<reset_credit::ResetIncident>,
     reset_pending: HashSet<ProviderId>,
@@ -457,7 +457,7 @@ impl View {
             rename_target: None,
             name_target: None,
             stopping_prompt: None,
-            rename: line_edit::LineEdit::default(),
+            rename: line_edit::Editor::default(),
             confirm_dialog: None,
             reset_incidents: Vec::new(),
             reset_pending: HashSet::new(),
@@ -541,7 +541,7 @@ impl View {
         self.rename_target.is_some() || self.name_target.is_some()
     }
 
-    fn title_editor(&self) -> Option<&line_edit::LineEdit> {
+    fn title_editor(&self) -> Option<&line_edit::Editor> {
         (self.title_editing() && self.selector.is_none()).then_some(&self.rename)
     }
 

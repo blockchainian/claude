@@ -22,9 +22,7 @@ fn recorded_view() -> (tempfile::TempDir, View) {
         )
         .unwrap();
     }
-    let mut provider = crate::providers::codex::CodexProvider::new(
-        directory.path().into(),
-    );
+    let mut provider = crate::providers::codex::CodexProvider::new(directory.path().into());
     let mut view = test_view(Grouping::Project, false);
     view.status_filter = 1;
     view.set_sessions(provider.refresh(100).sessions, false);
@@ -150,7 +148,7 @@ fn picker(kind: &str, check_underlines: bool) {
                 SelectorKind::Branch {
                     draft,
                     branches: vec!["main".into()],
-                    editor: super::super::line_edit::LineEdit::default(),
+                    editor: super::super::line_edit::Editor::default(),
                     editing: false,
                 }
             }

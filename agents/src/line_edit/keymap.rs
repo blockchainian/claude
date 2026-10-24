@@ -3,7 +3,7 @@ use EditCommand::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 /// CSI-u can report an ASCII control code instead of its letter and Control modifier.
-pub(crate) fn normalize_control_code(mut key: KeyEvent) -> KeyEvent {
+pub fn normalize_control_code(mut key: KeyEvent) -> KeyEvent {
     if let KeyCode::Char(character @ '\u{1}'..='\u{1a}') = key.code {
         key.code = KeyCode::Char(char::from(character as u8 - 1 + b'a'));
         key.modifiers |= KeyModifiers::CONTROL;
@@ -12,7 +12,7 @@ pub(crate) fn normalize_control_code(mut key: KeyEvent) -> KeyEvent {
 }
 
 /// GNU readline emacs bindings; unowned keys and releases return None.
-pub(crate) fn command_for_key(key: KeyEvent) -> Option<EditCommand> {
+pub fn command_for_key(key: KeyEvent) -> Option<EditCommand> {
     if key.kind == KeyEventKind::Release {
         return None;
     }

@@ -7092,7 +7092,7 @@ mod input_row {
                     let (_, task_row, _, event_row, task, event_panel) =
                         rendered_inputs(width, query, left);
                     let area = Rect::new(3, 2, width, 40);
-                    let mut editor: crate::line_edit::LineEdit = super::super::line_edit::LineEdit::default();
+                    let mut editor: crate::line_edit::Editor = super::super::line_edit::Editor::default();
                     editor.set_text(query);
                     if left {
                         editor.move_caret(crate::line_edit::Motion::Left);
@@ -7104,7 +7104,7 @@ mod input_row {
                         task.cursor_pos(area),
                         Some((task_row.x + expected, task_row.y))
                     );
-                    let mut editor: crate::line_edit::LineEdit = super::super::line_edit::LineEdit::default();
+                    let mut editor: crate::line_edit::Editor = super::super::line_edit::Editor::default();
                     editor.set_text(query);
                     if left {
                         editor.move_caret(crate::line_edit::Motion::Left);
@@ -10791,7 +10791,7 @@ mod event_navigation {
                 let current = events.len() / 2;
                 view.select_fixture_event(Some(events[current].clone()));
                 let key = KeyEvent::new(code, modifiers);
-                let mut editor: crate::line_edit::LineEdit = super::super::line_edit::LineEdit::default();
+                let mut editor: crate::line_edit::Editor = super::super::line_edit::Editor::default();
                 editor.set_text("a");
                 let mut kills = crate::line_edit::KillBuffer::default();
                 kills.begin_stroke();

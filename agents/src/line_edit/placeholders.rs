@@ -7,12 +7,14 @@ pub(super) struct Placed<P> {
     payload: P,
 }
 
-impl<P: Placeholder> LineEdit<P> {
-    pub(crate) fn placeholders(&self) -> impl Iterator<Item = &P> {
+impl<P: Placeholder> Editor<P> {
+    /// Iterates over placeholder payloads in text order.
+    pub fn placeholders(&self) -> impl Iterator<Item = &P> {
         self.placed.iter().map(|span| &span.payload)
     }
 
-    pub(crate) fn from_labeled_text(
+    /// Restores numbered labels as placeholders in order; a None payload removes its label.
+    pub fn from_labeled_text(
         text: &str,
         payloads: impl IntoIterator<Item = Option<P>>,
     ) -> Self {
@@ -45,7 +47,8 @@ impl<P: Placeholder> LineEdit<P> {
         edit
     }
 
-    pub(crate) fn insert_placeholder(&mut self, payload: P) {
+    /// Replaces the selection with a placeholder and numbers labels in text order.
+    pub fn insert_placeholder(&mut self, payload: P) {
         self.delete_selection();
         let number = self.placed.len() + 1;
         let label = P::label(number);
@@ -59,7 +62,8 @@ impl<P: Placeholder> LineEdit<P> {
         self.align_cursor();
     }
 
-    pub(crate) fn text_without_placeholders(&self) -> String {
+    /// Returns the text with all placeholder labels removed.
+    pub fn text_without_placeholders(&self) -> String {
         let mut text = self.text.clone();
         for span in self.placed.iter().rev() {
             text.replace_range(span.range.clone(), "");
@@ -67,7 +71,8 @@ impl<P: Placeholder> LineEdit<P> {
         text
     }
 
-    pub(crate) fn append(&mut self, editor: Self) {
+    /// Appends another editor at the end, carrying its placeholders and clearing selection.
+    pub fn append(&mut self, editor: Self) {
         self.clear_selection();
         self.end();
         let offset = self.cursor;

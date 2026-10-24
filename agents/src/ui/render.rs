@@ -40,7 +40,7 @@ pub(super) fn line(text: impl Into<Line<'static>>, area: Rect, buf: &mut Buffer)
             .render(row(area, 0, 1), buf);
     }
 }
-fn input_row<P: line_edit::Placeholder>(prompt: &str, edit: &line_edit::LineEdit<P>, area: Rect) -> (Line<'static>, u16) {
+fn input_row<P: line_edit::Placeholder>(prompt: &str, edit: &line_edit::Editor<P>, area: Rect) -> (Line<'static>, u16) {
     let prompt_width = prompt.width();
     let line_edit::Window { text, caret_column: caret } = edit.window(usize::from(area.width).saturating_sub(prompt_width));
     (
@@ -58,7 +58,7 @@ fn input_row<P: line_edit::Placeholder>(prompt: &str, edit: &line_edit::LineEdit
     )
 }
 
-pub(super) fn click_input_row<P: line_edit::Placeholder>(editor: &mut line_edit::LineEdit<P>, area: Rect, prefix: &str, column: u16) {
+pub(super) fn click_input_row<P: line_edit::Placeholder>(editor: &mut line_edit::Editor<P>, area: Rect, prefix: &str, column: u16) {
     let columns = usize::from(area.width).saturating_sub(prefix.width());
     let column = usize::from(column.saturating_sub(area.x)).saturating_sub(prefix.width());
     editor.place_caret_in_window(columns, column);
@@ -66,7 +66,7 @@ pub(super) fn click_input_row<P: line_edit::Placeholder>(editor: &mut line_edit:
 
 pub(super) fn render_input_row<P: line_edit::Placeholder>(
     prompt: &str,
-    edit: &line_edit::LineEdit<P>,
+    edit: &line_edit::Editor<P>,
     area: Rect,
     buf: &mut Buffer,
 ) {
@@ -2711,7 +2711,7 @@ mod branch_input_tests {
                 let area = Rect::new(4, 2, width, 40);
                 let mut view = View::default();
                 view.set_active_panel(Panel::TaskDetails);
-                let mut editor = line_edit::LineEdit::default();
+                let mut editor = line_edit::Editor::default();
                 editor.insert(text);
                 view.selector = Some(Selector::new(
                     SelectorKind::Branch {

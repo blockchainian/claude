@@ -1,26 +1,31 @@
+//! Readline-style editing with selections, layout and atomic placeholders.
+
 use crossterm::event::KeyEvent;
 
 mod command;
-pub(crate) mod keymap;
-pub(crate) use command::{EditCommand, Motion, WordKind};
+/// Readline key bindings and terminal control-code normalization.
+pub mod keymap;
+pub use command::{EditCommand, Motion, WordKind};
 use unicode_segmentation::UnicodeSegmentation;
 
 mod kill_buffer;
 mod selection;
 
-pub(crate) use kill_buffer::{Direction, KillBuffer};
+pub use kill_buffer::{Direction, KillBuffer};
 mod layout;
-pub(crate) use layout::{CaretStop, Vertical, Window, Wrap};
+pub use layout::{CaretStop, Vertical, Window, Wrap};
 
 mod placeholders;
 
-pub(crate) trait Placeholder: Clone {
+/// Payload for an atomic span whose label is numbered in text order.
+pub trait Placeholder: Clone {
     /// Label of the `ordinal`-th placeholder in text order, counting from 1.
     fn label(ordinal: usize) -> String;
 }
 
+/// Placeholder type for editors that contain only text.
 #[derive(Clone)]
-pub(crate) enum NoPlaceholder {}
+pub enum NoPlaceholder {}
 
 impl Placeholder for NoPlaceholder {
     fn label(_: usize) -> String {
@@ -28,8 +33,9 @@ impl Placeholder for NoPlaceholder {
     }
 }
 
+/// Editable text with a grapheme-aligned caret, selection and atomic placeholders.
 #[derive(Clone)]
-pub(crate) struct LineEdit<P: Placeholder = NoPlaceholder> {
+pub struct Editor<P: Placeholder = NoPlaceholder> {
     placed: Vec<placeholders::Placed<P>>,
     selection: Option<(usize, usize)>,
     text: String,
@@ -38,7 +44,7 @@ pub(crate) struct LineEdit<P: Placeholder = NoPlaceholder> {
     preferred_column: Option<usize>,
 }
 
-impl<P: Placeholder> Default for LineEdit<P> {
+impl<P: Placeholder> Default for Editor<P> {
     fn default() -> Self {
         Self {
             placed: Vec::new(),
@@ -50,35 +56,40 @@ impl<P: Placeholder> Default for LineEdit<P> {
     }
 }
 
-impl<P: Placeholder> LineEdit<P> {
-    pub(crate) fn cursor(&self) -> usize {
+impl<P: Placeholder> Editor<P> {
+    /// Returns the caret byte offset on a grapheme boundary.
+    pub fn cursor(&self) -> usize {
         self.cursor
     }
 
-    pub(crate) fn text(&self) -> &str {
+    /// Returns the text, including placeholder labels.
+    pub fn text(&self) -> &str {
         &self.text
     }
-    pub(crate) fn is_empty(&self) -> bool {
+    /// Returns whether the text is empty.
+    pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
-    pub(crate) fn set_text(&mut self, text: &str) {
+    /// Replaces all text, drops placeholders and selection, and moves the caret to the end.
+    pub fn set_text(&mut self, text: &str) {
         self.preferred_column = None;
         self.placed.clear();
         self.text = text.into();
         self.end();
         self.clear_selection();
     }
-    pub(crate) fn clear(&mut self) {
+    /// Clears the text, placeholders and selection.
+    pub fn clear(&mut self) {
         self.set_text("");
     }
-    pub(crate) fn insert(&mut self, text: impl ToString) {
-        if self.selection_range().is_some() {
+    /// Inserts text at the caret, replacing any selection.
+    pub fn insert(&mut self, text: &str) {
+        if self.selection().is_some() {
             self.replace_selection(text);
             return;
         }
         self.preferred_column = None;
-        let text = text.to_string();
-        let range = self.replace_placeholders(self.cursor..self.cursor, &text);
+        let range = self.replace_placeholders(self.cursor..self.cursor, text);
         self.cursor = range.start + text.len();
         self.align_cursor();
     }
@@ -221,7 +232,8 @@ impl<P: Placeholder> LineEdit<P> {
         };
         kills.push(removed, direction);
     }
-    pub(crate) fn move_caret(&mut self, motion: Motion) {
+    /// Moves the caret by the given motion and clears the selection.
+    pub fn move_caret(&mut self, motion: Motion) {
         self.clear_selection();
         match motion {
             Motion::Left => self.left(),
@@ -243,7 +255,8 @@ impl<P: Placeholder> LineEdit<P> {
         self.align_cursor();
     }
 
-    pub(crate) fn apply(&mut self, command: EditCommand, kills: &mut KillBuffer) {
+    /// Applies an editing command, saving killed text in the shared buffer.
+    pub fn apply(&mut self, command: EditCommand, kills: &mut KillBuffer) {
         match command {
             EditCommand::Move(motion) => self.move_caret(motion),
             EditCommand::Delete(motion) => {
@@ -262,12 +275,13 @@ impl<P: Placeholder> LineEdit<P> {
                     kills,
                 );
             }
-            EditCommand::Insert(text) => self.insert(text),
+            EditCommand::Insert(text) => self.insert(&text),
             EditCommand::Yank => self.insert(kills.text()),
         }
     }
 
-    pub(crate) fn handle_key(&mut self, key: KeyEvent, kills: &mut KillBuffer) -> bool {
+    /// Normalizes and applies an editing key; returns false for unowned keys.
+    pub fn handle_key(&mut self, key: KeyEvent, kills: &mut KillBuffer) -> bool {
         let Some(command) = keymap::command_for_key(keymap::normalize_control_code(key)) else {
             return false;
         };
@@ -281,8 +295,8 @@ mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 
-    fn edit(text: &str) -> LineEdit {
-        let mut edit = LineEdit::default();
+    fn edit(text: &str) -> Editor {
+        let mut edit = Editor::default();
         edit.set_text(text);
         edit
     }
@@ -305,7 +319,7 @@ mod tests {
         );
         assert_eq!(e.text(), "你好");
         e.insert("e");
-        e.insert('\u{301}');
+        e.insert("\u{301}");
         assert_eq!(e.text(), "你e\u{301}好");
         e.move_caret(Motion::Left);
         assert_eq!(e.cursor, "你".len());
@@ -335,7 +349,7 @@ mod tests {
         assert!(e.text.grapheme_indices(true).any(|(i, _)| i == e.cursor));
         let mut e = edit("👩👧");
         e.move_caret(Motion::Left);
-        e.insert('\u{200d}');
+        e.insert("\u{200d}");
         assert_eq!(e.cursor, e.text.len());
         e.apply(
             EditCommand::Delete(Motion::Left),
@@ -479,7 +493,7 @@ mod tests {
     #[test]
     fn kills_feed_the_shared_buffer_and_ctrl_y_pastes() {
         let mut kills = KillBuffer::default();
-        let press = |kills: &mut KillBuffer, e: &mut LineEdit, c, modifiers| {
+        let press = |kills: &mut KillBuffer, e: &mut Editor, c, modifiers| {
             assert!({
                 kills.begin_stroke();
                 e.handle_key(KeyEvent::new(KeyCode::Char(c), modifiers), kills)
@@ -516,7 +530,7 @@ mod tests {
     #[test]
     fn consecutive_kills_join_until_a_non_kill_key() {
         let mut kills = KillBuffer::default();
-        let press = |kills: &mut KillBuffer, e: &mut LineEdit, code, modifiers| {
+        let press = |kills: &mut KillBuffer, e: &mut Editor, code, modifiers| {
             assert!({
                 kills.begin_stroke();
                 e.handle_key(KeyEvent::new(code, modifiers), kills)
@@ -746,7 +760,7 @@ mod tests {
         assert_eq!(e.text(), "one baz");
         e.select(0, 3);
         e.apply(EditCommand::Move(Motion::Right), &mut kills);
-        assert_eq!(e.selection_range(), None);
+        assert_eq!(e.selection(), None);
         e.select(0, 4);
         e.apply(
             EditCommand::Kill(Motion::WordRight(WordKind::Alphanumeric)),

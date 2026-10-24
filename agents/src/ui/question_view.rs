@@ -1,7 +1,7 @@
 //! Provider-neutral question pages and their collected answer.
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crate::ask::{Answer, Ask, AskKind, Question, QuestionAnswer};
-use crate::line_edit::LineEdit;
+use crate::line_edit::Editor;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
@@ -39,7 +39,7 @@ pub(super) enum Target {
 struct Page {
     focus: usize,
     selected: Vec<usize>,
-    other: LineEdit,
+    other: Editor,
     /// Whether a multi-select question's free-text row is checked; typing checks it.
     other_checked: bool,
 }
@@ -240,7 +240,7 @@ impl QuestionView {
         })
     }
 
-    pub(super) fn focused_editor(&self) -> Option<&LineEdit> {
+    pub(super) fn focused_editor(&self) -> Option<&Editor> {
         self.editing().then_some(&self.pages[self.page].other)
     }
 
@@ -524,7 +524,7 @@ impl QuestionView {
         if self.editing() {
             let page = &mut self.pages[self.page];
             page.other
-                .insert(text.replace("\r\n", "\n").replace('\r', "\n"));
+                .insert(&text.replace("\r\n", "\n").replace('\r', "\n"));
             page.other_checked |= !page.other.is_empty();
         }
     }

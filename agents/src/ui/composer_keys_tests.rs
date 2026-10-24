@@ -200,7 +200,7 @@ fn history_search_receives_slash_before_panel_search_routing() {
         .name = Some("History".into());
     view.close_selector();
     view.set_active_panel(Panel::Prompt);
-    let mut entry = LineEdit::default();
+    let mut entry = Editor::default();
     entry.set_text("path/to/file");
     view.prompt_history.borrow_mut().push(entry);
     view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));

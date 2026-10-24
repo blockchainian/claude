@@ -79,7 +79,7 @@ fn prompt_mouse_drag_highlights_copies_and_replaces_selection() {
                     .modifier
                     .contains(ratatui::style::Modifier::REVERSED),
                 "column {column}; selection {:?}",
-                view.input_box.editor.selection_range()
+                view.input_box.editor.selection()
             );
         }
         assert!(
@@ -121,7 +121,7 @@ fn prompt_mouse_reverse_multiline_selection_survives_release_and_paste_replaces_
     );
     view.handle_paste("查");
     assert_eq!(view.input_box.editor.text(), "写查reply needed.");
-    assert!(view.input_box.editor.selection_range().is_none());
+    assert!(view.input_box.editor.selection().is_none());
 }
 
 #[test]
