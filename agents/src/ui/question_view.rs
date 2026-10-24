@@ -240,6 +240,10 @@ impl QuestionView {
         })
     }
 
+    pub(super) fn focused_editor(&self) -> Option<&LineEdit> {
+        self.editing().then_some(&self.pages[self.page].other)
+    }
+
     fn rows(&self) -> usize {
         if self.reviewing() {
             return REVIEW_ROWS.len();

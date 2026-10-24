@@ -1657,12 +1657,17 @@ impl View {
     }
 
     fn focused_editor_has_text(&self) -> bool {
+        if self.help || self.confirm_dialog.is_some() || self.frozen_draft() {
+            return false;
+        }
         if self.active_panel == Panel::TaskDetails
             && let Some(editor) = self.selector.as_ref().and_then(Selector::branch_editor)
         {
             return !editor.is_empty();
         }
-        if let Some(editor) = self.title_editor() {
+        if self.active_panel == Panel::TaskDetails
+            && let Some(editor) = self.title_editor()
+        {
             return !editor.is_empty();
         }
         if self.search_focused() {

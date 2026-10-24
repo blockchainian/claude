@@ -71,7 +71,7 @@ fn window_navigation_all_directions_in_three_layouts() {
 }
 
 #[test]
-fn window_navigation_preserves_editor_ctrl_w_before_other_key() {
+fn nonempty_editors_delete_ctrl_w_immediately_without_navigating() {
     for search in [false, true] {
         let (mut view, _) = event_fixture();
         if search {
@@ -84,17 +84,9 @@ fn window_navigation_preserves_editor_ctrl_w_before_other_key() {
             view.set_active_panel(Panel::Prompt);
             view.input_box.editor.insert("one two");
         }
-        assert_eq!(chord(&mut view, 'x'), None);
+        let panel = view.active_panel;
         assert_eq!(
-            if search {
-                view.search.text()
-            } else {
-                view.input_box.editor.text()
-            },
-            "one x"
-        );
-        assert_eq!(
-            view.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL)),
+            view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
             None
         );
         assert_eq!(
@@ -103,7 +95,27 @@ fn window_navigation_preserves_editor_ctrl_w_before_other_key() {
             } else {
                 view.input_box.editor.text()
             },
-            "one xtwo"
+            "one "
+        );
+        assert!(view.window_prefix.is_none());
+        assert_eq!(view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)), None);
+        assert_eq!(view.active_panel, panel);
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)),
+            None
+        );
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
+            None
+        );
+        assert!(view.window_prefix.is_none());
+        assert_eq!(
+            if search {
+                view.search.text()
+            } else {
+                view.input_box.editor.text()
+            },
+            "one "
         );
     }
 }
@@ -152,18 +164,15 @@ fn window_navigation_terminal_fallback_preserves_both_encoded_keys() {
 }
 
 #[test]
-fn window_navigation_release_and_second_ctrl_w_preserve_input() {
+fn nonempty_prompt_consecutive_ctrl_w_kills_yank_together() {
     let (mut view, _) = event_fixture();
     view.rows[view.selected].process = None;
     view.set_active_panel(Panel::Prompt);
     view.input_box.editor.insert("one two three");
     let prefix = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
     assert_eq!(view.handle_key(prefix), None);
-    assert_eq!(view.input_box.editor.text(), "one two three");
-    let mut release = prefix;
-    release.kind = KeyEventKind::Release;
-    assert_eq!(view.handle_key(release), None);
-    assert_eq!(view.input_box.editor.text(), "one two three");
+    assert_eq!(view.input_box.editor.text(), "one two ");
+    assert!(view.window_prefix.is_none());
     assert_eq!(view.handle_key(prefix), None);
     assert_eq!(view.input_box.editor.text(), "one ");
     assert_eq!(
@@ -174,7 +183,66 @@ fn window_navigation_release_and_second_ctrl_w_preserve_input() {
 }
 
 #[test]
-fn staged_ctrl_w_replay_joins_consecutive_prompt_kills() {
+fn empty_prompt_ctrl_w_starts_window_navigation() {
+    let (mut view, now) = event_fixture();
+    view.rows[view.selected].process = None;
+    event_screen(&view, 200, 45, now);
+    view.set_active_panel(Panel::Prompt);
+    assert!(view.input_box.editor.is_empty());
+    let initial = view.active_panel;
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
+        None
+    );
+    assert!(view.window_prefix.is_some());
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)),
+        None
+    );
+    assert_ne!(view.active_panel, initial);
+}
+
+#[test]
+fn ctrl_w_becomes_navigation_after_deleting_prompt_to_empty() {
+    let (mut view, _) = event_fixture();
+    view.rows[view.selected].process = None;
+    view.set_active_panel(Panel::Prompt);
+    view.input_box.editor.set_text("word");
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
+        None
+    );
+    assert!(view.input_box.editor.is_empty());
+    assert!(view.window_prefix.is_none());
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
+        None
+    );
+    assert!(view.window_prefix.is_some());
+}
+
+#[test]
+fn image_only_prompt_counts_as_nonempty_for_ctrl_w() {
+    let (mut view, _) = event_fixture();
+    view.rows[view.selected].process = None;
+    view.set_active_panel(Panel::Prompt);
+    view.input_box.editor.insert_image(
+        crate::images::ImageAttachment::from_image(
+            image::load_from_memory(&crate::images::fixture_png()).unwrap(),
+        )
+        .unwrap(),
+    );
+    assert_eq!(view.input_box.editor.text(), "[Image #1]");
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
+        None
+    );
+    assert!(view.window_prefix.is_none());
+    assert!(view.input_box.editor.is_empty());
+}
+
+#[test]
+fn consecutive_prompt_ctrl_w_kills_join_for_yank() {
     let (mut view, _) = event_fixture();
     view.rows[view.selected].process = None;
     view.set_active_panel(Panel::Prompt);
@@ -195,11 +263,10 @@ fn window_navigation_leaving_search_blurs_and_keeps_query() {
     let (mut view, now) = event_fixture();
     event_screen(&view, 200, 45, now);
     key(&mut view, KeyCode::Char('/'));
-    key(&mut view, KeyCode::Char('x'));
     assert!(view.search.focused());
     chord(&mut view, 'l');
     assert!(!view.search.focused());
-    assert_eq!(view.search.text(), "x");
+    assert_eq!(view.search.text(), "");
     assert!(view.active_panel == Panel::TaskDetails);
 }
 
