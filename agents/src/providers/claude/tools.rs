@@ -66,7 +66,7 @@ pub(super) const RULES: &[ToolRule] = &[
     },
     ToolRule {
         name: "ToolSearch",
-        title: &[Pick::Field(Source::Input, "/query")],
+        title: &[Pick::With(tool_search_title)],
         input: Some((Pick::With(empty_input), Format::Text)),
         output: Some((Pick::With(matches_output), Format::Text)),
         ..DEFAULT_RULE
@@ -156,6 +156,22 @@ fn shell_description(data: &ToolData<'_>) -> Option<String> {
     text(data.input, "description")
         .map(str::to_owned)
         .or_else(|| shell_title(data))
+}
+
+/// Groups a `select:` query's tools by MCP server; keyword queries stay as typed.
+fn tool_search_title(data: &ToolData<'_>) -> Option<String> {
+    let query = text(data.input, "query")?;
+    let Some(names) = query.strip_prefix("select:") else {
+        return Some(query.to_owned());
+    };
+    let mut groups = crate::providers::tool::groups::Groups::default();
+    for name in names.split(',').map(str::trim).filter(|name| !name.is_empty()) {
+        match crate::providers::mcp::parse(name) {
+            Some((server, tool)) => groups.add(server, Some(&tool.replace('_', " "))),
+            None => groups.add(name, None),
+        }
+    }
+    groups.finish()
 }
 
 fn recipient_title(data: &ToolData<'_>) -> Option<String> {
@@ -464,6 +480,25 @@ mod tests {
             assert!(rule.title.is_empty());
             assert!(rule.input.is_none());
         }
+    }
+
+    #[test]
+    fn tool_search_title_groups_selected_tools_by_server() {
+        let title = |query: &str| {
+            super::presentation(
+                "ToolSearch",
+                &super::ToolData {
+                    input: &serde_json::json!({"query": query, "max_results": 5}),
+                    result: None,
+                },
+            )
+            .title
+        };
+        assert_eq!(
+            title("select:mcp__plugin_codex_codex-manager__start,mcp__plugin_codex_codex-manager__send,mcp__claude-in-chrome__javascript_tool,Monitor").as_deref(),
+            Some("codex-manager {start, send}, claude-in-chrome javascript tool, Monitor")
+        );
+        assert_eq!(title("notebook jupyter").as_deref(), Some("notebook jupyter"));
     }
 
     #[test]
