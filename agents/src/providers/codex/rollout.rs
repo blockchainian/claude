@@ -4225,7 +4225,7 @@ mod tests {
             call.output.unwrap(),
             vec![text_section(
                 "output",
-                "Chat about this\n\nYou have not answered all questions"
+                "Chat about this"
             )]
         );
         assert!(call.is_error);

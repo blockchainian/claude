@@ -881,18 +881,34 @@ pub(crate) fn answer_list(questions: &Value, answers: &BTreeMap<String, String>)
     {
         blocks.push("You have not answered all questions".to_owned());
     }
-    let lines: Vec<String> = questions
+    let lines = answered_lines(questions, answers);
+    if !lines.is_empty() {
+        blocks.push(lines.join("\n"));
+    }
+    blocks.join("\n\n")
+}
+
+/// One `● header → answer` line per answered question.
+fn answered_lines(questions: &[Value], answers: &BTreeMap<String, String>) -> Vec<String> {
+    questions
         .iter()
         .filter_map(|question| {
             let answer = answers.get(question["question"].as_str()?)?;
             let header = text(question, "header").or_else(|| text(question, "question"))?;
             Some(format!("● {header} → {answer}"))
         })
-        .collect();
-    if !lines.is_empty() {
-        blocks.push(lines.join("\n"));
+        .collect()
+}
+
+/// Shows an ask the user chose to chat about as `Chat about this`, followed by the
+/// answers given before they did.
+fn chat_about_this(questions: &Value, answers: &BTreeMap<String, String>) -> String {
+    let questions = questions.as_array().map(Vec::as_slice).unwrap_or_default();
+    let lines = answered_lines(questions, answers);
+    if lines.is_empty() {
+        return "Chat about this".to_owned();
     }
-    blocks.join("\n\n")
+    format!("Chat about this\n\n{}", lines.join("\n"))
 }
 
 /// Shows a rejected ask as `Rejected` with the user's note, or as `Chat about this` with
@@ -919,10 +935,7 @@ pub(crate) fn rejected_answers(questions: &Value, text: &str) -> Option<String> 
         said
     };
     if dismissed(said) {
-        return Some(format!(
-            "Chat about this\n\n{}",
-            answer_list(questions, &BTreeMap::new())
-        ));
+        return Some(chat_about_this(questions, &BTreeMap::new()));
     }
     if !said.starts_with("The user wants to clarify these questions.") {
         return Some(format!("Rejected\n\n{}", said.trim()));
@@ -941,10 +954,7 @@ pub(crate) fn rejected_answers(questions: &Value, text: &str) -> Option<String> 
             answers.insert(question.to_owned(), answer.to_owned());
         }
     }
-    Some(format!(
-        "Chat about this\n\n{}",
-        answer_list(questions, &answers)
-    ))
+    Some(chat_about_this(questions, &answers))
 }
 
 pub(crate) fn rejected_questions(text: &str) -> Option<String> {

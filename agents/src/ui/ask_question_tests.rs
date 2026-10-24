@@ -164,7 +164,7 @@ fn ask_question_answers_list_headers_like_the_submit_tab() {
 fn ask_question_rejections_list_what_was_answered() {
     assert_eq!(
         output(&question_event(REJECTED)),
-        "Chat about this\n\nYou have not answered all questions"
+        "Chat about this"
     );
     let record: serde_json::Value = serde_json::from_str(REJECTED.lines().nth(1).unwrap()).unwrap();
     let original = record["message"]["content"][0]["content"].as_str().unwrap();

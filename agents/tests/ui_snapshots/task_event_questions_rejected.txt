@@ -6,6 +6,4 @@ AskUserQuestion                                                   压 缩 摘 �
                             类 的 系 统 行
                             2. 直 接 隐 藏 : 日 志 里 完 全 不 显 示 这 条
                                                                       ↓
-                                                     Chat about this
-
-                                                     You have not answered all questions
+                                                               Chat about this

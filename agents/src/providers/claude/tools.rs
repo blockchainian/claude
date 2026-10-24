@@ -406,7 +406,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             super::rejected_answers(questions, result).as_deref(),
-            Some("Chat about this\n\nYou have not answered all questions")
+            Some("Chat about this")
         );
         assert_eq!(
             super::rejected_answers(questions, records[1]["toolUseResult"].as_str().unwrap()),
@@ -458,7 +458,7 @@ mod tests {
                 for text in [result, short.as_str()] {
                     assert_eq!(
                         super::rejected_answers(questions, text).as_deref(),
-                        Some("Chat about this\n\nYou have not answered all questions")
+                        Some("Chat about this")
                     );
                     assert_eq!(
                         super::rejected_answers(

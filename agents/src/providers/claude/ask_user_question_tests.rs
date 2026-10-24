@@ -492,7 +492,7 @@ fn hook_rejected_questions_resend_message_and_questions() {
         assert_eq!(
             crate::providers::tool::rejected_answers(&body["tool_input"]["questions"], &result)
                 .as_deref(),
-            Some("Chat about this\n\nYou have not answered all questions")
+            Some("Chat about this")
         );
     }
 }
