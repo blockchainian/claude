@@ -769,6 +769,7 @@ fn provider_detail_blocks_are_centered() {
         include_str!("../../tests/fixtures/transcript.jsonl"),
         include_str!("../../tests/fixtures/claude-tool-calls.jsonl"),
         include_str!("../../tests/fixtures/claude-tool-details.jsonl"),
+        include_str!("../../tests/fixtures/claude-chrome-javascript.jsonl"),
         include_str!("../../tests/fixtures/claude-questions-answered.jsonl"),
         include_str!("../../tests/fixtures/claude-peer-prompts.jsonl"),
         include_str!("../../tests/fixtures/claude-compaction.jsonl"),
@@ -825,6 +826,9 @@ fn centered_detail_blocks_snapshot() {
             .into_iter()
             .filter(|event| event.calls.iter().any(|call| call.name == "WebFetch")),
     );
+    entries.extend(events(include_str!(
+        "../../tests/fixtures/claude-chrome-javascript.jsonl"
+    )));
     let mut snapshot = String::new();
     for event in entries {
         for width in [120, 200] {

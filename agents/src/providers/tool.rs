@@ -502,6 +502,11 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         ..DEFAULT_RULE
     },
     ToolRule {
+        name: "claude-in-chrome javascript_tool",
+        input: Some((Pick::With(javascript_input), Format::Text)),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
         name: "claude-client ask_claude",
         input: Some((Pick::Field(Source::Input, "/text"), Format::Markdown)),
         output: Some((Pick::With(mcp_markdown_output), Format::Text)),
@@ -812,6 +817,36 @@ fn arguments_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
             .map(|text| vec![text_section("args", text)])
             .unwrap_or_default(),
     )
+}
+fn javascript_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    use dprint_plugin_typescript::configuration::{
+        Configuration, ConfigurationBuilder, QuoteStyle,
+    };
+    use dprint_plugin_typescript::{FormatTextOptions, format_text};
+
+    static CONFIG: std::sync::OnceLock<Configuration> = std::sync::OnceLock::new();
+    let text = data.input.pointer("/text")?.as_str()?;
+    let config = CONFIG.get_or_init(|| {
+        ConfigurationBuilder::new()
+            .quote_style(QuoteStyle::PreferSingle)
+            .line_width(80)
+            .build()
+    });
+    let formatted = match format_text(FormatTextOptions {
+        path: std::path::Path::new("input.js"),
+        extension: None,
+        text: text.to_owned(),
+        config,
+        external_formatter: None,
+    }) {
+        Ok(Some(formatted)) => formatted,
+        Ok(None) | Err(_) => text.to_owned(),
+    };
+    let mut sections = vec![code_section("text", "js", &formatted)];
+    let mut remaining = data.input.clone();
+    remaining.as_object_mut()?.remove("text");
+    sections.extend(raw_input(&remaining));
+    Some(sections)
 }
 fn fetch_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     let mut sections = Vec::new();
@@ -1539,6 +1574,7 @@ fn label_section(section: Section) -> Vec<Section> {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::Value;
     #[test]
     fn captured_edit_patch_carries_file_language() {
         let record = include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
@@ -1647,6 +1683,103 @@ mod tests {
         assert_eq!(
             shell_output("cd /a/b/tests && sed -n 35,70p checks.test.mjs", &text),
             vec![super::code_section("stdout", "mjs", &text)]
+        );
+    }
+
+    #[test]
+    fn chrome_javascript_formats_recorded_text_and_preserves_other_fields() {
+        let records: Vec<Value> =
+            include_str!("../../tests/fixtures/claude-chrome-javascript.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let input = &records[0]["message"]["content"][0]["input"];
+        let content = records[1]["message"]["content"][0]["content"].clone();
+        let result = super::ToolResult {
+            source: None,
+            content: content.clone(),
+            structured: Value::Null,
+            error: false,
+        };
+        for name in [
+            "claude-in-chrome javascript_tool",
+            "mcp__claude-in-chrome__javascript_tool",
+            "mcp__plugin_claude-in-chrome_claude-in-chrome__javascript_tool",
+            "claude-in-chrome.javascript_tool",
+        ] {
+            let shown = super::presentation(
+                name,
+                &super::ToolData {
+                    input,
+                    result: Some(&result),
+                },
+            );
+            let crate::event::Section::Code { label, lang, text } = &shown.input[0] else {
+                panic!("JavaScript must be a code section: {:?}", shown.input);
+            };
+            assert_eq!(label, "text");
+            assert_eq!(lang, "js");
+            assert!(text.lines().count() > 1, "{text}");
+            assert!(text.contains(" => "), "{text}");
+            assert!(text.contains("'resource'"), "{text}");
+            assert!(text.contains("' '"), "{text}");
+            let mut remaining = input.clone();
+            remaining.as_object_mut().unwrap().remove("text");
+            assert_eq!(&shown.input[1..], super::raw_input(&remaining));
+            let Some(super::Body::Sections(output)) = shown.output else {
+                panic!("missing output")
+            };
+            assert_eq!(output, super::mcp_content(&content, None));
+            assert_eq!(output.len(), 2);
+
+            let mut formatted = input.clone();
+            formatted["text"] = text.clone().into();
+            assert_eq!(
+                super::presentation(
+                    name,
+                    &super::ToolData {
+                        input: &formatted,
+                        result: None
+                    }
+                )
+                .input,
+                shown.input,
+                "Already formatted JavaScript stays unchanged"
+            );
+        }
+    }
+
+    #[test]
+    fn chrome_javascript_invalid_text_stays_code_and_absent_text_uses_default_input() {
+        let record: Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-chrome-javascript.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        let mut input = record["message"]["content"][0]["input"].clone();
+        let invalid = format!("{}(", input["text"].as_str().unwrap());
+        input["text"] = invalid.clone().into();
+        let shown = super::presentation(
+            "mcp__claude-in-chrome__javascript_tool",
+            &super::ToolData {
+                input: &input,
+                result: None,
+            },
+        );
+        assert_eq!(shown.input[0], super::code_section("text", "js", &invalid));
+        input.as_object_mut().unwrap().remove("text");
+        assert_eq!(
+            super::presentation(
+                "mcp__claude-in-chrome__javascript_tool",
+                &super::ToolData {
+                    input: &input,
+                    result: None
+                }
+            )
+            .input,
+            super::raw_input(&input)
         );
     }
 

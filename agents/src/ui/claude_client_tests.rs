@@ -63,3 +63,39 @@ fn claude_client_recorded_input_and_reply_snapshot() {
         assert_eq!(rendered, std::fs::read_to_string(path).unwrap());
     }
 }
+
+#[test]
+fn chrome_javascript_recorded_input_and_output_blocks_snapshot() {
+    let directory = tempfile::tempdir().unwrap();
+    let transcript = directory.path().join("chrome.jsonl");
+    std::fs::write(
+        &transcript,
+        include_str!("../../tests/fixtures/claude-chrome-javascript.jsonl"),
+    )
+    .unwrap();
+    let events = crate::providers::claude::event_reader::tail(&transcript, usize::MAX).unwrap();
+    assert_eq!(events.len(), 1);
+    let now = events[0].ended_at.unwrap();
+    assert_eq!(events[0].calls[0].output.as_ref().unwrap().len(), 2);
+    let (mut view, _) = event_fixture();
+    view.set_event(events);
+    for width in [120, 180] {
+        let rendered = event_screen(&view, width, 90, now);
+        assert!(
+            rendered.contains(".getEntriesByType('resource')"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("\"action\": \"javascript_exec\""),
+            "{rendered}"
+        );
+        assert!(rendered.contains("\"tabId\": 123456789"), "{rendered}");
+        assert!(rendered.contains("- Available tabs:"), "{rendered}");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("tests/ui_snapshots/chrome_javascript_{width}.txt"));
+        if std::env::var_os("UPDATE_CHROME_JAVASCRIPT_SNAPSHOTS").is_some() {
+            std::fs::write(&path, &rendered).unwrap();
+        }
+        assert_eq!(rendered, std::fs::read_to_string(path).unwrap());
+    }
+}

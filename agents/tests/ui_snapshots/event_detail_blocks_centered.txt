@@ -38,3 +38,47 @@ WebFetch                                                                    http
                                                             The response body was not retrieved. If this URL requires authentication, use an
                                                             authenticated tool (e.g. gh for GitHub, or an MCP-provided fetch tool) instead of
                                                             WebFetch.
+claude-in-chrome javascript tool — 120 columns
+                                            claude-in-chrome javascript tool
+
+                        [
+                          ...new Set(
+                            performance.getEntriesByType('resource').map(e => e.name).filter(n =>
+                              /usage|reset|limit|grant|credit/i.test(n)
+                            ).map(n => n.replace(/[=&?]/g, ' ')),
+                          ),
+                        ].join('\n');
+                        {
+                          "action": "javascript_exec",
+                          "tabId": 123456789
+                        }
+                                                            ↓
+    https://claude.ai/v1/environment_providers/private/organizations/ORGANIZATION_ID/environments limit LIMIT
+
+
+                  Tab Context:
+                  - Executed on tabId: 123456789
+                  - Available tabs:
+                    • tabId 123456789: "New session - Claude" ("https://claude.ai/new#settings/usage")
+claude-in-chrome javascript tool — 200 columns
+                                                                                    claude-in-chrome javascript tool
+
+                                                                [
+                                                                  ...new Set(
+                                                                    performance.getEntriesByType('resource').map(e => e.name).filter(n =>
+                                                                      /usage|reset|limit|grant|credit/i.test(n)
+                                                                    ).map(n => n.replace(/[=&?]/g, ' ')),
+                                                                  ),
+                                                                ].join('\n');
+                                                                {
+                                                                  "action": "javascript_exec",
+                                                                  "tabId": 123456789
+                                                                }
+                                                                                                    ↓
+                                                https://claude.ai/v1/environment_providers/private/organizations/ORGANIZATION_ID/environments limit LIMIT
+
+
+                                                          Tab Context:
+                                                          - Executed on tabId: 123456789
+                                                          - Available tabs:
+                                                            • tabId 123456789: "New session - Claude" ("https://claude.ai/new#settings/usage")

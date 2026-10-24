@@ -697,13 +697,21 @@ fn parts(event: &Event) -> Vec<EventDetailSection> {
                     };
                     for section in output {
                         push_section(&mut output_parts, section, style, true);
+                        // Headings share the following content block's alignment.
+                        if !matches!(section, Section::Label(_)) {
+                            groups.push(Group {
+                                parts: std::mem::take(&mut output_parts),
+                            });
+                        }
                     }
                 }
                 None => output_parts.push(Part::new("", Body::Running)),
             }
-            groups.push(Group {
-                parts: output_parts,
-            });
+            if !output_parts.is_empty() {
+                groups.push(Group {
+                    parts: output_parts,
+                });
+            }
             sections
                 .last_mut()
                 .expect("call has a section")
@@ -980,6 +988,86 @@ mod tests {
             std::fs::write(&path, &snapshot).unwrap();
         }
         assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+    }
+
+    #[test]
+    fn chrome_output_blocks_have_independent_alignment_groups() {
+        let events = crate::providers::claude::event_reader::tail(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/claude-chrome-javascript.jsonl"),
+            usize::MAX,
+        )
+        .unwrap();
+        let event = events.iter().find(|event| !event.calls.is_empty()).unwrap();
+        let output = event.calls[0].output.as_ref().unwrap();
+        assert_eq!(output.len(), 2);
+        let detail = parts(event);
+        let groups = &detail[0].groups;
+        let arrow = groups
+            .iter()
+            .position(|group| matches!(group.parts[0].body, Body::Arrow))
+            .unwrap();
+        assert_eq!(groups.len() - arrow - 1, output.len());
+        let result: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-chrome-javascript.jsonl")
+                .lines()
+                .nth(1)
+                .unwrap(),
+        )
+        .unwrap();
+        let blocks = result["message"]["content"][0]["content"]
+            .as_array()
+            .unwrap();
+        for (group, block) in groups[arrow + 1..].iter().zip(blocks) {
+            assert_eq!(group.parts.len(), 1);
+            assert_eq!(
+                group.parts[0].source,
+                block["text"].as_str().unwrap().trim_end()
+            );
+        }
+    }
+
+    #[test]
+    fn captured_stderr_heading_stays_with_its_output_group() {
+        let events = crate::providers::claude::event_reader::tail(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/claude-tool-calls.jsonl"),
+            usize::MAX,
+        )
+        .unwrap();
+        let event = events
+            .iter()
+            .find(|event| {
+                event.calls.iter().any(|call| {
+                    call.output.as_ref().is_some_and(|output| {
+                        output.iter().any(
+                            |section| matches!(section, Section::Label(label) if label == "stderr"),
+                        )
+                    })
+                })
+            })
+            .unwrap();
+        let detail = parts(event);
+        let groups = detail.iter().flat_map(|section| &section.groups);
+        let stderr = groups
+            .clone()
+            .find(|group| group.parts.iter().any(|part| part.source == "stderr"))
+            .unwrap();
+        assert!(matches!(stderr.parts[0].body, Body::Label(_)));
+        assert_eq!(stderr.parts[0].source, "stderr");
+        assert!(stderr.parts[1].source.contains("Shell cwd was reset"));
+        assert!(
+            !stderr
+                .parts
+                .iter()
+                .any(|part| part.source.contains("decks.txt"))
+        );
+        assert!(groups.into_iter().any(|group| {
+            group
+                .parts
+                .iter()
+                .any(|part| part.source.contains("decks.txt"))
+        }));
     }
 
     #[test]

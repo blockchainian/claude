@@ -384,7 +384,7 @@ impl LineEdit {
         }
         let text = match CLIPBOARD_ACTION.take() {
             Some(crate::model::Action::Cut(earlier)) if self.cursor == cursor => earlier + removed,
-            Some(crate::model::Action::Cut(earlier)) => removed.to_owned() + &earlier,
+            Some(crate::model::Action::Cut(earlier)) => removed.to_owned() + earlier.as_str(),
             _ => removed.to_owned(),
         };
         CLIPBOARD_ACTION.set(Some(crate::model::Action::Cut(text)));

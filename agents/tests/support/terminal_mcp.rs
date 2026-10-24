@@ -211,3 +211,120 @@ fn terminal_codex_claude_client_text() {
         save_mcp_capture(&tmux, "codex", tool);
     }
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_claude_chrome_javascript() {
+    use std::io::Write;
+    let (_directory, tmux, transcript) = start_probe("chrome-javascript");
+    let width = 240;
+    let height = 150;
+    tmux.run(&["resize-window", "-t", "probe", "-x", "240", "-y", "150"]);
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&transcript)
+        .unwrap()
+        .write_all(include_str!("../fixtures/claude-chrome-javascript.jsonl").as_bytes())
+        .unwrap();
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
+    let plain = tmux.capture_when(|capture| {
+        capture.contains("Tab Context:")
+            && capture.contains("ORGANIZATION_ID")
+            && capture.contains("javascript_exec")
+    });
+    let evidence = std::env::var_os("AGENTS_JAVASCRIPT_EVIDENCE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("agents-chrome-javascript"));
+    std::fs::create_dir_all(&evidence).unwrap();
+    std::fs::write(evidence.join("capture.txt"), &plain).unwrap();
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    std::fs::write(evidence.join("capture.ansi"), &capture).unwrap();
+    assert!(plain.contains("\"action\": \"javascript_exec\""), "{plain}");
+    assert!(plain.contains("\"tabId\": 123456789"), "{plain}");
+    assert!(
+        plain.contains(".map(e => e.name)"),
+        "formatted arrow: {plain}"
+    );
+    assert!(plain.contains(".filter(n =>"), "formatted chain: {plain}");
+    assert!(
+        !plain.contains("\"text\":"),
+        "JS must leave JSON input: {plain}"
+    );
+    let parser = captured_screen(&capture, width, height);
+    let screen = parser.screen();
+    let (js_row, js_text) = screen
+        .rows(0, width)
+        .enumerate()
+        .find(|(_, text)| text.contains(".map(e => e.name)"))
+        .unwrap();
+    let js_start = js_text[..js_text.find(".map(e => e.name)").unwrap()].width() as u16;
+    let mut colors = Vec::new();
+    for column in js_start..js_start + ".map(e => e.name)".len() as u16 {
+        let cell = screen.cell(js_row as u16, column).unwrap();
+        if cell.contents().chars().any(|ch| !ch.is_whitespace())
+            && cell.fgcolor() != vt100::Color::Default
+            && !colors.contains(&cell.fgcolor())
+        {
+            colors.push(cell.fgcolor());
+        }
+    }
+    assert!(
+        colors.len() >= 2,
+        "JS tokens need multiple colors: {colors:?}"
+    );
+    let output_line = |marker: &str| {
+        plain
+            .lines()
+            .find(|line| line.contains(marker))
+            .unwrap()
+            .to_owned()
+    };
+    let result = output_line("ORGANIZATION_ID");
+    let context = output_line("Tab Context:");
+    let left_edge = |line: &str| line[..line.find(|ch: char| !ch.is_whitespace()).unwrap()].width();
+    let result_border = left_edge(&result);
+    let context_border = left_edge(&context);
+    assert_ne!(
+        result_border, context_border,
+        "each output block has its own left edge: {plain}"
+    );
+    let records = include_str!("../fixtures/claude-chrome-javascript.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    let blocks = records[1]["message"]["content"][0]["content"]
+        .as_array()
+        .unwrap();
+    let widths = blocks
+        .iter()
+        .map(|block| {
+            block["text"]
+                .as_str()
+                .unwrap()
+                .lines()
+                .map(UnicodeWidthStr::width)
+                .max()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    for (left, block_width) in [result_border, context_border].into_iter().zip(&widths) {
+        assert!(
+            (2 * left + block_width).abs_diff(usize::from(width)) <= 1,
+            "output block centered on panel: left={left} width={block_width}: {plain}"
+        );
+    }
+    let verdict = serde_json::json!({
+        "verdict":"pass", "fixture":"claude-chrome-javascript.jsonl",
+        "formatted_js":true, "js_colors":colors.len(),
+        "action_preserved":true, "tab_id_preserved":true,
+        "output_left_edges":[result_border, context_border],
+        "output_widths":widths,
+        "capture":evidence.join("capture.ansi"),
+    });
+    std::fs::write(
+        evidence.join("verdict.json"),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
+}

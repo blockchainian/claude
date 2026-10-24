@@ -531,7 +531,7 @@ fn task_event_growth_keeps_older_selection_and_viewport() {
     std::fs::write(
         &path,
         transcript_copies(&payload, 20, 0)
-            + &transcript_copies(&payload.replace("Codex", "CODEX"), 1, 20),
+            + transcript_copies(&payload.replace("Codex", "CODEX"), 1, 20).as_str(),
     )
     .unwrap();
     app.refresh_event(
