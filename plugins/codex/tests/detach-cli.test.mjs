@@ -6,15 +6,16 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { SessionStore, writeSupervisor } from "../codex-manager/inbox.mjs";
+import { fakeDaemon, send } from "./helpers/fake-daemon.mjs";
+import { SessionStore, writeSupervisor } from "../lib/inbox.mjs";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 
 const manager = path.resolve("plugins/codex/codex-manager/manager.mjs");
 
-function detach(home, threadId) {
+function detach(home, threadId, env = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [manager, "detach", "--thread", threadId], {
-      env: { ...process.env, CODEX_MANAGER_STATE_DIR: home, CLAUDE_CODE_SESSION_ID: "", CODEX_MANAGER_SESSIONS_DIR: path.join(home, "no-claude") },
+      env: { ...process.env, ...env, CODEX_MANAGER_STATE_DIR: home, CLAUDE_CODE_SESSION_ID: "", CODEX_MANAGER_SESSIONS_DIR: path.join(home, "no-claude") },
       stdio: ["ignore", "pipe", "pipe"], timeout: 15_000
     });
     let stdout = "";
@@ -65,21 +66,6 @@ test("detach CLI uses the owning store and live turn status after its manager ex
     const supervisorFile = path.join(home, "threads", `${threadId}.json`);
     const supervisor = await readFile(supervisorFile, "utf8");
 
-    const running = await detach(home, threadId);
-    assert.notEqual(running.code, 0);
-    assert.equal(running.stdout, "");
-    assert.match(running.stderr, /still running a turn/);
-    assert.equal(store.readState().threads[1].detached, undefined);
-
-    await client.request("turn/interrupt", { threadId, turnId });
-    const deadline = Date.now() + 10_000;
-    for (;;) {
-      const turns = await client.request("thread/turns/list", { threadId, limit: 1, sortDirection: "desc", itemsView: "full" });
-      if (turns.data[0].status !== "inProgress") break;
-      assert.ok(Date.now() < deadline, "interrupt must finish the test turn");
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-
     save("inProgress", true);
     const attached = await detach(home, threadId);
     assert.equal(attached.code, 0, attached.stderr);
@@ -109,3 +95,66 @@ test("detach CLI uses the owning store and live turn status after its manager ex
     await rm(home, { recursive: true, force: true });
   }
 });
+
+for (const attached of [false, true]) {
+  test(`detach CLI interrupts and waits before ${attached ? "unsubscribing" : "archiving"}`, { timeout: 15_000 }, async () => {
+    await exerciseRunningDetach({ attached });
+  });
+}
+
+for (const stall of ["running", "unanswered"]) {
+  test(`detach CLI fails after ten seconds when the turn stays ${stall}`, { timeout: 15_000 }, async () => {
+    await exerciseRunningDetach({ stall });
+  });
+}
+
+async function exerciseRunningDetach({ attached = false, stall } = {}) {
+  const home = await mkdtemp(path.join(os.tmpdir(), "detach-cli-running-"));
+  const env = { CODEX_MANAGER_STATE_DIR: home };
+  const store = new SessionStore("exited-supervisor", env);
+  const unrelated = { id: "unrelated", lastStatus: "inProgress", owner: "another-agent" };
+  store.writeState({ threads: [unrelated, { id: "thread-A", turnId: "stale-turn", lastStatus: "completed", attached }] });
+  writeSupervisor("thread-A", { sessionId: store.sessionId, pid: 2147483647 }, env);
+  const messages = [];
+  let polls = 0;
+  let interruptedAt;
+  const daemon = await fakeDaemon((message, socket) => {
+    messages.push(message);
+    if (message.id === undefined) return;
+    let result = {};
+    if (message.method === "thread/turns/list") {
+      polls += 1;
+      if (stall === "unanswered" && polls > 1) return;
+      result = { data: [{ id: "turn-live", status: !stall && polls >= 3 ? "interrupted" : "inProgress" }], nextCursor: null };
+    } else if (message.method === "turn/interrupt") {
+      interruptedAt = Date.now();
+    } else if (message.method === "thread/unsubscribe") {
+      result = { status: "unsubscribed" };
+    }
+    send(socket, { id: message.id, result });
+  });
+  try {
+    const result = await detach(home, "thread-A", { CODEX_DAEMON_SOCKET: daemon.socketPath });
+    const methods = messages.filter(message => message.id !== undefined).map(message => message.method);
+    assert.deepEqual(methods.slice(0, 4), ["initialize", "thread/resume", "thread/turns/list", "turn/interrupt"]);
+    assert.deepEqual(messages.find(message => message.method === "turn/interrupt").params, { threadId: "thread-A", turnId: "turn-live" });
+    assert.deepEqual(store.readState().threads[0], unrelated);
+    if (stall) {
+      assert.notEqual(result.code, 0);
+      assert.equal(result.stdout, "");
+      assert.match(result.stderr, /timed out.*10 seconds/);
+      assert.ok(Date.now() - interruptedAt >= 10_000);
+      assert.ok(!methods.includes("thread/archive") && !methods.includes("thread/unsubscribe"));
+      assert.equal(store.readState().threads[1].detached, undefined);
+    } else {
+      assert.equal(result.code, 0, result.stderr);
+      assert.deepEqual(methods.slice(4), ["thread/turns/list", "thread/turns/list", attached ? "thread/unsubscribe" : "thread/archive"]);
+      assert.deepEqual(JSON.parse(result.stdout), { threadId: "thread-A", detached: true, ...(attached ? { status: "unsubscribed" } : { archived: true }) });
+      assert.equal(store.readState().threads[1].lastStatus, "interrupted");
+      assert.equal(store.readState().threads[1].detached, true);
+    }
+  } finally {
+    await daemon.close();
+    await rm(home, { recursive: true, force: true });
+  }
+}
