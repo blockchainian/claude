@@ -17,7 +17,7 @@
     },
     {
       "name": "codex",
-      "description": "Supervise long-lived codex worker threads on the shared daemon through the codex-manager MCP server: start, prompt, answer, approve, interrupt, get woken, and run codex's review mode over a commit range.",
+      "description": "Supervise long-lived codex worker threads on the shared daemon through the codex-manager MCP server: start, prompt, answer, interrupt, get woken, and run codex's review mode over a commit range.",
       "author": {
         "name": "blockchainian"
       },
