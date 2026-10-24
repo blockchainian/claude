@@ -58,6 +58,8 @@ static PATHS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(?:[^\s:/]+/)+[^\s:]+$|^[\w@+-]+\.[\w.@+-]+$".into()));
 static STATUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:[ MADRCU?!]{2} \S|## )".into()));
 static NUMSTAT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:\d+|-)\t(?:\d+|-)\t".into()));
+static STAT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^ (?:\S.* \| |\d+ files? changed)".into()));
 static COUNTS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*\d+(\s+\d+)*(\s+\S.*)?$".into()));
 static LOG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{7,40} ".into()));
@@ -151,6 +153,15 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
             false,
         )
         .lines(&NUMSTAT),
+        row(
+            r"git\x00diff\x00((?:[^\x00]+\x00)*--stat(?:=[^\x00]*)?(?:\x00.*)?)",
+            &["-z", "--numstat", "--patch", "-p", "--name-only", "--name-status", "--summary", "--compact-summary"],
+            unknown,
+            Plain,
+            None,
+            false,
+        )
+        .lines(&STAT),
         row(r"cd\x00([^\x00-][^\x00]*)", &[], silent, Plain, None, false),
         row(
             r"mkdir\x00(.+)",

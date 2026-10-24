@@ -147,6 +147,11 @@ fn shell_output_command_table() {
         ("git add -v a.rs; git diff", "add 'a.rs'\n-a\n+b", &[]),
         ("git diff --stat", "a.rs | 1 +", &[]),
         (
+            "git diff a b --stat; git diff a b -- \"x y/a.json\"",
+            " x y/a.json | 1 +\n 1 file changed, 1 insertion(+)\ndiff --git a/x y/a.json b/x y/a.json\n@@ -1 +1 @@\n-a\n+b",
+            &[(2, 6, "diff")],
+        ),
+        (
             "git diff -- a.rs",
             "diff --git a/a.rs b/a.rs\n@@ -1 +1 @@\n-a\n+b",
             &[(0, 4, "diff")],
