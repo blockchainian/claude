@@ -834,6 +834,11 @@ fn completed_call(
             );
             (name, item["arguments"].clone(), None)
         }
+        "Extension" if item["kind"] == "image_gen.generation" => {
+            let mut arguments = item.clone();
+            arguments.as_object_mut().unwrap().remove("result");
+            (item_type.to_owned(), arguments, None)
+        }
         _ => (item_type.to_owned(), item.clone(), None),
     };
     let raw_name = name;
@@ -4179,6 +4184,40 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn image_generation_input_excludes_result() {
+        let record: Value =
+            include_str!("../../../tests/fixtures/codex-images/tool-generation.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .find(|record| record["payload"]["item"]["kind"] == "image_gen.generation")
+                .unwrap();
+        let item = &record["payload"]["item"];
+        assert!(!item["result"].as_str().unwrap().is_empty());
+        let call = completed_tool(&record).unwrap().unwrap().calls.remove(0);
+        let [Section::Structured { label, text }] = call.input.as_slice() else {
+            panic!("expected structured image generation input: {:?}", call.input);
+        };
+        assert_eq!(label, "input");
+        let input: Value = serde_json::from_str(text).unwrap();
+        let mut expected = item.clone();
+        expected.as_object_mut().unwrap().remove("result");
+        assert_eq!(input, expected);
+    }
+
+    #[test]
+    fn image_view_exec_calls_do_not_emit_events() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/codex-images/tool-view.jsonl");
+        let events = tail(&path, usize::MAX).unwrap();
+        assert_eq!(events.len(), 1);
+        let [call] = events[0].calls.as_slice() else {
+            panic!("expected the image view call");
+        };
+        assert_eq!(call.name, "ImageView");
+        assert_eq!(call.id, "exec-a6b963e9-ca3f-48c6-9a37-5ffae408af41");
     }
 
     #[test]
