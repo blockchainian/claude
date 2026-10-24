@@ -4031,7 +4031,7 @@ pub(crate) mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(
             events[0].body,
-            "appium-mcp appium {gesture tap, screenshot maxWidth 400}"
+            "appium-mcp appium {gesture tap, screenshot 400}"
         );
         assert_eq!(events[0].calls.len(), 2);
         assert!(events[0].paths.is_empty());

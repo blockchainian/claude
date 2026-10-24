@@ -28,7 +28,7 @@ pub(crate) const SERVER: McpServer = McpServer {
         },
         ToolRule {
             name: "appium_screenshot",
-            title: &[Pick::With(screenshot_title)],
+            title: &[Pick::Field(Source::Input, "/maxWidth")],
             input: Some((Pick::With(screenshot_input), Format::Table)),
             output: Some((Pick::With(screenshot), Format::Text)),
             ..DEFAULT_RULE
@@ -161,11 +161,6 @@ fn session_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
         }]),
         None => other_fields(data, &["action"]),
     }
-}
-
-fn screenshot_title(data: &ToolData<'_>) -> Option<String> {
-    let width = data.input.get("maxWidth").filter(|width| !width.is_null())?;
-    Some(format!("maxWidth {width}"))
 }
 
 fn screenshot_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
@@ -327,7 +322,7 @@ mod tests {
                 "ios real",
                 "discovery",
                 "create",
-                "maxWidth 400",
+                "400",
                 "accessibility id",
                 "tap",
                 "-ios predicate string",

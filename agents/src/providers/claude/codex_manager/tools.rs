@@ -454,10 +454,10 @@ mod tests {
             .as_deref(),
             input["threadId"].as_str()
         );
-        for name in [
-            serde_json::Value::Null,
-            serde_json::json!(" "),
-            serde_json::json!(42),
+        for (name, expected) in [
+            (serde_json::Value::Null, input["threadId"].as_str()),
+            (serde_json::json!(" "), input["threadId"].as_str()),
+            (serde_json::json!(42), Some("42")),
         ] {
             result.structured["name"] = name;
             assert_eq!(
@@ -470,7 +470,7 @@ mod tests {
                 )
                 .title
                 .as_deref(),
-                input["threadId"].as_str()
+                expected
             );
         }
     }

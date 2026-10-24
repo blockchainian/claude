@@ -104,11 +104,16 @@ pub(crate) fn mcp_content(
 
 fn tool_name(name: &str) -> String {
     if let Some((server, tool)) = super::mcp::parse(name) {
-        let declared = super::TOOL_RULES.iter().flat_map(|rules| rules.servers).any(|candidate| {
-            candidate.name == server && candidate.tools.iter().any(|rule| {
-                rule.name == tool || rule.aliases.contains(&tool)
-            })
-        });
+        let declared = super::TOOL_RULES
+            .iter()
+            .flat_map(|rules| rules.servers)
+            .any(|candidate| {
+                candidate.name == server
+                    && candidate
+                        .tools
+                        .iter()
+                        .any(|rule| rule.name == tool || rule.aliases.contains(&tool))
+            });
         if name.starts_with("mcp__") || name.contains(' ') || declared {
             return format!("{server} {tool}");
         }
@@ -283,11 +288,14 @@ pub(crate) const DEFAULT_RULE: ToolRule = ToolRule {
 
 pub(crate) fn rule(name: &str) -> &'static ToolRule {
     if let Some((server, tool)) = super::mcp::parse(name) {
-        if let Some(server) = super::TOOL_RULES.iter()
+        if let Some(server) = super::TOOL_RULES
+            .iter()
             .flat_map(|rules| rules.servers)
             .find(|candidate| candidate.name == server)
         {
-            return server.tools.iter()
+            return server
+                .tools
+                .iter()
                 .find(|rule| rule.name == tool || rule.aliases.contains(&tool))
                 .unwrap_or(&DEFAULT_RULE);
         }
@@ -296,7 +304,9 @@ pub(crate) fn rule(name: &str) -> &'static ToolRule {
         }
     }
     let name = tool_name(name);
-    super::TOOL_RULES.iter().flat_map(|rules| rules.native)
+    super::TOOL_RULES
+        .iter()
+        .flat_map(|rules| rules.native)
         .find(|rule| rule.name == name || rule.aliases.contains(&name.as_str()))
         .unwrap_or(&DEFAULT_RULE)
 }
@@ -454,16 +464,20 @@ fn format_code(lang: &str, text: &str) -> String {
     }
 }
 
-/// A string, or a list of strings joined with commas.
+/// A string or number, or a list of them joined with commas.
 fn title_text(value: &Value) -> Option<String> {
-    match value {
+    let scalar = |value: &Value| match value {
         Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    };
+    match value {
         Value::Array(items) => items
             .iter()
-            .map(Value::as_str)
+            .map(scalar)
             .collect::<Option<Vec<_>>>()
             .map(|items| items.join(", ")),
-        _ => None,
+        _ => scalar(value),
     }
 }
 
@@ -1072,6 +1086,27 @@ fn label_section(section: Section) -> Vec<Section> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn field_titles_accept_numbers_and_numbers_in_arrays() {
+        for (value, expected) in [
+            (serde_json::json!(400), "400"),
+            (serde_json::json!(-2), "-2"),
+            (serde_json::json!(2.5), "2.5"),
+            (serde_json::json!([400, "wide", -2, 2.5]), "400, wide, -2, 2.5"),
+        ] {
+            assert_eq!(super::title_text(&value).as_deref(), Some(expected));
+        }
+        for value in [
+            serde_json::json!(true),
+            serde_json::json!(null),
+            serde_json::json!({}),
+            serde_json::json!([400, false]),
+            serde_json::json!([[400]]),
+        ] {
+            assert_eq!(super::title_text(&value), None);
+        }
+    }
+
     fn shell_output(command: &str, text: &str) -> Vec<crate::event::Section> {
         super::shell_output_sections(command, "stdout", text, super::Stream::default())
             .unwrap_or_else(|| {
