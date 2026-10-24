@@ -72,6 +72,12 @@ pub(crate) const SERVER: McpServer = McpServer {
             ..DEFAULT_RULE
         },
         ToolRule {
+            name: "appium_app_lifecycle",
+            title: &[Pick::Field(Source::Input, "/action")],
+            input: Some((Pick::With(app_input), Format::Text)),
+            ..DEFAULT_RULE
+        },
+        ToolRule {
             name: "appium_orientation",
             title: &[Pick::Field(Source::Input, "/action")],
             input: Some((Pick::With(orientation_input), Format::Table)),
@@ -237,6 +243,19 @@ fn set_value_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     other_fields(data, &["text"])
 }
 
+/// The app's bundle id, followed by any other fields.
+fn app_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    let mut sections: Vec<_> = text(data.input, "id")
+        .map(|id| Section::Prose {
+            text: id.into(),
+            markdown: false,
+        })
+        .into_iter()
+        .collect();
+    sections.extend(other_fields(data, &["action", "id"])?);
+    Some(sections)
+}
+
 fn orientation_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     other_fields(data, &["action"])
 }
@@ -346,6 +365,24 @@ mod tests {
             output_text(&calls[8]),
             "ClassicalPrivate  •  51 songs  •  4 hrs 41 min"
         );
+    }
+
+    #[test]
+    fn appium_app_lifecycle_titles_its_action_and_shows_the_app_id() {
+        let input = serde_json::json!({
+            "action": "activate",
+            "id": "com.amazon.mp3.AmazonCloudPlayer",
+            "sessionId": "85f36cd8-4ade-476f-b3f1-814d9ac36275"
+        });
+        let shown = super::presentation(
+            "mcp__plugin_mobile_appium-mcp__appium_app_lifecycle",
+            &super::ToolData {
+                input: &input,
+                result: None,
+            },
+        );
+        assert_eq!(shown.title.as_deref(), Some("activate"));
+        assert_eq!(shown.input, prose("com.amazon.mp3.AmazonCloudPlayer"));
     }
 
     #[test]
