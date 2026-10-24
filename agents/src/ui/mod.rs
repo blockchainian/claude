@@ -1197,20 +1197,6 @@ impl View {
             .saturating_sub(self.event_section_heights(visible).1)
     }
 
-    pub(crate) fn event_read_count(&self, visible: usize, has_older: bool) -> usize {
-        let loaded = self.event_panel.len().max(visible);
-        if has_older
-            && (self.event_page_pending()
-                || (self.event_scroll() == 0
-                    && !self.following_event()
-                    && !matches!(self.selected_event_row(), Some(EventRow::Pinned(_)))))
-        {
-            loaded.saturating_add(visible.max(self.event_list.pending_older).max(1))
-        } else {
-            loaded
-        }
-    }
-
     /// Selects the newest shown event and resumes following the event list.
     fn show_newest_event(&mut self) {
         self.select_event(None);

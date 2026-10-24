@@ -4,6 +4,7 @@
 mod transcript_cache;
 use transcript_cache::{FileStamp, UsageCache};
 
+use crate::event::ALL_EVENTS;
 use crate::model::Action;
 use crate::model::{DraftKey, Session, SessionStatus};
 use crate::providers::Snapshot;
@@ -191,7 +192,6 @@ struct PendingTranscript {
     token: u64,
     session: SessionKey,
     path: PathBuf,
-    visible: usize,
 }
 
 /// A new task's directory and branch: the repository's current branch, or none outside git.
@@ -399,6 +399,12 @@ impl App {
     }
 
     #[cfg(test)]
+    fn refresh_event_for_list_rows(&mut self, rows: usize) {
+        self.initialize_selected_event_list();
+        self.refresh_event(self.view.event_read_count_for(rows, true));
+    }
+
+    #[cfg(test)]
     fn draw<B: ratatui::backend::Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
@@ -426,7 +432,8 @@ impl App {
         let mut cursor = None;
         terminal.try_draw(|frame| {
             let area = frame.area();
-            self.refresh_event(self.view.event_count(area));
+            self.initialize_selected_event_list();
+            self.refresh_event(self.view.event_read_count(area));
             self.refresh_usage(self.view.usage_width(area), now);
             self.view.render_at(area, frame.buffer_mut(), now);
             cursor = self.view.cursor_pos(area);
@@ -698,21 +705,17 @@ impl App {
         false
     }
 
-    fn refresh_event(&mut self, visible: usize) {
+    /// Loads the selected task's saved sort and filter into the event list.
+    fn initialize_selected_event_list(&mut self) {
         if let Some(id) = self.view.selected_id() {
             let sorting = self.preferences.task_sort(id);
             self.view
                 .initialize_event_list(sorting, self.preferences.task_filter(id));
         }
-        let count = if self.view.event_list.start_requested
-            || self.view.transcript_fully_loaded()
-            || self.view.restoring_event_position()
-        {
-            usize::MAX
-        } else {
-            self.view
-                .event_read_count(visible, self.transcript_has_older)
-        };
+    }
+
+    /// Reads the newest `count` events; `ALL_EVENTS` reads in the background.
+    fn refresh_event(&mut self, count: usize) {
         let selected = self
             .view
             .selected_id()
@@ -757,15 +760,12 @@ impl App {
                     }
                 }
                 Err(error) => {
-                    self.apply_event_result(Err(error), visible);
+                    self.apply_event_result(Err(error));
                     return;
                 }
             }
         }
-        if first_load
-            || ((self.view.transcript_fully_loaded() || self.view.restoring_event_position())
-                && self.transcript_has_older)
-        {
+        if first_load || (count == ALL_EVENTS && self.transcript_has_older) {
             let (session, path, mut reader) = self.transcript.take().expect("reader checked");
             self.transcript_request += 1;
             let token = self.transcript_request;
@@ -773,7 +773,6 @@ impl App {
                 token,
                 session: session.clone(),
                 path: path.clone(),
-                visible,
             });
             let pinned = if first_load && !self.view.has_pinned_events(&session) {
                 let pinned = self.preferences.task_pinned_events(&session);
@@ -842,7 +841,7 @@ impl App {
                     && previous.file == stamp.file
                     && (previous.count >= count || !self.transcript_has_older)
             }) {
-                self.finish_event_refresh(stamp, visible);
+                self.finish_event_refresh(stamp);
                 return Ok(None);
             }
             let update = self
@@ -855,8 +854,8 @@ impl App {
         })();
         match result {
             Ok(None) => {}
-            Ok(Some(result)) => self.apply_event_result(Ok(result), visible),
-            Err(error) => self.apply_event_result(Err(error), visible),
+            Ok(Some(result)) => self.apply_event_result(Ok(result)),
+            Err(error) => self.apply_event_result(Err(error)),
         }
     }
 
@@ -886,7 +885,7 @@ impl App {
                 }
                 loaded.transcript
             });
-            self.apply_event_result(result, pending.visible);
+            self.apply_event_result(result);
         }
     }
 
@@ -926,11 +925,7 @@ impl App {
         self.view.set_pinned_events(task, rows);
     }
 
-    fn apply_event_result(
-        &mut self,
-        result: io::Result<(TranscriptStamp, crate::event::Update)>,
-        visible: usize,
-    ) {
+    fn apply_event_result(&mut self, result: io::Result<(TranscriptStamp, crate::event::Update)>) {
         match result {
             Ok((stamp, update)) => {
                 self.transcript_parsed_bytes += update.parsed_bytes;
@@ -943,7 +938,7 @@ impl App {
                 if changed {
                     self.view.apply_event_update(update);
                 }
-                self.finish_event_refresh(stamp, visible);
+                self.finish_event_refresh(stamp);
             }
             Err(error) => {
                 self.transcript = None;
@@ -961,18 +956,10 @@ impl App {
         }
     }
 
-    fn finish_event_refresh(&mut self, stamp: TranscriptStamp, visible: usize) {
-        self.view.event_list.has_older = self.transcript_has_older;
-        if self.view.event_list.restoring {
-            self.view.prepare_event_search();
-            self.view.restore_event_list();
-        }
-        self.view.event_list.pending_older = 0;
-        self.view.finish_event_start();
+    fn finish_event_refresh(&mut self, stamp: TranscriptStamp) {
+        self.view.finish_event_load(self.transcript_has_older);
         self.view.event_session = Some(stamp.session.clone());
-        self.view
-            .clamp_event_scroll(self.view.event_max_scroll_for(visible));
-        if self.view.transcript_fully_loaded() {
+        if stamp.count == ALL_EVENTS {
             self.full_transcript_stamp = Some(stamp);
             self.transcript_stamp = None;
         } else {

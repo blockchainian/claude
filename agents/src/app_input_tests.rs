@@ -42,7 +42,7 @@ fn registry_app(kind: &str) -> (tempfile::TempDir, App, PathBuf, serde_json::Val
     );
     app.refresh();
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     super::event_search_tests::finish_search(&mut app);
     (directory, app, path, registry)
 }

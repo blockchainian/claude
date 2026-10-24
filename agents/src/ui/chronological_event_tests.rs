@@ -536,8 +536,9 @@ fn chronological_history_request_covers_queued_steps_beyond_a_page() {
     for _ in 0..12 {
         view.navigate_event(KeyCode::Up);
     }
-    assert!(view.event_read_count(4, true) >= 22);
-    assert_eq!(view.event_read_count(4, false), 10);
+    assert!(view.event_list_read_count(4) >= 22);
+    view.event_list.has_older = false;
+    assert_eq!(view.event_list_read_count(4), 10);
     view.apply_event_update(crate::event::Update {
         events: events[..22].to_vec(),
         prepended: 12,

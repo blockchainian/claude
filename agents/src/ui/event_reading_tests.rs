@@ -629,7 +629,7 @@ fn assert_centered_event_detail(
                 .flat_map(|part| {
                     part.lines_in(
                         usize::from(if part.reading_column() {
-                            drawn.columns.reading_width.min(drawn.columns.text.width)
+                            drawn.columns.reading_width()
                         } else {
                             drawn.columns.text.width
                         }),
@@ -1032,7 +1032,8 @@ fn equal_reading_width_wraps_prose_identically_in_wide_and_narrow_panels() {
         .unwrap();
     let narrow = layout(&event, 98);
     let wide = layout(&event, 200);
-    assert_eq!(narrow.columns.reading_width, wide.columns.reading_width);
+    assert!(narrow.columns.text.width >= 85);
+    assert_eq!(narrow.columns.reading_width(), wide.columns.reading_width());
     assert_ne!(narrow.columns.text.width, wide.columns.text.width);
     assert_eq!(
         narrow
@@ -1351,7 +1352,7 @@ fn codex_collaboration_message_sections_snapshot() {
                 .collect();
             snapshot.push_str(rows.join("\n").trim_end());
             snapshot.push_str("\n\n");
-            let columns = event_detail_columns(panel, panel);
+            let columns = EventDetailColumns::new(panel);
             let viewport = view.viewport.borrow();
             let layout = viewport.event_detail_layout.as_ref().unwrap();
             for (row, time) in &layout.times {
@@ -1414,10 +1415,8 @@ fn background_notification_titles_show_only_exit_numbers_on_the_left() {
         let line = super::body_line(event, 300, Path::new("/workspace"));
         assert_eq!(line.to_string(), event.body);
         if let Some(code) = code {
-            let columns = super::super::event_detail::event_detail_columns(
-                Rect::new(0, 0, 300, 20),
-                Rect::new(0, 0, 300, 20),
-            );
+            let columns =
+                super::super::event_detail::EventDetailColumns::new(Rect::new(0, 0, 300, 20));
             let (header, _) = detail.sections[0].title.line(columns);
             assert!(
                 header

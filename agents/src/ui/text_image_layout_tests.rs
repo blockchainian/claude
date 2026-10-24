@@ -29,7 +29,7 @@ fn prompt_event() -> Event {
 
 fn columns() -> EventDetailColumns {
     let area = Rect::new(0, 0, 100, 30);
-    event_detail_columns(area, area)
+    EventDetailColumns::new(area)
 }
 
 fn layout(event: &Event, cwd: &Path, images: &mut InlineImages) -> EventDetailLayout {

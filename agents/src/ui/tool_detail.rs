@@ -2157,7 +2157,7 @@ mod tests {
                         .flat_map(|part| {
                             part.lines(
                                 usize::from(if part.reading_column() {
-                                    columns.reading_width.min(columns.text.width)
+                                    columns.reading_width()
                                 } else {
                                     columns.text.width
                                 }),

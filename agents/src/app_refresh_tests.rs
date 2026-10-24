@@ -306,3 +306,50 @@ fn output_file_notifications_do_not_schedule_session_refresh() {
     app.handle_inputs(input, &mut None, &mut schedule).unwrap();
     assert_eq!(schedule.take_due(now + Duration::from_millis(100)), None);
 }
+
+#[test]
+fn hidden_event_list_still_loads_the_detail() {
+    let home = claude_home();
+    for index in 1..=2 {
+        std::fs::write(
+            home.path().join(format!(
+                "projects/project/00000000-0000-0000-0000-{index:012}.jsonl"
+            )),
+            include_bytes!("../tests/fixtures/claude-raw-detail.jsonl"),
+        )
+        .unwrap();
+    }
+    let mut app = App::new(claude_hub(home.path()), home.path().into());
+    app.refresh();
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::BackTab,
+        KeyModifiers::NONE,
+    )));
+    assert!(app.view.selected_id().is_some());
+    assert!(app.transcript.is_none());
+    let area = ratatui::layout::Rect::new(0, 0, 200, 40);
+    app.view
+        .render(area, &mut ratatui::buffer::Buffer::empty(area));
+    for (code, modifiers) in [
+        (KeyCode::Char('w'), KeyModifiers::CONTROL),
+        (KeyCode::Char('_'), KeyModifiers::NONE),
+    ] {
+        app.handle_event(Event::Key(KeyEvent::new(code, modifiers)));
+    }
+    let mut terminal = Terminal::new(TestBackend::new(200, 40)).unwrap();
+    app.draw(&mut terminal).unwrap();
+    super::event_search_tests::finish_search(&mut app);
+    app.draw(&mut terminal).unwrap();
+    assert_eq!(app.view.event_panel.len(), 1);
+    let buffer = terminal.backend().buffer();
+    let text = buffer
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains("Bash"), "details header missing: {text}");
+    assert!(
+        text.contains(".local/bin/cctail"),
+        "details body missing: {text}"
+    );
+}

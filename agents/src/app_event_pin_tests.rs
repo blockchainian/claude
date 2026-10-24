@@ -63,7 +63,7 @@ fn reload(app: &mut App) {
     app.transcript = None;
     app.transcript_stamp = None;
     app.full_transcript_stamp = None;
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert!(app.pending_transcript.is_some());
     super::event_search_tests::finish_search(app);
 }
@@ -209,7 +209,7 @@ fn pending_pin_restore_does_not_resurrect_forgotten_state() {
         .save_task_pinned_events(dir.path(), &task, vec![pinned.clone()])
         .unwrap();
     app.transcript = None;
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert!(app.pending_transcript.is_some());
     let mut sessions = app.sessions.clone();
     sessions[0].status = SessionStatus::Inactive;

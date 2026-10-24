@@ -31,18 +31,21 @@ pub(super) struct EventDetailColumns {
     /// their left and center segments here; body rows use it as the content column.
     pub text: Rect,
     pub time: Rect,
-    /// The wrap width of free text: the event list's message column width.
-    pub reading_width: u16,
 }
 
-/// Columns for a detail `panel` whose event list occupies `list`.
-pub(super) fn event_detail_columns(panel: Rect, list: Rect) -> EventDetailColumns {
-    let (text, time) = super::event_list::event_row_areas(panel);
-    EventDetailColumns {
-        panel,
-        text,
-        time,
-        reading_width: super::event_list::event_row_areas(list).0.width,
+/// The widest line free text wraps to, so prose stays readable in a wide pane.
+const READING_MEASURE: u16 = 85;
+
+impl EventDetailColumns {
+    /// Columns for a detail `panel`, computed from the panel alone.
+    pub(super) fn new(panel: Rect) -> Self {
+        let (text, time) = super::event_list::event_row_areas(panel);
+        Self { panel, text, time }
+    }
+
+    /// The wrap width of free text: the text column, capped at the reading measure.
+    pub(super) fn reading_width(&self) -> u16 {
+        self.text.width.min(READING_MEASURE)
     }
 }
 

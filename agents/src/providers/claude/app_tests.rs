@@ -28,7 +28,7 @@ pub(super) fn fixture() -> (tempfile::TempDir, App) {
     app.sessions[0].cwd = dir.path().to_owned();
     app.sessions[0].status = SessionStatus::Ready;
     app.view.set_sessions(app.sessions.clone(), false);
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     super::event_search_tests::finish_search(&mut app);
     (dir, app)
 }
@@ -46,7 +46,7 @@ pub(super) fn key(app: &mut App, code: KeyCode) -> bool {
     if code == KeyCode::Enter {
         return quit;
     }
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     if app.pending_transcript.is_some()
         && !app.view.transcript_fully_loaded()
         && !app.view.restoring_event_position()
@@ -104,15 +104,15 @@ fn task_event_cache_rereads_when_event_count_changes() {
     let (_dir, mut app) = fixture();
     key(&mut app, KeyCode::BackTab);
     app.refresh();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     super::event_search_tests::finish_search(&mut app);
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
     for (height, count) in [(24, 6), (40, 11), (60, 18), (18, 18), (24, 18)] {
-        app.refresh_event(
+        app.refresh_event_for_list_rows(
             app.view
-                .event_count(ratatui::layout::Rect::new(0, 0, 120, height)),
+                .event_read_count(ratatui::layout::Rect::new(0, 0, 120, height)),
         );
         assert_eq!(app.view.event_panel.len(), count);
     }
@@ -225,7 +225,7 @@ fn queued_wheel_events_apply_before_the_next_draw() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     let area = ratatui::layout::Rect::new(0, 0, 120, 23);
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
@@ -259,11 +259,11 @@ fn task_event_scroll_reloads_requested_events_and_keeps_cache() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     for _ in 0..7 {
         scroll_event(&mut app, ScrollUp);
     }
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.view.event_scroll(), 8);
     assert_eq!(app.transcript_stamp.as_ref().unwrap().count, 16);
     assert_eq!(app.view.event_panel.len(), 16);
@@ -281,13 +281,13 @@ fn task_event_scroll_reloads_requested_events_and_keeps_cache() {
         .unwrap()
         .set_modified(modified)
         .unwrap();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.view.event_panel, cached);
     for _ in 0..7 {
         scroll_event(&mut app, ScrollDown);
     }
-    app.refresh_event(8);
-    assert_eq!(app.view.event_scroll(), 8);
+    app.refresh_event_for_list_rows(8);
+    assert_eq!(app.view.event_scroll(), 11);
     assert_eq!(app.transcript_stamp.as_ref().unwrap().count, 16);
     assert_eq!(app.view.event_panel.len(), 16);
     assert_eq!(app.view.event_panel, cached);
@@ -324,7 +324,7 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
     let area = ratatui::layout::Rect::new(0, 0, 150, 19);
     let column = area.x + area.width * 2 / 3 + 1;
     let row = area.y + 2;
-    let visible = app.view.event_count(area);
+    let visible = app.view.event_read_count(area);
     let wheel = |app: &mut App, kind| {
         app.handle_event(Event::Mouse(MouseEvent {
             kind,
@@ -332,11 +332,11 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
             row,
             modifiers: KeyModifiers::NONE,
         }));
-        app.refresh_event(visible);
+        app.refresh_event_for_list_rows(visible);
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
     };
-    app.refresh_event(visible);
+    app.refresh_event_for_list_rows(visible);
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
     for _ in 0..45 {
@@ -360,7 +360,7 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
         // Clicking the selected top row gives keyboard navigation to the event list.
         for _ in 0..6 {
             app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-            app.refresh_event(visible);
+            app.refresh_event_for_list_rows(visible);
             app.view
                 .render(area, &mut ratatui::buffer::Buffer::empty(area));
         }
@@ -382,7 +382,7 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
                 KeyCode::Char('k')
             };
             app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-            app.refresh_event(visible);
+            app.refresh_event_for_list_rows(visible);
             app.view
                 .render(area, &mut ratatui::buffer::Buffer::empty(area));
         } else {
@@ -398,12 +398,14 @@ fn home_loads_first_event_of_whole_event() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 200, 0));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.view.event_panel.len(), 8);
     click_event(&mut app);
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
     let area = ratatui::layout::Rect::new(0, 0, 120, 23);
-    app.refresh_event(app.view.event_count(area));
+    app.refresh_event_for_list_rows(app.view.event_read_count(area));
+    assert!(app.pending_transcript.is_some());
+    super::event_search_tests::finish_search(&mut app);
     let detail = event_detail_at(&app, area);
     assert!(detail.contains("Transcript copy 0"), "{detail}");
 }
@@ -415,10 +417,10 @@ fn top_border_loads_first_event_of_whole_event() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 200, 0));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.view.event_panel.len(), 8);
     let area = ratatui::layout::Rect::new(0, 0, 200, 45);
-    let visible = app.view.event_count(area);
+    let visible = app.view.event_read_count(area);
     let scroll = |app: &mut App, kind| {
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
@@ -450,16 +452,17 @@ fn top_border_loads_first_event_of_whole_event() {
     for latest in [false, true] {
         click(&mut app, 1);
         click(&mut app, 1);
-        app.refresh_event(visible);
+        app.refresh_event_for_list_rows(visible);
+        super::event_search_tests::finish_search(&mut app);
         let detail = event_detail_at(&app, area);
         assert!(detail.contains("Transcript copy 0"), "{detail}");
         scroll(&mut app, MouseEventKind::ScrollDown);
         scroll(&mut app, MouseEventKind::ScrollDown);
-        app.refresh_event(visible);
+        app.refresh_event_for_list_rows(visible);
         assert!(event_detail_at(&app, area).contains("Transcript copy 1"));
         scroll(&mut app, MouseEventKind::ScrollUp);
         scroll(&mut app, MouseEventKind::ScrollUp);
-        app.refresh_event(visible);
+        app.refresh_event_for_list_rows(visible);
         assert!(event_detail_at(&app, area).contains("Transcript copy 0"));
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
@@ -474,7 +477,7 @@ fn top_border_loads_first_event_of_whole_event() {
                 .unwrap()
                 .write_all(transcript_copies(&payload, 1, 200).as_bytes())
                 .unwrap();
-            app.refresh_event(visible);
+            app.refresh_event_for_list_rows(visible);
             let mut buffer = ratatui::buffer::Buffer::empty(area);
             app.view.render(area, &mut buffer);
             let row = (0..45)
@@ -501,7 +504,7 @@ fn top_border_loads_first_event_of_whole_event() {
                 }));
             }
         }
-        app.refresh_event(visible);
+        app.refresh_event_for_list_rows(visible);
         assert!(event_detail_at(&app, area).contains("Transcript copy 200"));
         assert_eq!(app.view.event_scroll(), app.view.event_max_scroll());
         app.view
@@ -516,14 +519,14 @@ fn task_event_growth_keeps_older_selection_and_viewport() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_event(
+    app.refresh_event_for_list_rows(
         app.view
-            .event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+            .event_read_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
     );
     scroll_event(&mut app, ScrollUp);
-    app.refresh_event(
+    app.refresh_event_for_list_rows(
         app.view
-            .event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+            .event_read_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
     );
     let before = app.view.event_panel.clone();
     let selected = event_detail(&app);
@@ -534,9 +537,9 @@ fn task_event_growth_keeps_older_selection_and_viewport() {
             + transcript_copies(&payload.replace("Codex", "CODEX"), 1, 20).as_str(),
     )
     .unwrap();
-    app.refresh_event(
+    app.refresh_event_for_list_rows(
         app.view
-            .event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+            .event_read_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
     );
     assert_eq!(app.view.event_scroll(), scroll);
     assert_eq!(event_detail(&app), selected);
@@ -554,20 +557,20 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     click_event(&mut app);
     key(&mut app, KeyCode::Char('/'));
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     for c in "Codex".chars() {
         key(&mut app, KeyCode::Char(c));
     }
     super::event_search_tests::finish_search(&mut app);
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(app.view.matching_event_count(), 20);
     for _ in 0..30 {
         scroll_event(&mut app, crossterm::event::MouseEventKind::ScrollUp);
     }
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(app.view.event_scroll(), 0);
     let detail = event_detail(&app);
     assert!(detail.contains("Transcript copy 0"), "{detail}");
@@ -586,7 +589,7 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
         .set_modified(modified)
         .unwrap();
     key(&mut app, KeyCode::Backspace);
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(
         app.view.event_panel, cached,
         "query changes reuse cached transcript"
@@ -597,11 +600,11 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
         .open(&path)
         .unwrap();
     writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T17:00:00Z", "content":"Codex timeout"})).unwrap();
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(app.view.matching_event_count(), 21);
     assert_eq!(app.view.event_panel.last().unwrap().body, "Codex timeout");
     key(&mut app, KeyCode::Esc);
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(app.view.event_panel.len(), 41);
 }
 
@@ -610,20 +613,20 @@ fn task_event_scroll_clamps_at_transcript_start() {
     use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
     let (_dir, mut app) = fixture();
     assert_eq!(app.view.event_panel.len(), 2);
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     for _ in 0..5 {
         scroll_event(&mut app, ScrollUp);
     }
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(app.view.event_panel.len(), 2);
     scroll_event(&mut app, ScrollDown);
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(app.transcript_stamp.as_ref().unwrap().count, 2);
     assert_eq!(app.view.event_panel.len(), 2);
     // A transcript shorter than the visible window clamps all the way to zero.
     scroll_event(&mut app, ScrollUp);
-    app.refresh_event(8);
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.transcript_stamp.as_ref().unwrap().count, 8);
 }
 
@@ -633,7 +636,7 @@ fn task_event_cache_uses_selection_length_and_mtime() {
     let (_dir, mut app) = fixture();
     key(&mut app, KeyCode::BackTab);
     app.refresh();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     super::event_search_tests::finish_search(&mut app);
     assert_eq!(app.view.event_panel.len(), 2);
     let path = app.sessions[0].transcript.clone().unwrap();
@@ -645,11 +648,11 @@ fn task_event_cache_uses_selection_length_and_mtime() {
     let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
     file.set_modified(modified).unwrap();
     let cached = app.view.event_panel.clone();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.view.event_panel, cached);
     file.set_modified(modified + Duration::from_secs(1))
         .unwrap();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_ne!(app.view.event_panel, cached);
     let mut file = std::fs::OpenOptions::new()
         .append(true)
@@ -659,7 +662,7 @@ fn task_event_cache_uses_selection_length_and_mtime() {
     file.set_modified(modified + Duration::from_secs(1))
         .unwrap();
     app.refresh();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.sessions.len(), 1);
     assert!(
         app.view.selected_id().is_some(),
@@ -683,7 +686,7 @@ fn task_event_reloads_on_keyboard_selection_and_clears_without_transcript() {
     third.transcript = None;
     app.sessions.extend([second, third]);
     app.view.set_sessions(app.sessions.clone(), false);
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     key(&mut app, KeyCode::Down);
     assert_eq!(
         app.view.event_session.as_ref(),
@@ -725,7 +728,7 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_event() {
     );
     click_event(&mut app);
     key(&mut app, KeyCode::Char('/'));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(
         app.full_transcript_stamp.as_ref().unwrap().session,
         child.id

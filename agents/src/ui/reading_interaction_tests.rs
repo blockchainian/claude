@@ -19,9 +19,8 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
             == super::super::render::ScreenLayout::Large;
         assert_eq!(
             view.viewport.borrow().event_text.area.x,
-            super::super::event_detail::event_detail_columns(
-                view.viewport.borrow().event_detail,
-                view.viewport.borrow().event_panel
+            super::super::event_detail::EventDetailColumns::new(
+                view.viewport.borrow().event_detail
             )
             .text
             .x
@@ -94,9 +93,8 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
         view.render_at(resized, &mut buf, now);
         assert_eq!(
             view.viewport.borrow().event_text.area.x,
-            super::super::event_detail::event_detail_columns(
-                view.viewport.borrow().event_detail,
-                view.viewport.borrow().event_panel
+            super::super::event_detail::EventDetailColumns::new(
+                view.viewport.borrow().event_detail
             )
             .text
             .x
@@ -155,10 +153,7 @@ fn start_event_detail_header(
         .collect::<Vec<_>>()
         .join("\n");
     let detail = view.viewport.borrow().event_detail;
-    let columns = super::super::event_detail::event_detail_columns(
-        detail,
-        view.center_layout(area).event_panel,
-    );
+    let columns = super::super::event_detail::EventDetailColumns::new(detail);
     let header = rendered
         .lines()
         .nth(usize::from(detail.y + 1))
@@ -246,10 +241,7 @@ fn preformatted_detail_rows_stay_in_content_column() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let viewport = view.viewport.borrow();
-        let columns = super::super::event_detail::event_detail_columns(
-            viewport.event_detail,
-            view.center_layout(area).event_panel,
-        );
+        let columns = super::super::event_detail::EventDetailColumns::new(viewport.event_detail);
         let limit = columns.text.width;
         let left = columns.text.x;
         for row in &viewport.event_text.rows {
@@ -289,10 +281,7 @@ fn event_detail_without_subject_centers_tool_name_without_duplicate_metadata() {
         view.select_fixture_event(Some(event.clone()));
         let screen = event_screen(&view, width, 50, now);
         let detail = view.viewport.borrow().event_detail;
-        let columns = super::super::event_detail::event_detail_columns(
-            detail,
-            view.center_layout(Rect::new(0, 0, width, 50)).event_panel,
-        );
+        let columns = super::super::event_detail::EventDetailColumns::new(detail);
         let header = screen.lines().nth(usize::from(detail.y + 1)).unwrap();
         let title = "SubagentHandback";
         assert_eq!(
@@ -328,10 +317,7 @@ fn event_detail_event_and_tool_times_share_the_list_clock_column() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let viewport = view.viewport.borrow();
-        let columns = super::super::event_detail::event_detail_columns(
-            viewport.event_detail,
-            viewport.event_panel,
-        );
+        let columns = super::super::event_detail::EventDetailColumns::new(viewport.event_detail);
         let (_, list_time) = super::super::event_list::event_row_areas(viewport.event_panel);
         assert_eq!(columns.time.width, list_time.width);
         assert_eq!(
@@ -407,10 +393,8 @@ fn clipped_command_and_output_keep_time_empty_and_double_click_copies_original()
         view.render_at(buf.area, &mut buf, now);
         let (x, ys) = {
             let viewport = view.viewport.borrow();
-            let columns = super::super::event_detail::event_detail_columns(
-                viewport.event_detail,
-                viewport.event_panel,
-            );
+            let columns =
+                super::super::event_detail::EventDetailColumns::new(viewport.event_detail);
             assert!(command.width() > columns.text.width.into());
             let rows: Vec<_> = viewport
                 .event_text

@@ -1,8 +1,8 @@
-use super::event_detail::{EventDetailArea, EventDetailColumns, Section, event_detail_columns};
+use super::event_detail::{EventDetailArea, EventDetailColumns, Section};
 use super::formatting::{format_event_duration, format_relative_time};
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
-use crate::event::{Event, Kind};
+use crate::event::{ALL_EVENTS, Event, Kind};
 use chrono::{DateTime, Utc};
 
 const TURN_BRACKET: [&str; 3] = ["┐", "│", "┘"];
@@ -14,6 +14,41 @@ pub(super) const CLOCK_WIDTH: usize = 8;
 pub(super) const EVENT_TOP: u16 = 1;
 
 impl View {
+    /// The newest events the list needs: `ALL_EVENTS` while it jumps to the start,
+    /// searches, sorts by duration or restores a saved position; otherwise every loaded
+    /// event and at least `rows`, plus one page while it is scrolled to an older row.
+    pub(crate) fn event_list_read_count(&self, rows: usize) -> usize {
+        if self.event_list.start_requested
+            || self.transcript_fully_loaded()
+            || self.restoring_event_position()
+        {
+            return ALL_EVENTS;
+        }
+        let loaded = self.event_panel.len().max(rows);
+        if self.event_list.has_older
+            && (self.event_page_pending()
+                || (self.event_scroll() == 0
+                    && !self.following_event()
+                    && !matches!(self.selected_event_row(), Some(EventRow::Pinned(_)))))
+        {
+            loaded.saturating_add(rows.max(self.event_list.pending_older).max(1))
+        } else {
+            loaded
+        }
+    }
+
+    /// Takes a finished read into the list and restores its position before clamping.
+    pub(crate) fn finish_event_load(&mut self, has_older: bool) {
+        self.event_list.has_older = has_older;
+        if self.event_list.restoring {
+            self.prepare_event_search();
+            self.restore_event_list();
+        }
+        self.event_list.pending_older = 0;
+        self.finish_event_start();
+        self.clamp_event_scroll(self.event_max_scroll());
+    }
+
     pub(super) fn refresh_transcript(&mut self) {
         let mode = if self.terminal_requested() {
             self.event_detail.return_mode
@@ -411,8 +446,7 @@ impl View {
         self.restore_event_detail_zoom(event);
         let areas = areas.into();
         let area = areas.content;
-        let list = self.center_layout(buf.area).event_panel;
-        let columns = event_detail_columns(area, list);
+        let columns = EventDetailColumns::new(area);
         let mut body_area = super::render::row(
             columns.text,
             EVENT_TOP,
@@ -721,16 +755,14 @@ impl View {
             return;
         }
         let viewport = self.viewport.borrow();
+        let Some(columns) = viewport.event_detail_columns else {
+            return;
+        };
         let cwd = self
             .selected_row()
             .map(|session| session.cwd.as_path())
             .unwrap_or(Path::new("."));
-        let layout = self.selected_event_detail_layout(
-            event,
-            event_detail_columns(viewport.event_detail, viewport.event_panel),
-            cwd,
-            DateTime::UNIX_EPOCH,
-        );
+        let layout = self.selected_event_detail_layout(event, columns, cwd, DateTime::UNIX_EPOCH);
         let found = layout
             .lines
             .iter()
@@ -1801,12 +1833,10 @@ fn event_detail_layout(
     cwd: &std::path::Path,
     now: DateTime<Utc>,
 ) -> EventDetailLayout {
-    let view = View::new(Grouping::Project, false);
     let panel = Rect::new(0, 0, width, 1);
-    let list = view.center_layout(Rect::new(0, 0, width, 45)).event_panel;
     event_detail_parts_layout(
         event,
-        event_detail_columns(panel, list),
+        EventDetailColumns::new(panel),
         cwd,
         now,
         super::tool_detail::event_detail_content(event, String::new(), Style::new().dim())
@@ -1931,7 +1961,7 @@ fn event_detail_parts_layout_with_images(
                 .into_iter()
                 .map(|part| {
                     let reading_width = if part.reading_column() {
-                        columns.reading_width.min(columns.text.width)
+                        columns.reading_width()
                     } else {
                         columns.text.width
                     };
@@ -2918,7 +2948,7 @@ mod panel_detail_tests {
     }
 
     fn columns(width: u16) -> EventDetailColumns {
-        event_detail_columns(Rect::new(10, 2, width, 20), Rect::new(0, 0, 50, 20))
+        EventDetailColumns::new(Rect::new(10, 2, width, 20))
     }
 
     fn layout_part(columns: EventDetailColumns, part: Part) -> EventDetailLayout {
@@ -3030,7 +3060,7 @@ mod panel_detail_tests {
         let view = View::new(Grouping::Project, false);
         let panel = Rect::new(0, 0, 100, 6);
         let mut buffer = Buffer::empty(Rect::new(0, 0, 101, 6));
-        let columns = event_detail_columns(panel, view.center_layout(buffer.area).event_panel);
+        let columns = EventDetailColumns::new(panel);
         let mut layout = event_detail_parts_layout_with_images(
             &event,
             columns,
@@ -3272,9 +3302,8 @@ mod panel_detail_tests {
     }
 
     #[test]
-    fn json_detail_keeps_its_body_without_an_event_list() {
-        let columns = event_detail_columns(Rect::new(0, 0, 80, 12), Rect::default());
-        assert_eq!(columns.reading_width, 0);
+    fn json_detail_uses_the_text_column() {
+        let columns = EventDetailColumns::new(Rect::new(0, 0, 80, 12));
         assert!(columns.text.width > 0);
         let raw = include_str!("../../tests/fixtures/codex-manager-await.jsonl");
         let part = Part::text(raw.into(), false);
@@ -3392,7 +3421,7 @@ mod panel_detail_tests {
             let columns = columns(width);
             let layout = layout_part(columns, Part::prose(source.into(), false));
             assert!(layout.lines.len() > 1);
-            let wrap_width = columns.reading_width.min(columns.text.width);
+            let wrap_width = columns.reading_width();
             for (_, cells) in layout.rows.iter().skip(2) {
                 let start = cells.first().unwrap().0.start;
                 let end = cells.last().unwrap().0.end;

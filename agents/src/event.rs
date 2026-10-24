@@ -2,6 +2,9 @@ pub(crate) mod agent;
 
 use chrono::{DateTime, Utc};
 
+/// A read count that asks for every event in the transcript.
+pub(crate) const ALL_EVENTS: usize = usize::MAX;
+
 fn participant_name(name: Option<&str>) -> Option<&str> {
     name.map(str::trim).filter(|name| !name.is_empty())
 }

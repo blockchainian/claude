@@ -366,13 +366,22 @@ impl View {
             footer_rule,
         }
     }
-    pub(crate) fn event_count(&self, area: Rect) -> usize {
-        usize::from(
-            self.center_layout(area)
+    /// How many of the selected task's newest events the drawn panels need.
+    pub(crate) fn event_read_count(&self, area: Rect) -> usize {
+        let layout = self.center_layout(area);
+        let list_rows = usize::from(
+            layout
                 .event_panel
                 .height
                 .saturating_sub(u16::from(self.event_list.search.input.applied())),
-        )
+        );
+        self.event_read_count_for(list_rows, !layout.event_detail.is_empty())
+    }
+
+    /// The list's read count, including the newest event while details are shown.
+    pub(crate) fn event_read_count_for(&self, list_rows: usize, detail_shown: bool) -> usize {
+        self.event_list_read_count(list_rows)
+            .max(usize::from(detail_shown))
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
@@ -2903,7 +2912,7 @@ mod section_edge_tests {
             meta_style: Style::new().dim(),
         };
         let panel = Rect::new(0, 0, 100, 1);
-        let columns = super::super::event_detail::event_detail_columns(panel, panel);
+        let columns = super::super::event_detail::EventDetailColumns::new(panel);
         let (line, maps) = title.line(columns);
         let mut panel_buffer = Buffer::empty(panel);
         line.render(panel, &mut panel_buffer);

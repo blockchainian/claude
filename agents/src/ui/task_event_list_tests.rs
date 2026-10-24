@@ -418,8 +418,9 @@ fn event_pin_navigation_and_mouse_use_distinct_rows() {
         modifiers: KeyModifiers::NONE,
     });
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+    view.event_list.has_older = true;
     assert_eq!(
-        view.event_read_count(4, true),
+        view.event_list_read_count(4),
         view.event_panel.len().max(4)
     );
 }

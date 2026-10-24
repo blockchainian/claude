@@ -112,7 +112,7 @@ fn batched_task_round_trip_restores_the_loaded_rows_without_reloading() {
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)));
     assert_eq!(app.view.selected_id(), Some(&first));
     let parsed = app.transcript_parsed_bytes;
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.view.event_panel, expected);
     assert_eq!(
         app.view.event_panel[app.view.event_list.cursor.unwrap()].source,

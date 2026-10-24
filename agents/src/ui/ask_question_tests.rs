@@ -227,10 +227,7 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
         let parts = event_detail_parts(&event);
         let viewport = view.viewport.borrow();
         let region = &viewport.event_text;
-        let columns = super::super::event_detail::event_detail_columns(
-            area,
-            view.center_layout(area).event_panel,
-        );
+        let columns = super::super::event_detail::EventDetailColumns::new(area);
         for row in &region.rows {
             assert_eq!(row.x, columns.text.x);
             assert!(

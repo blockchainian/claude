@@ -58,33 +58,33 @@
                                                                                                                                                                                    ▕
                                                              Claude Code --worktree default directory .claude/worktrees                                                            ▕
                                                                                           ↓                                                                                        ▕
-                                                     Title                                                                                                                         ▕
-                                                     ──────────────────────────────────────────────────────────────                                                                ▕
-                                                     code.claude.com                                                                                                               ▕
-                                                     claude code worktree setup guide                                                                                              ▕
-                                                     git worktrees claude code                                                                                                     ▕
-                                                     Claude Code Worktrees: Run Parallel Sessions Without Conflicts                                                                ▕
-                                                     2026 02 20 claude code worktree                                                                                               ▕
-                                                     code worktree                                                                                                                 ▕
-                                                     [FEATURE] Configurable default worktree directory                                                                             ▕
-                                                     worktree guide                                                                                                                ▕
-                                                     Claude Code Worktrees: Parallel Sessions Without Conflicts                                                                    ▕
+                                                Title                                                                                                                              ▕
+                                                ──────────────────────────────────────────────────────────────                                                                     ▕
+                                                code.claude.com                                                                                                                    ▕
+                                                claude code worktree setup guide                                                                                                   ▕
+                                                git worktrees claude code                                                                                                          ▕
+                                                Claude Code Worktrees: Run Parallel Sessions Without Conflicts                                                                     ▕
+                                                2026 02 20 claude code worktree                                                                                                    ▕
+                                                code worktree                                                                                                                      ▕
+                                                [FEATURE] Configurable default worktree directory                                                                                  ▕
+                                                worktree guide                                                                                                                     ▕
+                                                Claude Code Worktrees: Parallel Sessions Without Conflicts                                                                         ▕
                                                                                                                                                                                    ▕
-                                                     The default location is .claude/worktrees/<name>/ under the repository                                                        ▕
-                                                     root. Running claude --worktree <name> creates that directory and a new                                                       ▕
-                                                     branch named worktree-<name>. The official docs say to put worktrees                                                          ▕
-                                                     somewhere else, configure a WorktreeCreate hook.                                                                              ▕
-                                                     • Naming: If you omit the name, Claude generates one such as bright-                                                          ▕
-                                                       running-fox.                                                                                                                ▕
-                                                     • Base branch: Worktrees branch from the remote default branch, and fall                                                      ▕
-                                                       back to your current local HEAD if no remote is configured or the fetch                                                     ▕
-                                                       fails. Setting worktree.baseRef to "head" changes this to local HEAD.                                                       ▕
-                                                     • Trust prompt: Before using --worktree interactively in a directory for                                                      ▕
-                                                       the first time, accept the workspace trust dialog.                                                                          ▕
-                                                     • Gitignore: Sources recommend adding .claude/worktrees/ to .gitignore so                                                     ▕
-                                                       worktree contents don't show up as untracked files.
-                                                     • Configurable path: A GitHub feature request on claudeissues.com asked for
-                                                       a worktreeDir setting, since Claude Code hardcodes the worktree location
-                                                       to .claude/worktrees/<name>. The issue is marked closed, but the results…
+                                                The default location is .claude/worktrees/<name>/ under the repository root. Running                                               ▕
+                                                claude --worktree <name> creates that directory and a new branch named                                                             ▕
+                                                worktree-<name>. The official docs say to put worktrees somewhere else, configure a                                                ▕
+                                                WorktreeCreate hook.                                                                                                               ▕
+                                                • Naming: If you omit the name, Claude generates one such as bright-running-fox.                                                   ▕
+                                                • Base branch: Worktrees branch from the remote default branch, and fall back to your                                              ▕
+                                                  current local HEAD if no remote is configured or the fetch fails. Setting                                                        ▕
+                                                  worktree.baseRef to "head" changes this to local HEAD.                                                                           ▕
+                                                • Trust prompt: Before using --worktree interactively in a directory for the first                                                 ▕
+                                                  time, accept the workspace trust dialog.                                                                                         ▕
+                                                • Gitignore: Sources recommend adding .claude/worktrees/ to .gitignore so worktree                                                 ▕
+                                                  contents don't show up as untracked files.                                                                                       ▕
+                                                • Configurable path: A GitHub feature request on claudeissues.com asked for a                                                      ▕
+                                                  worktreeDir setting, since Claude Code hardcodes the worktree location to
+                                                  .claude/worktrees/<name>. The issue is marked closed, but the results don't confirm
+                                                  whether such a setting shipped. The official docs point to the WorktreeCreate hook…
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  ? help

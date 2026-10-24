@@ -83,7 +83,7 @@ impl TitleRow {
 
 #[cfg(test)]
 mod tests {
-    use super::super::event_detail::{EventDetailColumns, event_detail_columns};
+    use super::super::event_detail::EventDetailColumns;
     use super::*;
     use ratatui::{
         layout::Rect,
@@ -102,7 +102,7 @@ mod tests {
     }
 
     fn columns(width: u16) -> EventDetailColumns {
-        event_detail_columns(Rect::new(10, 2, width, 8), Rect::new(0, 0, 40, 8))
+        EventDetailColumns::new(Rect::new(10, 2, width, 8))
     }
 
     #[test]

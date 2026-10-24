@@ -9,7 +9,7 @@ fn fixture() -> (tempfile::TempDir, App) {
         include_str!("../tests/fixtures/claude-bg-metadata.jsonl").repeat(4),
     )
     .unwrap();
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert!(app.transcript_parsed_bytes < std::fs::metadata(path).unwrap().len());
     super::tests::click_event(&mut app);
     (dir, app)
@@ -25,7 +25,7 @@ fn first_list_search_does_not_read_history_on_the_ui_thread() {
         KeyModifiers::NONE,
     )));
     assert!(app.view.event_list.search.input.applied());
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(
         app.transcript_parsed_bytes, parsed,
         "opening search blocks on history"
@@ -41,7 +41,7 @@ fn start_search(app: &mut App) {
         KeyCode::Char('/'),
         KeyModifiers::NONE,
     )));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert!(app.pending_transcript.is_some());
 }
 
@@ -65,7 +65,7 @@ fn loaded_history_matches_the_current_query_and_catches_growth() {
             KeyCode::Char(c),
             KeyModifiers::NONE,
         )));
-        app.refresh_event(8);
+        app.refresh_event_for_list_rows(8);
     }
     finish_search(&mut app);
     assert!(app.pending_transcript.is_none());
@@ -102,7 +102,7 @@ fn loaded_history_matches_the_current_query_and_catches_growth() {
         .open(&path)
         .unwrap();
     file.write_all(notification.as_bytes()).unwrap();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(
         app.view.event_panel,
         crate::providers::claude::event_reader::tail(&path, usize::MAX).unwrap()
@@ -132,7 +132,7 @@ fn completed_history_does_not_replace_another_task_or_request() {
     .unwrap();
     app.sessions = vec![second.clone()];
     app.view.set_sessions(app.sessions.clone(), false);
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     let second_event = app.view.event_panel.clone();
     assert_eq!(app.view.selected_id(), Some(&second.id));
     let Input::EventsLoaded {
@@ -148,7 +148,7 @@ fn completed_history_does_not_replace_another_task_or_request() {
     assert_eq!(app.view.event_session.as_ref(), Some(&second.id));
     app.sessions = vec![first.clone()];
     app.view.set_sessions(app.sessions.clone(), false);
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     // The saved search on the first task also loads asynchronously.
     assert!(app.pending_transcript.is_some());
     finish_search(&mut app);
@@ -176,7 +176,7 @@ fn duration_sort_loads_history_off_the_ui_thread_and_time_keeps_it() {
         include_str!("../tests/fixtures/claude-bg-metadata.jsonl").repeat(40),
     )
     .unwrap();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 23)).unwrap();
     app.draw(&mut terminal).unwrap();
     super::tests::click_event(&mut app);
@@ -213,7 +213,7 @@ fn duration_sort_loads_history_off_the_ui_thread_and_time_keeps_it() {
         KeyCode::Char('t'),
         KeyModifiers::NONE,
     )));
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(
         app.view.event_panel, expected,
         "returning to time keeps loaded history"
@@ -233,7 +233,7 @@ fn duration_history_load_errors_keep_loaded_rows_and_retry() {
         KeyCode::Char('t'),
         KeyModifiers::NONE,
     )));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert!(
         app.pending_transcript.is_some(),
         "duration sorting loads the whole history"
@@ -246,7 +246,7 @@ fn duration_history_load_errors_keep_loaded_rows_and_retry() {
     );
     assert_eq!(app.view.event_session, session);
     std::fs::write(&path, transcript).unwrap();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert!(
         app.pending_transcript.is_some(),
         "the next refresh retries history loading"
@@ -321,7 +321,7 @@ fn saved_duration_loads_full_history_on_first_refresh() {
     second.id.id = "second-duration".into();
     app.sessions = vec![second];
     app.view.set_sessions(app.sessions.clone(), false);
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert!(app.pending_transcript.is_some());
     finish_search(&mut app);
     assert_eq!(app.view.event_list.sort, crate::ui::EventSort::Time);
@@ -348,7 +348,7 @@ fn parked_event_position_loads_history_before_restoring_selection() {
         }
     }
     std::fs::write(&path, transcript).unwrap();
-    app.refresh_event(usize::MAX);
+    app.refresh_event_for_list_rows(usize::MAX);
     let first = app.sessions[0].id.clone();
     let mut other = app.sessions[0].clone();
     other.id.id = "other-history".into();
@@ -383,13 +383,13 @@ fn parked_event_position_loads_history_before_restoring_selection() {
     }
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
     assert_eq!(app.view.selected_id(), Some(&second));
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert!(app.pending_transcript.is_some());
     finish_search(&mut app);
     assert!(app.view.event_panel.len() < 24);
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)));
     assert_eq!(app.view.selected_id(), Some(&first));
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert!(app.pending_transcript.is_some());
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 23)).unwrap();
     app.draw(&mut terminal).unwrap();

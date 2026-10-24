@@ -255,10 +255,7 @@ fn drawn_image(view: &View) -> crate::images::ImageSource {
         },
         pointer: "/message/content/0/content/0/source/data".into(),
     };
-    let mut columns = super::super::event_detail::event_detail_columns(
-        Rect::new(20, 8, 56, 25),
-        Rect::new(0, 0, 80, 10),
-    );
+    let mut columns = super::super::event_detail::EventDetailColumns::new(Rect::new(20, 8, 56, 25));
     columns.text.width = 40;
     view.viewport.borrow_mut().event_detail_columns = Some(columns);
     view.viewport.borrow_mut().event_detail_images = vec![super::super::event_detail::DrawnImage {

@@ -72,10 +72,7 @@ fn event_detail_centers_multiline_sections_and_arrow_on_panel_midline() {
         let buf = event_detail_buffer(&view, width, now);
         let viewport = view.viewport.borrow();
         let region = &viewport.event_text;
-        let columns = super::super::event_detail::event_detail_columns(
-            viewport.event_detail,
-            viewport.event_panel,
-        );
+        let columns = super::super::event_detail::EventDetailColumns::new(viewport.event_detail);
         for text in [&input, &output] {
             let source = region
                 .sources
@@ -139,11 +136,8 @@ fn event_detail_centers_all_output_fragments_with_one_offset() {
             .unwrap();
         let output_parts = &parts[output_start..];
         assert!(output_parts.len() >= 4);
-        let columns = super::super::event_detail::event_detail_columns(
-            Rect::new(2, 1, width, 40),
-            view.center_layout(Rect::new(0, 0, width + 4, 42))
-                .event_panel,
-        );
+        let columns =
+            super::super::event_detail::EventDetailColumns::new(Rect::new(2, 1, width, 40));
         let content_width = columns.text.width;
         let widest = output_parts
             .iter()
@@ -248,11 +242,8 @@ fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
                 .join("\n"),
             include_str!("../../tests/ui_snapshots/manager_await_json.txt").trim_end_matches('\n')
         );
-        let columns = super::super::event_detail::event_detail_columns(
-            Rect::new(2, 1, width, 40),
-            view.center_layout(Rect::new(0, 0, width + 4, 42))
-                .event_panel,
-        );
+        let columns =
+            super::super::event_detail::EventDetailColumns::new(Rect::new(2, 1, width, 40));
         let content_width = columns.text.width;
         let lines = part.lines(
             content_width.into(),
@@ -607,10 +598,7 @@ fn manager_detach_detail_centers_thread_and_has_no_input() {
         .expect("detail must retain the tool name beside its subject");
     let left = title.find(thread_id).unwrap();
     let viewport = view.viewport.borrow();
-    let columns = super::super::event_detail::event_detail_columns(
-        viewport.event_detail,
-        view.center_layout(buf.area).event_panel,
-    );
+    let columns = super::super::event_detail::EventDetailColumns::new(viewport.event_detail);
     assert_eq!(
         left,
         usize::from(super::super::centering::centered_x(

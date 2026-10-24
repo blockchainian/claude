@@ -4626,7 +4626,7 @@ fn background_box_dims_title_but_not_indicator_or_output() {
     let detail =
         super::tool_detail::event_detail_content(&event, String::new(), Style::new().dim());
     let mut title_buf = Buffer::empty(Rect::new(0, 0, 40, 1));
-    let columns = super::event_detail::event_detail_columns(title_buf.area, title_buf.area);
+    let columns = super::event_detail::EventDetailColumns::new(title_buf.area);
     (&detail.sections[0].title.line(columns).0).render(title_buf.area, &mut title_buf);
     let title_x = (0..40)
         .find(|x| cell_text(title_buf[(*x, 0)].symbol()) == "R")
@@ -4831,6 +4831,55 @@ fn event_fixture() -> (View, chrono::DateTime<Utc>) {
     }
     view.set_event(view.event_panel.clone());
     (view, now)
+}
+
+#[test]
+fn prose_detail_keeps_its_body_while_the_event_list_is_hidden() {
+    for (width, height_zoom, width_zoom) in [
+        (200, None, Some(Panel::TaskList)),
+        (120, Some(Panel::EventDetail), None),
+    ] {
+        let (mut view, now) = event_fixture();
+        view.select_fixture_event(Some(view.event_panel[1].clone()));
+        assert!(event_screen(&view, width, 50, now).contains("I will check the files"));
+        view.height_zoom = height_zoom;
+        view.width_zoom = width_zoom;
+        let rendered = event_screen(&view, width, 50, now);
+        let viewport = view.viewport.borrow();
+        assert!(viewport.event_panel.is_empty());
+        let detail = viewport.event_detail;
+        assert!(
+            rendered
+                .lines()
+                .skip(usize::from(detail.y))
+                .take(usize::from(detail.height))
+                .any(|line| line.contains("I will check the files")),
+            "width {width}"
+        );
+    }
+}
+
+#[test]
+fn detail_wrap_ignores_event_list_zoom() {
+    let (mut view, now) = event_fixture();
+    view.select_fixture_event(Some(view.event_panel[6].clone()));
+    let before = event_screen(&view, 200, 50, now);
+    let columns = view.viewport.borrow().event_detail_columns.unwrap();
+    view.width_zoom = Some(Panel::EventList);
+    let after = event_screen(&view, 200, 50, now);
+    assert_eq!(
+        view.viewport.borrow().event_detail_columns.unwrap(),
+        columns
+    );
+    let body = |screen: &str| {
+        screen
+            .lines()
+            .skip(usize::from(columns.panel.y))
+            .take(usize::from(columns.panel.height))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(body(&after), body(&before));
 }
 
 fn event_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) -> String {
@@ -5249,7 +5298,10 @@ fn dashboard_event_list_fills_rows_next_to_rules() {
                 view.viewport.borrow().event_rows.len(),
                 usize::from(last - first + 1)
             );
-            assert_eq!(view.event_count(area), usize::from(last - first + 1));
+            assert_eq!(
+                view.event_read_count(area),
+                if search { crate::event::ALL_EVENTS } else { 100 }
+            );
             if crate::ui::render::ScreenLayout::for_width(width)
                 == crate::ui::render::ScreenLayout::Large
             {
@@ -5486,9 +5538,8 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
             );
             if large {
                 let detail = view.viewport.borrow().event_text.area;
-                let columns = super::event_detail::event_detail_columns(
+                let columns = super::event_detail::EventDetailColumns::new(
                     view.viewport.borrow().event_detail,
-                    view.center_layout(buf.area).event_panel,
                 );
                 assert_eq!(detail.x, columns.text.x);
                 assert_eq!(detail.right(), columns.text.right());
@@ -8575,10 +8626,7 @@ fn task_event_selected_event_header_centers_kind_and_keeps_time_right() {
         click_event_text(&mut view, &list, body, MouseButton::Left);
         let open = event_screen(&view, 100, 25, now);
         let detail = view.viewport.borrow().event_detail;
-        let columns = super::event_detail::event_detail_columns(
-            detail,
-            view.center_layout(Rect::new(0, 0, 100, 25)).event_panel,
-        );
+        let columns = super::event_detail::EventDetailColumns::new(detail);
         let header = open.lines().nth(usize::from(detail.y + 1)).unwrap();
         assert_eq!(
             header.find("Assistant"),
@@ -9021,9 +9069,9 @@ fn double_click_on_open_event_body_copies_the_whole_event() {
     let (mut view, now) = event_fixture();
     let body = "A long response with **bold** words whose body must be cut before the right edge of the log\n\nA second paragraph";
     view.event_panel[6].body = body.into();
-    let list = event_screen(&view, 100, 25, now);
+    let list = event_screen(&view, 100, 45, now);
     click_event_text(&mut view, &list, "A long response", MouseButton::Left);
-    let open = event_screen(&view, 100, 25, now);
+    let open = event_screen(&view, 100, 45, now);
     assert_eq!(
         double_click_text(&mut view, &open, "A second paragraph"),
         Some(Action::Copy {
@@ -9064,9 +9112,9 @@ fn event_detail_left_click_has_no_deadline() {
 fn double_click_event_detail_copies_the_message() {
     let (mut view, now) = event_fixture();
     view.event_panel[6].body = "A long response with **bold** words whose body must be cut before the right edge of the log\n\nA second paragraph".into();
-    let list = event_screen(&view, 100, 25, now);
+    let list = event_screen(&view, 100, 45, now);
     click_event_text(&mut view, &list, "A long response", MouseButton::Left);
-    let open = event_screen(&view, 100, 25, now);
+    let open = event_screen(&view, 100, 45, now);
     assert_eq!(
         double_click_text(&mut view, &open, "A second paragraph"),
         Some(Action::Copy {
@@ -9932,7 +9980,7 @@ fn wrapped_messages_keep_list_text_and_open_paragraphs() {
     for event in &events[6..12] {
         view.event_panel = vec![event.clone()];
         view.select_fixture_event(Some(event.clone()));
-        let area = Rect::new(0, 0, 2000, 25);
+        let area = Rect::new(0, 0, 2000, 100);
         let mut buffer = Buffer::empty(area);
         view.render_event_detail(area, &mut buffer, now);
         let lines: Vec<String> = buffer
