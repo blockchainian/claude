@@ -66,7 +66,7 @@ pub const FOREGROUND_SESSION: &str = "Running in a terminal · /bg";
 const DETACH: &[u8] = b"\x1a";
 
 const PAGE_SIZE: usize = 10;
-const ASK_USER_QUESTION_PORT: u16 = 47831;
+const ASK_USER_QUESTION_PORT: u16 = 10000;
 
 /// Removes the transcript and its sibling directory without following symlinks.
 pub fn delete(transcript: &Path) -> io::Result<()> {

@@ -110,7 +110,20 @@ pub(super) fn ensure_ask_user_question(path: &Path, port: u16) -> io::Result<()>
         .as_array_mut()
         .ok_or_else(invalid)?;
     let url = format!("http://127.0.0.1:{port}/ask-user-question");
+    // A hook on another port would fail every question once the dashboard listens on this one.
+    let is_stale = |action: &Map<String, Value>| {
+        action.get("type").and_then(Value::as_str) == Some("http")
+            && action
+                .get("url")
+                .and_then(Value::as_str)
+                .is_some_and(|other| {
+                    other != url
+                        && other.starts_with("http://127.0.0.1:")
+                        && other.ends_with("/ask-user-question")
+                })
+    };
     let mut exists = false;
+    let mut stale = false;
     for entry in entries.iter() {
         let entry = entry.as_object().ok_or_else(invalid)?;
         let matcher = match entry.get("matcher") {
@@ -131,15 +144,28 @@ pub(super) fn ensure_ask_user_question(path: &Path, port: u16) -> io::Result<()>
             {
                 exists = true;
             }
+            stale |= matcher == Some("AskUserQuestion") && is_stale(action);
         }
     }
-    if exists {
+    if exists && !stale {
         return Ok(());
     }
-    entries.push(serde_json::json!({
-        "matcher": "AskUserQuestion",
-        "hooks": [{"type": "http", "url": url, "timeout": 3600}]
-    }));
+    if stale {
+        entries.retain_mut(|entry| {
+            if entry["matcher"] != "AskUserQuestion" {
+                return true;
+            }
+            let actions = entry["hooks"].as_array_mut().expect("validated hooks");
+            actions.retain(|action| !action.as_object().is_some_and(is_stale));
+            !actions.is_empty()
+        });
+    }
+    if !exists {
+        entries.push(serde_json::json!({
+            "matcher": "AskUserQuestion",
+            "hooks": [{"type": "http", "url": url, "timeout": 3600}]
+        }));
+    }
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -437,6 +463,25 @@ mod tests {
         fs::write(&path, existing).unwrap();
         ensure_ask_user_question(&path, 31337).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), existing);
+    }
+
+    #[test]
+    fn ask_user_question_replaces_hook_on_another_port() {
+        let (_directory, path) = fixture();
+        fs::write(&path, r#"{"hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"http","url":"http://127.0.0.1:47831/ask-user-question","timeout":3600}]},{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"true"},{"type":"http","url":"http://127.0.0.1:47831/ask-user-question","timeout":3600}]}]}}"#).unwrap();
+
+        ensure_ask_user_question(&path, 10000).unwrap();
+
+        assert_eq!(
+            read(&path)["hooks"]["PreToolUse"],
+            json!([
+                {"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": "true"}]},
+                {
+                    "matcher": "AskUserQuestion",
+                    "hooks": [{"type": "http", "url": "http://127.0.0.1:10000/ask-user-question", "timeout": 3600}]
+                }
+            ])
+        );
     }
 
     #[test]
