@@ -204,7 +204,8 @@ pub(crate) enum Format {
     Markdown,
     /// Formats source code in the given language as a code section.
     Code(&'static str),
-    /// A JSON array as a Markdown table: one row per element, one column per field.
+    /// A JSON array as a Markdown table, one row per element and one column per field;
+    /// a JSON object is a single row.
     Table,
 }
 
@@ -236,6 +237,8 @@ pub(crate) struct ToolRule {
     pub task: Option<TaskAction>,
     pub list_subject: bool,
     pub list_input: bool,
+    /// How the input fields no title or input pick shows are drawn; JSON when unset.
+    pub remaining_input: Option<Format>,
     /// Appends the codex-manager requests still waiting for Claude to the output.
     pub attention: bool,
     shell_stream: Stream,
@@ -254,6 +257,7 @@ const DEFAULT_RULE: ToolRule = ToolRule {
     task: None,
     list_subject: false,
     list_input: false,
+    remaining_input: None,
     attention: false,
     shell_stream: Stream {
         merged_stderr: false,
@@ -519,6 +523,7 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
             Pick::Field(Source::Input, "/action_summary"),
             Pick::Field(Source::Input, "/action"),
         ],
+        remaining_input: Some(Format::Table),
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -771,7 +776,10 @@ pub(crate) fn presentation(name: &str, data: &ToolData<'_>) -> Presentation {
         Some((Pick::With(function), _)) => function(data),
         None => None,
     }
-    .unwrap_or_else(|| raw_input(&remaining));
+    .unwrap_or_else(|| match rule.remaining_input {
+        Some(format) => picked_sections(&remaining, "/input", format, false),
+        None => raw_input(&remaining),
+    });
     let mut output = if data.result.is_some() {
         Some(output(rule.output, data))
     } else {
@@ -1250,7 +1258,10 @@ fn table_cell(text: &str) -> String {
 /// A Markdown table of a JSON array: objects give one column per field, in first-seen order;
 /// scalars give a single column headed `name`.
 fn markdown_table(value: &Value, name: &str) -> Option<String> {
-    let rows = value.as_array().filter(|rows| !rows.is_empty())?;
+    let rows = match value {
+        Value::Object(object) if !object.is_empty() => std::slice::from_ref(value),
+        _ => value.as_array().filter(|rows| !rows.is_empty())?.as_slice(),
+    };
     let cell = |value: &Value| {
         table_cell(
             &value
@@ -1764,6 +1775,12 @@ mod tests {
 
     #[test]
     fn chrome_find_and_computer_title_their_fields_and_show_the_rest() {
+        let table = |text: &str| {
+            vec![crate::event::Section::Markdown {
+                label: "input".into(),
+                text: text.into(),
+            }]
+        };
         for (name, input, title, rest) in [
             (
                 "mcp__claude-in-chrome__find",
@@ -1772,7 +1789,7 @@ mod tests {
                     "tabId": 665979853
                 }),
                 "Refresh link near the calendar/summary panel",
-                serde_json::json!({"tabId": 665979853}),
+                super::raw_input(&serde_json::json!({"tabId": 665979853})),
             ),
             (
                 "mcp__claude-in-chrome__computer",
@@ -1783,13 +1800,19 @@ mod tests {
                     "action_summary": "点搜索按钮执行航班搜索"
                 }),
                 "点搜索按钮执行航班搜索",
-                serde_json::json!({"tabId": 665979853, "ref": "ref_21"}),
+                table("| tabId | ref |\n| --- | --- |\n| 665979853 | ref\\_21 |"),
             ),
             (
                 "mcp__claude-in-chrome__computer",
                 serde_json::json!({"action": "wait", "tabId": 665979853, "duration": 4}),
                 "wait",
-                serde_json::json!({"tabId": 665979853, "duration": 4}),
+                table("| tabId | duration |\n| --- | --- |\n| 665979853 | 4 |"),
+            ),
+            (
+                "mcp__claude-in-chrome__computer",
+                serde_json::json!({"action": "wait"}),
+                "wait",
+                Vec::new(),
             ),
         ] {
             let shown = super::presentation(
@@ -1800,7 +1823,7 @@ mod tests {
                 },
             );
             assert_eq!(shown.title.as_deref(), Some(title));
-            assert_eq!(shown.input, super::raw_input(&rest));
+            assert_eq!(shown.input, rest);
         }
     }
 
