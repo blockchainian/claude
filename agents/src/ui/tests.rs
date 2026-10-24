@@ -8624,6 +8624,15 @@ fn temp_event_path(filename: &str) -> (tempfile::TempDir, PathBuf) {
     (dir, target)
 }
 
+fn file_image_source(path: PathBuf) -> crate::images::ImageSource {
+    let metadata = std::fs::metadata(&path).unwrap();
+    crate::images::ImageSource::File {
+        path,
+        len: metadata.len(),
+        modified: metadata.modified().unwrap(),
+    }
+}
+
 #[test]
 fn task_event_click_on_a_shortened_tool_path_opens_the_full_path() {
     let (mut view, now) = event_fixture();
@@ -8678,9 +8687,9 @@ fn task_event_click_on_an_image_placeholder_opens_the_image() {
     let (mut view, now) = event_fixture();
     let (_dir, image) = temp_event_path("2.png");
     view.event_panel[0].body = "Please look at [Image #1] and [Image #2]".into();
-    view.event_panel[0].images = vec![crate::event::Image {
+    view.event_panel[0].images = vec![crate::images::Image {
         label: "[Image #2]".into(),
-        path: image.clone(),
+        source: file_image_source(image.clone()),
     }];
     let list = event_screen(&view, 100, 40, now);
     assert!(list.contains("[Image #1] and [Image #2]"), "{list}");
@@ -8719,9 +8728,9 @@ fn task_details_prompt_links_its_shortened_path_and_image_placeholder() {
     std::fs::write(&image, "").unwrap();
     let selected = &mut view.rows[view.selected];
     selected.prompt = format!("Look at [Image #1] and the report in {path} please");
-    selected.prompt_images = vec![crate::event::Image {
+    selected.prompt_images = vec![crate::images::Image {
         label: "[Image #1]".into(),
-        path: image.clone(),
+        source: file_image_source(image.clone()),
     }];
     let rendered = screen(&view, 120, 40);
     assert!(!rendered.contains(path), "{rendered}");

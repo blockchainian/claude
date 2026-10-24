@@ -23,7 +23,7 @@ pub(super) struct Summary {
     pub git_branch: Option<String>,
     pub pr: Option<PullRequest>,
     pub prompt: String,
-    pub prompt_images: Vec<crate::event::Image>,
+    pub prompt_images: Vec<crate::images::Image>,
     pub queued: Vec<String>,
     pub prompt_at: Option<DateTime<Utc>>,
     pub turn_messages: usize,
@@ -1410,7 +1410,7 @@ pub(super) mod tests {
 
     /// Asserts `images` are the labelled PNGs embedded in the transcript.
     pub(in crate::providers::claude) fn assert_embedded_images(
-        images: &[crate::event::Image],
+        images: &[crate::images::Image],
         numbers: &[u64],
     ) {
         assert_eq!(
@@ -1424,11 +1424,10 @@ pub(super) mod tests {
                 .collect::<Vec<_>>()
         );
         for image in images {
-            assert!(
-                std::fs::read(&image.path)
-                    .unwrap()
-                    .starts_with(b"\x89PNG\r\n")
-            );
+            let crate::images::ImageSource::File { path, .. } = &image.source else {
+                panic!("expected materialized image")
+            };
+            assert!(std::fs::read(path).unwrap().starts_with(b"\x89PNG\r\n"));
         }
     }
 

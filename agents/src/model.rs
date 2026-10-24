@@ -101,8 +101,8 @@ pub struct Session {
     pub prompt: String,
     /// Source record or tool-call identities for activity, update and prompt.
     pub task_details_sources: [Option<String>; 3],
-    /// Images attached to `prompt` whose files still exist.
-    pub prompt_images: Vec<crate::event::Image>,
+    /// Images attached to `prompt`.
+    pub prompt_images: Vec<crate::images::Image>,
     pub queued: Vec<String>,
     pub prompt_at: Option<DateTime<Utc>>,
     pub turn_messages: usize,

@@ -1,21 +1,15 @@
-use std::{
-    collections::VecDeque,
-    fs::File,
-    io::{BufRead, BufReader, Cursor, Seek, SeekFrom},
-    sync::Arc,
-};
+use std::{collections::VecDeque, io::Cursor, sync::Arc};
 
-use base64::{Engine, engine::general_purpose::STANDARD};
-use image::{DynamicImage, ImageFormat, imageops::FilterType};
+use image::{DynamicImage, ImageFormat, ImageReader, Limits, imageops::FilterType};
 
-use crate::event::ImageBlock;
+use crate::images::ImageSource;
 
 const CACHE_BYTES: usize = 64 << 20;
 
 type Png = ((u32, u32), Arc<Vec<u8>>);
 
 struct Entry {
-    source: ImageBlock,
+    source: ImageSource,
     image: Arc<DynamicImage>,
     png: Option<Png>,
 }
@@ -41,7 +35,7 @@ impl Cache {
         }
     }
 
-    pub fn image(&mut self, source: &ImageBlock) -> Option<Arc<DynamicImage>> {
+    pub fn image(&mut self, source: &ImageSource) -> Option<Arc<DynamicImage>> {
         if let Some(index) = self
             .entries
             .iter()
@@ -66,7 +60,7 @@ impl Cache {
         Some(image)
     }
 
-    pub fn png(&mut self, source: &ImageBlock, pixels: (u32, u32)) -> Option<Arc<Vec<u8>>> {
+    pub fn png(&mut self, source: &ImageSource, pixels: (u32, u32)) -> Option<Arc<Vec<u8>>> {
         let image = self.image(source)?;
         if let Some((size, png)) = self
             .entries
@@ -105,21 +99,24 @@ impl Cache {
     }
 }
 
-fn read(source: &ImageBlock) -> Option<DynamicImage> {
-    let mut file = File::open(&source.record.path).ok()?;
-    file.seek(SeekFrom::Start(source.record.offset)).ok()?;
-    let mut line = Vec::new();
-    BufReader::new(file).read_until(b'\n', &mut line).ok()?;
-    let record: serde_json::Value = serde_json::from_slice(&line).ok()?;
-    let data = record.pointer(&source.pointer)?.as_str()?;
-    let bytes = STANDARD.decode(data).ok()?;
-    image::load_from_memory(&bytes).ok()
+fn read(source: &ImageSource) -> Option<DynamicImage> {
+    let bytes = source.bytes()?;
+    let mut reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    let mut limits = Limits::default();
+    limits.max_alloc = Some(256 << 20);
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    reader.limits(limits);
+    reader.decode().ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::tests::fixture;
     use super::*;
+    use base64::{Engine, engine::general_purpose::STANDARD};
 
     #[test]
     fn inline_images_raster_reads_offset_scales_png_and_reuses_cache() {
@@ -142,11 +139,18 @@ mod tests {
     fn inline_images_raster_cache_evicts_by_bytes_and_recency() {
         let first = fixture();
         let mut second = first.clone();
-        second.pointer = "/toolUseResult/file/base64".into();
+        if let ImageSource::Record { pointer, .. } = &mut second {
+            *pointer = "/toolUseResult/file/base64".into();
+        }
         let temp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::copy(&first.record.path, temp.path()).unwrap();
+        let ImageSource::Record { record, .. } = &first else {
+            unreachable!()
+        };
+        std::fs::copy(&record.path, temp.path()).unwrap();
         let mut third = first.clone();
-        third.record.path = temp.path().to_owned();
+        if let ImageSource::Record { record, .. } = &mut third {
+            record.path = temp.path().to_owned();
+        }
         let mut cache = Cache::new();
         let original = cache.image(&first).unwrap();
         cache.limit = original.as_bytes().len() * 2;
@@ -167,21 +171,70 @@ mod tests {
     fn inline_images_raster_rejects_wrong_offsets_base64_and_image_bytes() {
         let mut source = fixture();
         let mut cache = Cache::new();
-        source.record.offset = 0;
+        let ImageSource::Record { record, .. } = &mut source else {
+            unreachable!()
+        };
+        record.offset = 0;
         assert!(cache.image(&source).is_none());
         source = fixture();
-        source.pointer = "/message/content/0/content/0/source/media_type".into();
+        let ImageSource::Record { pointer, .. } = &mut source else {
+            unreachable!()
+        };
+        *pointer = "/message/content/0/content/0/source/media_type".into();
         assert!(cache.image(&source).is_none());
-        let bytes = std::fs::read(&source.record.path).unwrap();
-        let mut record: serde_json::Value =
-            serde_json::from_slice(&bytes[source.record.offset as usize..]).unwrap();
-        source.pointer = fixture().pointer;
-        *record.pointer_mut(&source.pointer).unwrap() =
+        source = fixture();
+        let (path, offset, expected_pointer) = match &source {
+            ImageSource::Record { record, pointer } => {
+                (record.path.clone(), record.offset, pointer.clone())
+            }
+            ImageSource::File { .. } => unreachable!(),
+        };
+        let bytes = std::fs::read(path).unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&bytes[offset as usize..]).unwrap();
+        let ImageSource::Record { pointer, .. } = &mut source else {
+            unreachable!()
+        };
+        *pointer = expected_pointer;
+        *value.pointer_mut(pointer).unwrap() =
             serde_json::Value::String(STANDARD.encode(b"invalid image"));
         let temp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(temp.path(), serde_json::to_vec(&record).unwrap()).unwrap();
-        source.record.path = temp.path().to_owned();
-        source.record.offset = 0;
+        std::fs::write(temp.path(), serde_json::to_vec(&value).unwrap()).unwrap();
+        if let ImageSource::Record { record, .. } = &mut source {
+            record.path = temp.path().to_owned();
+            record.offset = 0;
+        }
         assert!(cache.image(&source).is_none());
+    }
+
+    #[test]
+    fn inline_images_raster_reads_codex_data_url_records() {
+        let mut source = fixture();
+        let ImageSource::Record {
+            record: source_record,
+            pointer,
+        } = &source
+        else {
+            unreachable!()
+        };
+        let bytes = std::fs::read(&source_record.path).unwrap();
+        let line = &bytes[source_record.offset as usize..];
+        let mut record: serde_json::Value = serde_json::from_slice(line).unwrap();
+        let encoded = record.pointer(pointer).unwrap().as_str().unwrap();
+        *record.pointer_mut(pointer).unwrap() =
+            serde_json::Value::String(format!("data:image/png;base64,{encoded}"));
+
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), serde_json::to_vec(&record).unwrap()).unwrap();
+        if let ImageSource::Record { record, .. } = &mut source {
+            record.path = file.path().to_owned();
+            record.offset = 0;
+        }
+
+        let image = Cache::new().image(&source);
+        assert_eq!(
+            image.map(|image| (image.width(), image.height())),
+            Some((960, 539))
+        );
     }
 }

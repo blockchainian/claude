@@ -4,7 +4,8 @@ pub(crate) mod shell_summary;
 
 use shell_output::{Stream, sections as shell_output_sections};
 
-use crate::event::{ImageBlock, Section, SourceRecord, ToolCall};
+use crate::event::{Section, SourceRecord, ToolCall};
+use crate::images::{Image, ImageSource};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -60,10 +61,12 @@ pub(crate) fn mcp_content(
                 } else {
                     "data"
                 };
-                return Section::Image(ImageBlock {
-                    media_type: mime.into(),
-                    record: record.clone(),
-                    pointer: format!("{pointer}/{index}/{data}"),
+                return Section::Image(Image {
+                    label: format!("[image {mime}]"),
+                    source: ImageSource::Record {
+                        record: record.clone(),
+                        pointer: format!("{pointer}/{index}/{data}"),
+                    },
                 });
             }
             Section::Placeholder(match mime {
