@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn f7_existing_filenames_and_dot_paths_keep_relative_ranges() {
+    fn existing_filenames_and_dot_paths_keep_relative_ranges() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("screens")).unwrap();
         for name in ["screen.png", "screens/screen.png"] {
@@ -189,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn f7_dot_paths_link_and_abbreviate_as_relative_paths() {
+    fn dot_paths_link_and_abbreviate_as_relative_paths() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("screens")).unwrap();
         for name in ["screen.png", "screens/screen.png"] {

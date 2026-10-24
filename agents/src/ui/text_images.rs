@@ -129,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn f7_existing_filenames_and_dot_paths_find_real_images_under_cwd() {
+    fn existing_filenames_and_dot_paths_find_real_images_under_cwd() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("screens")).unwrap();
         for name in ["screen.png", "screens/screen.png"] {
