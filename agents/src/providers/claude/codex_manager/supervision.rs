@@ -111,7 +111,7 @@ pub(in crate::providers::claude) fn supervisions(
         for thread in record.threads {
             let supervisor =
                 read::<Supervisor>(&state.join("threads").join(format!("{}.json", thread.id)))?;
-            if !supervisor.is_some_and(|supervisor| supervisor.session_id == session.id) {
+            if supervisor.is_none_or(|supervisor| supervisor.session_id != session.id) {
                 continue;
             }
             let prefix = format!("{}.ask.", thread.id);
