@@ -10,13 +10,16 @@ type Png = ((u32, u32), Arc<Vec<u8>>);
 
 struct Entry {
     source: ImageSource,
-    image: Arc<DynamicImage>,
+    image: Option<Arc<DynamicImage>>,
     png: Option<Png>,
 }
 
 impl Entry {
     fn bytes(&self) -> usize {
-        self.image.as_bytes().len() + self.png.as_ref().map_or(0, |(_, png)| png.len())
+        self.image
+            .as_ref()
+            .map_or(1024, |image| image.as_bytes().len())
+            + self.png.as_ref().map_or(0, |(_, png)| png.len())
     }
 }
 
@@ -42,14 +45,14 @@ impl Cache {
             .position(|entry| entry.source == *source)
         {
             let entry = self.entries.remove(index)?;
-            let image = Arc::clone(&entry.image);
+            let image = entry.image.clone();
             self.entries.push_back(entry);
-            return Some(image);
+            return image;
         }
-        let image = Arc::new(read(source)?);
+        let image = read(source).map(Arc::new);
         let entry = Entry {
             source: source.clone(),
-            image: Arc::clone(&image),
+            image: image.clone(),
             png: None,
         };
         if entry.bytes() <= self.limit {
@@ -57,7 +60,7 @@ impl Cache {
             self.entries.push_back(entry);
             self.trim();
         }
-        Some(image)
+        image
     }
 
     pub fn png(&mut self, source: &ImageSource, pixels: (u32, u32)) -> Option<Arc<Vec<u8>>> {
@@ -236,5 +239,97 @@ mod tests {
             image.map(|image| (image.width(), image.height())),
             Some((960, 539))
         );
+    }
+
+    fn file_source(path: &std::path::Path) -> ImageSource {
+        let metadata = std::fs::metadata(path).unwrap();
+        ImageSource::File {
+            path: path.to_owned(),
+            len: metadata.len(),
+            modified: metadata.modified().unwrap(),
+        }
+    }
+
+    #[test]
+    fn inline_images_raster_success_hits_need_no_source_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("image.data");
+        std::fs::write(&path, crate::images::fixture_png()).unwrap();
+        let source = file_source(&path);
+        let mut cache = Cache::new();
+        let image = cache.image(&source).unwrap();
+        let png = cache.png(&source, (20, 20)).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(Arc::ptr_eq(&image, &cache.image(&source).unwrap()));
+        assert!(Arc::ptr_eq(&png, &cache.png(&source, (20, 20)).unwrap()));
+    }
+
+    #[test]
+    fn inline_images_raster_failed_records_stay_cached_until_evicted() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("transcript.jsonl");
+        let mut source = fixture();
+        let ImageSource::Record { record, .. } = &mut source else {
+            unreachable!()
+        };
+        let bytes = std::fs::read(&record.path).unwrap();
+        std::fs::write(&path, &bytes[..record.offset as usize]).unwrap();
+        record.path = path.clone();
+        let mut cache = Cache::new();
+        cache.limit = 1024;
+        assert!(cache.image(&source).is_none());
+        assert_eq!(cache.bytes, 1024);
+        assert_eq!(cache.entries.len(), 1);
+        std::fs::write(&path, bytes).unwrap();
+        assert!(
+            cache.image(&source).is_none(),
+            "the same key must not read the repaired record"
+        );
+        assert!(cache.png(&source, (20, 20)).is_none());
+        let mut other = source.clone();
+        let ImageSource::Record { pointer, .. } = &mut other else {
+            unreachable!()
+        };
+        *pointer = "/missing".into();
+        assert!(cache.image(&other).is_none());
+        assert_eq!(cache.bytes, 1024);
+        assert_eq!(cache.entries.len(), 1);
+        assert_eq!(cache.entries[0].source, other);
+        assert!(
+            cache.image(&source).is_some(),
+            "eviction must permit reading the repaired record"
+        );
+        assert_eq!(cache.bytes, 1024, "an image over the limit is not retained");
+    }
+
+    #[test]
+    fn inline_images_raster_file_metadata_selects_the_current_image() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("image.png");
+        let bytes = crate::images::fixture_png();
+        std::fs::write(&path, &bytes).unwrap();
+        let first = file_source(&path);
+        let mut cache = Cache::new();
+        let image = cache.image(&first).unwrap();
+        let thumbnail = image.resize_exact(17, 11, FilterType::Triangle);
+        thumbnail.save(&path).unwrap();
+        let second = file_source(&path);
+        assert_ne!(first, second);
+        let current = cache.image(&second).unwrap();
+        assert_eq!((current.width(), current.height()), (17, 11));
+        assert!(Arc::ptr_eq(&image, &cache.image(&first).unwrap()));
+    }
+
+    #[test]
+    fn inline_images_raster_limits_image_dimensions() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("wide.png");
+        let image = image::load_from_memory(&crate::images::fixture_png()).unwrap();
+        image
+            .resize_exact(16_385, 1, FilterType::Nearest)
+            .save(&path)
+            .unwrap();
+        assert_eq!(image::open(&path).unwrap().width(), 16_385);
+        assert!(Cache::new().image(&file_source(&path)).is_none());
     }
 }

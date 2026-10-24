@@ -22,7 +22,10 @@ enum Body {
     /// A section label, in the given style.
     Label(Style),
     /// A transcript image, with placeholder text as its copy source.
-    Image(crate::images::Image),
+    Image {
+        image: crate::images::Image,
+        caption: bool,
+    },
     /// An input/output arrow without selectable source bytes.
     Arrow,
     /// The dim animation that a call has no output yet.
@@ -47,7 +50,7 @@ impl Body {
         match self {
             Self::Markdown | Self::Prose(_) => ContentKind::Prose,
             Self::Label(_)
-            | Self::Image(_)
+            | Self::Image { .. }
             | Self::Arrow
             | Self::Running
             | Self::Code(_)
@@ -69,13 +72,13 @@ impl Part {
         }
     }
 
-    pub fn image(image: crate::images::Image) -> Self {
-        Self::new(image.label.clone(), Body::Image(image))
+    pub fn image(image: crate::images::Image, caption: bool) -> Self {
+        Self::new(image.label.clone(), Body::Image { image, caption })
     }
 
-    pub fn image_block(&self) -> Option<&crate::images::ImageSource> {
+    pub fn shown_image(&self) -> Option<&crate::images::Image> {
         match &self.body {
-            Body::Image(image) => Some(&image.source),
+            Body::Image { image, .. } => Some(image),
             _ => None,
         }
     }
@@ -326,7 +329,8 @@ impl Part {
         now: chrono::DateTime<chrono::Utc>,
     ) -> Vec<Line<'static>> {
         match &self.body {
-            Body::Image(_) => vec![Line::from(Span::styled(
+            Body::Image { caption: false, .. } => Vec::new(),
+            Body::Image { caption: true, .. } => vec![Line::from(Span::styled(
                 source.to_owned(),
                 Style::new().dim(),
             ))],
@@ -760,7 +764,7 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             return;
         }
         Section::Image(image) => {
-            parts.push(Part::image(image.clone()));
+            parts.push(Part::image(image.clone(), true));
             return;
         }
         Section::Code { label, lang, text } => {

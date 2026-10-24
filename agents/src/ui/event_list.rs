@@ -1942,10 +1942,10 @@ fn event_detail_parts_layout_with_images(
                     };
                     let (mut lines, mut breaks) =
                         part.layout_in(usize::from(reading_width), body_style, now, cwd);
-                    let image = part.image_block().and_then(|image| {
+                    let image = part.shown_image().and_then(|image| {
                         let index = image_index;
                         image_index += 1;
-                        image_size(index, image).map(|size| (index, size))
+                        image_size(index, &image.source).map(|size| (index, size))
                     });
                     if let Some((_, (_, height))) = image {
                         lines.resize(usize::from(height), Line::default());
@@ -1976,8 +1976,9 @@ fn event_detail_parts_layout_with_images(
                     layout.images.push(DetailImage {
                         index,
                         image: part
-                            .image_block()
+                            .shown_image()
                             .expect("image size belongs to an image")
+                            .source
                             .clone(),
                         rows: first..first + lines.len(),
                         x: group_x,
@@ -2919,10 +2920,13 @@ mod panel_detail_tests {
             super::tool_detail::event_detail_content(&event, String::new(), Style::new().dim())
                 .sections;
         sections[0].groups = vec![Group {
-            parts: vec![Part::image(crate::images::Image {
-                label: "[image image/png]".into(),
-                source: image.clone(),
-            })],
+            parts: vec![Part::image(
+                crate::images::Image {
+                    label: "[image image/png]".into(),
+                    source: image.clone(),
+                },
+                true,
+            )],
         }];
         (event, sections, image)
     }
@@ -3085,14 +3089,76 @@ mod panel_detail_tests {
     }
 
     #[test]
+    fn inline_image_caption_is_optional_when_unavailable() {
+        let (_, _, source) = image_section();
+        let image = crate::images::Image {
+            label: "[image image/png]".into(),
+            source,
+        };
+        for caption in [false, true] {
+            let (event, mut sections, _) = image_section();
+            sections[0].groups[0].parts = vec![Part::image(image.clone(), caption)];
+            let layout = event_detail_parts_layout(
+                &event,
+                columns(100),
+                Path::new("/"),
+                DateTime::UNIX_EPOCH,
+                sections,
+            );
+            assert_eq!(layout.lines.len(), 2 + usize::from(caption));
+            assert_eq!(layout.images.len(), 0);
+            let text = layout
+                .lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert_eq!(text.contains(&image.label), caption);
+        }
+    }
+
+    #[test]
+    fn inline_image_without_caption_still_draws_and_retains_copy_source() {
+        let (event, mut sections, source) = image_section();
+        sections[0].groups[0].parts = vec![Part::image(
+            crate::images::Image {
+                label: "[image image/png]".into(),
+                source: source.clone(),
+            },
+            false,
+        )];
+        let mut images = super::super::inline_images::InlineImages::new(Some((10, 20)));
+        let size = images.size(&source, 80, Default::default()).unwrap();
+        let layout = event_detail_parts_layout_with_images(
+            &event,
+            columns(100),
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+            sections,
+            |index, image| {
+                assert_eq!(index, 0);
+                assert_eq!(image, &source);
+                images.size(image, 80, Default::default())
+            },
+        );
+        assert_eq!(layout.images.len(), 1);
+        assert_eq!(layout.images[0].rows.len(), usize::from(size.1));
+        assert_eq!(layout.images[0].image, source);
+        assert_eq!(layout.sources[1].text.as_ref(), "[image image/png]");
+    }
+
+    #[test]
     fn inline_image_order_includes_unavailable_images() {
         let (event, mut sections, image) = image_section();
         sections[0].groups[0]
             .parts
-            .push(Part::image(crate::images::Image {
-                label: "[image image/png]".into(),
-                source: image,
-            }));
+            .push(Part::image(
+                crate::images::Image {
+                    label: "[image image/png]".into(),
+                    source: image,
+                },
+                true,
+            ));
         let layout = event_detail_parts_layout_with_images(
             &event,
             columns(100),
