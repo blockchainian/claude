@@ -630,7 +630,7 @@ struct Entry {
     event: Event,
     missing: bool,
     last_result: Option<usize>,
-    labels: Vec<(String, Option<String>)>,
+    labels: Vec<(Vec<String>, Option<String>)>,
 }
 struct ResultAt {
     content_pointer: String,
@@ -1336,10 +1336,13 @@ impl EventReader {
             .map(|range| entry.event.body[range.clone()].to_owned())
             .collect();
         path_subjects.extend(path);
-        entry.labels.insert(0, label);
+        entry.labels.insert(
+            0,
+            (crate::providers::mcp::list_group(name, &label.0), label.1),
+        );
         let mut groups = crate::providers::tool::groups::Groups::default();
         for (head, member) in &entry.labels {
-            groups.add(head, member.as_deref());
+            groups.add_path(head, member.as_deref());
         }
         let (body, members) = groups.finish_with_ranges().unwrap();
         // A member's path range stops before a Read's line range, which links find themselves.
@@ -2616,8 +2619,15 @@ pub(crate) mod tests {
             )
         );
         assert_eq!(read.summary, format!("Read {}", read.title));
-        let event = events.iter().find(|event| event.calls.contains(read)).unwrap();
-        let paths: Vec<_> = event.paths.iter().map(|range| &event.body[range.clone()]).collect();
+        let event = events
+            .iter()
+            .find(|event| event.calls.contains(read))
+            .unwrap();
+        let paths: Vec<_> = event
+            .paths
+            .iter()
+            .map(|range| &event.body[range.clone()])
+            .collect();
         assert_eq!(paths, [file["filePath"].as_str().unwrap()]);
         assert!(read.input.is_empty());
         let edit = calls.iter().find(|call| call.name == "Edit").unwrap();
@@ -4013,6 +4023,20 @@ pub(crate) mod tests {
         assert_eq!(tail(file.path(), 2).unwrap(), expected_tail);
         assert!(tail(file.path(), 0).unwrap().is_empty());
     }
+    #[test]
+    fn captured_parallel_appium_calls_share_the_tool_prefix() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-appium-parallel.jsonl");
+        let events = tail(&path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].body,
+            "appium-mcp appium {gesture tap, screenshot maxWidth 400}"
+        );
+        assert_eq!(events[0].calls.len(), 2);
+        assert!(events[0].paths.is_empty());
+    }
+
     #[test]
     fn missing_result_keeps_the_entire_batch_running_and_request_id_groups() {
         let mut file = tempfile::NamedTempFile::new().unwrap();

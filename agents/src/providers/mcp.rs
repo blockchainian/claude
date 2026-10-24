@@ -31,9 +31,118 @@ pub(crate) fn parse(name: &str) -> Option<(&str, &str)> {
     (!server.is_empty() && !tool.is_empty()).then_some((server, tool))
 }
 
+/// Group MCP calls by server and shared tool-name components, preserving titles.
+pub(crate) fn list_group(name: &str, label: &str) -> Vec<String> {
+    if label != super::tool::display_tool_name(name) {
+        return vec![label.to_owned()];
+    }
+    let Some((server, tool)) = parse(name) else {
+        return vec![label.to_owned()];
+    };
+    if label != format!("{server} {}", tool.replace('_', " ")) {
+        return vec![label.to_owned()];
+    }
+    let mut words = tool.split('_');
+    let first = words.next().unwrap();
+    std::iter::once(format!("{server} {first}"))
+        .chain(words.map(str::to_owned))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::providers::tool::*;
+    #[test]
+    fn captured_mcp_tree_preserves_single_calls_nested_titles_and_path_ranges() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-appium.jsonl");
+        let events = crate::providers::claude::event_reader::tail(&path, 100).unwrap();
+        let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
+        let gestures: Vec<_> = calls
+            .iter()
+            .filter(|call| call.name.ends_with("__appium_gesture"))
+            .collect();
+        let screenshot = calls
+            .iter()
+            .find(|call| call.name.ends_with("__appium_screenshot"))
+            .unwrap();
+        let add = |groups: &mut groups::Groups, call: &crate::event::ToolCall| {
+            groups.add_path(
+                &super::list_group(&call.name, &display_tool_name(&call.name)),
+                Some(&call.title),
+            );
+        };
+        let mut groups = groups::Groups::default();
+        add(&mut groups, gestures[0]);
+        assert_eq!(groups.finish().unwrap(), "appium-mcp appium gesture tap");
+        let mut groups = groups::Groups::default();
+        for gesture in &gestures {
+            add(&mut groups, gesture);
+        }
+        assert_eq!(
+            groups.finish().unwrap(),
+            "appium-mcp appium gesture {tap, tap (200, 85)}"
+        );
+        let mut groups = groups::Groups::default();
+        for gesture in &gestures {
+            add(&mut groups, gesture);
+        }
+        add(&mut groups, screenshot);
+        groups.add("Read", Some("src/main.rs:10-20"));
+        let (body, ranges) = groups.finish_with_ranges().unwrap();
+        assert_eq!(
+            body,
+            "appium-mcp appium {gesture {tap, tap (200, 85)}, screenshot maxWidth 400}, Read src/main.rs:10-20"
+        );
+        assert_eq!(
+            ranges
+                .iter()
+                .map(|range| &body[range.clone()])
+                .collect::<Vec<_>>(),
+            ["tap", "tap (200, 85)", "maxWidth 400", "src/main.rs:10-20"]
+        );
+        assert_eq!(super::list_group("functions.exec", "Exec"), ["Exec"]);
+        assert_eq!(
+            super::list_group(&gestures[0].name, "human description"),
+            ["human description"]
+        );
+        assert_eq!(
+            super::list_group("mcp__other__appium_gesture", "other appium gesture"),
+            ["other appium", "gesture"]
+        );
+    }
+
+    #[test]
+    fn prefix_tools_and_subject_names_remain_distinct() {
+        let mut groups = groups::Groups::default();
+        groups.add_path(
+            &super::list_group("mcp__server__appium_gesture", "server appium gesture"),
+            None,
+        );
+        groups.add_path(
+            &super::list_group(
+                "mcp__server__appium_gesture_tap",
+                "server appium gesture tap",
+            ),
+            Some("detail"),
+        );
+        let (body, ranges) = groups.finish_with_ranges().unwrap();
+        assert_eq!(body, "server appium {gesture, gesture tap detail}");
+        assert_eq!(&body[ranges[0].clone()], "detail");
+        let mut groups = groups::Groups::default();
+        groups.add_path(&["server appium".into()], Some("gesture"));
+        groups.add_path(&["server appium".into(), "gesture".into()], Some("tap"));
+        let (body, ranges) = groups.finish_with_ranges().unwrap();
+        assert_eq!(body, "server appium gesture, server appium gesture tap");
+        assert_eq!(
+            ranges
+                .iter()
+                .map(|range| &body[range.clone()])
+                .collect::<Vec<_>>(),
+            ["gesture", "tap"]
+        );
+    }
+
     #[test]
     fn captured_mcp_names_preserve_server_and_tool_case() {
         let record: serde_json::Value =
