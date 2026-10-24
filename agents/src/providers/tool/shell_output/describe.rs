@@ -225,6 +225,22 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
             None,
             false,
         ),
+        row(
+            r"git\x00commit(?:\x00(.*))?",
+            &[
+                "--dry-run", "--short", "--long", "--porcelain", "-p", "--patch", "--interactive",
+                "-h", "--help",
+            ],
+            silent,
+            Plain,
+            None,
+            false,
+        )
+        .options(
+            &["-m", "--message", "-F", "--file", "-C", "-c", "-t", "--author", "--date"],
+            &["-q", "--quiet"],
+        ),
+        row(r"pgrep\x00(.+)", &[], silent, Plain, None, false).options(&[], &["-q"]),
         row(r"sleep\x00([0-9.]+)", &[], silent, Plain, None, false),
         row(
             r"(?:head|tail)\x00-n\x00([0-9]+)\x00([^\x00]+)",
@@ -1190,6 +1206,12 @@ mod shape_tests {
             ("rustfmt --edition 2024 a.rs", 0, Some(0), false, false),
             ("rustfmt --check a.rs", 0, None, false, false),
             ("rustfmt --emit=stdout a.rs", 0, None, false, false),
+            ("git commit -qm 'fix: a'", 0, Some(0), false, false),
+            ("git commit --quiet -m fix", 0, Some(0), false, false),
+            ("git commit -m fix", 0, None, false, false),
+            ("git commit -q --dry-run", 0, None, false, false),
+            ("pgrep -q -f agents", 0, Some(0), false, false),
+            ("pgrep -f agents", 0, None, false, false),
             ("sleep 0.1", 0, Some(0), false, false),
             ("head -n 3 a.py", 0, Some(3), true, false),
             ("tail -n 2 a.rs", 0, Some(2), true, false),
