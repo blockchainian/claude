@@ -23,7 +23,7 @@ const usage = `usage:
   manager.mjs pending                               Stop hook: block on undelivered events and unwatched threads
   manager.mjs owner                                 PostToolUse hook: record the thread's starting agent`;
 
-const MODEL_EFFORTS = Object.freeze({ "gpt-6.1-sol": ["medium"], "gpt-6-luna": ["high"] });
+const MODEL_EFFORTS = Object.freeze({ "gpt-6.1-sol": ["medium"] });
 
 function validateModelEffort(model, effort) {
   if (model !== undefined || effort !== undefined) {
