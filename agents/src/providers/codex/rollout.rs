@@ -4044,11 +4044,11 @@ mod tests {
                 text: "{unfinished".to_owned()
             }]
         );
-        let mcp = records
-            .iter()
-            .find(|record| record["payload"]["item"]["type"] == "McpToolCall")
-            .unwrap();
-        let event = completed_tool(mcp).unwrap().unwrap();
+        let mcp: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-client/notify.jsonl"
+        ))
+        .unwrap();
+        let event = completed_tool(&mcp).unwrap().unwrap();
         assert!(
             matches!(&event.calls[0].input[0], Section::Markdown {label, text} if label == "text" && text == mcp["payload"]["item"]["arguments"]["text"].as_str().unwrap())
         );

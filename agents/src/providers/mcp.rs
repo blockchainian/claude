@@ -48,8 +48,8 @@ mod tests {
             format!("{server} {}", tool.replace('_', " "))
         );
         assert_eq!(
-            display_tool_name("mcp__claude-client__ask_claude"),
-            "claude-client ask claude"
+            display_tool_name("mcp__claude-client__ask"),
+            "claude-client ask"
         );
     }
 

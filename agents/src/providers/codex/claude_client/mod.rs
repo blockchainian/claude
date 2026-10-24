@@ -4,14 +4,14 @@ pub(crate) const SERVER: McpServer = McpServer {
     name: "claude-client",
     tools: &[
         ToolRule {
-            name: "ask_claude",
+            name: "ask",
             input: Some((Pick::Field(Source::Input, "/text"), Format::Markdown)),
             output: Some((Pick::With(mcp_markdown_output), Format::Text)),
             list_input: true,
             ..DEFAULT_RULE
         },
         ToolRule {
-            name: "notify_claude",
+            name: "notify",
             input: Some((Pick::Field(Source::Input, "/text"), Format::Markdown)),
             output: Some((Pick::With(mcp_markdown_output), Format::Text)),
             list_input: true,
@@ -25,8 +25,8 @@ mod tests {
     #[test]
     fn claude_client_text_is_markdown_and_follows_the_list_tool_name() {
         for source in [
-            include_str!("../../../../tests/fixtures/claude-client/ask_claude.jsonl"),
-            include_str!("../../../../tests/fixtures/claude-client/notify_claude.jsonl"),
+            include_str!("../../../../tests/fixtures/claude-client/ask.jsonl"),
+            include_str!("../../../../tests/fixtures/claude-client/notify.jsonl"),
         ] {
             let record: serde_json::Value = serde_json::from_str(source).unwrap();
             let item = &record["payload"]["item"];
@@ -67,8 +67,8 @@ mod tests {
     #[test]
     fn tool_detail_titles_center_the_tool_name_without_a_subject() {
         for source in [
-            include_str!("../../../../tests/fixtures/claude-client/ask_claude.jsonl"),
-            include_str!("../../../../tests/fixtures/claude-client/notify_claude.jsonl"),
+            include_str!("../../../../tests/fixtures/claude-client/ask.jsonl"),
+            include_str!("../../../../tests/fixtures/claude-client/notify.jsonl"),
             include_str!("../../../../tests/fixtures/tool-list/claude.jsonl"),
         ] {
             let record: serde_json::Value =

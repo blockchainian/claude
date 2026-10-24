@@ -5,12 +5,12 @@ use crate::providers::{Provider, codex::CodexProvider};
 fn claude_client_recorded_input_and_reply_snapshot() {
     for (tool, source) in [
         (
-            "ask_claude",
-            include_str!("../../tests/fixtures/claude-client/ask_claude.jsonl"),
+            "ask",
+            include_str!("../../tests/fixtures/claude-client/ask.jsonl"),
         ),
         (
-            "notify_claude",
-            include_str!("../../tests/fixtures/claude-client/notify_claude.jsonl"),
+            "notify",
+            include_str!("../../tests/fixtures/claude-client/notify.jsonl"),
         ),
     ] {
         let directory = tempfile::tempdir().unwrap();

@@ -187,15 +187,15 @@ fn terminal_codex_mcp_generic_event_detail() {
 fn terminal_codex_claude_client_text() {
     for (tool, fixture, input_marker, reply_marker) in [
         (
-            "ask_claude",
-            include_str!("../fixtures/claude-client/ask_claude.jsonl"),
-            "状态线程正在",
-            "按函数拆补丁",
+            "ask",
+            include_str!("../fixtures/claude-client/ask.jsonl"),
+            "请回复 OK，用于抓 ask 的真实 fixture",
+            "OK",
         ),
         (
-            "notify_claude",
-            include_str!("../fixtures/claude-client/notify_claude.jsonl"),
-            "Step 4 provider/App/UI",
+            "notify",
+            include_str!("../fixtures/claude-client/notify.jsonl"),
+            "客户端改名线程开始抓 fixture",
             "Delivered to Claude.",
         ),
     ] {
