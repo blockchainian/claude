@@ -379,6 +379,65 @@ mod tests {
     }
 
     #[test]
+    fn bold_next_to_cjk_punctuation() {
+        for (source, bold) in [
+            ("**适用范围太窄。**这条规则开头是…", "适用范围太窄。"),
+            ("**放错了位置。**“发给…", "放错了位置。"),
+            (
+                "**改 CLAUDE.md 的适用范围。**把",
+                "改 CLAUDE.md 的适用范围。",
+            ),
+            ("中文**「粗体」**后文", "「粗体」"),
+            ("中文**(bold)**后文", "(bold)"),
+            ("a**「bold」**b", "「bold」"),
+            ("한**(bold)**글", "(bold)"),
+            ("ｶ**(bold)**ﾅ", "(bold)"),
+            ("字\u{e0100}**(bold)**后", "(bold)"),
+            ("字\u{fe00}**(bold)**后", "(bold)"),
+            ("a**「\u{fe00}bold」\u{fe00}**b", "「\u{fe00}bold」\u{fe00}"),
+        ] {
+            let lines = render(source, 100);
+            assert_eq!(plain(&lines).join(""), source.replace("**", ""), "{source}");
+            let styled: String = lines
+                .iter()
+                .flat_map(|line| &line.spans)
+                .filter(|span| span.style.add_modifier.contains(Modifier::BOLD))
+                .map(|span| span.content.as_ref())
+                .collect();
+            assert_eq!(styled, bold, "{source}");
+            assert!(has_markers(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn cjk_flanking_preserves_other_delimiter_rules() {
+        let lines = render("a**bold!\u{fe00}**b", 100);
+        assert_eq!(plain(&lines), ["abold!\u{fe00}b"]);
+        assert!(lines[0].spans.iter().any(|span| {
+            span.content == "bold!\u{fe00}" && span.style.add_modifier.contains(Modifier::BOLD)
+        }));
+        for source in [
+            "a**(bold)**b",
+            "a\u{fe00}**(bold)**b",
+            "a**😀bold😀**b",
+            "字** bold**后",
+            "字**bold **后",
+            "字__bold__后",
+            "a__「bold」__b",
+            "`**适用范围太窄。**这`",
+        ] {
+            let lines = render(source, 100);
+            assert!(
+                lines
+                    .iter()
+                    .flat_map(|line| &line.spans)
+                    .all(|span| { !span.style.add_modifier.contains(Modifier::BOLD) }),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
     fn mermaid_renders_box_drawing_and_caches_across_widths() {
         if !mermaid_process("mermaid_renders_box_drawing_and_caches_across_widths", true) {
             return;
