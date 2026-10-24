@@ -1357,16 +1357,7 @@ impl View {
                     selector.selected =
                         super::navigation::step(selector.selected, selector.len(), 1, code);
                 } else if over_event || over_task_details {
-                    let over_image = over_event
-                        && self
-                            .viewport
-                            .borrow()
-                            .event_detail_images
-                            .iter()
-                            .any(|image| image.area.contains(position));
-                    // Images are tall, so the wheel crosses them twice as fast as text.
-                    let rows = if over_image { WHEEL_ROWS * 2 } else { WHEEL_ROWS };
-                    self.scroll_content_rows(forward, over_event, mouse.row, rows, true);
+                    self.scroll_content_rows(forward, over_event, mouse.row, WHEEL_ROWS, true);
                 }
             }
             _ => {}

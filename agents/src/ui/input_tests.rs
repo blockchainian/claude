@@ -631,17 +631,3 @@ fn image_zoom_switching_tasks_does_not_park_zoom_mode() {
     assert_eq!(view.event_detail.scroll.borrow().zoom_image, None);
     assert!(view.event_detail.scroll.borrow().zooms.is_empty());
 }
-
-#[test]
-fn wheel_over_image_scrolls_details_twice_as_far() {
-    let scrolled = |column, row| {
-        let (_directory, mut view) = image_fixture();
-        drawn_image(&view);
-        view.handle_mouse(image_mouse(MouseEventKind::ScrollDown, column, row));
-        view.event_detail.scroll.borrow().offset
-    };
-    let text = scrolled(30, 31);
-    assert!(text > 0);
-    assert_eq!(scrolled(30, 28), text * 2);
-}
-
