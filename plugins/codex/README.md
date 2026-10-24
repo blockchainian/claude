@@ -8,7 +8,7 @@ MCP server, `codex-manager`: Claude starts a thread, gives it follow-up
 prompts, answers its questions and approval requests, interrupts it, lists
 what is running, asks it for a code review, and gets woken when it finishes
 or has something to say. Codex reaches Claude through two tools,
-`notify_claude` and `ask_claude`, served by an MCP server this plugin ships.
+`notify` and `ask`, served by an MCP server this plugin ships.
 Threads Claude starts get that server with the thread; sessions Claude
 attaches to get it from the installed `claude` plugin (see Install).
 
@@ -42,8 +42,8 @@ codex plugin marketplace add blockchainian/claude
 codex plugin add claude@blockchainian
 ```
 
-The plugin registers the `claude-client` MCP server with `ask_claude` and
-`notify_claude`. It starts `node codex-manager/manager.mjs claude` from its installed
+The plugin registers the `claude-client` MCP server with `ask` and
+`notify`. It starts `node claude-client/client.mjs mcp` from its installed
 directory, so no absolute script path or manual global MCP entry is needed.
 Claude's PostToolUse, Stop and SubagentStop hooks are excluded from the Codex installation.
 
@@ -73,7 +73,7 @@ with its app-server daemon running (`codex agents` starts one).
 | `start(cwd, prompt, name?, model?, effort?)` | `thread/start` on the daemon (approval `on-request`, sandbox `workspace-write` with network access, and the `claude-client` MCP server in its config), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. Omit both `model` and `effort` to keep the daemon defaults, or pass both: `gpt-6.1-sol` with `medium`, or `gpt-6-luna` with `high`. Other pairs are refused. |
 | `attach(thread)` | Take over a session that is already running elsewhere (the codex TUI, say), found by its thread id or exact name. `thread/resume` with nothing but the id subscribes to it, so its settings stay as its own client set them. After that `send`, `reply`, `interrupt`, `list` and the await command work on it. |
 | `send(threadId, prompt)` | `turn/start` on an existing thread. When a turn is still running the prompt is injected into it (the daemon's start-or-steer rule); the result says which happened. |
-| `reply(threadId, ask, reply, callId?)` | Answer what the thread is waiting for, quoting the request's text as `ask`: the reply becomes the result of its `ask_claude` call, or, for an approval request, one of the decisions its inbox event listed. `callId` picks one when several are waiting. |
+| `reply(threadId, ask, reply, callId?)` | Answer what the thread is waiting for, quoting the request's text as `ask`: the reply becomes the result of its `ask` call, or, for an approval request, one of the decisions its inbox event listed. `callId` picks one when several are waiting. |
 | `interrupt(threadId)` | `turn/interrupt` the thread's current turn. |
 | `list(state?)` | The threads this Claude session started or attached, their `state`, and the unread inbox count per thread. State is `detached` first, then `waiting` for a pending ask or approval, otherwise `lastStatus`: `inProgress`, `completed`, `failed`, `interrupted`, `idle` (no turn yet), or `unavailable` (resume failed). Pass an array of states to include; omit for all threads, or pass `[]` for none. |
 | `detach(threadId)` | Release a thread no longer needed. A thread this session started gets `thread/archive`, together with its spawned agents, and a later `send` is refused. An attached session only gets `thread/unsubscribe`; it stays open in its own client, and a later `send` or `attach` subscribes again. Refused while a turn is running. |
@@ -89,7 +89,7 @@ none or several open, the name is refused with the candidates' ids.
 The daemon sends a thread's approval requests to every client subscribed to
 it, and the first answer settles them for all. So for an attached session the
 manager answers none of the daemon's requests, not even with an error: they
-stay with the client the session runs in. `notify_claude` and `ask_claude` do
+stay with the client the session runs in. `notify` and `ask` do
 reach Claude, because they do not travel through the daemon's requests.
 
 ## Getting woken
@@ -105,7 +105,10 @@ same turn; a thread the session started is then archived and takes no further
 `send`. Before ending a multi-thread run, `list(state: ["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"])`
 and detach every finished thread.
 
-`node <plugin>/codex-manager/manager.mjs detach --thread <id>` releases a thread through its owning session, even after that session exits.
+`node <plugin>/codex-manager/manager.mjs detach --thread <id>` releases a thread
+through its owning session, even after that session exits. It interrupts a running
+turn and waits up to ten seconds for it to end before detaching; on timeout it
+fails without detaching.
 
 Every `start`/`send`/`review` result carries an await command. Run it with
 `run_in_background`:
@@ -121,10 +124,10 @@ Claude. Four kinds of event arrive:
   from `turn/completed`. A codex turn is a whole task, so this fires once per
   prompt, never per tool call. For a review thread `lastMessage` names the
   file the review was written to.
-- `{"kind":"notify","text":…}` when codex calls `notify_claude`. The tools
+- `{"kind":"notify","text":…}` when codex calls `notify`. The tools
   server appends the text to the inbox and answers at once; codex keeps
   working.
-- `{"kind":"ask","callId":…,"text":…}` when codex calls `ask_claude`. The tools
+- `{"kind":"ask","callId":…,"text":…}` when codex calls `ask`. The tools
   server keeps the call open, so codex blocks inside the same turn until
   Claude calls `reply`; the reply text is what codex receives as the tool's
   result.
@@ -143,14 +146,14 @@ whatever was still held, and the manager withdraws the open questions too.
 
 ## How a tool call finds its Claude session
 
-Codex starts the tools server itself (`manager.mjs claude`), so it
+Codex starts the tools server itself (`claude-client/client.mjs mcp`), so it
 knows nothing of Claude's session. Codex sends the calling thread's id with
 every MCP tool call (`_meta.threadId`). The manager records, for each thread it
 starts, attaches or adopts, which session supervises it and the manager's pid;
 the last session to claim a thread has it. The tools server looks the thread up
 there, refuses when there is no record or that manager is no longer running,
 and otherwise writes into that session's directory: the inbox event, and for
-`ask_claude` the open question, which `reply` answers with a file the tools
+`ask` the open question, which `reply` answers with a file the tools
 server is polling for. The manager and ownership hook serialize `state.json`
 edits under a shared lock.
 
@@ -229,8 +232,8 @@ the rendered text is what the daemon hands to every client. Severity is the
 reviewer's claim — the caller verifies each finding against the code before
 acting on it.
 
-Rejected: dynamic tools declared on `thread/start` for `notify_claude` and
-`ask_claude` (the daemon routes their calls to the client that started the
+Rejected: dynamic tools declared on `thread/start` for `notify` and
+`ask` (the daemon routes their calls to the client that started the
 thread, but they can be declared nowhere else, so a session Claude did not
 start can never have them); a Claude subagent wrapping a codex CLI call per workstream (stacks
 both latencies and cleans worktrees up under running jobs); `codex exec
@@ -250,7 +253,7 @@ parameters, approval forwarding, completion delivery, the review tool, adoption 
 restart, reconnect after a dropped daemon connection, daemon-down error
 reporting, and attaching to a session by name or id. The tools server runs as
 a second child on the same state directory, called the way codex calls it:
-`notify_claude`, `ask_claude` answered by `reply`, ask timeout, cancelled and
+`notify`, `ask` answered by `reply`, ask timeout, cancelled and
 abandoned calls, and threads nobody supervises.
 
 ## License

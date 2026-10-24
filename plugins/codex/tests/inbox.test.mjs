@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import test from "node:test";
-import { SessionStore } from "../codex-manager/inbox.mjs";
+import { SessionStore } from "../lib/inbox.mjs";
 
 for (const state of ["missing", "empty", "consumed", "partial", "pending skips await"]) {
   test(`claim creates no lock directory when inbox is ${state}`, async () => {

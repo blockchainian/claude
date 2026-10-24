@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ABOUTME: Lets Claude Code run codex threads on the shared app-server daemon as supervised workers.
-// ABOUTME: `mcp` serves Claude's tools and relays codex events; `await` and `pending` deliver them; `claude` serves codex.
+// ABOUTME: `mcp` serves Claude's tools and relays codex events; `await` and `pending` deliver them.
 
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -9,8 +9,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 import { readStdin } from "../lib/stdin.mjs";
-import { runClaude } from "./claude.mjs";
-import { SessionStore, askTimeoutSeconds, readSupervisor, writeSupervisor } from "./inbox.mjs";
+import { SessionStore, askTimeoutSeconds, readSupervisor, writeSupervisor } from "../lib/inbox.mjs";
 import { parentProcesses, recordedSessionId, resolveSessionId } from "./session.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -21,9 +20,7 @@ const usage = `usage:
   manager.mjs await --thread <id> [--timeout <s>]   print the next inbox events and exit
   manager.mjs detach --thread <id>                   release a thread from its owning session
   manager.mjs pending                               Stop hook: block on undelivered events and unwatched threads
-  manager.mjs owner                                 PostToolUse hook: record the thread's starting agent
-  manager.mjs claude                                serve notify_claude and ask_claude to codex over stdio
-  manager.mjs whoami                                print the resolved Claude session id`;
+  manager.mjs owner                                 PostToolUse hook: record the thread's starting agent`;
 
 const DEFAULT_DECISIONS = ["accept", "acceptForSession", "decline", "cancel"];
 const MODEL_EFFORTS = Object.freeze({ "gpt-6.1-sol": ["medium"], "gpt-6-luna": ["high"] });
@@ -35,10 +32,10 @@ const APPROVALS = {
 const TOOL_TIMEOUT_MARGIN_SECONDS = 60;
 const FORWARDED_ENV = ["CODEX_MANAGER_STATE_DIR", "CODEX_MANAGER_ASK_TIMEOUT"];
 
-/** How codex launches the server that carries notify_claude and ask_claude, as an mcp_servers entry. */
+/** How codex launches the server that carries notify and ask, as an mcp_servers entry. */
 function claudeToolsServer() {
   const env = Object.fromEntries(FORWARDED_ENV.filter((name) => process.env[name]).map((name) => [name, process.env[name]]));
-  return { command: process.execPath, args: [scriptPath, "claude"], env, tool_timeout_sec: askTimeoutSeconds() + TOOL_TIMEOUT_MARGIN_SECONDS, default_tools_approval_mode: "approve" };
+  return { command: process.execPath, args: [fileURLToPath(new URL("../claude-client/client.mjs", import.meta.url)), "mcp"], env, tool_timeout_sec: askTimeoutSeconds() + TOOL_TIMEOUT_MARGIN_SECONDS, default_tools_approval_mode: "approve" };
 }
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000, 30000];
 
@@ -198,7 +195,7 @@ class Manager {
     });
   }
 
-  /** Points the thread's notify_claude and ask_claude calls at this session. */
+  /** Points the thread's notify and ask calls at this session. */
   supervise(threadId) {
     writeSupervisor(threadId, { sessionId: this.store.sessionId, pid: process.pid });
   }
@@ -443,7 +440,7 @@ class Manager {
     const absolute = path.resolve(cwd);
     const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", claudeTools: true, model, effort });
     const turn = await this.startTurn(client, threadId, prompt);
-    return { threadId, turnId: turn.id, name: name ?? null, cwd: absolute, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when codex finishes the turn, calls notify_claude or ask_claude, or needs an approval." };
+    return { threadId, turnId: turn.id, name: name ?? null, cwd: absolute, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when codex finishes the turn, calls notify or ask, or needs an approval." };
   }
 
   /** Runs codex's own review mode (its rubric and priorities) over the commits since base; the rendered review lands in out. */
@@ -618,7 +615,7 @@ const TOOLS = [
   { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task; returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute checkout or worktree root, not a subdirectory." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation: its goal, the files involved, test-first, the gate, and commit+push." }, name: { type: "string", description: "Short human-readable thread name." }, model: { type: "string", enum: Object.keys(MODEL_EFFORTS), description: "Worker model; supply effort with it, or omit both for daemon defaults." }, effort: { type: "string", enum: [...new Set(Object.values(MODEL_EFFORTS).flat())], description: `Required effort for the selected model; supply model with it. ${Object.entries(MODEL_EFFORTS).map(([model, efforts]) => `${model} allows ${efforts.join(" or ")}`).join("; ")}.` } }, required: ["cwd", "prompt"] } },
   { name: "attach", description: "Take over a codex session already running elsewhere, found by its thread id or exact name, so that send, interrupt and the await command work on it. Its approvals stay with the client it runs in.", inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or exact session name." } }, required: ["thread"] } },
   { name: "send", description: "Send a follow-up prompt to a codex thread: it starts a new turn when the thread is idle and is injected into the running turn otherwise. Keep follow-ups small and related, at most three items; start a new thread for unrelated work.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, prompt: { type: "string" } }, required: ["threadId", "prompt"] } },
-  { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. Pass the request's text as ask and your answer as reply. The reply becomes the result of its ask_claude call or, for an approval request, one of the decisions its inbox event listed. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, ask: { type: "string", description: "The waiting request's text, verbatim: the ask_claude question or the approval description." }, reply: { type: "string", description: "The answer; for an approval, one of its listed decisions." } }, required: ["threadId", "ask", "reply"] } },
+  { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. Pass the request's text as ask and your answer as reply. The reply becomes the result of its ask call or, for an approval request, one of the decisions its inbox event listed. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, ask: { type: "string", description: "The waiting request's text, verbatim: the ask question or the approval description." }, reply: { type: "string", description: "The answer; for an approval, one of its listed decisions." } }, required: ["threadId", "ask", "reply"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "list", description: "List the codex threads this session started or attached, with each one's state, what it is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: { state: { type: "array", items: { type: "string", enum: ["detached", "waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] }, description: "Return only threads in these states; omit for all threads. Detached takes precedence over waiting on an ask or approval, then the last turn status applies." } } } },
   { name: "detach", description: "Release a thread you no longer need. A thread you started is archived with its spawned agents and takes no further send; an attached session stays open in its own client, and send or attach takes it back. Refused while a turn is running.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
@@ -693,7 +690,28 @@ async function runDetach(options) {
     // This caller releases one thread without taking over the session's other threads or supervisor pid.
     const client = await manager.connect({ adopt: false });
     client.onServerRequest = () => {};
-    const latest = await manager.subscribe(client, options.thread);
+    let latest = await manager.subscribe(client, options.thread);
+    if (latest?.status === "inProgress") {
+      const turnId = latest.id;
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`thread ${options.thread} turn ${turnId} timed out after 10 seconds waiting for interruption`)), 10_000);
+      });
+      try {
+        await Promise.race([client.request("turn/interrupt", { threadId: options.thread, turnId }), timeout]);
+        do {
+          const turns = await Promise.race([
+            client.request("thread/turns/list", { threadId: options.thread, limit: 1, sortDirection: "desc", itemsView: "full" }),
+            timeout
+          ]);
+          latest = turns.data?.[0];
+          if (latest?.id !== turnId || !latest.status) throw new Error(`thread ${options.thread} turn ${turnId} missing from latest turns`);
+          if (latest.status === "inProgress") await Promise.race([sleep(50), timeout]);
+        } while (latest.status === "inProgress");
+      } finally {
+        clearTimeout(timer);
+      }
+    }
     manager.updateThread(options.thread, { turnId: latest?.id, lastStatus: latest?.status ?? "idle" });
     const result = await manager.detach({ threadId: options.thread });
     process.stdout.write(`${JSON.stringify(result)}\n`);
@@ -713,11 +731,6 @@ export async function main(argv) {
   if (command === "detach") return runDetach(options);
   if (command === "pending") return runPending();
   if (command === "owner") return runOwner();
-  if (command === "claude") return runClaude(JSON.parse(await readFile(pluginManifestPath, "utf8")).version);
-  if (command === "whoami") {
-    process.stdout.write(`${await resolveSessionId()}\n`);
-    return 0;
-  }
   throw new Error(command ? `unknown command: ${command}` : "missing command");
 }
 
