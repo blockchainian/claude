@@ -391,7 +391,8 @@ pub trait Provider: Send {
 }
 
 pub fn configured() -> io::Result<(crate::sessions::Hub, PathBuf)> {
-    let provider = claude::ClaudeProvider::from_config()?;
+    let provider = claude::ClaudeProvider::from_config()?
+        .with_codex_manager(claude::codex_manager::supervision::state_dir()?);
     let preferences_dir = provider.preferences_dir();
     let mut providers: Vec<Box<dyn Provider>> = vec![
         Box::new(provider),

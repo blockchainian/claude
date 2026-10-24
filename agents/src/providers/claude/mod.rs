@@ -20,6 +20,9 @@ mod settings_tests;
 #[cfg(test)]
 pub use models::write_fixture_cache;
 mod ask_user_question;
+pub(crate) mod codex_manager;
+#[cfg(test)]
+mod codex_manager_tests;
 pub(crate) mod event_reader;
 mod images;
 #[cfg(test)]
@@ -36,8 +39,8 @@ mod weekly_usage;
 
 use crate::model::{Action, Process, Session, SessionStatus};
 use crate::providers::{
-    Capabilities, Provider, ProviderId, SessionAction, SessionInput, SessionKey, Snapshot,
-    TerminalCommand, TerminalInput,
+    Capabilities, Provider, ProviderId, SessionAction, SessionInput, SessionKey, Snapshot, Supervision,
+    SupervisionState, TerminalCommand, TerminalInput,
 };
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
@@ -328,6 +331,7 @@ struct CachedSummary {
 
 pub struct ClaudeProvider {
     config_dir: PathBuf,
+    codex_manager: Option<PathBuf>,
     index: HashMap<String, Transcript>,
     summaries: HashMap<PathBuf, CachedSummary>,
     starts: HashMap<PathBuf, Option<DateTime<Utc>>>,
@@ -424,12 +428,19 @@ impl ClaudeProvider {
     pub fn new(config_dir: PathBuf) -> Self {
         Self {
             config_dir,
+            codex_manager: None,
             index: HashMap::new(),
             summaries: HashMap::new(),
             starts: HashMap::new(),
             background: background::Tasks::default(),
             ask_user_question: None,
         }
+    }
+
+    /// Reports, watches and detaches the Codex threads codex-manager records under `state`.
+    pub fn with_codex_manager(mut self, state: PathBuf) -> Self {
+        self.codex_manager = Some(state);
+        self
     }
 
     pub fn from_config() -> io::Result<Self> {
@@ -684,10 +695,22 @@ impl ClaudeProvider {
                 }
             }
         }
+        let supervisions = if let Some(state) = &self.codex_manager {
+            let keys: Vec<_> = sessions.iter().map(|session| session.id.clone()).collect();
+            match codex_manager::supervision::supervisions(state, &keys) {
+                Ok(supervisions) => supervisions,
+                Err(error) => {
+                    eprintln!("agents: codex-manager supervisions: {error}");
+                    vec![]
+                }
+            }
+        } else {
+            vec![]
+        };
         Snapshot {
             sessions,
             has_more,
-            supervisions: vec![],
+            supervisions,
         }
     }
 
@@ -872,6 +895,7 @@ impl Provider for ClaudeProvider {
     fn session_source(&self) -> Box<dyn Provider> {
         let mut source = Self::new(self.config_dir.clone());
         source.ask_user_question = self.ask_user_question.clone();
+        source.codex_manager = self.codex_manager.clone();
         Box::new(source)
     }
 
@@ -1017,7 +1041,13 @@ impl Provider for ClaudeProvider {
             .mode(0o700)
             .recursive(true)
             .create(&jobs)?;
-        Ok(vec![sessions, self.config_dir.join("projects"), jobs])
+        let mut roots = vec![sessions, self.config_dir.join("projects"), jobs];
+        if let Some(state) = &self.codex_manager
+            && state.is_dir()
+        {
+            roots.push(state.clone());
+        }
+        Ok(roots)
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -1229,6 +1259,42 @@ impl Provider for ClaudeProvider {
         let session = session.clone();
         Ok(Box::new(move || delete_session(&config_dir, &session)))
     }
+    fn detach(&self, supervision: &Supervision) -> io::Result<SessionAction> {
+        if supervision.session.provider != ProviderId::Codex {
+            return Err(io::ErrorKind::Unsupported.into());
+        }
+        let state = self.codex_manager.clone().ok_or(io::ErrorKind::Unsupported)?;
+        let config = self.config_dir.clone();
+        let supervision = supervision.clone();
+        Ok(Box::new(move || {
+            let current = codex_manager::supervision::supervisions(
+                &state,
+                std::slice::from_ref(&supervision.supervisor),
+            )?;
+            if current.iter().any(|current| {
+                current.session == supervision.session && current.state == SupervisionState::Detached
+            }) {
+                return Ok(());
+            }
+            let output = codex_manager::supervision::detach_command(
+                &config,
+                &state,
+                &supervision.session.id,
+            )?
+            .output()?;
+            if !output.status.success() {
+                return Err(io::Error::other(format!(
+                    "codex-manager detach failed ({}): {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                )));
+            }
+            let _: serde_json::Value = serde_json::from_slice(&output.stdout)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            Ok(())
+        }))
+    }
+
     fn archive(&self, session: &Session) -> io::Result<SessionAction> {
         let config_dir = self.config_dir.clone();
         let session = session.clone();
