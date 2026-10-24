@@ -782,10 +782,10 @@ impl EventReader {
         &mut self,
         record: &serde_json::Value,
         body: &str,
-    ) -> io::Result<Vec<crate::images::Image>> {
+    ) -> Vec<crate::images::Image> {
         match self.source_records().first() {
             Some(source) => self.images.take(source, record, body),
-            None => Ok(Vec::new()),
+            None => Vec::new(),
         }
     }
 
@@ -902,7 +902,7 @@ impl EventReader {
                     if let Some((kind, sender, body)) = wrapped {
                         self.push_wrapped(&record, kind, sender, body, at);
                     } else if is_prompt_text(&record, &text) {
-                        let images = self.prompt_images(&record, &text)?;
+                        let images = self.prompt_images(&record, &text);
                         let kind = if record["isCompactSummary"] == true {
                             Kind::Compaction
                         } else {
@@ -1000,7 +1000,7 @@ impl EventReader {
                         self.push_wrapped(&record, kind, sender, body, at);
                     } else {
                         let body = prompt_body(&text);
-                        let images = self.prompt_images(&record, &body)?;
+                        let images = self.prompt_images(&record, &body);
                         self.push(Kind::User, body, at);
                         let event = &mut self.entries.last_mut().unwrap().event;
                         event.source = record["uuid"].as_str().map(str::to_owned);
@@ -1028,7 +1028,7 @@ impl EventReader {
                     let (sender, body) = peer
                         .map(|(_, sender, body)| (sender, body))
                         .unwrap_or_else(|| (None, body.to_owned()));
-                    let images = self.prompt_images(&record, &body)?;
+                    let images = self.prompt_images(&record, &body);
                     self.push(kind, body, at);
                     self.entries.last_mut().unwrap().event.images = images;
                     self.entries.last_mut().unwrap().event.source =
@@ -2531,6 +2531,7 @@ pub(crate) mod tests {
         });
         writeln!(file, "{remove}").unwrap();
         reader.refresh(20).unwrap();
+        let delivery_offset = file.as_file().metadata().unwrap().len();
         writeln!(file, "{delivery}").unwrap();
         let events = reader.refresh(20).unwrap().events;
         assert_eq!(events.len(), 1);
@@ -2546,10 +2547,17 @@ pub(crate) mod tests {
         assert_eq!(events[0].body, text);
         assert_eq!(events[0].images.len(), 1);
         assert_eq!(events[0].images[0].label, "[Image #1]");
-        let crate::images::ImageSource::File { path, .. } = &events[0].images[0].source else {
-            panic!("expected materialized image")
-        };
-        let bytes = std::fs::read(path).unwrap();
+        assert_eq!(
+            events[0].images[0].source,
+            crate::images::ImageSource::Record {
+                record: crate::event::SourceRecord {
+                    path: file.path().to_owned(),
+                    offset: delivery_offset,
+                },
+                pointer: "/attachment/prompt/1/source/data".into(),
+            }
+        );
+        let bytes = events[0].images[0].source.bytes().unwrap();
         assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
         assert_eq!(super::tail(file.path(), 20).unwrap(), events);
         let summary =
@@ -2575,7 +2583,7 @@ pub(crate) mod tests {
         assert_eq!(events.len(), 2);
         for (event, numbers) in events.iter().zip([&[6][..], &[8, 9]]) {
             assert_eq!(event.kind, crate::event::Kind::User);
-            super::super::transcript::tests::assert_embedded_images(&event.images, numbers);
+            super::super::transcript::tests::assert_record_images(&event.images, numbers);
         }
         assert_eq!(super::tail(&path, 1).unwrap()[0].images, events[1].images);
     }

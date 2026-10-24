@@ -713,7 +713,6 @@ fn read_messages(
     let mut effort_found = false;
     let mut tool_results = HashSet::new();
     let mut images = super::images::PromptImages::default();
-    let mut image_error = None;
     let mut activity = super::event_reader::ActivityEvent::default();
     walk_records(file, start, bytes, sidechains, |offset, record| {
         let source = SourceRecord {
@@ -802,13 +801,7 @@ fn read_messages(
         {
             summary.task_details_sources[2] = record["uuid"].as_str().map(str::to_owned);
             summary.prompt = printable(&prompt);
-            match images.take(&source, &record, &summary.prompt) {
-                Ok(images) => summary.prompt_images = images,
-                Err(error) => {
-                    image_error = Some(error);
-                    return false;
-                }
-            }
+            summary.prompt_images = images.take(&source, &record, &summary.prompt);
             summary.prompt_at = at;
             summary.turn_messages = turn_messages;
             prompt_found = true;
@@ -840,9 +833,6 @@ fn read_messages(
         }
         true
     })?;
-    if let Some(error) = image_error {
-        return Err(error);
-    }
     if let Some(event) = activity.finish()? {
         summary.task_details_sources[0] = event.calls.first().map(|call| call.id.clone());
         summary.activity = Some(event.activity());
@@ -1428,7 +1418,7 @@ pub(super) mod tests {
     }
 
     /// Asserts `images` are the labelled PNGs embedded in the transcript.
-    pub(in crate::providers::claude) fn assert_embedded_images(
+    pub(in crate::providers::claude) fn assert_record_images(
         images: &[crate::images::Image],
         numbers: &[u64],
     ) {
@@ -1443,10 +1433,17 @@ pub(super) mod tests {
                 .collect::<Vec<_>>()
         );
         for image in images {
-            let crate::images::ImageSource::File { path, .. } = &image.source else {
-                panic!("expected materialized image")
+            let crate::images::ImageSource::Record { record, pointer } = &image.source else {
+                panic!("expected transcript image")
             };
-            assert!(std::fs::read(path).unwrap().starts_with(b"\x89PNG\r\n"));
+            let mut file = BufReader::new(File::open(&record.path).unwrap());
+            file.seek(SeekFrom::Start(record.offset)).unwrap();
+            let mut line = String::new();
+            file.read_line(&mut line).unwrap();
+            let value: Value = serde_json::from_str(&line).unwrap();
+            assert!(value.pointer(pointer).unwrap().is_string());
+            assert!(pointer.ends_with("/source/data"));
+            assert!(image.source.bytes().unwrap().starts_with(b"\x89PNG\r\n"));
         }
     }
 
@@ -1465,8 +1462,21 @@ pub(super) mod tests {
         }
         std::fs::write(&path, &bytes).unwrap();
         let summary = read(&path, bytes.len() as u64).unwrap();
-        let session = super::super::session("test".into(), summary, Some(path), Utc::now());
-        assert_embedded_images(&session.prompt_images, &[8, 9]);
+        let session = super::super::session("test".into(), summary, Some(path.clone()), Utc::now());
+        assert_record_images(&session.prompt_images, &[8, 9]);
+        let offset = bytes.find(&format!("{}\n", records[4])).unwrap() as u64;
+        for (index, image) in session.prompt_images.iter().enumerate() {
+            assert_eq!(
+                image.source,
+                crate::images::ImageSource::Record {
+                    record: SourceRecord {
+                        path: path.clone(),
+                        offset
+                    },
+                    pointer: format!("/message/content/{}/source/data", index + 1),
+                }
+            );
+        }
     }
 
     #[test]
@@ -1585,6 +1595,71 @@ pub(super) mod tests {
                     expected
                 );
             }
+        }
+    }
+
+    #[test]
+    fn damaged_prompt_images_keep_the_event_and_generic_label() {
+        let (_, records) = image_fixture();
+        for mime in [Value::Null, Value::from("invalid mime")] {
+            let mut record = records[0].clone();
+            record.as_object_mut().unwrap().remove("imagePasteIds");
+            let source = &mut record["message"]["content"][1]["source"];
+            source.as_object_mut().unwrap().remove("media_type");
+            if !mime.is_null() {
+                source["media_type"] = mime;
+            }
+            source["data"] = "".into();
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(file, "{record}").unwrap();
+            let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+            let events = super::super::event_reader::tail(file.path(), 20).unwrap();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].kind, crate::event::Kind::User);
+            assert_eq!(events[0].body, summary.prompt);
+            assert_eq!(events[0].images, summary.prompt_images);
+            assert_eq!(summary.prompt_images.len(), 1);
+            assert_eq!(summary.prompt_images[0].label, "[image]");
+            assert_eq!(
+                summary.prompt_images[0].source,
+                crate::images::ImageSource::Record {
+                    record: SourceRecord {
+                        path: file.path().to_owned(),
+                        offset: 0
+                    },
+                    pointer: "/message/content/1/source/data".into(),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn subagent_prompt_images_use_absolute_tail_offsets() {
+        let (_, records) = image_fixture();
+        let mut record = records[4].clone();
+        record["isSidechain"] = true.into();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{}", " ".repeat(3 * CHUNK as usize)).unwrap();
+        let offset = file.as_file().metadata().unwrap().len();
+        writeln!(file, "{record}").unwrap();
+        let summary = read_subagent_tail(
+            file.path(),
+            &mut File::open(file.path()).unwrap(),
+            file.as_file().metadata().unwrap().len(),
+        )
+        .unwrap();
+        assert_record_images(&summary.prompt_images, &[8, 9]);
+        for (index, image) in summary.prompt_images.iter().enumerate() {
+            assert_eq!(
+                image.source,
+                crate::images::ImageSource::Record {
+                    record: SourceRecord {
+                        path: file.path().to_owned(),
+                        offset
+                    },
+                    pointer: format!("/message/content/{}/source/data", index + 1),
+                }
+            );
         }
     }
 

@@ -1,13 +1,7 @@
 use crate::event::SourceRecord;
 use crate::images::{Image, ImageSource};
-use base64::Engine;
 use serde_json::Value;
-use std::{collections::HashMap, path::PathBuf};
-use std::{
-    hash::{Hash, Hasher},
-    io::{self, Write},
-    os::unix::fs::DirBuilderExt,
-};
+use std::collections::HashMap;
 
 /// The images embedded in prompts; queued prompts arrive before their deliveries in a backwards walk.
 #[derive(Default)]
@@ -38,12 +32,7 @@ impl PromptImages {
         }
     }
 
-    pub(super) fn take(
-        &mut self,
-        _source: &SourceRecord,
-        record: &Value,
-        body: &str,
-    ) -> io::Result<Vec<Image>> {
+    pub(super) fn take(&mut self, source: &SourceRecord, record: &Value, body: &str) -> Vec<Image> {
         if record["type"] == "queue-operation"
             && record["operation"] == "enqueue"
             && let Some((source, delivery)) = record["content"]
@@ -53,21 +42,23 @@ impl PromptImages {
         {
             return self.take(&source, &delivery, body);
         }
+        let prefix = if queued_prompt(record).is_some() {
+            "/attachment/prompt"
+        } else {
+            "/message/content"
+        };
         image_blocks(record)
-            .map(|(label, block)| {
+            .map(|(index, label, block)| {
                 let label = label
                     .filter(|label| body.contains(label))
                     .unwrap_or_else(|| image_caption(block));
-                let path = embedded_image(&block["source"])?;
-                let metadata = std::fs::metadata(&path)?;
-                Ok(Image {
+                Image {
                     label,
-                    source: ImageSource::File {
-                        path,
-                        len: metadata.len(),
-                        modified: metadata.modified()?,
+                    source: ImageSource::Record {
+                        record: source.clone(),
+                        pointer: format!("{prefix}/{index}/source/data"),
                     },
-                })
+                }
             })
             .collect()
     }
@@ -98,7 +89,7 @@ pub(super) fn prompt_text(record: &Value) -> Option<String> {
     };
     if text.trim().is_empty() {
         let labels = image_blocks(record)
-            .map(|(label, block)| label.unwrap_or_else(|| image_caption(block)))
+            .map(|(_, label, block)| label.unwrap_or_else(|| image_caption(block)))
             .collect::<Vec<_>>();
         Some(if labels.is_empty() {
             text
@@ -110,7 +101,7 @@ pub(super) fn prompt_text(record: &Value) -> Option<String> {
     }
 }
 
-fn image_blocks(record: &Value) -> impl Iterator<Item = (Option<String>, &Value)> {
+fn image_blocks(record: &Value) -> impl Iterator<Item = (usize, Option<String>, &Value)> {
     let (prompt, content) = if let Some(prompt) = queued_prompt(record) {
         (&record["attachment"], prompt)
     } else {
@@ -120,13 +111,14 @@ fn image_blocks(record: &Value) -> impl Iterator<Item = (Option<String>, &Value)
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|block| block["type"] == "image")
         .enumerate()
-        .map(move |(index, block)| {
-            let label = prompt["imagePasteIds"][index]
+        .filter(|(_, block)| block["type"] == "image")
+        .enumerate()
+        .map(move |(image_index, (index, block))| {
+            let label = prompt["imagePasteIds"][image_index]
                 .as_u64()
                 .map(|number| format!("[Image #{number}]"));
-            (label, block)
+            (index, label, block)
         })
 }
 
@@ -143,42 +135,4 @@ fn image_caption(block: &Value) -> String {
         Some(mime) => format!("[image {mime}]"),
         None => "[image]".to_owned(),
     }
-}
-
-fn embedded_image(source: &Value) -> io::Result<PathBuf> {
-    let invalid = || io::Error::new(io::ErrorKind::InvalidData, "Invalid Claude pasted image");
-    if source["type"] != "base64" {
-        return Err(invalid());
-    }
-    let extension = match source["media_type"].as_str() {
-        Some("image/png") => "png",
-        Some("image/jpeg") => "jpg",
-        Some("image/gif") => "gif",
-        Some("image/webp") => "webp",
-        _ => return Err(invalid()),
-    };
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(source["data"].as_str().ok_or_else(invalid)?)
-        .map_err(|_| invalid())?;
-    let mut hash = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hash);
-    let directory = std::env::temp_dir().join(format!("agents-images-{}", std::process::id()));
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .recursive(true)
-        .create(&directory)?;
-    let path = directory.join(format!("{:016x}.{extension}", hash.finish()));
-    if !path.exists() {
-        let mut file = tempfile::NamedTempFile::new_in(&directory)?;
-        file.write_all(&bytes)?;
-        match file.persist_noclobber(&path) {
-            Ok(_) => {}
-            Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error.error),
-        }
-    }
-    if std::fs::read(&path)? != bytes {
-        return Err(invalid());
-    }
-    Ok(path)
 }
