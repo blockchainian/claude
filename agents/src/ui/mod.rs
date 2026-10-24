@@ -27,6 +27,7 @@ mod hyperlink;
 mod inline_images;
 mod input;
 mod key_name;
+mod line_edit;
 mod line_truncation;
 pub(crate) mod links;
 mod markdown;
@@ -291,7 +292,7 @@ pub struct View {
     last_update: DateTime<Utc>,
     event_detail: task_ui::EventDetail,
     input_box: prompt_box::PromptBox,
-    prompt_history: std::rc::Rc<RefCell<Vec<crate::line_edit::LineEdit>>>,
+    prompt_history: std::rc::Rc<RefCell<Vec<line_edit::LineEdit>>>,
     questions: question_flow::Questions,
     capabilities: HashMap<ProviderId, Capabilities>,
     rows: Vec<Session>,
@@ -317,7 +318,7 @@ pub struct View {
     name_target: Option<crate::model::DraftKey>,
     /// The prompt of the turn Esc is stopping, returned to its input once the stop lands.
     stopping_prompt: Option<(SessionKey, String)>,
-    rename: crate::line_edit::LineEdit,
+    rename: line_edit::LineEdit,
     confirm_dialog: Option<ConfirmDialog>,
     reset_incidents: Vec<reset_credit::ResetIncident>,
     reset_pending: HashSet<ProviderId>,
@@ -452,7 +453,7 @@ impl View {
             rename_target: None,
             name_target: None,
             stopping_prompt: None,
-            rename: crate::line_edit::LineEdit::default(),
+            rename: line_edit::LineEdit::default(),
             confirm_dialog: None,
             reset_incidents: Vec::new(),
             reset_pending: HashSet::new(),
@@ -536,7 +537,7 @@ impl View {
         self.rename_target.is_some() || self.name_target.is_some()
     }
 
-    fn title_editor(&self) -> Option<&crate::line_edit::LineEdit> {
+    fn title_editor(&self) -> Option<&line_edit::LineEdit> {
         (self.title_editing() && self.selector.is_none()).then_some(&self.rename)
     }
 

@@ -128,7 +128,7 @@ fn middle_paste_title_and_search_use_the_clicked_editor() {
                 _ => &view.event_detail.search.input,
             };
             assert_eq!(input.text(), "贴🦀");
-            let mut editor = crate::line_edit::LineEdit::default();
+            let mut editor = super::super::line_edit::LineEdit::default();
             editor.set_text("贴🦀");
             let (_, caret) = editor.window(usize::from(area.width.saturating_sub(9)));
             assert_eq!(input.caret(area), Some((area.x + 9 + caret, area.y)));
@@ -139,7 +139,7 @@ fn middle_paste_title_and_search_use_the_clicked_editor() {
 #[test]
 fn middle_paste_branch_moves_focus_from_prompt() {
     let mut view = fixture();
-    let mut editor = crate::line_edit::LineEdit::default();
+    let mut editor = crate::ui::line_edit::LineEdit::default();
     editor.set_text("剪贴板后");
     view.selector = Some(Selector::new(
         draft_controls::SelectorKind::Branch {
@@ -193,7 +193,7 @@ fn middle_paste_wrapped_rows_and_blank_rows_keep_line_ends() {
 
 #[test]
 fn middle_paste_narrow_input_uses_content_end() {
-    let mut editor = crate::line_edit::LineEdit::default();
+    let mut editor = crate::ui::line_edit::LineEdit::default();
     editor.set_text("剪贴板");
     editor.home();
     editor.click_row_after(Rect::new(0, 0, 2, 1), "Search ❯ ", 1);

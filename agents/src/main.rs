@@ -5,7 +5,6 @@ mod clipboard;
 mod event;
 mod images;
 mod jsonl;
-pub(crate) mod line_edit;
 mod model;
 mod processes;
 mod providers;

@@ -1,4 +1,4 @@
-use crate::line_edit::LineEdit;
+use super::line_edit::LineEdit;
 use super::*;
 
 #[path = "prompt_images.rs"]
@@ -257,7 +257,7 @@ impl PromptBox {
     }
 
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> Option<PromptAction> {
-        let key = crate::line_edit::normalize_key(key);
+        let key = super::line_edit::normalize_key(key);
         if key.kind == KeyEventKind::Release {
             return None;
         }

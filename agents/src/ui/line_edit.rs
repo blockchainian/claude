@@ -4,10 +4,11 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+#[path = "line_edit_selection.rs"]
 mod selection;
 
 /// CSI-u can report an ASCII control code instead of its letter and Control modifier.
-pub(crate) fn normalize_key(mut key: KeyEvent) -> KeyEvent {
+pub(super) fn normalize_key(mut key: KeyEvent) -> KeyEvent {
     if let KeyCode::Char(character @ '\u{1}'..='\u{1a}') = key.code {
         key.code = KeyCode::Char(char::from(character as u8 - 1 + b'a'));
         key.modifiers |= KeyModifiers::CONTROL;
@@ -15,6 +16,7 @@ pub(crate) fn normalize_key(mut key: KeyEvent) -> KeyEvent {
     key
 }
 
+#[path = "line_images.rs"]
 mod images;
 
 thread_local! {
@@ -27,7 +29,7 @@ thread_local! {
 }
 
 /// Saves the text removed while handling this key.
-pub(crate) fn finish_key() {
+pub(super) fn finish_key() {
     let was_kill = KEY_HAS_KILL.replace(false);
     if let Some((text, backward)) = KEY_KILLS.take() {
         KILL_BUFFER.with_borrow_mut(|buffer| {
@@ -46,7 +48,7 @@ pub(crate) fn finish_key() {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct LineEdit {
+pub(super) struct LineEdit {
     images: Vec<images::ImageSpan>,
     selection: Option<(usize, usize)>,
     text: String,
@@ -59,7 +61,7 @@ impl LineEdit {
     /// Caret stops as (byte offset, display column, visual row). The first row starts
     /// after `inset` columns of label; later rows wrap at the full width. A newline never
     /// wraps, so a row filled to the width adds no blank row before the next line.
-    pub(crate) fn visual_positions(
+    pub(super) fn visual_positions(
         &self,
         width: usize,
         inset: usize,
@@ -93,7 +95,7 @@ impl LineEdit {
     }
 
     /// Places the caret after the displayed grapheme, or at the visible line's end.
-    pub(crate) fn click_after(&mut self, width: usize, inset: usize, column: usize, row: usize) {
+    pub(super) fn click_after(&mut self, width: usize, inset: usize, column: usize, row: usize) {
         let positions = self.visual_positions(width, inset);
         let row = row.min(positions.last().expect("end caret").2);
         let &(byte, x, _) = positions
@@ -112,7 +114,7 @@ impl LineEdit {
         self.set_cursor(self.caret_boundary(offset, true));
     }
 
-    pub(crate) fn click_row_after(
+    pub(super) fn click_row_after(
         &mut self,
         area: ratatui::layout::Rect,
         prefix: &str,
@@ -142,7 +144,7 @@ impl LineEdit {
     }
 
     /// Returns false when the caret is already on the requested boundary row.
-    pub(crate) fn move_vertical(&mut self, width: usize, inset: usize, down: bool) -> bool {
+    pub(super) fn move_vertical(&mut self, width: usize, inset: usize, down: bool) -> bool {
         // Columns count from the text's start on every row, so the label's inset on the
         // first row does not shift the column the caret keeps.
         let inset = inset.min(width.max(1) - 1);
@@ -177,27 +179,27 @@ impl LineEdit {
         true
     }
 
-    pub(crate) fn cursor(&self) -> usize {
+    pub(super) fn cursor(&self) -> usize {
         self.cursor
     }
 
-    pub(crate) fn text(&self) -> &str {
+    pub(super) fn text(&self) -> &str {
         &self.text
     }
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
-    pub(crate) fn set_text(&mut self, text: &str) {
+    pub(super) fn set_text(&mut self, text: &str) {
         self.preferred_column = None;
         self.images.clear();
         self.text = text.into();
         self.end();
         self.clear_selection();
     }
-    pub(crate) fn clear(&mut self) {
+    pub(super) fn clear(&mut self) {
         self.set_text("");
     }
-    pub(crate) fn insert(&mut self, text: impl ToString) {
+    pub(super) fn insert(&mut self, text: impl ToString) {
         PREVIOUS_KEY_WAS_KILL.set(false);
         if self.selection_range().is_some() {
             self.replace_selection(text);
@@ -214,7 +216,7 @@ impl LineEdit {
         self.relabel_images();
         self.cursor = self.caret_boundary(self.cursor, true);
     }
-    pub(crate) fn left(&mut self) {
+    pub(super) fn left(&mut self) {
         self.preferred_column = None;
         self.cursor = self.text[..self.cursor]
             .grapheme_indices(true)
@@ -222,23 +224,23 @@ impl LineEdit {
             .map_or(0, |(i, _)| i);
         self.cursor = self.caret_boundary(self.cursor, false);
     }
-    pub(crate) fn right(&mut self) {
+    pub(super) fn right(&mut self) {
         self.preferred_column = None;
         if let Some(g) = self.text[self.cursor..].graphemes(true).next() {
             self.cursor += g.len();
         }
         self.cursor = self.caret_boundary(self.cursor, true);
     }
-    pub(crate) fn home(&mut self) {
+    pub(super) fn home(&mut self) {
         self.preferred_column = None;
         self.cursor = 0;
     }
-    pub(crate) fn end(&mut self) {
+    pub(super) fn end(&mut self) {
         self.preferred_column = None;
         self.cursor = self.text.len();
     }
     /// Moves to the start of the caret's line, or of the previous line when already there.
-    pub(crate) fn line_start(&mut self) {
+    pub(super) fn line_start(&mut self) {
         self.preferred_column = None;
         let line_start = |end: usize| self.text[..end].rfind('\n').map_or(0, |i| i + 1);
         let mut start = line_start(self.cursor);
@@ -248,7 +250,7 @@ impl LineEdit {
         self.cursor = self.caret_boundary(start, false);
     }
     /// Moves to the end of the caret's line, or of the next line when already there.
-    pub(crate) fn line_end(&mut self) {
+    pub(super) fn line_end(&mut self) {
         self.preferred_column = None;
         let line_end = |from: usize| match self.text[from..].find('\n') {
             Some(i) => from + i - usize::from(self.text[..from + i].ends_with('\r')),
@@ -262,19 +264,19 @@ impl LineEdit {
         }
         self.cursor = self.caret_boundary(end, true);
     }
-    pub(crate) fn backspace(&mut self) {
+    pub(super) fn backspace(&mut self) {
         let end = self.cursor;
         self.left();
         self.cursor = self.replace_images(self.cursor..end, "").start;
         self.align_cursor();
     }
-    pub(crate) fn delete(&mut self) {
+    pub(super) fn delete(&mut self) {
         let start = self.cursor;
         self.right();
         self.cursor = self.replace_images(start..self.cursor, "").start;
         self.align_cursor();
     }
-    pub(crate) fn word_left(&mut self) {
+    pub(super) fn word_left(&mut self) {
         self.preferred_column = None;
         let mut word = false;
         for (i, g) in self.text[..self.cursor].grapheme_indices(true).rev() {
@@ -289,7 +291,7 @@ impl LineEdit {
         }
         self.cursor = self.caret_boundary(self.cursor, false);
     }
-    pub(crate) fn word_right(&mut self) {
+    pub(super) fn word_right(&mut self) {
         self.preferred_column = None;
         let mut word = false;
         let start = self.cursor;
@@ -306,7 +308,7 @@ impl LineEdit {
         self.cursor = self.caret_boundary(self.cursor, true);
     }
     /// Deletes what Ctrl+E would move over.
-    pub(crate) fn kill_to_end(&mut self) {
+    pub(super) fn kill_to_end(&mut self) {
         if !self.remove_empty_line(false) {
             let start = self.cursor;
             self.line_end();
@@ -316,7 +318,7 @@ impl LineEdit {
         self.align_cursor();
     }
     /// Deletes what Ctrl+A would move over.
-    pub(crate) fn kill_to_start(&mut self) {
+    pub(super) fn kill_to_start(&mut self) {
         if !self.remove_empty_line(true) {
             let end = self.cursor;
             self.line_start();
@@ -347,19 +349,19 @@ impl LineEdit {
         }
         false
     }
-    pub(crate) fn kill_word_back(&mut self) {
+    pub(super) fn kill_word_back(&mut self) {
         let end = self.cursor;
         self.word_left();
         self.cursor = self.replace_images(self.cursor..end, "").start;
         self.align_cursor();
     }
-    pub(crate) fn kill_word_forward(&mut self) {
+    pub(super) fn kill_word_forward(&mut self) {
         let start = self.cursor;
         self.word_right();
         self.cursor = self.replace_images(start..self.cursor, "").start;
         self.align_cursor();
     }
-    pub(crate) fn window(&self, available_cols: usize) -> (&str, u16) {
+    pub(super) fn window(&self, available_cols: usize) -> (&str, u16) {
         let cols = available_cols.min(usize::from(u16::MAX));
         if cols == 0 {
             return ("", 0);
@@ -412,7 +414,7 @@ impl LineEdit {
             }
         });
     }
-    pub(crate) fn handle(&mut self, key: KeyEvent) -> bool {
+    pub(super) fn handle(&mut self, key: KeyEvent) -> bool {
         if key.kind == KeyEventKind::Release {
             return false;
         }

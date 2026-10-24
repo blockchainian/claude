@@ -1594,7 +1594,7 @@ impl View {
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
         let focus = self.task_focus();
         let action = self.handle_key_event(key);
-        crate::line_edit::finish_key();
+        line_edit::finish_key();
         if self.task_focus() != focus {
             self.set_active_panel(self.active_panel);
         }
@@ -1602,7 +1602,7 @@ impl View {
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {
-        let key = crate::line_edit::normalize_key(key);
+        let key = line_edit::normalize_key(key);
         if key.kind == KeyEventKind::Release {
             return None;
         }

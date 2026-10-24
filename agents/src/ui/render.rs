@@ -40,7 +40,7 @@ pub(super) fn line(text: impl Into<Line<'static>>, area: Rect, buf: &mut Buffer)
             .render(row(area, 0, 1), buf);
     }
 }
-fn input_row(prompt: &str, edit: &crate::line_edit::LineEdit, area: Rect) -> (Line<'static>, u16) {
+fn input_row(prompt: &str, edit: &line_edit::LineEdit, area: Rect) -> (Line<'static>, u16) {
     let prompt_width = prompt.width();
     let (text, caret) = edit.window(usize::from(area.width).saturating_sub(prompt_width));
     (
@@ -60,7 +60,7 @@ fn input_row(prompt: &str, edit: &crate::line_edit::LineEdit, area: Rect) -> (Li
 
 pub(super) fn render_input_row(
     prompt: &str,
-    edit: &crate::line_edit::LineEdit,
+    edit: &line_edit::LineEdit,
     area: Rect,
     buf: &mut Buffer,
 ) {
@@ -2652,7 +2652,7 @@ mod branch_input_tests {
                 let area = Rect::new(4, 2, width, 40);
                 let mut view = View::default();
                 view.set_active_panel(Panel::TaskDetails);
-                let mut editor = crate::line_edit::LineEdit::default();
+                let mut editor = line_edit::LineEdit::default();
                 editor.insert(text);
                 view.selector = Some(Selector::new(
                     SelectorKind::Branch {

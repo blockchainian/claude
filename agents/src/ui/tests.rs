@@ -7061,7 +7061,7 @@ mod input_row {
                     let (_, task_row, _, event_row, task, event_panel) =
                         rendered_inputs(width, query, left);
                     let area = Rect::new(3, 2, width, 40);
-                    let mut editor = crate::line_edit::LineEdit::default();
+                    let mut editor = super::super::line_edit::LineEdit::default();
                     editor.set_text(query);
                     if left {
                         editor.left();
@@ -7074,7 +7074,7 @@ mod input_row {
                         task.cursor_pos(area),
                         Some((task_row.x + expected, task_row.y))
                     );
-                    let mut editor = crate::line_edit::LineEdit::default();
+                    let mut editor = super::super::line_edit::LineEdit::default();
                     editor.set_text(query);
                     if left {
                         editor.left();
@@ -10714,7 +10714,7 @@ mod event_navigation {
                 let current = events.len() / 2;
                 view.select_fixture_event(Some(events[current].clone()));
                 let key = KeyEvent::new(code, modifiers);
-                let mut editor = crate::line_edit::LineEdit::default();
+                let mut editor = super::super::line_edit::LineEdit::default();
                 editor.set_text("a");
                 let consumed = view.search_focused() && editor.handle(key);
                 if consumed {

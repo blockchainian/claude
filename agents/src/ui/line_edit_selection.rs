@@ -13,39 +13,39 @@ impl LineEdit {
         );
     }
 
-    pub(crate) fn set_cursor(&mut self, offset: usize) {
+    pub(in crate::ui) fn set_cursor(&mut self, offset: usize) {
         self.assert_boundary(offset);
         self.home();
         self.cursor = self.image_caret(offset);
         self.clear_selection();
     }
 
-    pub(crate) fn clear_selection(&mut self) {
+    pub(in crate::ui) fn clear_selection(&mut self) {
         self.selection = None;
     }
 
-    pub(crate) fn select(&mut self, anchor: usize, end: usize) {
+    pub(in crate::ui) fn select(&mut self, anchor: usize, end: usize) {
         self.assert_boundary(anchor);
         self.set_cursor(end);
         self.selection = Some((anchor, end));
     }
 
-    pub(crate) fn selection_range(&self) -> Option<Range<usize>> {
+    pub(in crate::ui) fn selection_range(&self) -> Option<Range<usize>> {
         let (anchor, end) = self.selection?;
         (anchor != end).then(|| {
             self.image_boundary(anchor.min(end), false)..self.image_boundary(anchor.max(end), true)
         })
     }
 
-    pub(crate) fn selected_text(&self) -> Option<&str> {
+    pub(in crate::ui) fn selected_text(&self) -> Option<&str> {
         Some(&self.text[self.selection_range()?])
     }
 
-    pub(crate) fn delete_selection(&mut self) -> bool {
+    pub(in crate::ui) fn delete_selection(&mut self) -> bool {
         self.replace_selection("")
     }
 
-    pub(crate) fn replace_selection(&mut self, text: impl ToString) -> bool {
+    pub(in crate::ui) fn replace_selection(&mut self, text: impl ToString) -> bool {
         let Some(range) = self.selection_range() else {
             return false;
         };
@@ -58,7 +58,7 @@ impl LineEdit {
     }
 
     /// Consume selection deletion; insertion still uses the editor's normal path.
-    pub(crate) fn selection_key(&mut self, key: KeyEvent) -> bool {
+    pub(in crate::ui) fn selection_key(&mut self, key: KeyEvent) -> bool {
         let modifiers = key.modifiers - KeyModifiers::SHIFT;
         match (key.code, modifiers) {
             (KeyCode::Backspace | KeyCode::Delete, KeyModifiers::NONE)
