@@ -634,7 +634,9 @@ impl View {
                 if let Some(row) = visible_rows.iter().position(|&source| source == row) {
                     let y = body_area.y + row as u16;
                     for (x, cap) in [(areas.panel.x, "╴"), (areas.panel.right() - 1, "╶")] {
-                        buf[(x, y)].set_symbol(cap).set_style(Style::default().dim());
+                        buf[(x, y)]
+                            .set_symbol(cap)
+                            .set_style(Style::default().dim());
                     }
                 }
             }
@@ -2038,6 +2040,8 @@ fn event_detail_parts_layout_with_images(
                 let id = layout.sources.len();
                 let mut maps = part.maps_in(&lines, cwd);
                 let first = layout.lines.len();
+                // A drawn image shows no text, so its label carries no text links.
+                let drawn_image = image.is_some();
                 let caption_image = if image.is_none() {
                     part.shown_image()
                 } else {
@@ -2061,7 +2065,9 @@ fn event_detail_parts_layout_with_images(
                 if part.running() && width > 0 {
                     layout.running.push(first);
                 }
-                let mut links = if let Some(image) = caption_image {
+                let mut links = if drawn_image {
+                    Vec::new()
+                } else if let Some(image) = caption_image {
                     vec![super::links::Link {
                         range: 0..part.source.len(),
                         target: super::links::LinkTarget::Image(image.source.clone()),
@@ -2961,8 +2967,15 @@ pub(super) mod event_markdown {
                 .collect();
             assert_eq!(titles.len(), calls.len());
             for y in titles {
-                let edges = [buffer[(panel.x, y)].symbol(), buffer[(panel.right() - 1, y)].symbol()];
-                assert_eq!(edges, if rules { ["╴", "╶"] } else { [" ", " "] }, "row {y}");
+                let edges = [
+                    buffer[(panel.x, y)].symbol(),
+                    buffer[(panel.right() - 1, y)].symbol(),
+                ];
+                assert_eq!(
+                    edges,
+                    if rules { ["╴", "╶"] } else { [" ", " "] },
+                    "row {y}"
+                );
             }
         }
     }

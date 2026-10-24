@@ -144,3 +144,40 @@ fn unmentioned_path_captions_use_the_existing_abbreviation() {
     assert!(!text.contains(path.to_str().unwrap()));
     assert!(detail.images.is_empty());
 }
+
+#[test]
+fn drawn_images_carry_no_path_link_beside_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let screenshot = dir.path().join("screenshot.png");
+    image::RgbImage::new(2, 2).save(&screenshot).unwrap();
+    let fixture = include_str!("../../tests/fixtures/claude-appium.jsonl").replace(
+        "/tmp/screenshot_1792876190968.png",
+        screenshot.to_str().unwrap(),
+    );
+    let transcript = dir.path().join("transcript.jsonl");
+    std::fs::write(&transcript, fixture).unwrap();
+    let event = crate::providers::claude::event_reader::tail(&transcript, 200)
+        .unwrap()
+        .into_iter()
+        .find(|event| {
+            event
+                .calls
+                .iter()
+                .any(|call| call.name.ends_with("appium_screenshot"))
+        })
+        .unwrap();
+    let mut images = InlineImages::new(Some((10, 20)));
+    let layout = layout(&event, dir.path(), &mut images);
+    assert_eq!(layout.images.len(), 1);
+    let target = super::super::links::LinkTarget::Path(screenshot.canonicalize().unwrap());
+    let raw = super::super::links::LinkTarget::Path(screenshot.clone());
+    assert!(
+        !layout
+            .links
+            .iter()
+            .flatten()
+            .any(|link| link.target == target || link.target == raw),
+        "{:?}",
+        layout.links
+    );
+}
