@@ -796,6 +796,151 @@ fn result_section(text: &str) -> Section {
     text_section("output", text)
 }
 
+fn image_data(value: &str) -> &str {
+    if value.starts_with("data:") {
+        value.split_once(',').map_or(value, |(_, data)| data)
+    } else {
+        value
+    }
+}
+
+fn image_hash(value: &str) -> [u8; 32] {
+    Sha256::digest(image_data(value)).into()
+}
+
+fn output_image_blocks(output: &Value) -> impl Iterator<Item = (usize, &str)> {
+    output
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter(|(_, block)| block["type"] == "input_image")
+        .filter_map(|(index, block)| Some((index, block["image_url"].as_str()?)))
+}
+
+fn image_hashes(record: &Value) -> impl Iterator<Item = [u8; 32]> {
+    let payload = &record["payload"];
+    let generated = (payload["item"]["kind"] == "image_gen.generation")
+        .then(|| payload["item"]["result"].as_str())
+        .flatten()
+        .map(image_hash);
+    generated
+        .into_iter()
+        .chain(output_image_blocks(&payload["output"]).map(|(_, url)| image_hash(url)))
+}
+
+fn output_image(record: &crate::event::SourceRecord, index: usize, url: &str) -> Image {
+    let label = url
+        .strip_prefix("data:")
+        .and_then(|data| data.split_once(';'))
+        .filter(|(mime, _)| !mime.is_empty())
+        .map_or_else(
+            || "[image]".to_owned(),
+            |(mime, _)| format!("[image {mime}]"),
+        );
+    Image {
+        label,
+        source: ImageSource::Record {
+            record: record.clone(),
+            pointer: format!("/payload/output/{index}/image_url"),
+        },
+    }
+}
+
+fn image_file(value: &str) -> Option<Image> {
+    let path = if value.starts_with("file:") {
+        url::Url::parse(value).ok()?.to_file_path().ok()?
+    } else {
+        PathBuf::from(value)
+    };
+    let metadata = std::fs::metadata(&path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    Some(Image {
+        label: path.to_string_lossy().into_owned(),
+        source: ImageSource::File {
+            path,
+            len: metadata.len(),
+            modified: metadata.modified().ok()?,
+        },
+    })
+}
+
+fn record_turn(record: &Value) -> Option<&str> {
+    let payload = &record["payload"];
+    payload["turn_id"]
+        .as_str()
+        .or_else(|| payload["internal_chat_message_metadata_passthrough"]["turn_id"].as_str())
+}
+
+/// ImageView completions have independent ids; their enclosing call owns the output bytes.
+fn image_views(path: &Path, records: &[(u64, Value)]) -> HashMap<u64, (Image, [u64; 2])> {
+    let outputs: HashMap<_, _> = records
+        .iter()
+        .filter(|(_, record)| {
+            record["type"] == "response_item"
+                && matches!(
+                    record["payload"]["type"].as_str(),
+                    Some("function_call_output" | "custom_tool_call_output")
+                )
+        })
+        .filter_map(|(offset, record)| {
+            Some((record["payload"]["call_id"].as_str()?, (*offset, record)))
+        })
+        .collect();
+    let calls: Vec<_> = records
+        .iter()
+        .filter(|(_, record)| {
+            record["type"] == "response_item"
+                && matches!(
+                    record["payload"]["type"].as_str(),
+                    Some("function_call" | "custom_tool_call")
+                )
+                && record["payload"]["name"]
+                    .as_str()
+                    .is_some_and(|name| tool::rule(name).wrapper)
+        })
+        .filter_map(|(start, record)| {
+            let id = record["payload"]["call_id"].as_str()?;
+            let (end, output) = outputs.get(id)?;
+            let turn = record_turn(record)?;
+            (record_turn(output) == Some(turn)).then_some((*start, *end, turn, *output))
+        })
+        .collect();
+    let mut positions = HashMap::<u64, Vec<u64>>::new();
+    for (offset, record) in records {
+        if record["type"] != "event_msg" || record["payload"]["item"]["type"] != "ImageView" {
+            continue;
+        }
+        let mut enclosing = calls.iter().filter(|(start, end, turn, _)| {
+            start < offset && offset < end && record_turn(record) == Some(*turn)
+        });
+        if let Some((start, _, _, _)) = enclosing.next()
+            && enclosing.next().is_none()
+        {
+            positions.entry(*start).or_default().push(*offset);
+        }
+    }
+    let mut images = HashMap::new();
+    for (start, end, _, output) in calls {
+        let Some(positions) = positions.get(&start) else {
+            continue;
+        };
+        let record = crate::event::SourceRecord {
+            path: path.to_owned(),
+            offset: end,
+        };
+        for (offset, (index, url)) in positions
+            .iter()
+            .zip(output_image_blocks(&output["payload"]["output"]))
+        {
+            images.insert(*offset, (output_image(&record, index, url), [start, end]));
+        }
+    }
+    images
+}
+
 fn completed_call(
     item: &Value,
     command: Option<String>,
@@ -860,8 +1005,25 @@ fn completed_call(
         "Extension" if item["kind"] == "image_gen.generation" => {
             let mut arguments = item.clone();
             arguments.as_object_mut().unwrap().remove("result");
-            (item_type.to_owned(), arguments, None)
+            let output = item["result"].as_str().zip(record).map(|(_, record)| {
+                vec![Section::Image(Image {
+                    label: "[image]".into(),
+                    source: ImageSource::Record {
+                        record: record.clone(),
+                        pointer: "/payload/item/result".into(),
+                    },
+                })]
+            });
+            (item_type.to_owned(), arguments, output)
         }
+        "ImageView" => (
+            item_type.to_owned(),
+            item.clone(),
+            item["path"]
+                .as_str()
+                .and_then(image_file)
+                .map(|image| vec![Section::Image(image)]),
+        ),
         _ => (item_type.to_owned(), item.clone(), None),
     };
     let raw_name = name;
@@ -1629,6 +1791,14 @@ impl Reader {
                     .or_insert(offset),
             );
         }
+        for hash in image_hashes(record) {
+            affected = affected.min(
+                *dependencies
+                    .entry(format!("image:{hash:02x?}"))
+                    .and_modify(|previous| *previous = (*previous).min(offset))
+                    .or_insert(offset),
+            );
+        }
         if completed_user(record) {
             affected = affected.min(latest_prompt.unwrap_or(offset));
         }
@@ -1829,12 +1999,18 @@ impl Reader {
                 .iter()
                 .flat_map(|(_, record)| record_ids(record).map(str::to_owned))
                 .collect();
+            let images: HashSet<_> = older
+                .iter()
+                .flat_map(|(_, record)| image_hashes(record))
+                .collect();
             older.append(&mut self.records);
             self.records = older;
             // Rebuild retained rows when either half of a paired event arrives,
             // including every member of a merged message group.
             for (offset, record) in &self.records[added..] {
-                if record_ids(record).any(|id| ids.contains(id)) {
+                if record_ids(record).any(|id| ids.contains(id))
+                    || image_hashes(record).any(|hash| images.contains(&hash))
+                {
                     selected.insert(*offset);
                 }
             }
@@ -2202,6 +2378,17 @@ fn events_with_context<'a>(
     let mut completed_messages = HashMap::new();
     let mut collaboration = HashMap::new();
     let mut sources: HashMap<&str, Vec<u64>> = HashMap::new();
+    let views = image_views(path, records);
+    let generated: HashSet<_> = records
+        .iter()
+        .filter(|(_, record)| record["payload"]["item"]["kind"] == "image_gen.generation")
+        .filter_map(|(_, record)| record["payload"]["item"]["result"].as_str().map(image_hash))
+        .collect();
+    let completed_mcp: HashSet<_> = records
+        .iter()
+        .filter(|(_, record)| record["payload"]["item"]["type"] == "McpToolCall")
+        .filter_map(|(_, record)| record["payload"]["item"]["id"].as_str())
+        .collect();
     for (offset, record) in records {
         for id in record_ids(record) {
             sources.entry(id).or_default().push(*offset);
@@ -2322,6 +2509,10 @@ fn events_with_context<'a>(
         if let Some(mut event) = completed_tool(record, Some(&reference(offset)))? {
             event.turn = turns.at(offset);
             event.source = Some(source(record, offset));
+            if let Some((image, offsets)) = views.get(&offset) {
+                event.calls[0].output = Some(vec![Section::Image(image.clone())]);
+                source_records.extend(offsets.iter().map(|offset| reference(*offset)));
+            }
             event.source_records = source_records;
             if !seen.insert(required_text(&payload["item"], "id")?.to_owned()) {
                 return Ok(true);
@@ -2343,11 +2534,43 @@ fn events_with_context<'a>(
                 {
                     return Ok(true);
                 }
+                if payload["call_id"]
+                    .as_str()
+                    .is_some_and(|id| completed_mcp.contains(id))
+                {
+                    return Ok(true);
+                }
                 if let Some(id) = payload["call_id"].as_str()
                     && !seen.insert(id.to_owned())
                 {
                     return Ok(true);
                 }
+                let image_output = payload["call_id"]
+                    .as_str()
+                    .and_then(|id| results.get(id))
+                    .filter(|(_, output, _)| output_image_blocks(output).next().is_some())
+                    .map(|(_, output, offset)| {
+                        let source = reference(*offset);
+                        output
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, block)| match block["type"].as_str()? {
+                                "input_text" => Some(Section::Text {
+                                    label: "output".into(),
+                                    text: block["text"].as_str()?.to_owned(),
+                                }),
+                                "input_image" => {
+                                    let url = block["image_url"].as_str()?;
+                                    (!(payload["name"] == "wait"
+                                        && generated.contains(&image_hash(url))))
+                                    .then(|| Section::Image(output_image(&source, index, url)))
+                                }
+                                _ => None,
+                            })
+                            .collect()
+                    });
                 let ended = payload["call_id"]
                     .as_str()
                     .and_then(|id| results.remove(id))
@@ -2368,6 +2591,10 @@ fn events_with_context<'a>(
                     });
                 let mut call =
                     response_tool_call(payload, ended.as_ref().map(|(_, text, _)| text.as_str()));
+                if let Some(output) = image_output {
+                    call.output = Some(output);
+                    call.hide_output = false;
+                }
                 if let Some(message) = &mut call.agent_message {
                     message.author = metadata
                         .as_ref()
@@ -5135,3 +5362,7 @@ mod source_tests;
 #[cfg(test)]
 #[path = "rollout_pinned_reader_tests.rs"]
 mod pinned_reader_tests;
+
+#[cfg(test)]
+#[path = "rollout_image_tests.rs"]
+mod image_tests;
