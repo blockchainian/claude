@@ -508,11 +508,11 @@ mod tests {
         assert_eq!(maps[0].len(), display.chars().count());
         let links = [super::super::links::Link {
             range: 0..source.len(),
-            target: target.clone().into(),
+            target: target.clone(),
         }];
         assert_eq!(
             super::super::links::row_links(&maps[0], &links),
-            [(0..display.width() as u16, super::super::links::LinkTarget::Path(target))]
+            [(0..display.width() as u16, target)]
         );
         assert_eq!(maps[0].first().unwrap().1.start, 0);
         assert_eq!(maps[0].last().unwrap().1.end, source.len());

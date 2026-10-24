@@ -616,7 +616,6 @@ pub(super) fn background_tasks(
     (&mut file).take(len - start).read_to_end(&mut tail)?;
     let background = read_messages(
         &mut file,
-        path,
         start,
         tail,
         &mut Summary::default(),
@@ -653,7 +652,7 @@ pub(super) fn walk_records(
     mut start: u64,
     mut bytes: Vec<u8>,
     sidechains: bool,
-    mut visit: impl FnMut(u64, Value) -> bool,
+    mut visit: impl FnMut(Value) -> bool,
 ) -> io::Result<()> {
     let mut chunk = CHUNK;
     loop {
@@ -666,21 +665,8 @@ pub(super) fn walk_records(
                 .position(|byte| *byte == b'\n')
                 .map_or(bytes.len(), |index| index + 1)
         };
-        let mut offset = start + skip as u64;
-        let mut records = Vec::new();
-        for line in bytes[skip..].split(|byte| *byte == b'\n') {
-            let line_offset = offset;
-            offset += line.len() as u64 + 1;
-            #[cfg(test)]
-            PARSED_BYTES.with(|count| count.set(count.get() + line.len() as u64));
-            if let Ok(record) = serde_json::from_slice::<Value>(line)
-                && (sidechains || record["isSidechain"] != true)
-            {
-                records.push((line_offset, record));
-            }
-        }
-        for (offset, record) in records.into_iter().rev() {
-            if !visit(offset, record) {
+        for record in records_with_sidechains(&bytes[skip..], sidechains).rev() {
+            if !visit(record) {
                 return Ok(());
             }
         }
@@ -703,7 +689,6 @@ pub(super) fn walk_records(
 
 fn read_messages(
     file: &mut (impl Read + Seek),
-    path: &Path,
     start: u64,
     bytes: Vec<u8>,
     summary: &mut Summary,
@@ -725,12 +710,9 @@ fn read_messages(
     let mut effort_found = false;
     let mut tool_results = HashSet::new();
     let mut images = super::images::PromptImages::default();
+    let mut image_error = None;
     let mut activity = super::event_reader::ActivityEvent::default();
-    walk_records(file, start, bytes, sidechains, |offset, record| {
-        let source = crate::event::SourceRecord {
-            path: path.to_owned(),
-            offset,
-        };
+    walk_records(file, start, bytes, sidechains, |record| {
         if !descriptions_only && !activity.ready() {
             activity.record(record.clone());
         }
@@ -744,7 +726,7 @@ fn read_messages(
                 effort_found = true;
             }
         }
-        images.record(&source, &record);
+        images.record(&record);
         if !questions_found && let Some(blocks) = record["message"]["content"].as_array() {
             for block in blocks.iter().rev() {
                 if record["type"] == "user"
@@ -813,7 +795,13 @@ fn read_messages(
         {
             summary.task_details_sources[2] = record["uuid"].as_str().map(str::to_owned);
             summary.prompt = printable(&prompt);
-            summary.prompt_images = images.take(&source, &record, &summary.prompt);
+            match images.take(&record, &summary.prompt) {
+                Ok(images) => summary.prompt_images = images,
+                Err(error) => {
+                    image_error = Some(error);
+                    return false;
+                }
+            }
             summary.prompt_at = at;
             summary.turn_messages = turn_messages;
             prompt_found = true;
@@ -845,6 +833,9 @@ fn read_messages(
         }
         true
     })?;
+    if let Some(error) = image_error {
+        return Err(error);
+    }
     if let Some(event) = activity.finish()? {
         summary.task_details_sources[0] = event.calls.first().map(|call| call.id.clone());
         summary.activity = Some(event.activity());
@@ -916,7 +907,6 @@ fn read_summary(path: &Path, len: u64) -> io::Result<Summary> {
     if len <= 2 * CHUNK {
         read_messages(
             &mut file,
-            path,
             0,
             head,
             &mut summary,
@@ -926,7 +916,6 @@ fn read_summary(path: &Path, len: u64) -> io::Result<Summary> {
     } else {
         read_messages(
             &mut file,
-            path,
             len - CHUNK - 1,
             tail,
             &mut summary,
@@ -948,16 +937,12 @@ pub(super) fn read_subagent_cached(
     len: u64,
     previous: Option<&Summary>,
 ) -> io::Result<Summary> {
-    let mut summary = read_subagent_tail(path, &mut File::open(path)?, len)?;
+    let mut summary = read_subagent_tail(&mut File::open(path)?, len)?;
     read_history(path, len, previous, true, &mut summary)?;
     Ok(summary)
 }
 
-pub(super) fn read_subagent_tail(
-    path: &Path,
-    file: &mut (impl Read + Seek),
-    len: u64,
-) -> io::Result<Summary> {
+pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io::Result<Summary> {
     let start = len.saturating_sub(CHUNK + 1);
     file.seek(SeekFrom::Start(start))?;
     let mut bytes = Vec::new();
@@ -980,7 +965,6 @@ pub(super) fn read_subagent_tail(
     // Start zero prevents the message scan from seeking before this bounded tail.
     read_messages(
         &mut std::io::Cursor::new(Vec::<u8>::new()),
-        path,
         0,
         bytes,
         &mut summary,
@@ -1362,7 +1346,7 @@ pub(super) mod tests {
     }
 
     /// Asserts `images` are the labelled PNGs embedded in the transcript.
-    pub(in crate::providers::claude) fn assert_prompt_images(
+    pub(in crate::providers::claude) fn assert_embedded_images(
         images: &[crate::images::Image],
         numbers: &[u64],
     ) {
@@ -1377,18 +1361,10 @@ pub(super) mod tests {
                 .collect::<Vec<_>>()
         );
         for image in images {
-            let crate::images::ImageSource::Record { record, pointer } = &image.source else {
-                panic!("expected transcript image")
+            let crate::images::ImageSource::File { path, .. } = &image.source else {
+                panic!("expected materialized image")
             };
-            assert!(record.path.is_file());
-            assert!(pointer.ends_with("/source/data"));
-            assert!(
-                image
-                    .source
-                    .bytes()
-                    .unwrap()
-                    .starts_with(b"\x89PNG\r\n\x1a\n")
-            );
+            assert!(std::fs::read(path).unwrap().starts_with(b"\x89PNG\r\n"));
         }
     }
 
@@ -1408,7 +1384,7 @@ pub(super) mod tests {
         std::fs::write(&path, &bytes).unwrap();
         let summary = read(&path, bytes.len() as u64).unwrap();
         let session = super::super::session("test".into(), summary, Some(path), Utc::now());
-        assert_prompt_images(&session.prompt_images, &[8, 9]);
+        assert_embedded_images(&session.prompt_images, &[8, 9]);
     }
 
     #[test]

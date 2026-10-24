@@ -24,7 +24,7 @@ fn expanded_details_keep_directory_and_pull_request_links_separate() {
         let pr = viewport
             .task_details_links
             .iter()
-            .find(|(_, path)| path.as_path().unwrap().to_string_lossy().contains("/pull/12"))
+            .find(|(_, path)| path.to_string_lossy().contains("/pull/12"))
             .expect("pull request link")
             .0;
         assert!(!directory.intersects(pr));

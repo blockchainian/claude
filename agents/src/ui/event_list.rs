@@ -2285,8 +2285,11 @@ pub(super) mod event_markdown {
         let events = crate::providers::claude::event_reader::tail(&transcript, 20).unwrap();
         let event = &events[0];
         let image = &event.images[0];
-        let crate::images::ImageSource::Record { .. } = &image.source else {
-            panic!("expected transcript image source")
+        let crate::images::ImageSource::File {
+            path: image_path, ..
+        } = &image.source
+        else {
+            panic!("expected file source")
         };
         let layout = event_detail_layout(event, 200, dir.path(), DateTime::UNIX_EPOCH);
         assert!(
@@ -2294,7 +2297,7 @@ pub(super) mod event_markdown {
                 .links
                 .iter()
                 .flatten()
-                .any(|link| link.target == super::links::LinkTarget::Image(image.source.clone()))
+                .any(|link| link.target == *image_path)
         );
         let area = Rect::new(0, 0, 200, 1);
         let links = render_event(
@@ -2306,7 +2309,7 @@ pub(super) mod event_markdown {
             None,
             dir.path(),
         );
-        assert!(links.iter().any(|(_, target)| target == &super::links::LinkTarget::Image(image.source.clone())));
+        assert!(links.iter().any(|(_, target)| target == image_path));
     }
 
     #[test]

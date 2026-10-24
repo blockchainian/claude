@@ -3192,7 +3192,7 @@ fn task_details_folder_and_pr_use_rule_styles_and_keep_links() {
             assert_eq!(cell.style(), reference.style());
             if x == pr.x {
                 assert!(cell.symbol().contains("\x1b]8;;"));
-                assert!(cell_text(cell.symbol()).contains(url.as_path().unwrap().to_str().unwrap()));
+                assert!(cell_text(cell.symbol()).contains(url.to_str().unwrap()));
             }
         }
         assert!(buf[(folder.x, y)].symbol().contains("\x1b[4:4m"));
@@ -3206,14 +3206,14 @@ fn task_details_folder_and_pr_use_rule_styles_and_keep_links() {
                 &mut view,
                 mouse(MouseEventKind::Down(MouseButton::Left), folder.x, y)
             ),
-            Some(Action::open_path(crate::test_project()))
+            Some(Action::OpenPath(crate::test_project()))
         );
         assert_eq!(
             click_mouse(
                 &mut view,
                 mouse(MouseEventKind::Down(MouseButton::Left), pr.x, y)
             ),
-            Some(Action::Open(url.clone()))
+            Some(Action::OpenPath(url.clone()))
         );
     }
 }
@@ -3473,12 +3473,12 @@ fn task_details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
         );
         assert_eq!(
             click_text(&mut view, &rendered, path),
-            Some(Action::open_path(dir.path().join(path)))
+            Some(Action::OpenPath(dir.path().join(path)))
         );
     }
     assert_eq!(
         click_text(&mut view, &rendered, "reports/queued.md"),
-        Some(Action::open_path(dir.path().join("reports/queued.md")))
+        Some(Action::OpenPath(dir.path().join("reports/queued.md")))
     );
     view.rows[view.selected].queued.clear();
     view.rows[view.selected].prompt = "Prompt row  \n".repeat(20);
@@ -4313,7 +4313,7 @@ fn task_details_queued_messages_keep_links_selection_and_copy() {
     let rendered = screen(&view, 120, 50);
     assert_eq!(
         click_text(&mut view, &rendered, "report"),
-        Some(Action::open_path("https://example.com/report".into()))
+        Some(Action::OpenPath("https://example.com/report".into()))
     );
     assert_eq!(
         double_click_text(&mut view, &rendered, "Queued first"),
@@ -6515,7 +6515,7 @@ fn task_details_status_shows_only_the_directory_name() {
     let (rect, path) = viewport
         .task_details_links
         .iter()
-        .find(|(_, path)| path == &directory)
+        .find(|(_, path)| **path == directory)
         .unwrap();
     assert_eq!(rect.y, viewport.task_details.bottom());
     assert_eq!(path, &directory);
@@ -8657,7 +8657,7 @@ fn task_event_click_on_a_shortened_tool_path_opens_the_full_path() {
     assert!(!list.contains(path), "{list}");
     assert_eq!(
         click_text(&mut view, &list, "report.md"),
-        Some(Action::open_path(path.into()))
+        Some(Action::OpenPath(path.into()))
     );
     assert_eq!(view.visible_event(), view.event_panel.get(7));
     let (x, y) = rendered_cell(&list, "report.md");
@@ -8688,7 +8688,7 @@ fn task_event_click_on_a_path_in_free_tool_text_opens_the_full_path() {
     assert!(!list.contains(path), "{list}");
     assert_eq!(
         click_text(&mut view, &list, "plan.md"),
-        Some(Action::open_path(path.into()))
+        Some(Action::OpenPath(path.into()))
     );
 }
 
@@ -8706,7 +8706,7 @@ fn task_event_click_on_an_image_placeholder_opens_the_image() {
     assert_eq!(click_text(&mut view, &list, "[Image #1]"), None);
     assert_eq!(
         click_text(&mut view, &list, "[Image #2]"),
-        Some(Action::Open(crate::ui::LinkTarget::Image(file_image_source(image))))
+        Some(Action::OpenPath(image))
     );
 }
 
@@ -8724,7 +8724,7 @@ fn open_event_links_its_wrapped_path() {
     assert!(open.contains("another-long-directory"), "{open}");
     assert_eq!(
         click_text(&mut view, &open, "another-long-directory"),
-        Some(Action::open_path(path.into()))
+        Some(Action::OpenPath(path.into()))
     );
     assert_eq!(click_text(&mut view, &open, "see"), None);
 }
@@ -8747,11 +8747,11 @@ fn task_details_prompt_links_its_shortened_path_and_image_placeholder() {
     assert!(rendered.contains("report.md"), "{rendered}");
     assert_eq!(
         click_text(&mut view, &rendered, "report.md"),
-        Some(Action::open_path(path.into()))
+        Some(Action::OpenPath(path.into()))
     );
     assert_eq!(
         click_text(&mut view, &rendered, "[Image #1]"),
-        Some(Action::Open(crate::ui::LinkTarget::Image(file_image_source(image))))
+        Some(Action::OpenPath(image))
     );
     assert_eq!(click_text(&mut view, &rendered, "Look at"), None);
     assert_eq!(
@@ -8775,7 +8775,7 @@ fn task_details_relative_paths_link_only_when_they_exist() {
     let rendered = screen(&view, 120, 40);
     assert_eq!(
         click_text(&mut view, &rendered, "src/main.rs"),
-        Some(Action::open_path(dir.path().join("src/main.rs")))
+        Some(Action::OpenPath(dir.path().join("src/main.rs")))
     );
     assert_eq!(click_text(&mut view, &rendered, "and/or"), None);
     view.last_copy_click = None;
@@ -8803,7 +8803,7 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
         .borrow()
         .task_details_links
         .iter()
-        .find(|(_, target)| target.as_path().unwrap().to_str().unwrap().starts_with("vscode://"))
+        .find(|(_, target)| target.to_str().unwrap().starts_with("vscode://"))
         .unwrap()
         .clone();
     let (x, y) = (rect.x, rect.y);
@@ -8812,7 +8812,7 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
             &mut view,
             mouse(MouseEventKind::Down(MouseButton::Left), x, y)
         ),
-        Some(Action::open_path(
+        Some(Action::OpenPath(
             super::vscode::pull_request_link(
                 "https://github.com/0xbabedead/chadwallet/pull/833",
                 dir.path()
@@ -8829,8 +8829,8 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
         .task_details_links
         .iter()
         .find(|(_, target)| {
-            !target.as_path().unwrap().to_str().unwrap().starts_with("vscode://")
-                && !target.as_path().unwrap().to_str().unwrap().ends_with("todo.md")
+            !target.to_str().unwrap().starts_with("vscode://")
+                && !target.to_str().unwrap().ends_with("todo.md")
         })
         .unwrap()
         .clone();
@@ -8840,11 +8840,11 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
             &mut view,
             mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1)
         ),
-        Some(Action::open_path(dir.path().to_owned()))
+        Some(Action::OpenPath(dir.path().to_owned()))
     );
     assert_eq!(
         click_text(&mut view, &rendered, "todo.md"),
-        Some(Action::open_path(todo))
+        Some(Action::OpenPath(todo))
     );
     assert_eq!(click_text(&mut view, &rendered, "Then read"), None);
 }
@@ -8864,8 +8864,8 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
         .task_details_links
         .iter()
         .find(|(_, target)| {
-            !target.as_path().unwrap().to_str().unwrap().starts_with("vscode://")
-                && !target.as_path().unwrap().to_str().unwrap().ends_with("todo.md")
+            !target.to_str().unwrap().starts_with("vscode://")
+                && !target.to_str().unwrap().ends_with("todo.md")
         })
         .unwrap()
         .clone();
@@ -8873,7 +8873,7 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
     let cwd_cell = mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1);
     assert_eq!(
         click_mouse(&mut view, cwd_cell),
-        Some(Action::open_path(crate::test_project()))
+        Some(Action::OpenPath(crate::test_project()))
     );
     // Below 100 columns task details move below the task list.
     screen(&view, 99, 40);
@@ -8905,7 +8905,7 @@ fn project_group_header_opens_its_directory() {
     );
     assert_eq!(
         view.flush_pending_click(Instant::now() + view.double_click_interval),
-        Some(Action::open_path(crate::test_project()))
+        Some(Action::OpenPath(crate::test_project()))
     );
     let selected = view.selected;
     assert_eq!(
@@ -9614,7 +9614,7 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
         }
         assert_eq!(
             click_text(&mut view, &rendered, sha),
-            Some(Action::open_path(target.clone()))
+            Some(Action::OpenPath(target.clone()))
         );
         assert_eq!(view.visible_event(), view.event_panel.get(7));
         assert_eq!(click_text(&mut view, &rendered, "deadbeef"), None);
@@ -9622,14 +9622,14 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
         let rendered = event_screen(&view, 120, 40, now);
         assert_eq!(
             click_text(&mut view, &rendered, sha),
-            Some(Action::open_path(target.clone()))
+            Some(Action::OpenPath(target.clone()))
         );
         view.select_fixture_event(None);
     }
     let rendered = screen(&view, 120, 40);
     assert_eq!(
         click_text(&mut view, &rendered, sha),
-        Some(Action::open_path(target))
+        Some(Action::OpenPath(target))
     );
     // Open the layout before the full SHA has been checked; it must gain the link later.
     view.event_panel[7].body = format!("commit {full}");
@@ -9642,7 +9642,7 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
             .borrow()
             .event_links
             .iter()
-            .find(|(_, url)| url.as_path().unwrap().to_str().unwrap().ends_with(&format!("&sha={full}")))
+            .find(|(_, url)| url.to_str().unwrap().ends_with(&format!("&sha={full}")))
             .cloned();
         if let Some((rect, target)) = link {
             // The tool title repeats the SHA; click its linked body occurrence.
@@ -9663,7 +9663,7 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
                     .or_else(
                         || view.flush_pending_click(Instant::now() + view.double_click_interval)
                     ),
-                Some(Action::Open(target))
+                Some(Action::OpenPath(target))
             );
             break;
         }

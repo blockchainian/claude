@@ -59,7 +59,7 @@ fn heading_text_opens_and_double_clicks_but_blank_sides_do_not() {
     assert!(click(&mut view, path.x, path.y).is_none());
     assert_eq!(
         view.flush_pending_click(Instant::now() + view.double_click_interval),
-        Some(Action::open_path(directory.path().into()))
+        Some(Action::OpenPath(directory.path().into()))
     );
 }
 #[test]
@@ -70,7 +70,7 @@ fn different_target_runs_pending_path_before_new_click() {
     assert!(click(&mut view, path.x, path.y).is_none());
     assert_eq!(
         click(&mut view, tab.x, tab.y),
-        Some(Action::open_path(directory.path().into()))
+        Some(Action::OpenPath(directory.path().into()))
     );
     assert_eq!(view.status_filter, 1);
 }
@@ -94,11 +94,11 @@ fn links_without_double_action_open_each_click_immediately() {
         .expect("directory link outside copy bodies");
     assert_eq!(
         click(&mut view, rect.x, rect.y),
-        Some(Action::Open(target.clone()))
+        Some(Action::OpenPath(target.clone()))
     );
     assert_eq!(
         click(&mut view, rect.x, rect.y),
-        Some(Action::Open(target))
+        Some(Action::OpenPath(target))
     );
     assert!(view.pending_click.is_none());
 }
@@ -126,8 +126,8 @@ fn pending_path_precedes_immediate_link_action() {
     assert_eq!(
         click(&mut view, link.x, link.y),
         Some(Action::Batch(vec![
-            Action::open_path(directory.path().into()),
-            Action::Open(target)
+            Action::OpenPath(directory.path().into()),
+            Action::OpenPath(target)
         ]))
     );
 }

@@ -60,7 +60,7 @@ fn task_details_status_links_keep_underlines_and_click_targets_in_both_layouts()
                     &mut view,
                     mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y)
                 ),
-                Some(Action::open_path(target))
+                Some(Action::OpenPath(target))
             );
         }
     }

@@ -30,7 +30,6 @@ mod key_name;
 mod line_edit;
 mod line_truncation;
 mod links;
-pub(crate) use links::LinkTarget;
 mod markdown;
 mod navigation;
 mod paths;

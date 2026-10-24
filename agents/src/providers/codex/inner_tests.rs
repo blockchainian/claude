@@ -4,6 +4,22 @@ use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+fn file_source(path: PathBuf) -> crate::images::ImageSource {
+    let metadata = std::fs::metadata(&path).unwrap();
+    crate::images::ImageSource::File {
+        len: metadata.len(),
+        modified: metadata.modified().unwrap(),
+        path,
+    }
+}
+
+fn image_path(image: &crate::images::Image) -> PathBuf {
+    match &image.source {
+        crate::images::ImageSource::File { path, .. } => path.clone(),
+        crate::images::ImageSource::Record { .. } => panic!("expected file source"),
+    }
+}
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/codex-inner")
@@ -514,21 +530,24 @@ fn prompt_image_paths_use_wrapper_then_paired_completed_event() {
         write_image_records(&rollout, &records);
         let entries = tail(&rollout, 1).unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].images.len(), 1);
-        let crate::images::ImageSource::Record { record, pointer } = &entries[0].images[0].source else {
-            panic!("expected response record image")
-        };
-        assert_eq!(record.path, rollout);
-        assert!(pointer.starts_with("/payload/content/"));
-        assert!(entries[0].images[0].source.bytes().is_some());
+        assert_eq!(
+            entries[0].images,
+            [crate::images::Image {
+                label: "[Image #1]".into(),
+                source: file_source(image.clone())
+            }]
+        );
         // The wrapper is enough when the completed event has not been written yet.
         write_image_records(&rollout, &records[..1]);
-        assert_eq!(tail(&rollout, 1).unwrap()[0].images.len(), 1);
+        assert_eq!(
+            tail(&rollout, 1).unwrap()[0].images.len(),
+            usize::from(name == "wrapped")
+        );
     }
     std::fs::remove_file(&image).unwrap();
     for name in ["wrapped", "fallback"] {
         write_image_records(&rollout, &relocated_image_records(name, &image));
-        assert_eq!(tail(&rollout, 1).unwrap()[0].images.len(), 1);
+        assert!(tail(&rollout, 1).unwrap()[0].images.is_empty());
     }
 }
 
@@ -548,14 +567,10 @@ fn prompt_image_pairing_does_not_borrow_another_prompts_paths() {
     let entries = tail(&rollout, 100).unwrap();
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].images.len(), 1);
-    assert_eq!(entries[1].images.len(), 1);
-    let crate::images::ImageSource::Record { record, .. } = &entries[1].images[0].source else {
-        panic!("expected the second prompt's own image")
-    };
-    assert_eq!(record.offset, format!("{}\n{}\n", first[0], first[1]).len() as u64);
+    assert!(entries[1].images.is_empty());
     // A newer unrelated completed prompt cannot supply the older prompt either.
     write_image_records(&rollout, &[second[0].clone(), first[1].clone()]);
-    assert_eq!(tail(&rollout, 100).unwrap()[0].images.len(), 1);
+    assert!(tail(&rollout, 100).unwrap()[0].images.is_empty());
 }
 
 #[test]
@@ -573,39 +588,7 @@ fn named_image_blocks_without_prompt_text_show_their_labels() {
     let entries = tail(&path, 100).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].body, "[Image #1]");
-    assert_eq!(entries[0].images.len(), 1);
-    assert!(entries[0].images[0].source.bytes().is_some());
-}
-
-#[test]
-fn prompt_images_use_recorded_data_urls_when_local_files_are_missing() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("rollout.jsonl");
-    let missing = dir.path().join("missing.png");
-    let mut records: Vec<Value> = include_str!("../../../tests/fixtures/codex-images/data-url.jsonl")
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    records[0]["payload"]["content"][0]["text"] = format!(
-        "<image name=[Image #1] path=\"{}\">",
-        missing.display()
-    )
-    .into();
-    records[1]["payload"]["item"]["content"][0]["path"] = missing.to_str().unwrap().into();
-    write_image_records(&path, &records);
-
-    let event = tail(&path, 1).unwrap().remove(0);
-    assert_eq!(event.images.len(), 1);
-    let image = &event.images[0];
-    let crate::images::ImageSource::Record { record, pointer } = &image.source else {
-        panic!("Codex input image should use its recorded data URL")
-    };
-    assert_eq!(record.path, path);
-    assert_eq!(record.offset, 0);
-    assert_eq!(pointer, "/payload/content/1/image_url");
-    let decoded = image.source.bytes().unwrap();
-    let raster = image::load_from_memory(&decoded).unwrap();
-    assert_eq!((raster.width(), raster.height()), (24, 24));
+    assert!(entries[0].images.is_empty());
 }
 
 #[test]
@@ -650,14 +633,13 @@ fn session_prompt_images_belong_to_first_user_message() {
         );
         let sessions = provider.refresh(1).sessions;
         let session = sessions.iter().find(|s| s.id.id == "thread-0").unwrap();
-        assert_eq!(session.prompt_images.len(), 1);
-        let crate::images::ImageSource::Record { record, pointer } = &session.prompt_images[0].source else {
-            panic!("expected first prompt's transcript image")
-        };
-        assert!(record.offset > 0);
-        assert_eq!(record.path, path);
-        assert!(pointer.starts_with("/payload/content/"));
-        assert!(session.prompt_images[0].source.bytes().is_some());
+        assert_eq!(
+            session.prompt_images,
+            [crate::images::Image {
+                label: "[Image #1]".into(),
+                source: file_source(image.clone())
+            }]
+        );
         assert_eq!(session.prompt, prompt.chars().take(512).collect::<String>());
     }
     std::fs::remove_file(&image).unwrap();
@@ -667,8 +649,7 @@ fn session_prompt_images_belong_to_first_user_message() {
         .into_iter()
         .find(|s| s.id.id == "thread-0")
         .unwrap();
-    assert_eq!(session.prompt_images.len(), 1);
-    assert!(session.prompt_images[0].source.bytes().is_some());
+    assert!(session.prompt_images.is_empty());
 }
 
 #[test]
@@ -718,7 +699,7 @@ fn first_prompt_images_stop_at_the_first_completed_user_boundary() {
 }
 
 #[test]
-fn recorded_prompt_image_ignores_wrapper_and_event_paths() {
+fn wrapper_path_precedes_event_path_and_unavailable_path_falls_back() {
     let dir = tempfile::tempdir().unwrap();
     let wrapper = dir.path().join("wrapper.png");
     let event = dir.path().join("event.png");
@@ -729,17 +710,12 @@ fn recorded_prompt_image_ignores_wrapper_and_event_paths() {
     let mut records = relocated_image_records("wrapped", &wrapper);
     records[1]["payload"]["item"]["content"][0]["path"] = event.to_str().unwrap().into();
     write_image_records(&path, &records);
-    let image = tail(&path, 100).unwrap()[0].images[0].clone();
-    let crate::images::ImageSource::Record { pointer, .. } = &image.source else {
-        panic!("expected transcript image source")
-    };
-    assert!(pointer.starts_with("/payload/content/"));
-    assert!(image.source.bytes().is_some());
+    assert_eq!(image_path(&tail(&path, 100).unwrap()[0].images[0]), wrapper);
     std::fs::remove_file(&wrapper).unwrap();
-    assert_eq!(tail(&path, 100).unwrap()[0].images[0], image);
+    assert_eq!(image_path(&tail(&path, 100).unwrap()[0].images[0]), event);
     records[1]["payload"]["turn_id"] = "different-turn".into();
     write_image_records(&path, &records);
-    assert_eq!(tail(&path, 100).unwrap()[0].images[0], image);
+    assert!(tail(&path, 100).unwrap()[0].images.is_empty());
 }
 
 #[test]

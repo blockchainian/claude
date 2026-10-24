@@ -46,7 +46,6 @@ fn cwd_paths_match_in_tool_titles_bodies_and_links() {
         assert!(
             links[0]
                 .target
-                .as_path().unwrap()
                 .to_string_lossy()
                 .contains(file.to_str().unwrap())
         );

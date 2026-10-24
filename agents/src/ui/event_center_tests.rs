@@ -74,9 +74,9 @@ fn event_content_centered_links_click_and_underline_exactly_the_path() {
             event_panel.x + (event_panel.width / 2 - 19 / 2).min(event_panel.width - 11 - 19);
         let expected = Rect::new(start + 5, event_panel.y, 9, 1);
         let links = view.viewport.borrow().event_links.clone();
-        assert!(links.contains(&(expected, super::super::links::LinkTarget::Path(target.clone()))), "{links:?}");
+        assert!(links.contains(&(expected, target.clone())), "{links:?}");
         let before = buf.clone();
-        super::super::links::underline(&mut buf, &[(expected, super::super::links::LinkTarget::Path(target.clone()))]);
+        super::super::links::underline(&mut buf, &[(expected, target.clone())]);
         for x in event_panel.x..event_panel.right() {
             assert_eq!(
                 buf[(x, event_panel.y)] != before[(x, event_panel.y)],
@@ -93,7 +93,7 @@ fn event_content_centered_links_click_and_underline_exactly_the_path() {
                 )
             )
             .or_else(|| view.flush_pending_click(Instant::now() + view.double_click_interval)),
-            Some(Action::open_path(target))
+            Some(Action::OpenPath(target))
         );
     }
 }

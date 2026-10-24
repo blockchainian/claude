@@ -1,21 +1,26 @@
-use crate::{event::SourceRecord, images::{Image, ImageSource}};
+use crate::images::{Image, ImageSource};
+use base64::Engine;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
+use std::{
+    hash::{Hash, Hasher},
+    io::{self, Write},
+    os::unix::fs::DirBuilderExt,
+};
 
 /// The images embedded in prompts; queued prompts arrive before their deliveries in a backwards walk.
 #[derive(Default)]
 pub(super) struct PromptImages {
-    queued: HashMap<String, (SourceRecord, Value)>,
-    delivered: HashMap<String, Vec<(SourceRecord, Value)>>,
+    queued: HashMap<String, Value>,
+    delivered: HashMap<String, Vec<Value>>,
 }
 
 impl PromptImages {
-    pub(super) fn record(&mut self, source: &SourceRecord, record: &Value) {
+    pub(super) fn record(&mut self, record: &Value) {
         if queued_prompt(record).is_some()
             && let Some(id) = record["attachment"]["source_uuid"].as_str()
         {
-            self.queued
-                .insert(id.to_owned(), (source.clone(), record.clone()));
+            self.queued.insert(id.to_owned(), record.clone());
         }
         if record["type"] == "queue-operation"
             && record["operation"] == "remove"
@@ -31,12 +36,7 @@ impl PromptImages {
         }
     }
 
-    pub(super) fn take(
-        &mut self,
-        source: &SourceRecord,
-        record: &Value,
-        body: &str,
-    ) -> Vec<Image> {
+    pub(super) fn take(&mut self, record: &Value, body: &str) -> io::Result<Vec<Image>> {
         if record["type"] == "queue-operation"
             && record["operation"] == "enqueue"
             && let Some(delivery) = record["content"]
@@ -44,40 +44,39 @@ impl PromptImages {
                 .and_then(|text| self.delivered.get_mut(text))
                 .and_then(Vec::pop)
         {
-            return self.take(&delivery.0, &delivery.1, body);
+            return self.take(&delivery, body);
         }
-        let (prompt, content, prefix) = if let Some(prompt) = queued_prompt(record) {
-            (&record["attachment"], prompt, "/attachment/prompt")
+        let (prompt, content) = if let Some(prompt) = queued_prompt(record) {
+            (&record["attachment"], prompt)
         } else {
-            (record, &record["message"]["content"], "/message/content")
+            (record, &record["message"]["content"])
         };
-        let ids = prompt["imagePasteIds"].as_array();
-        let mut image_number = 0;
-        content
-            .as_array()
-            .into_iter()
-            .flatten()
-            .enumerate()
-            .filter(|(_, block)| block["type"] == "image")
-            .map(|(index, block)| {
-                let id = ids
-                    .and_then(|ids| ids.get(image_number))
-                    .and_then(Value::as_u64);
-                image_number += 1;
-                let tagged = id.map(|id| format!("[Image #{id}]"));
-                let label = tagged
-                    .filter(|label| body.contains(label))
-                    .unwrap_or_else(|| {
-                        let mime = block["source"]["media_type"].as_str().unwrap_or("image");
-                        format!("[image {mime}]")
-                    });
-                Image {
+        let Some(ids) = prompt["imagePasteIds"].as_array() else {
+            return Ok(Vec::new());
+        };
+        ids.iter()
+            .zip(
+                content
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|block| block["type"] == "image"),
+            )
+            .filter_map(|(id, block)| {
+                let label = format!("[Image #{}]", id.as_u64()?);
+                body.contains(&label).then_some((label, block))
+            })
+            .map(|(label, block)| {
+                let path = embedded_image(&block["source"])?;
+                let metadata = std::fs::metadata(&path)?;
+                Ok(Image {
                     label,
-                    source: ImageSource::Record {
-                        record: source.clone(),
-                        pointer: format!("{prefix}/{index}/source/data"),
+                    source: ImageSource::File {
+                        path,
+                        len: metadata.len(),
+                        modified: metadata.modified()?,
                     },
-                }
+                })
             })
             .collect()
     }
@@ -90,4 +89,42 @@ pub(super) fn queued_prompt(record: &Value) -> Option<&Value> {
         && attachment["type"] == "queued_command"
         && attachment["commandMode"] == "prompt")
         .then_some(&attachment["prompt"])
+}
+
+fn embedded_image(source: &Value) -> io::Result<PathBuf> {
+    let invalid = || io::Error::new(io::ErrorKind::InvalidData, "Invalid Claude pasted image");
+    if source["type"] != "base64" {
+        return Err(invalid());
+    }
+    let extension = match source["media_type"].as_str() {
+        Some("image/png") => "png",
+        Some("image/jpeg") => "jpg",
+        Some("image/gif") => "gif",
+        Some("image/webp") => "webp",
+        _ => return Err(invalid()),
+    };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(source["data"].as_str().ok_or_else(invalid)?)
+        .map_err(|_| invalid())?;
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hash);
+    let directory = std::env::temp_dir().join(format!("agents-images-{}", std::process::id()));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .recursive(true)
+        .create(&directory)?;
+    let path = directory.join(format!("{:016x}.{extension}", hash.finish()));
+    if !path.exists() {
+        let mut file = tempfile::NamedTempFile::new_in(&directory)?;
+        file.write_all(&bytes)?;
+        match file.persist_noclobber(&path) {
+            Ok(_) => {}
+            Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.error),
+        }
+    }
+    if std::fs::read(&path)? != bytes {
+        return Err(invalid());
+    }
+    Ok(path)
 }

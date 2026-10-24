@@ -1123,17 +1123,17 @@ impl View {
             }
             return;
         };
-        let mut links: Vec<super::links::DrawnLink> = Vec::new();
+        let mut links = Vec::new();
         if let Some(area) = folder_area
             && let Some(target) = super::links::existing(cwd.clone())
         {
-            links.push((area, target.into()));
+            links.push((area, target));
         }
         if let (Some(area), Some(pr)) = (right_area, &session.pr) {
             let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
                 .unwrap_or_else(|| pr.url.clone());
             super::hyperlink::hyperlink(buf, area, &url);
-            links.push((area, PathBuf::from(url).into()));
+            links.push((area, PathBuf::from(url)));
         }
         super::links::underline(buf, &links);
         viewport.task_details_links.extend(links);
@@ -1300,7 +1300,7 @@ impl View {
         let mut body_links: Vec<Vec<super::links::Link>> = Vec::new();
         // The columns each item draws a link on, parallel to `items`; bodies fill theirs
         // once their rows are mapped to their text.
-        let mut item_links: Vec<Vec<(std::ops::Range<u16>, super::links::LinkTarget)>> = Vec::new();
+        let mut item_links: Vec<Vec<(std::ops::Range<u16>, PathBuf)>> = Vec::new();
 
         // The agent appends an exit marker to the output file when the
         // command ends, which lands before the completion notification does.
@@ -1758,7 +1758,7 @@ impl View {
         let content_area = Rect::new(0, 0, content_width, total as u16);
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
-        let mut drawn_links: Vec<super::links::DrawnLink> = Vec::new();
+        let mut drawn_links = Vec::new();
         let mut background_titles = Vec::new();
         for ((((item, mapped), links), id), indent) in items
             .into_iter()

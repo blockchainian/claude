@@ -4,55 +4,15 @@ use ratatui::{buffer::Buffer, layout::Rect};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum LinkTarget {
-    Path(PathBuf),
-    Image(crate::images::ImageSource),
-}
-
-impl LinkTarget {
-    pub(crate) fn as_path(&self) -> Option<&Path> {
-        match self {
-            Self::Path(path) => Some(path),
-            Self::Image(_) => None,
-        }
-    }
-
-}
-
-impl From<PathBuf> for LinkTarget {
-    fn from(path: PathBuf) -> Self { Self::Path(path) }
-}
-
-impl From<String> for LinkTarget {
-    fn from(path: String) -> Self { Self::Path(path.into()) }
-}
-
-impl From<&str> for LinkTarget {
-    fn from(path: &str) -> Self { Self::Path(path.into()) }
-}
-
-impl From<&Path> for LinkTarget {
-    fn from(path: &Path) -> Self { Self::Path(path.into()) }
-}
-
-impl PartialEq<PathBuf> for LinkTarget {
-    fn eq(&self, other: &PathBuf) -> bool { self.as_path() == Some(other.as_path()) }
-}
-
-impl PartialEq<&Path> for LinkTarget {
-    fn eq(&self, other: &&Path) -> bool { self.as_path() == Some(*other) }
-}
-
 /// A link inside a text: the bytes it covers and the file, directory or URL it opens.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Link {
     pub range: Range<usize>,
-    pub target: LinkTarget,
+    pub target: PathBuf,
 }
 
 /// A link on screen: the cells it covers and what it opens.
-pub(super) type DrawnLink = (Rect, LinkTarget);
+pub(super) type DrawnLink = (Rect, PathBuf);
 
 /// The existing paths in `text`, and the label of each of `images`.
 pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::images::Image]) -> Vec<Link> {
@@ -66,14 +26,15 @@ pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::images::Image]
         }
     }
     for image in images {
-        if let crate::images::ImageSource::File { path, .. } = &image.source
-            && !path.exists()
-        {
+        if !matches!(image.source, crate::images::ImageSource::File { .. }) {
             continue;
         }
+        let Some(target) = image.source.local_file().ok().and_then(existing) else {
+            continue;
+        };
         links.extend(text.match_indices(&image.label).map(|(at, label)| Link {
             range: at..at + label.len(),
-            target: LinkTarget::Image(image.source.clone()),
+            target: target.clone(),
         }));
     }
     links.sort_by_key(|link| link.range.start);
@@ -96,7 +57,7 @@ fn markdown_links(text: &str, cwd: &Path) -> Vec<Link> {
                 {
                     links.push(Link {
                         range: label,
-                        target: LinkTarget::Path(target),
+                        target,
                     });
                 }
             }
@@ -124,12 +85,12 @@ pub(super) fn path_links(text: &str, paths: &[Range<usize>], cwd: &Path) -> Vec<
             {
                 return Some(Link {
                     range: range.start..range.end + len,
-                    target: LinkTarget::Path(link.into()),
+                    target: link.into(),
                 });
             }
             Some(Link {
                 range: range.clone(),
-                target: LinkTarget::Path(target),
+                target,
             })
         })
         .collect();
@@ -147,7 +108,7 @@ pub(super) fn add_commits(text: &str, cwd: &Path, links: &mut Vec<Link>) {
             continue;
         }
         if let Some(target) = super::commits::target(cwd, &text[range.clone()]) {
-            links.push(Link { range, target: LinkTarget::Path(target) });
+            links.push(Link { range, target });
         }
     }
     links.sort_by_key(|link| link.range.start);
@@ -203,7 +164,7 @@ pub(super) fn drawn_links(rows: &[DrawnRow], links: &[Link]) -> Vec<DrawnLink> {
 pub(super) fn row_links(
     cells: &[(Range<u16>, Range<usize>)],
     links: &[Link],
-) -> Vec<(Range<u16>, LinkTarget)> {
+) -> Vec<(Range<u16>, PathBuf)> {
     let row = DrawnRow {
         segment: 0,
         x: 0,
@@ -265,7 +226,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
         buf.set_string(0, 0, "a界b c", ratatui::style::Style::default());
         let before = buf.clone();
-        let links = [(Rect::new(0, 0, 4, 1), PathBuf::from("/a").into())];
+        let links = [(Rect::new(0, 0, 4, 1), PathBuf::from("/a"))];
         underline(&mut buf, &links);
         let symbols: Vec<_> = (0..5).map(|x| buf[(x, 0)].symbol().to_owned()).collect();
         assert_eq!(
@@ -368,10 +329,10 @@ mod tests {
         assert_eq!(
             targets,
             [
-                ("src/ui/log.rs", LinkTarget::Path(dir.path().join("src/ui/log.rs"))),
-                ("~/", LinkTarget::Path(home)),
-                (absolute.to_str().unwrap(), LinkTarget::Path(absolute.clone())),
-                ("[Image #1]", LinkTarget::Image(images[0].source.clone())),
+                ("src/ui/log.rs", dir.path().join("src/ui/log.rs")),
+                ("~/", home),
+                (absolute.to_str().unwrap(), absolute.clone()),
+                ("[Image #1]", image),
             ]
         );
     }

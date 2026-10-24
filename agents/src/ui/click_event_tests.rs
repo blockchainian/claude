@@ -365,7 +365,7 @@ fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
     release_click(&mut view, MouseButton::Left, rect.x + 2, rect.y);
     assert_eq!(
         view.flush_pending_click(Instant::now() + std::time::Duration::from_secs(1)),
-        Some(Action::open_path(path))
+        Some(Action::OpenPath(path))
     );
     view.handle_mouse(mouse(
         MouseEventKind::Down(MouseButton::Left),

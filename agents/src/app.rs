@@ -1612,17 +1612,7 @@ impl App {
             Action::Unsupported(what) => {
                 self.view.show_error(format!("{what} is not supported"));
             }
-            Action::Open(target) => {
-                let target = match target {
-                    crate::ui::LinkTarget::Path(path) => path,
-                    crate::ui::LinkTarget::Image(source) => match source.local_file() {
-                        Ok(path) => path,
-                        Err(error) => {
-                            self.view.show_error(format!("Cannot open image: {error}"));
-                            return false;
-                        }
-                    },
-                };
+            Action::OpenPath(target) => {
                 let link = crate::ui::vscode::open_target(&target);
                 let opened = Command::new("open")
                     .arg(link.as_deref().map_or(target.as_os_str(), OsStr::new))

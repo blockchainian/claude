@@ -152,6 +152,6 @@ fn codex_memory_note_link_opens_the_recorded_file_line() {
     );
     assert_eq!(
         view.flush_pending_click(Instant::now() + std::time::Duration::from_secs(1)),
-        Some(Action::open_path(target))
+        Some(Action::OpenPath(target))
     );
 }
