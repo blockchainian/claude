@@ -804,7 +804,15 @@ fn image_data(value: &str) -> &str {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static IMAGE_HASH_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static IMAGE_INTERVAL_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn image_hash(value: &str) -> [u8; 32] {
+    #[cfg(test)]
+    IMAGE_HASH_BYTES.with(|count| count.set(count.get() + image_data(value).len()));
     Sha256::digest(image_data(value)).into()
 }
 
@@ -818,16 +826,31 @@ fn output_image_blocks(output: &Value) -> impl Iterator<Item = (usize, &str)> {
         .filter_map(|(index, block)| Some((index, block["image_url"].as_str()?)))
 }
 
-fn image_hashes(record: &Value) -> impl Iterator<Item = [u8; 32]> {
-    let payload = &record["payload"];
-    let generated = (payload["item"]["kind"] == "image_gen.generation")
-        .then(|| payload["item"]["result"].as_str())
-        .flatten()
-        .map(image_hash);
-    generated
-        .into_iter()
-        .chain(output_image_blocks(&payload["output"]).map(|(_, url)| image_hash(url)))
+struct RecordImages {
+    generated: Option<[u8; 32]>,
+    output: HashMap<usize, [u8; 32]>,
 }
+
+impl RecordImages {
+    fn new(record: &Value) -> Self {
+        let payload = &record["payload"];
+        Self {
+            generated: (payload["item"]["kind"] == "image_gen.generation")
+                .then(|| payload["item"]["result"].as_str())
+                .flatten()
+                .map(image_hash),
+            output: output_image_blocks(&payload["output"])
+                .map(|(index, url)| (index, image_hash(url)))
+                .collect(),
+        }
+    }
+
+    fn hashes(&self) -> impl Iterator<Item = &[u8; 32]> {
+        self.generated.iter().chain(self.output.values())
+    }
+}
+
+type ImageHashes = HashMap<u64, RecordImages>;
 
 fn output_image(record: &crate::event::SourceRecord, index: usize, url: &str) -> Image {
     let label = url
@@ -908,17 +931,49 @@ fn image_views(path: &Path, records: &[(u64, Value)]) -> HashMap<u64, (Image, [u
             (record_turn(output) == Some(turn)).then_some((*start, *end, turn, *output))
         })
         .collect();
-    let mut positions = HashMap::<u64, Vec<u64>>::new();
-    for (offset, record) in records {
-        if record["type"] != "event_msg" || record["payload"]["item"]["type"] != "ImageView" {
-            continue;
+    // Sweep each turn's strict call intervals. Endpoint ordering excludes both
+    // boundaries and the active set preserves the existing ambiguity rule.
+    let mut turns = HashMap::<&str, Vec<(u64, u8, usize)>>::new();
+    for (index, (start, end, turn, _)) in calls.iter().enumerate() {
+        if start < end {
+            let points = turns.entry(turn).or_default();
+            points.push((*start, 2, index));
+            points.push((*end, 0, index));
         }
-        let mut enclosing = calls.iter().filter(|(start, end, turn, _)| {
-            start < offset && offset < end && record_turn(record) == Some(*turn)
-        });
-        if let Some((start, _, _, _)) = enclosing.next()
-            && enclosing.next().is_none()
+    }
+    for (index, (offset, record)) in records.iter().enumerate() {
+        if record["type"] == "event_msg"
+            && record["payload"]["item"]["type"] == "ImageView"
+            && let Some(turn) = record_turn(record)
         {
+            turns.entry(turn).or_default().push((*offset, 1, index));
+        }
+    }
+    let mut owners = HashMap::new();
+    for points in turns.values_mut() {
+        points.sort_unstable();
+        let mut active = std::collections::BTreeSet::new();
+        for &(offset, kind, index) in points.iter() {
+            match kind {
+                0 => {
+                    active.remove(&index);
+                }
+                2 => {
+                    active.insert(index);
+                }
+                _ => {
+                    #[cfg(test)]
+                    IMAGE_INTERVAL_CHECKS.with(|count| count.set(count.get() + 1));
+                    if active.len() == 1 {
+                        owners.insert(offset, calls[*active.first().unwrap()].0);
+                    }
+                }
+            }
+        }
+    }
+    let mut positions = HashMap::<u64, Vec<u64>>::new();
+    for (offset, _) in records {
+        if let Some(start) = owners.get(offset) {
             positions.entry(*start).or_default().push(*offset);
         }
     }
@@ -1630,6 +1685,7 @@ pub(crate) struct Reader {
     line_ends: HashMap<u64, u64>,
     entries: Vec<(u64, Event)>,
     dependencies: HashMap<String, u64>,
+    image_hashes: ImageHashes,
     latest_prompt: Option<u64>,
     shown: usize,
     boundary: crate::jsonl::Boundary,
@@ -1652,6 +1708,7 @@ impl Reader {
             line_ends: HashMap::new(),
             entries: Vec::new(),
             dependencies: HashMap::new(),
+            image_hashes: ImageHashes::new(),
             latest_prompt: None,
             shown: 0,
             boundary: crate::jsonl::Boundary::default(),
@@ -1750,6 +1807,7 @@ impl Reader {
     fn dependency(
         entries: &[(u64, Event)],
         dependencies: &mut HashMap<String, u64>,
+        image_hashes: &mut ImageHashes,
         latest_prompt: &mut Option<u64>,
         record: &Value,
         offset: u64,
@@ -1791,7 +1849,11 @@ impl Reader {
                     .or_insert(offset),
             );
         }
-        for hash in image_hashes(record) {
+        for hash in image_hashes
+            .entry(offset)
+            .or_insert_with(|| RecordImages::new(record))
+            .hashes()
+        {
             affected = affected.min(
                 *dependencies
                     .entry(format!("image:{hash:02x?}"))
@@ -1817,6 +1879,7 @@ impl Reader {
         file.read_to_end(&mut bytes)?;
         if let Ok(record) = serde_json::from_slice::<Value>(&bytes) {
             if !inherited(&record, self.history_start) {
+                self.image_hashes.remove(&self.read);
                 self.pending_offset = Some(self.read);
                 self.pending_bytes = bytes.clone();
                 self.records.push((self.read, record));
@@ -1858,16 +1921,18 @@ impl Reader {
             self.records.clear();
             self.entries.clear();
             self.dependencies.clear();
+            self.image_hashes.clear();
             self.latest_prompt = None;
             self.shown = 0;
             self.pending_offset = None;
             parsed_bytes += self.read_pending(&mut file)?;
-            self.entries = events_with_context(
+            self.entries = events_with_images(
                 &self.path,
                 &self.records,
                 usize::MAX,
                 None,
                 self.metadata.as_ref(),
+                &mut self.image_hashes,
             )?;
         } else if changed && metadata.len() > self.read {
             if self.read == 0 {
@@ -1903,6 +1968,7 @@ impl Reader {
                         reused += line.len() as u64;
                     }
                 } else if let Ok(record) = serde_json::from_slice::<Value>(line) {
+                    self.image_hashes.remove(&offset);
                     incoming.push((offset, record));
                 }
                 offset += line.len() as u64 + 1;
@@ -1915,6 +1981,7 @@ impl Reader {
                 affected = affected.min(Self::dependency(
                     &self.entries,
                     &mut self.dependencies,
+                    &mut self.image_hashes,
                     &mut self.latest_prompt,
                     record,
                     *offset,
@@ -1926,6 +1993,7 @@ impl Reader {
                 affected = affected.min(Self::dependency(
                     &self.entries,
                     &mut self.dependencies,
+                    &mut self.image_hashes,
                     &mut self.latest_prompt,
                     record,
                     *offset,
@@ -1937,12 +2005,13 @@ impl Reader {
             let start = self
                 .records
                 .partition_point(|(offset, _)| *offset < affected);
-            let mut suffix = events_with_context(
+            let mut suffix = events_with_images(
                 &self.path,
                 &self.records[start..],
                 usize::MAX,
                 None,
                 self.metadata.as_ref(),
+                &mut self.image_hashes,
             )?;
             if let Some((_, previous)) = prefix
                 .checked_sub(1)
@@ -1999,9 +2068,14 @@ impl Reader {
                 .iter()
                 .flat_map(|(_, record)| record_ids(record).map(str::to_owned))
                 .collect();
+            for (offset, record) in &older {
+                self.image_hashes
+                    .entry(*offset)
+                    .or_insert_with(|| RecordImages::new(record));
+            }
             let images: HashSet<_> = older
                 .iter()
-                .flat_map(|(_, record)| image_hashes(record))
+                .flat_map(|(offset, _)| self.image_hashes[offset].hashes().copied())
                 .collect();
             older.append(&mut self.records);
             self.records = older;
@@ -2009,7 +2083,9 @@ impl Reader {
             // including every member of a merged message group.
             for (offset, record) in &self.records[added..] {
                 if record_ids(record).any(|id| ids.contains(id))
-                    || image_hashes(record).any(|hash| images.contains(&hash))
+                    || self.image_hashes[offset]
+                        .hashes()
+                        .any(|hash| images.contains(hash))
                 {
                     selected.insert(*offset);
                 }
@@ -2027,12 +2103,13 @@ impl Reader {
                     true
                 }
             });
-            let incoming = events_with_context(
+            let incoming = events_with_images(
                 &self.path,
                 &self.records,
                 usize::MAX,
                 Some(&selected),
                 self.metadata.as_ref(),
+                &mut self.image_hashes,
             )?;
             self.entries.extend(incoming);
             merge_entries(&self.records, &mut self.entries);
@@ -2040,6 +2117,7 @@ impl Reader {
                 Self::dependency(
                     &self.entries,
                     &mut self.dependencies,
+                    &mut self.image_hashes,
                     &mut self.latest_prompt,
                     record,
                     *offset,
@@ -2355,12 +2433,30 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
 
 /// Converts selected records while borrowing every retained record for pairing and deduplication.
 /// Selected entries stay unmerged so callers can combine them with retained entries first.
-fn events_with_context<'a>(
+fn events_with_context(
+    path: &Path,
+    records: &[(u64, Value)],
+    count: usize,
+    selected: Option<&HashSet<u64>>,
+    metadata: Option<&Value>,
+) -> io::Result<Vec<(u64, Event)>> {
+    events_with_images(
+        path,
+        records,
+        count,
+        selected,
+        metadata,
+        &mut ImageHashes::new(),
+    )
+}
+
+fn events_with_images<'a>(
     path: &Path,
     records: &'a [(u64, Value)],
     count: usize,
     selected: Option<&HashSet<u64>>,
     metadata: Option<&Value>,
+    image_hashes: &mut ImageHashes,
 ) -> io::Result<Vec<(u64, Event)>> {
     let sender = metadata
         .as_ref()
@@ -2379,10 +2475,15 @@ fn events_with_context<'a>(
     let mut collaboration = HashMap::new();
     let mut sources: HashMap<&str, Vec<u64>> = HashMap::new();
     let views = image_views(path, records);
+    for (offset, record) in records {
+        image_hashes
+            .entry(*offset)
+            .or_insert_with(|| RecordImages::new(record));
+    }
     let generated: HashSet<_> = records
         .iter()
         .filter(|(_, record)| record["payload"]["item"]["kind"] == "image_gen.generation")
-        .filter_map(|(_, record)| record["payload"]["item"]["result"].as_str().map(image_hash))
+        .filter_map(|(offset, _)| image_hashes[offset].generated)
         .collect();
     let completed_mcp: HashSet<_> = records
         .iter()
@@ -2564,7 +2665,10 @@ fn events_with_context<'a>(
                                 "input_image" => {
                                     let url = block["image_url"].as_str()?;
                                     (!(payload["name"] == "wait"
-                                        && generated.contains(&image_hash(url))))
+                                        && image_hashes[offset]
+                                            .output
+                                            .get(&index)
+                                            .is_some_and(|hash| generated.contains(hash))))
                                     .then(|| Section::Image(output_image(&source, index, url)))
                                 }
                                 _ => None,

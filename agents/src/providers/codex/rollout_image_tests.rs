@@ -306,3 +306,109 @@ fn selected_tool_images_keep_their_unselected_context() {
         }
     }
 }
+
+#[test]
+fn backward_pages_hash_each_image_record_once() {
+    let mut records = captured("tool-generation.jsonl");
+    records.extend(captured("tool-mcp.jsonl"));
+    for record in &mut records {
+        record["paging_padding"] = "x".repeat(CHUNK as usize).into();
+    }
+    let expected: usize = records
+        .iter()
+        .flat_map(|record| {
+            let payload = &record["payload"];
+            let generated = (payload["item"]["kind"] == "image_gen.generation")
+                .then(|| payload["item"]["result"].as_str())
+                .flatten();
+            generated
+                .into_iter()
+                .chain(output_image_blocks(&payload["output"]).map(|(_, url)| url))
+        })
+        .map(|url| image_data(url).len())
+        .sum();
+    let file = transcript(&records);
+    IMAGE_HASH_BYTES.with(|count| count.set(0));
+    let mut reader = Reader::new(file.path().to_path_buf(), false);
+    reader.refresh(1).unwrap();
+    reader.refresh(usize::MAX).unwrap();
+    assert_eq!(IMAGE_HASH_BYTES.with(std::cell::Cell::get), expected);
+}
+
+#[test]
+fn image_view_interval_lookup_scales_with_records() {
+    let fixture = captured("tool-view.jsonl");
+    let mut records = Vec::new();
+    for index in 0..128 {
+        let mut group = fixture.clone();
+        for record in &mut group {
+            record["payload"]["call_id"] = format!("wrapper-{index}").into();
+        }
+        records.extend(group);
+    }
+    let records: Vec<_> = records
+        .into_iter()
+        .enumerate()
+        .map(|(index, record)| (index as u64, record))
+        .collect();
+    IMAGE_INTERVAL_CHECKS.with(|count| count.set(0));
+    let found = image_views(Path::new("captured.jsonl"), &records);
+    assert_eq!(found.len(), 128);
+    assert!(IMAGE_INTERVAL_CHECKS.with(std::cell::Cell::get) <= records.len());
+}
+
+#[test]
+fn image_view_index_keeps_strict_intervals_and_record_order() {
+    let fixture = captured("tool-view.jsonl");
+    let mut output = fixture[2].clone();
+    let block = output["payload"]["output"][2].clone();
+    output["payload"]["output"]
+        .as_array_mut()
+        .unwrap()
+        .push(block);
+    let mut nested_call = fixture[0].clone();
+    nested_call["payload"]["call_id"] = "nested".into();
+    let mut nested_output = fixture[2].clone();
+    nested_output["payload"]["call_id"] = "nested".into();
+    let records = vec![
+        (10, fixture[0].clone()),
+        (29, fixture[1].clone()),
+        (11, fixture[1].clone()),
+        (10, fixture[1].clone()),
+        (30, fixture[1].clone()),
+        (15, nested_call),
+        (20, fixture[1].clone()),
+        (25, nested_output),
+        (30, output),
+    ];
+    let found = image_views(Path::new("captured.jsonl"), &records);
+    assert_eq!(found.len(), 2);
+    for (offset, index) in [(29, 2), (11, 3)] {
+        let (image, interval) = &found[&offset];
+        assert_eq!(*interval, [10, 30]);
+        assert!(
+            matches!(&image.source, ImageSource::Record { record, pointer }
+            if record.offset == 30 && pointer == &format!("/payload/output/{index}/image_url"))
+        );
+    }
+}
+
+#[test]
+fn pending_image_record_reuses_hash_when_completed() {
+    let records = captured("tool-generation.jsonl");
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    let mut reader = Reader::new(file.path().to_path_buf(), false);
+    IMAGE_HASH_BYTES.with(|count| count.set(0));
+    for record in records {
+        write!(file, "{record}").unwrap();
+        reader.refresh(usize::MAX).unwrap();
+        let before = IMAGE_HASH_BYTES.with(std::cell::Cell::get);
+        writeln!(file).unwrap();
+        reader.refresh(usize::MAX).unwrap();
+        assert_eq!(IMAGE_HASH_BYTES.with(std::cell::Cell::get), before);
+    }
+    assert_eq!(
+        reader.refresh(usize::MAX).unwrap().events,
+        tail(file.path(), usize::MAX).unwrap()
+    );
+}
