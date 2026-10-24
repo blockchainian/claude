@@ -1,14 +1,14 @@
-// ABOUTME: The MCP server codex runs to reach Claude: notify_claude and ask_claude, over stdio.
+// ABOUTME: The MCP server codex runs to reach Claude: notify and ask, over stdio.
 // ABOUTME: Each call names its codex thread; the thread's supervisor record says which Claude session gets it.
 
 import crypto from "node:crypto";
 import readline from "node:readline";
-import { SessionStore, askTimeoutSeconds, readSupervisor, running } from "./inbox.mjs";
+import { SessionStore, askTimeoutSeconds, readSupervisor, running } from "../lib/inbox.mjs";
 
 const textArgument = { type: "object", properties: { text: { type: "string", description: "The message for Claude." } }, required: ["text"], additionalProperties: false };
 const TOOLS = [
-  { name: "notify_claude", description: "Send Claude, the supervisor of this thread, a short progress note, then keep working. Fails at once when no Claude session supervises this thread.", inputSchema: textArgument },
-  { name: "ask_claude", description: "Ask Claude, the supervisor of this thread, for a decision you cannot make yourself, such as a change to a file another thread is editing, which you must not edit yourself. You wait, and the answer comes back as this tool's result; if none arrives in time, proceed on your own judgment. Fails at once when no Claude session supervises this thread.", inputSchema: textArgument }
+  { name: "notify", description: "Send Claude, the supervisor of this thread, a short progress note, then keep working. Fails at once when no Claude session supervises this thread.", inputSchema: textArgument },
+  { name: "ask", description: "Ask Claude, the supervisor of this thread, for a decision you cannot make yourself, such as a change to a file another thread is editing, which you must not edit yourself. You wait, and the answer comes back as this tool's result; if none arrives in time, proceed on your own judgment. Fails at once when no Claude session supervises this thread.", inputSchema: textArgument }
 ];
 const POLL_MS = 250;
 
@@ -62,7 +62,7 @@ async function callTool({ name, arguments: args = {}, _meta: meta = {} }, cancel
   const store = supervisorStore(meta.threadId);
   if (!store) return failed("No Claude session is supervising this thread. Proceed on your own judgment.");
   const event = { turnId: meta["x-codex-turn-metadata"]?.turn_id, callId: meta.callId ?? crypto.randomUUID(), text: args.text ?? "" };
-  if (name === "ask_claude") return ask(store, meta.threadId, event, cancelled);
+  if (name === "ask") return ask(store, meta.threadId, event, cancelled);
   store.append(meta.threadId, { kind: "notify", ...event });
   return said("Delivered to Claude.");
 }
