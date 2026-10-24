@@ -7095,7 +7095,7 @@ mod input_row {
                     let mut editor: crate::line_edit::LineEdit = super::super::line_edit::LineEdit::default();
                     editor.set_text(query);
                     if left {
-                        editor.left();
+                        editor.move_caret(crate::line_edit::Motion::Left);
                     }
                     let expected = (9 + editor
                         .window(usize::from(task_row.width.saturating_sub(9))).caret_column)
@@ -7107,7 +7107,7 @@ mod input_row {
                     let mut editor: crate::line_edit::LineEdit = super::super::line_edit::LineEdit::default();
                     editor.set_text(query);
                     if left {
-                        editor.left();
+                        editor.move_caret(crate::line_edit::Motion::Left);
                     }
                     let event_expected = (9 + editor
                         .window(usize::from(event_row.width.saturating_sub(9))).caret_column)
@@ -10795,7 +10795,7 @@ mod event_navigation {
                 editor.set_text("a");
                 let mut kills = crate::line_edit::KillBuffer::default();
                 kills.begin_stroke();
-                let consumed = view.search_focused() && editor.handle(key, &mut kills);
+                let consumed = view.search_focused() && editor.handle_key(key, &mut kills);
                 if consumed {
                     view.handle_key(key);
                     assert_eq!(view.event_list.search.input.text(), editor.text());

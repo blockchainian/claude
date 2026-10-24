@@ -40,7 +40,7 @@ fn middle_paste_prompt_hits_display_cells_and_line_ends() {
     ] {
         let mut view = fixture();
         view.input_box.editor.set_text(text);
-        view.input_box.editor.home();
+        view.input_box.editor.move_caret(crate::line_edit::Motion::TextStart);
         screen(&view, 160, 40);
         let prompt = view.viewport.borrow().prompt;
         // The first line has the task label; later lines start at the padding.
@@ -195,7 +195,7 @@ fn middle_paste_wrapped_rows_and_blank_rows_keep_line_ends() {
 fn middle_paste_narrow_input_uses_content_end() {
     let mut editor: crate::line_edit::LineEdit = crate::ui::line_edit::LineEdit::default();
     editor.set_text("剪贴板");
-    editor.home();
+    editor.move_caret(crate::line_edit::Motion::TextStart);
     render::click_input_row(&mut editor, Rect::new(0, 0, 2, 1), "Search ❯ ", 1);
     editor.insert("贴🦀");
     assert_eq!(editor.text(), "剪贴板贴🦀");

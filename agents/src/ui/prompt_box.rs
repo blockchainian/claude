@@ -257,11 +257,8 @@ impl PromptBox {
     }
 
     pub(super) fn handle_key(&mut self, key: KeyEvent, kills: &mut crate::line_edit::KillBuffer) -> Option<PromptAction> {
-        let key = crate::line_edit::normalize_key(key);
+        let key = crate::line_edit::keymap::normalize_control_code(key);
         if key.kind == KeyEventKind::Release {
-            return None;
-        }
-        if self.editor.selection_key(key) {
             return None;
         }
         if self.history_key(key, kills) {
@@ -277,6 +274,7 @@ impl PromptBox {
             _ => None,
         };
         if let Some(down) = vertical {
+            self.editor.clear_selection();
             let (width, inset) = self.text_width.get();
             if !self.editor.move_row(line_edit::Wrap { width, first_row_inset: inset }, if down { line_edit::Vertical::Down } else { line_edit::Vertical::Up }) {
                 self.recall_history(down);
@@ -310,7 +308,7 @@ impl PromptBox {
                 return Some(PromptAction::Submit(self.editor.prompt_text()));
             }
         } else {
-            self.editor.handle(key, kills);
+            self.editor.handle_key(key, kills);
         }
         None
     }

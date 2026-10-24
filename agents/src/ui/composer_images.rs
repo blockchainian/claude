@@ -109,7 +109,7 @@ mod ordering_tests {
         let mut editor = Composer::default();
         editor.insert("suffix");
         editor.insert_placeholder(attach());
-        editor.home();
+        editor.move_caret(crate::line_edit::Motion::TextStart);
         editor.insert_placeholder(attach());
         let stored = editor.stored_input();
         let restored = Composer::restore_input(&stored);

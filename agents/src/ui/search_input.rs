@@ -15,7 +15,7 @@ pub(crate) struct SearchInput {
 impl SearchInput {
     pub fn focus(&mut self) {
         self.focused = true;
-        self.query.end();
+        self.query.move_caret(crate::line_edit::Motion::TextEnd);
     }
 
     pub fn blur(&mut self) {
@@ -52,7 +52,7 @@ impl SearchInput {
         match key.code {
             KeyCode::Enter => self.blur(),
             KeyCode::Esc => self.close(),
-            _ => return self.query.handle(key, kills),
+            _ => return self.query.handle_key(key, kills),
         }
         true
     }

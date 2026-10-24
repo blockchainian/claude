@@ -19,7 +19,7 @@ impl Tmux {
         }
     }
     fn literal(&self, text: &str) {
-        self.run(&["send-keys", "-t", "probe", "-l", text]);
+        self.run(&["send-keys", "-t", "probe", "-l", "--", text]);
     }
     fn key(&self, key: &str) {
         self.run(&["send-keys", "-t", "probe", key]);
@@ -246,4 +246,72 @@ fn probe(format: &str) {
         format,
         format == "csi-u"
     );
+}
+
+#[test]
+#[ignore = "requires tmux"]
+fn readline_words_match_in_composer() {
+    let directory = tempfile::tempdir().unwrap();
+    let (codex, claude) = composer_session(directory.path());
+    let binary =
+        std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
+    let binary = Path::new(&binary).canonicalize().unwrap();
+    let tmux = Tmux::new(format!("agents-readline-{}", std::process::id()));
+    tmux.run(&[
+        "new-session",
+        "-d",
+        "-s",
+        "probe",
+        "-x",
+        "100",
+        "-y",
+        "40",
+        "-e",
+        &format!("CODEX_HOME={}", codex.display()),
+        "-e",
+        &format!("CLAUDE_CONFIG_DIR={}", claude.display()),
+        "-e",
+        &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
+        binary.to_str().unwrap(),
+    ]);
+    tmux.wait(|s| s.contains("Inactive 1"));
+    tmux.key("Tab");
+    let screen = tmux.wait(|s| s.contains("Composer ❯"));
+    let row = screen
+        .lines()
+        .position(|line| line.contains("Composer ❯"))
+        .unwrap();
+    tmux.literal(&format!("\x1b[<0;15;{}M\x1b[<0;15;{}m", row + 1, row + 1));
+    let cases: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/readline-words.json")).unwrap();
+    for case in cases.as_array().unwrap() {
+        let input = case["input"].as_str().unwrap();
+        let key = case["key"].as_str().unwrap();
+        tmux.literal(input);
+        tmux.wait(|s| s.contains(&format!("❯ {input}")));
+        if matches!(key, "Alt+F" | "Alt+D") {
+            tmux.key("Home");
+        }
+        match key {
+            "Alt+B" => tmux.literal("\x1bb"),
+            "Alt+F" => tmux.literal("\x1bf"),
+            "Alt+D" => tmux.literal("\x1bd"),
+            "Alt+Backspace" => tmux.literal("\x1b\x7f"),
+            "Ctrl+W" => tmux.key("C-w"),
+            _ => panic!("unknown readline key: {key}"),
+        }
+        // Insert a visible caret marker to verify the actual terminal input path.
+        tmux.literal("|");
+        let mut expected = case["result"].as_str().unwrap().to_owned();
+        let point = case["point"].as_u64().unwrap() as usize;
+        let byte = expected.chars().take(point).map(char::len_utf8).sum();
+        expected.insert(byte, '|');
+        tmux.wait(|s| {
+            s.lines()
+                .any(|line| line.trim().ends_with(&format!("❯ {expected}")))
+        });
+        tmux.key("End");
+        tmux.key("C-u");
+        tmux.wait(|s| s.lines().any(|line| line.trim().ends_with("❯")));
+    }
 }

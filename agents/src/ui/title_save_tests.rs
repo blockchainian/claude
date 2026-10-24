@@ -132,7 +132,7 @@ fn task_title_and_focus_park_across_task_switches() {
     let mut kills = crate::line_edit::KillBuffer::default();
     kills.begin_stroke();
     view.rename
-        .handle(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), &mut kills);
+        .handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), &mut kills);
     let caret = view.rename.window(80).caret_column;
     view.set_active_panel(Panel::TaskList);
     assert_eq!(view.take_pending_action(), None);

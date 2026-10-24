@@ -10,7 +10,7 @@ fn key(editor: &mut Composer, code: KeyCode, modifiers: KeyModifiers) {
         let mut kills = crate::line_edit::KillBuffer::default();
     assert!({
         kills.begin_stroke();
-        editor.handle(KeyEvent::new(code, modifiers), &mut kills)
+        editor.handle_key(KeyEvent::new(code, modifiers), &mut kills)
     });
 }
 
@@ -192,8 +192,8 @@ fn image_caret_stays_on_grapheme_boundaries_with_combining_text() {
     let mut editor = Composer::default();
     editor.insert_placeholder(image());
     editor.insert("\u{301}");
-    editor.home();
-    editor.right();
+    editor.move_caret(crate::line_edit::Motion::TextStart);
+    editor.move_caret(crate::line_edit::Motion::Right);
     assert_eq!(editor.cursor(), editor.text().len());
     assert!(
         editor
@@ -201,7 +201,7 @@ fn image_caret_stays_on_grapheme_boundaries_with_combining_text() {
             .iter()
             .any(|p| p.byte == editor.cursor())
     );
-    editor.backspace();
+    editor.apply(crate::line_edit::EditCommand::Delete(crate::line_edit::Motion::Left), &mut crate::line_edit::KillBuffer::default());
     assert!(editor.is_empty());
     assert!(editor.image_paths().is_empty());
 }
@@ -212,8 +212,8 @@ fn remaining_images_keep_contiguous_numbers_after_deletion() {
     editor.insert_placeholder(image());
     editor.insert_placeholder(image());
     let second = editor.image_paths()[1].clone();
-    editor.home();
-    editor.delete();
+    editor.move_caret(crate::line_edit::Motion::TextStart);
+    editor.apply(crate::line_edit::EditCommand::Delete(crate::line_edit::Motion::Right), &mut crate::line_edit::KillBuffer::default());
     assert_eq!(editor.text(), "[Image #1]");
     assert_eq!(editor.image_paths(), vec![second]);
     editor.insert_placeholder(image());
@@ -227,17 +227,17 @@ fn renumbering_across_ten_images_preserves_caret_and_attachment_order() {
         editor.insert_placeholder(image());
     }
     let paths = editor.image_paths()[1..].to_vec();
-    editor.home();
-    editor.delete();
-    editor.end();
+    editor.move_caret(crate::line_edit::Motion::TextStart);
+    editor.apply(crate::line_edit::EditCommand::Delete(crate::line_edit::Motion::Right), &mut crate::line_edit::KillBuffer::default());
+    editor.move_caret(crate::line_edit::Motion::TextEnd);
     editor.insert(" suffix");
     assert_eq!(editor.prompt_text(), " suffix");
     assert_eq!(editor.image_paths(), paths);
     assert_eq!(editor.cursor(), editor.text().len());
     assert!(editor.text().ends_with("[Image #10] suffix"));
-    editor.home();
+    editor.move_caret(crate::line_edit::Motion::TextStart);
     for _ in 0..10 {
-        editor.delete();
+        editor.apply(crate::line_edit::EditCommand::Delete(crate::line_edit::Motion::Right), &mut crate::line_edit::KillBuffer::default());
     }
     assert_eq!(editor.text(), " suffix");
     assert!(editor.image_paths().is_empty());

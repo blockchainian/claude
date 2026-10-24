@@ -353,7 +353,7 @@ impl QuestionView {
                 KeyCode::Up | KeyCode::Down | KeyCode::Tab | KeyCode::BackTab => {}
                 _ => {
                     let page = &mut self.pages[self.page];
-                    page.other.handle(key, kills);
+                    page.other.handle_key(key, kills);
                     page.other_checked |= !page.other.is_empty();
                     return None;
                 }

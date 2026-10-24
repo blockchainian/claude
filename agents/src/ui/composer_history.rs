@@ -20,7 +20,7 @@ impl PromptBox {
     pub(super) fn record_submission(&mut self) {
         let mut entry = self.editor.clone();
         entry.clear_selection();
-        entry.end();
+        entry.move_caret(crate::line_edit::Motion::TextEnd);
         self.history.borrow_mut().push(entry);
         self.recall = Recall::default();
         self.search = None;
@@ -122,7 +122,7 @@ impl PromptBox {
             }
             _ => {
                 let search = self.search.as_mut().expect("history search");
-                if search.query.handle(key, kills) {
+                if search.query.handle_key(key, kills) {
                     self.search_history(false, true);
                 }
             }

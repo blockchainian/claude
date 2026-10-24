@@ -33,7 +33,8 @@ impl<P: Placeholder> LineEdit<P> {
     pub(crate) fn selection_range(&self) -> Option<Range<usize>> {
         let (anchor, end) = self.selection?;
         (anchor != end).then(|| {
-            self.placeholder_boundary(anchor.min(end), false)..self.placeholder_boundary(anchor.max(end), true)
+            self.placeholder_boundary(anchor.min(end), false)
+                ..self.placeholder_boundary(anchor.max(end), true)
         })
     }
 
@@ -41,11 +42,11 @@ impl<P: Placeholder> LineEdit<P> {
         Some(&self.text[self.selection_range()?])
     }
 
-    pub(crate) fn delete_selection(&mut self) -> bool {
+    pub(super) fn delete_selection(&mut self) -> bool {
         self.replace_selection("")
     }
 
-    pub(crate) fn replace_selection(&mut self, text: impl ToString) -> bool {
+    pub(super) fn replace_selection(&mut self, text: impl ToString) -> bool {
         let Some(range) = self.selection_range() else {
             return false;
         };
@@ -55,32 +56,5 @@ impl<P: Placeholder> LineEdit<P> {
         self.align_cursor();
         self.set_cursor(self.cursor);
         true
-    }
-
-    /// Consume selection deletion; insertion still uses the editor's normal path.
-    pub(crate) fn selection_key(&mut self, key: KeyEvent) -> bool {
-        let modifiers = key.modifiers - KeyModifiers::SHIFT;
-        match (key.code, modifiers) {
-            (KeyCode::Backspace | KeyCode::Delete, KeyModifiers::NONE)
-            | (KeyCode::Char('h' | 'd'), KeyModifiers::CONTROL) => self.delete_selection(),
-            (
-                KeyCode::Left
-                | KeyCode::Right
-                | KeyCode::Up
-                | KeyCode::Down
-                | KeyCode::Home
-                | KeyCode::End,
-                KeyModifiers::NONE,
-            )
-            | (
-                KeyCode::Char('a' | 'b' | 'e' | 'f' | 'n' | 'p' | 'k' | 'u' | 'w'),
-                KeyModifiers::CONTROL,
-            )
-            | (KeyCode::Char('b' | 'f' | 'd'), KeyModifiers::ALT) => {
-                self.clear_selection();
-                false
-            }
-            _ => false,
-        }
     }
 }

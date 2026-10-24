@@ -213,7 +213,7 @@ mod tests {
             },
             ("好b", 3)
         );
-        e.left();
+        e.move_caret(crate::line_edit::Motion::Left);
         assert_eq!(
             {
                 let window = e.window(4);
@@ -221,7 +221,7 @@ mod tests {
             },
             ("好b", 2)
         );
-        e.left();
+        e.move_caret(crate::line_edit::Motion::Left);
         assert_eq!(
             {
                 let window = e.window(4);
@@ -229,7 +229,7 @@ mod tests {
             },
             ("你好", 2)
         );
-        e.home();
+        e.move_caret(crate::line_edit::Motion::TextStart);
         assert_eq!(
             {
                 let window = e.window(4);

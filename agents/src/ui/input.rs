@@ -1599,7 +1599,7 @@ impl View {
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {
-        let key = line_edit::normalize_key(key);
+        let key = line_edit::keymap::normalize_control_code(key);
         if key.kind == KeyEventKind::Release {
             return None;
         }
@@ -1749,7 +1749,7 @@ impl View {
                     };
                 }
                 _ => {
-                    self.rename.handle(key, &mut self.kill_buffer);
+                    self.rename.handle_key(key, &mut self.kill_buffer);
                 }
             }
             return None;

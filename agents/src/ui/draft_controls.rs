@@ -772,7 +772,7 @@ impl View {
             return Some(self.apply_choice(selected));
         }
         if let Some(editor) = selector.active_editor() {
-            editor.handle(key, &mut self.kill_buffer);
+            editor.handle_key(key, &mut self.kill_buffer);
             return Some(None);
         }
         let code = super::navigation::list_navigation(key)?;
