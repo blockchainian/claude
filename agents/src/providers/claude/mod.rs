@@ -2,6 +2,7 @@
 
 mod tools;
 mod claude_in_chrome;
+mod computer_use;
 
 mod account;
 mod api;
@@ -2353,5 +2354,5 @@ mod delete_live_tests {
 
 pub(crate) const TOOL_RULES: super::tool::ToolRules = super::tool::ToolRules {
     native: tools::RULES,
-    servers: &[codex_manager::SERVER, claude_in_chrome::SERVER],
+    servers: &[codex_manager::SERVER, claude_in_chrome::SERVER, computer_use::SERVER],
 };
