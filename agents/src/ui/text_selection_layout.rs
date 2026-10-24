@@ -372,10 +372,9 @@ fn source_tokens(source: &str, markdown: bool, lines: &[Line<'_>]) -> Vec<Token>
 
 /// Reorder cell tokens into display order, retaining each cell's original source bytes.
 fn table_tokens(rows: &[Vec<Vec<Token>>], lines: &[Line<'_>]) -> Option<(Vec<Token>, usize)> {
-    use super::content::Table;
-    let table = Table {
-        rows: rows
-            .iter()
+    use super::content::{Cell, Table};
+    let table = Table::new(
+        rows.iter()
             .map(|row| {
                 row.iter()
                     .map(|cell| {
@@ -388,19 +387,35 @@ fn table_tokens(rows: &[Vec<Vec<Token>>], lines: &[Line<'_>]) -> Option<(Vec<Tok
                     .collect()
             })
             .collect(),
-        style: Default::default(),
-    };
+        Default::default(),
+    );
+    // Source bytes by offset into the concatenated plain cells; every grapheme of a
+    // preformatted cell maps to the whole cell it was formatted from.
     let mut offset = 0;
-    let cells: std::collections::HashMap<_, _> = rows
-        .iter()
-        .flatten()
-        .flatten()
-        .map(|token| {
-            let start = offset;
-            offset += token.text.len();
-            (start, token)
-        })
-        .collect();
+    let mut cells: std::collections::HashMap<usize, Option<Range<usize>>> = Default::default();
+    for (cells_of_row, tokens_of_row) in table.rows.iter().zip(rows) {
+        for (cell, tokens) in cells_of_row.iter().zip(tokens_of_row) {
+            match cell {
+                Cell::Prose(_) => {
+                    for token in tokens {
+                        cells.insert(offset, token.source.clone());
+                        offset += token.text.len();
+                    }
+                }
+                Cell::Preformatted(_) => {
+                    let source = tokens
+                        .iter()
+                        .filter_map(|token| token.source.clone())
+                        .reduce(|whole, next| whole.start.min(next.start)..whole.end.max(next.end));
+                    let plain = cell.plain();
+                    for (byte, _) in plain.grapheme_indices(true) {
+                        cells.insert(offset + byte, source.clone());
+                    }
+                    offset += plain.len();
+                }
+            }
+        }
+    }
     for (rule_index, rule) in lines.iter().enumerate() {
         let text = rule.to_string();
         let trimmed = text.trim_start();
@@ -434,8 +449,7 @@ fn table_tokens(rows: &[Vec<Vec<Token>>], lines: &[Line<'_>]) -> Option<(Vec<Tok
                 let source = sources
                     .iter()
                     .find(|(columns, _)| usize::from(columns.start) == x)
-                    .and_then(|(_, bytes)| cells.get(&bytes.start))
-                    .and_then(|token| token.source.clone());
+                    .and_then(|(_, bytes)| cells.get(&bytes.start).cloned().flatten());
                 tokens.push(Token {
                     text: grapheme.to_owned(),
                     source,

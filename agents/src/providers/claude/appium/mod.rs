@@ -317,12 +317,22 @@ mod tests {
                 "",
                 "label",
                 "tap (200, 85)",
+                "create",
             ]
         );
         let input = |index: usize| calls[index].input.clone();
         assert_eq!(input(0), Vec::new());
         assert_eq!(input(1), prose("00000000-0000000000000000"));
         assert_eq!(input(2), prose("com.amazon.mp3.AmazonCloudPlayer"));
+        // A session without an app lists its remaining fields, the capabilities as their JSON text.
+        assert!(matches!(
+            &input(10)[..],
+            [Section::Markdown { label, text }]
+                if label == "input"
+                    && text.starts_with(
+                        "| platform | capabilities |\n| --- | --- |\n| ios | \\{\\\"appium\\:udid\\\"\\:\\\"00000000\\-0000000000000000\\\"\\,"
+                    )
+        ));
         assert_eq!(input(5), prose("A5000000-0000-0000-BE14-000000000000"));
         assert_eq!(
             input(7),

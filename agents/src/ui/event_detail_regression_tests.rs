@@ -469,3 +469,31 @@ fn claude_write_content_uses_path_syntax_and_preserves_unknown_text() {
     }
     assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
 }
+
+#[test]
+fn appium_session_table_detail_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let transcript = dir.path().join("transcript.jsonl");
+    std::fs::write(
+        &transcript,
+        include_str!("../../tests/fixtures/claude-appium.jsonl"),
+    )
+    .unwrap();
+    let event = crate::providers::claude::event_reader::tail(&transcript, 200)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(event.calls[0].title, "create");
+    let mut snapshot = String::new();
+    for line in event_detail_layout(&event, 120, Path::new("/workspace"), DateTime::UNIX_EPOCH).lines
+    {
+        snapshot.push_str(line.to_string().trim_end());
+        snapshot.push('\n');
+    }
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/ui_snapshots/appium_session_event_detail.txt");
+    if std::env::var_os("UPDATE_EVENT_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+}

@@ -52,8 +52,71 @@ impl Block {
 /// Cells remain in source order until the reading width is known.
 #[derive(Clone)]
 pub(super) struct Table {
-    pub rows: Vec<Vec<Line<'static>>>,
+    pub rows: Vec<Vec<Cell>>,
     pub style: ratatui::style::Style,
+}
+
+/// A cell whose text the detail panel would show as a structured section keeps that layout.
+#[derive(Clone)]
+pub(super) enum Cell {
+    Prose(Line<'static>),
+    Preformatted(Vec<Line<'static>>),
+}
+
+impl Default for Cell {
+    fn default() -> Self {
+        Self::Prose(Line::default())
+    }
+}
+
+impl Cell {
+    fn new(line: Line<'static>) -> Self {
+        match super::structured_text::parse(&line.to_string()) {
+            Some(document) => Self::Preformatted(document.highlighted()),
+            None => Self::Prose(line),
+        }
+    }
+
+    fn width(&self) -> usize {
+        match self {
+            Self::Prose(line) => line.width(),
+            Self::Preformatted(lines) => lines.iter().map(Line::width).max().unwrap_or(0),
+        }
+    }
+
+    /// The unformatted text that the cell's display graphemes map to.
+    pub fn plain(&self) -> String {
+        match self {
+            Self::Prose(line) => line.to_string(),
+            Self::Preformatted(lines) => lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
+
+    /// A preformatted cell keeps its line breaks and cuts long lines at the column width.
+    fn layout(&self, width: usize) -> (Vec<Line<'static>>, Vec<Option<bool>>) {
+        match self {
+            Self::Prose(line) => wrap(
+                line.clone(),
+                0,
+                textwrap::Options::new(width).break_words(true),
+            ),
+            Self::Preformatted(lines) => {
+                let mut wrapped = Vec::new();
+                let mut breaks = Vec::new();
+                for line in lines {
+                    let pieces = hard_wrap_line(line.clone(), width);
+                    breaks.push(None);
+                    breaks.extend(std::iter::repeat_n(Some(false), pieces.len() - 1));
+                    wrapped.extend(pieces);
+                }
+                (wrapped, breaks)
+            }
+        }
+    }
 }
 
 pub(super) struct TableLayout {
@@ -64,6 +127,16 @@ pub(super) struct TableLayout {
 }
 
 impl Table {
+    pub fn new(rows: Vec<Vec<Line<'static>>>, style: ratatui::style::Style) -> Self {
+        Self {
+            rows: rows
+                .into_iter()
+                .map(|row| row.into_iter().map(Cell::new).collect())
+                .collect(),
+            style,
+        }
+    }
+
     pub fn layout(&self, indent: usize, options: textwrap::Options<'_>) -> TableLayout {
         use unicode_segmentation::UnicodeSegmentation;
         use unicode_width::UnicodeWidthStr;
@@ -85,7 +158,7 @@ impl Table {
                 self.rows
                     .iter()
                     .filter_map(|row| row.get(column))
-                    .map(Line::width)
+                    .map(Cell::width)
                     .max()
                     .unwrap_or(0)
             })
@@ -108,14 +181,10 @@ impl Table {
                 (0..columns)
                     .map(|column| {
                         let cell = row.get(column).cloned().unwrap_or_default();
-                        let plain = cell.to_string();
+                        let plain = cell.plain();
                         let start = base;
                         base += plain.len();
-                        let (lines, breaks) = wrap(
-                            cell,
-                            0,
-                            textwrap::Options::new(widths[column].max(1)).break_words(true),
-                        );
+                        let (lines, breaks) = cell.layout(widths[column].max(1));
                         (plain, start, lines, breaks)
                     })
                     .collect()
@@ -148,6 +217,7 @@ impl Table {
                 let mut sources = Vec::new();
                 let mut x = indent;
                 let mut space = false;
+                let mut newline = false;
                 for (column, (plain, base, lines, breaks)) in row.iter().enumerate() {
                     if column > 0 {
                         spans.push(Span::styled(" │ ", self.style));
@@ -168,7 +238,11 @@ impl Table {
                         ));
                         x = end;
                     }
-                    space |= breaks.get(display_row) == Some(&Some(true));
+                    match breaks.get(display_row) {
+                        Some(Some(true)) => space = true,
+                        Some(None) if display_row > 0 => newline = true,
+                        _ => {}
+                    }
                     let padding = widths[column].saturating_sub(line.width());
                     spans.extend(line.spans);
                     if column + 1 < columns && padding > 0 {
@@ -177,7 +251,9 @@ impl Table {
                     }
                 }
                 layout.lines.push(Line::from(spans));
-                layout.breaks.push((display_row > 0).then_some(space));
+                layout
+                    .breaks
+                    .push((display_row > 0 && !newline).then_some(space));
                 layout.sources.push(sources);
             }
         }
@@ -319,4 +395,42 @@ fn wrap(
         })
         .collect();
     (lines, breaks)
+}
+
+/// Lines cut at `width` by grapheme, keeping each span's style.
+pub(super) fn hard_wrap(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
+    if width == 0 {
+        return Vec::new();
+    }
+    lines
+        .into_iter()
+        .flat_map(|line| hard_wrap_line(line, width))
+        .collect()
+}
+
+fn hard_wrap_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
+    use unicode_width::UnicodeWidthStr;
+    let mut lines = Vec::new();
+    let mut row = Line::default();
+    let mut used = 0;
+    for grapheme in line.styled_graphemes(ratatui::style::Style::default()) {
+        let cells = grapheme.symbol.width();
+        if used > 0 && used + cells > width {
+            lines.push(std::mem::take(&mut row));
+            used = 0;
+        }
+        if let Some(span) = row
+            .spans
+            .last_mut()
+            .filter(|span| span.style == grapheme.style)
+        {
+            span.content.to_mut().push_str(grapheme.symbol);
+        } else {
+            row.spans
+                .push(Span::styled(grapheme.symbol.to_owned(), grapheme.style));
+        }
+        used += cells;
+    }
+    lines.push(row);
+    lines
 }

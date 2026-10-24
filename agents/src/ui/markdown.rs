@@ -255,10 +255,7 @@ impl Writer {
         self.lines.push(Block {
             lines: Vec::new(),
             indent: self.indent,
-            kind: Kind::Table(Table {
-                rows,
-                style: self.style(),
-            }),
+            kind: Kind::Table(Table::new(rows, self.style())),
         });
     }
 
@@ -652,6 +649,109 @@ mod tests {
             .zip(lines)
             .filter(|(_, line)| line.to_string().contains('┼'))
             .all(|(map, _)| map.is_empty())
+    }
+
+    /// The recorded appium session call whose capabilities cell is a JSON string.
+    fn capabilities_table() -> (serde_json::Value, String) {
+        let capabilities = serde_json::json!({
+            "appium:udid": "00000000-0000000000000000",
+            "appium:usePreinstalledWDA": true,
+            "appium:prebuiltWDAPath": "/Users/user/.cache/appium-mcp/wda-real/16.12.4/signed/23ed55a4-b472-45e1-b469-ee696e1e150c/Payload-resigned.ipa",
+            "appium:wdaLaunchTimeout": 30000,
+            "appium:shouldTerminateApp": false,
+            "appium:newCommandTimeout": 600
+        });
+        let row = serde_json::json!({"platform": "ios", "capabilities": capabilities.to_string()});
+        let source = crate::providers::tool::markdown_table(&row, "input").unwrap();
+        (capabilities, source)
+    }
+
+    #[test]
+    fn structured_table_cells_draw_like_structured_sections() {
+        let (capabilities, source) = capabilities_table();
+        let lines = render(&source, 60);
+        let text = plain(&lines);
+        assert_eq!(text[0], "platform │ capabilities");
+        assert_eq!(text[2], "ios      │ {");
+        assert_eq!(text[3], "         │   \"appium:udid\": \"00000000-0000000000000000\",");
+        assert_eq!(text.last().unwrap(), "         │ }");
+        let document = super::super::structured_text::parse(&capabilities.to_string()).unwrap();
+        let expected: Vec<String> = document
+            .lines(49)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let cells: Vec<String> = text[2..]
+            .iter()
+            .map(|line| line.chars().skip(11).collect())
+            .collect();
+        assert_eq!(cells, expected);
+        assert!(expected.len() > 8, "the long path wraps inside the column");
+        for line in &lines {
+            assert!(line.width() <= 60);
+        }
+        assert!(
+            lines[3]
+                .spans
+                .iter()
+                .any(|span| span.style.fg.is_some() && span.content.contains("appium:udid"))
+        );
+    }
+
+    #[test]
+    fn structured_table_cell_selection_copies_the_displayed_text() {
+        use super::super::{
+            Grouping, View,
+            text_selection::{DrawnRow, Source, TextRegion},
+        };
+        use ratatui::layout::Rect;
+        let (capabilities, source) = capabilities_table();
+        let (lines, breaks): (Vec<_>, Vec<_>) = blocks(&source)
+            .into_iter()
+            .map(|block| block.layout_with_breaks(textwrap::Options::new(60)))
+            .fold(
+                (Vec::new(), Vec::new()),
+                |(mut lines, mut breaks), (next, joins)| {
+                    lines.extend(next);
+                    breaks.extend(joins);
+                    (lines, breaks)
+                },
+            );
+        let maps = super::super::text_selection_layout::map_lines(&source, &lines, true);
+        let mut view = View::new(Grouping::Project, false);
+        view.viewport.borrow_mut().event_text = TextRegion {
+            area: Rect::new(0, 0, 60, lines.len() as u16),
+            sources: vec![Source {
+                id: 0,
+                text: source.clone().into(),
+                label: "table".into(),
+            }],
+            rows: lines
+                .iter()
+                .zip(maps)
+                .zip(breaks)
+                .enumerate()
+                .map(|(index, ((line, cells), continuation))| DrawnRow {
+                    segment: 0,
+                    index,
+                    x: 0,
+                    y: index as u16,
+                    cells,
+                    continuation,
+                    text: line.to_string(),
+                })
+                .collect(),
+        };
+        let last = lines.len() as u16 - 1;
+        view.begin_text_selection(11, 2);
+        view.extend_text_selection(12, last);
+        let Some(super::super::Action::Copy { text, .. }) = view.finish_text_selection(12, last)
+        else {
+            panic!("copy action")
+        };
+        let document = super::super::structured_text::parse(&capabilities.to_string()).unwrap();
+        assert_eq!(text, document.text());
+        assert!(maps_for_rules_are_empty(&source, &lines));
     }
 
     #[test]

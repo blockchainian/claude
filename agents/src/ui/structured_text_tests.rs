@@ -72,3 +72,19 @@ fn explicit_structured_sections_use_the_format_registry() {
             .contains("\n  <dict>\n    <key>settings</key>")
     );
 }
+
+#[test]
+fn documents_wrap_their_lines_at_the_width() {
+    let xml = include_str!("../../tests/fixtures/structured_text/real-theme.plist");
+    let document = structured_text::parse(xml).unwrap();
+    let lines = document.lines(24);
+    assert!(lines.len() > document.highlighted().len());
+    assert!(lines.iter().all(|line| line.width() <= 24));
+    let joined: String = lines.iter().map(ToString::to_string).collect();
+    let unwrapped: String = document
+        .highlighted()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(joined, unwrapped);
+}
