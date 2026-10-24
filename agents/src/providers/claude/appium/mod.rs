@@ -36,8 +36,8 @@ pub(crate) const SERVER: McpServer = McpServer {
         ToolRule {
             name: "appium_find_element",
             aliases: &["appium_find_elements"],
-            title: &[Pick::Field(Source::Input, "/selector")],
-            input: Some((Pick::With(find_input), Format::Table)),
+            title: &[Pick::Field(Source::Input, "/strategy")],
+            input: Some((Pick::With(selector_input), Format::Code(""))),
             output: Some((Pick::With(element_ids), Format::Text)),
             ..DEFAULT_RULE
         },
@@ -49,7 +49,7 @@ pub(crate) const SERVER: McpServer = McpServer {
         },
         ToolRule {
             name: "appium_get_page_source",
-            input: Some((Pick::With(page_source_input), Format::Code("xpath"))),
+            input: Some((Pick::With(selector_input), Format::Code(""))),
             ..DEFAULT_RULE
         },
         ToolRule {
@@ -176,10 +176,6 @@ fn screenshot(data: &ToolData<'_>) -> Option<Body> {
     Some(Body::Sections(vec![Section::Image(image)]))
 }
 
-fn find_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
-    other_fields(data, &["selector"])
-}
-
 /// The found elements' ids, one per line.
 fn element_ids(data: &ToolData<'_>) -> Option<Body> {
     let result = data.result.filter(|result| !result.error)?;
@@ -209,11 +205,11 @@ fn gesture_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     other_fields(data, &["action", "x", "y"])
 }
 
-/// The selector as code, since XPath filters run long.
-fn page_source_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+/// The selector as code, since predicates and XPath filters run long.
+fn selector_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     let selector = text(data.input, "selector")?;
-    let mut sections = vec![code_section("selector", "xpath", selector)];
-    sections.extend(other_fields(data, &["selector"])?);
+    let mut sections = vec![code_section("selector", "", selector)];
+    sections.extend(other_fields(data, &["selector", "strategy"])?);
     Some(sections)
 }
 
@@ -296,9 +292,9 @@ mod tests {
                 "discovery",
                 "create",
                 "maxWidth 400",
-                "Playlists",
+                "accessibility id",
                 "tap",
-                "label CONTAINS[c] 'classic'",
+                "-ios predicate string",
                 "",
                 "label",
                 "tap (200, 85)",
@@ -313,19 +309,18 @@ mod tests {
             input(7),
             vec![super::code_section(
                 "selector",
-                "xpath",
+                "",
                 "//*[contains(translate(@label,'CLASI','clasi'),'classic')]"
             )]
         );
         assert_eq!(input(8), prose("42010000-0000-0000-BE14-000000000000"));
         assert_eq!(input(9), Vec::new());
         assert_eq!(input(3), Vec::new());
-        for index in [4, 6] {
-            let sections = input(index);
-            let [Section::Markdown { text, .. }] = sections.as_slice() else {
-                panic!("input {index} must be a table: {sections:?}");
-            };
-            assert!(!text.contains("sessionId"), "{text}");
+        for (index, selector) in [(4, "Playlists"), (6, "label CONTAINS[c] 'classic'")] {
+            assert_eq!(
+                input(index),
+                vec![super::code_section("selector", "", selector)]
+            );
         }
 
         assert_eq!(
