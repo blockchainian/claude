@@ -1973,7 +1973,15 @@ fn event_detail_parts_layout_with_images(
         layout.rows.push((layout.sources.len() - 1, Vec::new()));
         let body_start = layout.lines.len();
         let source_start = layout.sources.len();
+        // A blank line separates content blocks; the arrow sits flush against the blocks it joins.
+        let mut previous_arrow: Option<bool> = None;
         for group in section.groups {
+            let arrow = group.parts.iter().all(super::tool_detail::Part::arrow);
+            if previous_arrow.is_some_and(|previous| !previous && !arrow) {
+                layout.lines.push(Line::default());
+                layout.rows.push((layout.sources.len() - 1, Vec::new()));
+            }
+            previous_arrow = Some(arrow);
             let rendered: Vec<_> = group
                 .parts
                 .into_iter()

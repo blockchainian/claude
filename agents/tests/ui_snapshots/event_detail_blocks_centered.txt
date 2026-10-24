@@ -54,6 +54,7 @@ claude-in-chrome javascript tool — 120 columns
     https://claude.ai/v1/environment_providers/private/organizations/ORGANIZATION_ID/environments limit LIMIT
 
 
+
                   Tab Context:
                   - Executed on tabId: 123456789
                   - Available tabs:
@@ -70,6 +71,7 @@ claude-in-chrome javascript tool — 200 columns
                                                                 ].join('\n');
                                                                                                     ↓
                                                 https://claude.ai/v1/environment_providers/private/organizations/ORGANIZATION_ID/environments limit LIMIT
+
 
 
                                                           Tab Context:

@@ -59,7 +59,7 @@ fn wide_text_images_keep_the_text_centered_independently() {
         .iter()
         .position(|line| line.to_string().trim() == event.body)
         .unwrap();
-    assert_eq!(with_image.images[0].rows.start, row + 1);
+    assert_eq!(with_image.images[0].rows.start, row + 2);
     assert_eq!(
         with_image
             .lines

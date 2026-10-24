@@ -185,6 +185,10 @@ impl Part {
         matches!(self.body, Body::Running)
     }
 
+    pub fn arrow(&self) -> bool {
+        matches!(self.body, Body::Arrow)
+    }
+
     /// Generated rules and title padding have no source bytes to select.
     #[cfg(test)]
     pub fn maps(&self, lines: &[Line<'_>]) -> Vec<Vec<super::text_selection_layout::CellMap>> {
@@ -973,9 +977,7 @@ mod tests {
     fn codex_fixture_events(fixture: &str) -> Vec<Event> {
         use crate::providers::Provider;
         let directory = tempfile::tempdir().unwrap();
-        let provider = crate::providers::codex::CodexProvider::new(
-            directory.path().into(),
-        );
+        let provider = crate::providers::codex::CodexProvider::new(directory.path().into());
         let database = rusqlite::Connection::open(directory.path().join("state_5.sqlite")).unwrap();
         database
             .execute_batch(include_str!("../../tests/fixtures/codex-state.sql"))
@@ -2187,7 +2189,9 @@ mod tests {
                                 .collect::<String>()
                         })
                         .find(|row| row.contains(needle))
-                        .unwrap_or_else(|| panic!("missing {needle:?}, input={input}, width={width}"));
+                        .unwrap_or_else(|| {
+                            panic!("missing {needle:?}, input={input}, width={width}")
+                        });
                     assert_eq!(
                         row[..row.find(needle).unwrap()].width(),
                         usize::from(
@@ -2202,6 +2206,52 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn blocks_are_separated_by_a_blank_line_and_the_arrow_joins_its_neighbors() {
+        use crate::providers::{Provider, claude::ClaudeProvider};
+        use ratatui::{buffer::Buffer, layout::Rect};
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("projects/project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("00000000-0000-0000-0000-000000000001.jsonl"),
+            include_str!("../../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+        let session = ClaudeProvider::new(directory.path().into())
+            .refresh(1)
+            .sessions
+            .remove(0);
+        let mut view = super::super::View::new(crate::model::Grouping::Project, false);
+        view.status_filter = 1;
+        view.set_sessions(vec![session], false);
+        view.event_session = view.selected_id().cloned();
+        view.set_event(vec![manager_reply_event()]);
+        let area = Rect::new(0, 0, 160, 80);
+        let mut buffer = Buffer::empty(area);
+        view.viewport.borrow_mut().event_panel = area;
+        view.render_event_detail(area, &mut buffer, chrono::DateTime::UNIX_EPOCH);
+        let panel = view.viewport.borrow().event_detail_columns.unwrap().panel;
+        let rows: Vec<String> = (panel.y..panel.bottom())
+            .map(|y| {
+                (panel.x..panel.right())
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+                    .trim()
+                    .to_owned()
+            })
+            .collect();
+        let arrow = rows.iter().position(|row| row == "↓").unwrap();
+        assert!(!rows[arrow - 1].is_empty(), "{rows:#?}");
+        assert!(!rows[arrow + 1].is_empty(), "{rows:#?}");
+        let table = rows
+            .iter()
+            .position(|row| row.starts_with("Attention"))
+            .unwrap();
+        assert!(rows[table - 1].is_empty(), "{rows:#?}");
+        assert!(!rows[table - 2].is_empty(), "{rows:#?}");
     }
 
     #[test]
@@ -2403,9 +2453,7 @@ mod tests {
         .unwrap();
         let mut claude = crate::providers::claude::ClaudeProvider::new(dir.path().into());
         let mut session = claude.refresh(1).sessions.remove(0);
-        let codex = crate::providers::codex::CodexProvider::new(
-            dir.path().into(),
-        );
+        let codex = crate::providers::codex::CodexProvider::new(dir.path().into());
         for fixture in ["codex-mcp-errors.jsonl", "codex-command-failed.jsonl"] {
             session.transcript = Some(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
