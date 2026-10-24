@@ -205,7 +205,7 @@ pub(crate) enum Format {
     /// Formats source code in the given language as a code section.
     Code(&'static str),
     /// A JSON array as a Markdown table, one row per element and one column per field;
-    /// a JSON object is a single row.
+    /// a JSON object or a single value is one row.
     Table,
 }
 
@@ -515,7 +515,7 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
     ToolRule {
         name: "claude-in-chrome find",
         title: &[Pick::Field(Source::Input, "/query")],
-        remaining_input: Some(Format::Table),
+        input: Some((Pick::Field(Source::Input, "/tabId"), Format::Table)),
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -524,7 +524,7 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
             Pick::Field(Source::Input, "/action_summary"),
             Pick::Field(Source::Input, "/action"),
         ],
-        remaining_input: Some(Format::Table),
+        input: Some((Pick::Field(Source::Input, "/tabId"), Format::Table)),
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -1260,8 +1260,10 @@ fn table_cell(text: &str) -> String {
 /// scalars give a single column headed `name`.
 fn markdown_table(value: &Value, name: &str) -> Option<String> {
     let rows = match value {
-        Value::Object(object) if !object.is_empty() => std::slice::from_ref(value),
-        _ => value.as_array().filter(|rows| !rows.is_empty())?.as_slice(),
+        Value::Array(rows) if !rows.is_empty() => rows.as_slice(),
+        Value::Array(_) | Value::Null => return None,
+        Value::Object(object) if object.is_empty() => return None,
+        _ => std::slice::from_ref(value),
     };
     let cell = |value: &Value| {
         table_cell(
@@ -1778,7 +1780,7 @@ mod tests {
     fn chrome_find_and_computer_title_their_fields_and_show_the_rest() {
         let table = |text: &str| {
             vec![crate::event::Section::Markdown {
-                label: "input".into(),
+                label: "tabId".into(),
                 text: text.into(),
             }]
         };
@@ -1801,13 +1803,13 @@ mod tests {
                     "action_summary": "点搜索按钮执行航班搜索"
                 }),
                 "点搜索按钮执行航班搜索",
-                table("| tabId | ref |\n| --- | --- |\n| 665979853 | ref\\_21 |"),
+                table("| tabId |\n| --- |\n| 665979853 |"),
             ),
             (
                 "mcp__claude-in-chrome__computer",
                 serde_json::json!({"action": "wait", "tabId": 665979853, "duration": 4}),
                 "wait",
-                table("| tabId | duration |\n| --- | --- |\n| 665979853 | 4 |"),
+                table("| tabId |\n| --- |\n| 665979853 |"),
             ),
             (
                 "mcp__claude-in-chrome__computer",
