@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { runClaude } from "./claude.mjs";
 
 const usage = `usage:
-  client.mjs mcp   serve notify_claude and ask_claude to codex over stdio`;
+  client.mjs mcp   serve notify and ask to codex over stdio`;
 
 try {
   const command = process.argv[2];

@@ -51,14 +51,19 @@ test("the packaged Claude client starts without a Claude host and delivers real 
     assert.equal(initialized.result.serverInfo.version, manifest.version);
     child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
     const listed = await request("tools/list", {});
-    assert.deepEqual(listed.result.tools.map(({ name }) => name).sort(), ["ask_claude", "notify_claude"]);
+    assert.deepEqual(listed.result.tools.map(({ name }) => name).sort(), ["ask", "notify"]);
     const call = (name, text, threadId) => request("tools/call", { name, arguments: { text }, _meta: { threadId, callId: "client-call" } });
-    const orphan = await call("ask_claude", "Who supervises this thread?", "unclaimed");
+    for (const name of ["ask_claude", "notify_claude"]) {
+      const removed = await call(name, "Removed tool", "unclaimed");
+      assert.equal(removed.result.isError, true);
+      assert.equal(removed.result.content[0].text, `unknown tool: ${name}`);
+    }
+    const orphan = await call("ask", "Who supervises this thread?", "unclaimed");
     assert.equal(orphan.result.isError, true);
     assert.match(orphan.result.content[0].text, /No Claude session is supervising/);
     await mkdir(path.join(state, "threads"));
     await writeFile(path.join(state, "threads", "client-thread.json"), JSON.stringify({ sessionId: "supervisor", pid: process.pid }));
-    const delivered = await call("notify_claude", "Client installation verified.", "client-thread");
+    const delivered = await call("notify", "Client installation verified.", "client-thread");
     assert.equal(delivered.result.isError, undefined);
     assert.equal(delivered.result.content[0].text, "Delivered to Claude.");
     const event = JSON.parse((await readFile(path.join(state, "supervisor", "client-thread.jsonl"), "utf8")).trim());
