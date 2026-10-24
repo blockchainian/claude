@@ -1698,7 +1698,7 @@ test("a detached thread is not subscribed to again when the server starts or rec
   }
 });
 
-test("mcp starts a thread on an allowed model and effort, and refuses any other pair", { timeout: 20_000 }, async () => {
+test("mcp starts a thread on an allowed model, effort and tier, and refuses any other value", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
@@ -1707,21 +1707,22 @@ test("mcp starts a thread on an allowed model and effort, and refuses any other 
     await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
     const tools = await mcp.request("tools/list", {});
     const schema = tools.result.tools.find((tool) => tool.name === "start").inputSchema;
-    assert.deepEqual(schema.properties.model.enum, ["gpt-6.1-sol", "gpt-6-luna"]);
-    assert.deepEqual(schema.properties.effort.enum, ["medium", "high"]);
+    assert.deepEqual(schema.properties.model.enum, ["gpt-6.1-sol"]);
+    assert.deepEqual(schema.properties.effort.enum, ["medium"]);
+    assert.deepEqual(schema.properties.tier.enum, ["fast", "standard"]);
     assert.deepEqual(schema.required, ["cwd", "prompt"]);
 
     for (const [args, error] of [
-      [{ model: "gpt-6-luna", effort: "medium" }, "gpt-6-luna runs only at high effort"],
-      [{ model: "gpt-6-luna", effort: "low" }, "gpt-6-luna runs only at high effort"],
       [{ model: "gpt-6.1-sol", effort: "high" }, "gpt-6.1-sol runs only at medium effort"],
-      [{ model: "gpt-6-luna" }, "gpt-6-luna runs only at high effort"],
       [{ model: "gpt-6.1-sol" }, "gpt-6.1-sol runs only at medium effort"],
-      [{ effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
-      [{ model: "other", effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
-      [{ model: "toString", effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
-      [{ model: null, effort: "high" }, "model must be one of gpt-6.1-sol, gpt-6-luna"],
-      [{ model: "gpt-6-luna", effort: null }, "gpt-6-luna runs only at high effort"]
+      [{ model: "gpt-6.1-sol", effort: null }, "gpt-6.1-sol runs only at medium effort"],
+      [{ effort: "medium" }, "model must be one of gpt-6.1-sol"],
+      [{ model: "gpt-6-luna", effort: "high" }, "model must be one of gpt-6.1-sol"],
+      [{ model: "toString", effort: "medium" }, "model must be one of gpt-6.1-sol"],
+      [{ model: null, effort: "medium" }, "model must be one of gpt-6.1-sol"],
+      [{ tier: "priority" }, "tier must be one of fast, standard"],
+      [{ tier: "toString" }, "tier must be one of fast, standard"],
+      [{ tier: null }, "tier must be one of fast, standard"]
     ]) {
       const refused = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", ...args });
       assert.equal(refused.isError, true);
@@ -1729,15 +1730,16 @@ test("mcp starts a thread on an allowed model and effort, and refuses any other 
       assert.equal(script.messages.some((message) => message.method === "thread/start"), false);
     }
 
-    for (const [model, effort] of [["gpt-6-luna", "high"], ["gpt-6.1-sol", "medium"]]) {
-      const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", model, effort });
+    for (const [tier, serviceTier] of [[undefined, undefined], ["fast", "priority"], ["standard", "default"]]) {
+      const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", model: "gpt-6.1-sol", effort: "medium", tier });
       assert.equal(started.isError, false, started.text);
       const start = script.messages.filter((message) => message.method === "thread/start").at(-1).params;
-      assert.equal(start.model, model);
+      assert.equal(start.model, "gpt-6.1-sol");
+      assert.equal(start.serviceTier, serviceTier);
       assert.deepEqual(start.config, {
         "sandbox_workspace_write.network_access": true,
         "mcp_servers.claude-client": { command: process.execPath, args: [client, "mcp"], env: { CODEX_MANAGER_STATE_DIR: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" },
-        model_reasoning_effort: effort
+        model_reasoning_effort: "medium"
       });
     }
   } finally {
@@ -1775,7 +1777,7 @@ for (const scenario of ["latest summary", "independent", "no summary", "custom t
     try {
       await mcp.request("initialize", {});
       if (scenario === "latest summary") await writeFile(path.join(sessions, `${process.pid}.json`), JSON.stringify({ sessionId: current, name: "Session name" }));
-      const result = await mcp.call("transfer", { cwd: "plugins", ...(scenario === "latest summary" ? { model: "gpt-6-luna", effort: "high" } : {}) });
+      const result = await mcp.call("transfer", { cwd: "plugins", ...(scenario === "latest summary" ? { model: "gpt-6.1-sol", effort: "medium", tier: "standard" } : {}) });
       if (scenario === "no summary") {
         assert.equal(result.isError, true);
         assert.equal(result.text, "no compaction summary in this session; run /compact first");
@@ -1788,8 +1790,9 @@ for (const scenario of ["latest summary", "independent", "no summary", "custom t
       const start = script.messages.find((message) => message.method === "thread/start").params;
       assert.equal(start.sandbox, "workspace-write");
       assert.equal(start.config["mcp_servers.claude-client"], undefined);
-      assert.equal(start.model, scenario === "latest summary" ? "gpt-6-luna" : undefined);
-      assert.equal(start.config.model_reasoning_effort, scenario === "latest summary" ? "high" : undefined);
+      assert.equal(start.model, scenario === "latest summary" ? "gpt-6.1-sol" : undefined);
+      assert.equal(start.config.model_reasoning_effort, scenario === "latest summary" ? "medium" : undefined);
+      assert.equal(start.serviceTier, scenario === "latest summary" ? "default" : undefined);
       const named = script.messages.find((message) => message.method === "thread/name/set");
       assert.deepEqual(named?.params, name ? { threadId: "thread-A", name } : undefined);
       const prompt = script.messages.find((message) => message.method === "turn/start").params.input[0].text;
@@ -1811,7 +1814,7 @@ for (const scenario of ["latest summary", "independent", "no summary", "custom t
   });
 }
 
-test("transfer validates cwd and shares start's model and effort rules", { timeout: 20_000 }, async () => {
+test("transfer validates cwd and shares start's model, effort and tier rules", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
@@ -1822,10 +1825,10 @@ test("transfer validates cwd and shares start's model and effort rules", { timeo
     const tools = (await mcp.request("tools/list", {})).result.tools;
     const start = tools.find((tool) => tool.name === "start").inputSchema;
     const transfer = tools.find((tool) => tool.name === "transfer").inputSchema;
-    assert.deepEqual(Object.keys(transfer.properties), ["cwd", "model", "effort"]);
+    assert.deepEqual(Object.keys(transfer.properties), ["cwd", "model", "effort", "tier"]);
     assert.deepEqual(transfer.required, ["cwd"]);
-    for (const field of ["model", "effort"]) assert.deepEqual(transfer.properties[field], start.properties[field]);
-    for (const args of [{ model: "other", effort: "high" }, { model: "gpt-6-luna" }, { effort: "high" }, { model: "gpt-6.1-sol", effort: "high" }, { model: null, effort: "high" }]) {
+    for (const field of ["model", "effort", "tier"]) assert.deepEqual(transfer.properties[field], start.properties[field]);
+    for (const args of [{ model: "gpt-6-luna", effort: "high" }, { model: "gpt-6.1-sol" }, { effort: "medium" }, { model: "gpt-6.1-sol", effort: "high" }, { model: null, effort: "medium" }, { tier: "priority" }]) {
       const expected = await mcp.call("start", { cwd: "plugins", prompt: "task", ...args });
       const actual = await mcp.call("transfer", { cwd: "plugins", ...args });
       assert.equal(actual.isError, true);
