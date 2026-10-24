@@ -705,6 +705,15 @@ fn parts(event: &Event) -> Vec<EventDetailSection> {
             let mut input = Vec::new();
             for section in &call.input {
                 match section {
+                    Section::GroupBreak if !input.is_empty() => {
+                        sections
+                            .last_mut()
+                            .expect("call has a section")
+                            .groups
+                            .push(Group {
+                                parts: std::mem::take(&mut input),
+                            });
+                    }
                     Section::Label(label) if input.is_empty() && sections.len() == 1 => {
                         sections[0].title.title = label.clone();
                     }
@@ -755,6 +764,11 @@ fn parts(event: &Event) -> Vec<EventDetailSection> {
                     };
                     for section in output {
                         if matches!(section, Section::GroupBreak) {
+                            if !output_parts.is_empty() {
+                                groups.push(Group {
+                                    parts: std::mem::take(&mut output_parts),
+                                });
+                            }
                             continue;
                         }
                         push_section(&mut output_parts, section, style, true);
@@ -832,10 +846,6 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             (label, Part::new(cells(text), Body::Diff(lang.clone())))
         }
         Section::Markdown { text, .. } => {
-            // A Markdown block after other content starts after a blank line, as it would within one document.
-            if !parts.is_empty() {
-                parts.push(Part::new("", Body::Text));
-            }
             parts.extend(if text_output {
                 Part::text_parts(cells(text), true)
             } else {
@@ -2039,33 +2049,157 @@ mod tests {
         }
     }
 
+    fn manager_reply_event() -> Event {
+        let timestamps: Vec<serde_json::Value> =
+            include_str!("../../tests/fixtures/claude-chrome-javascript.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        // The reply capture omits timestamps; use a recorded tool exchange's times.
+        let records = include_str!("../../tests/fixtures/claude-manager-reply.jsonl")
+            .lines()
+            .enumerate()
+            .map(|(index, line)| {
+                let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+                record["timestamp"] = timestamps[index]["timestamp"].clone();
+                record.to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let transcript = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(transcript.path(), records).unwrap();
+        crate::providers::claude::event_reader::tail(transcript.path(), usize::MAX)
+            .unwrap()
+            .remove(0)
+    }
+
     #[test]
-    fn markdown_after_other_output_starts_after_a_blank_line() {
+    fn markdown_after_other_output_has_no_added_blank_line() {
+        let event = manager_reply_event();
+        let output = event.calls[0].output.as_ref().unwrap();
         let mut parts = Vec::new();
-        for text in [
-            "| Name | State |\n| --- | --- |\n| a | waiting |",
-            "| Thread | Attention |\n| --- | --- |\n| t | q |",
-        ] {
-            push_section(
-                &mut parts,
-                &Section::Markdown {
-                    label: "output".into(),
-                    text: text.into(),
-                },
-                Style::default(),
-                true,
-            );
+        for section in output {
+            push_section(&mut parts, section, Style::default(), true);
         }
-        let lines = texts(&parts, 80);
-        let second = lines
+        assert!(parts.iter().all(|part| !part.source.is_empty()));
+    }
+
+    #[test]
+    fn group_break_centers_text_and_markdown_as_separate_groups() {
+        use crate::providers::{Provider, claude::ClaudeProvider};
+        use ratatui::{buffer::Buffer, layout::Rect};
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("projects/project");
+        std::fs::create_dir_all(&project).unwrap();
+        let transcript = project.join("00000000-0000-0000-0000-000000000001.jsonl");
+        std::fs::write(
+            &transcript,
+            include_str!("../../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+        let mut provider = ClaudeProvider::new(directory.path().into());
+        let session = provider.refresh(1).sessions.remove(0);
+        let captured = manager_reply_event();
+        let table = captured.calls[0]
+            .output
+            .as_ref()
+            .unwrap()
             .iter()
-            .position(|line| line.contains("Thread"))
-            .unwrap();
-        assert!(
-            second > 0 && lines[second - 1].trim().is_empty(),
-            "{lines:?}"
-        );
-        assert!(!lines[0].trim().is_empty(), "{lines:?}");
+            .find(|section| matches!(section, Section::Markdown { .. }))
+            .unwrap()
+            .clone();
+        let text = Section::Text {
+            label: String::new(),
+            text: captured.calls[0].id.clone(),
+        };
+        for input in [true, false] {
+            let mut event = captured.clone();
+            let call = &mut event.calls[0];
+            let sections = vec![
+                Section::GroupBreak,
+                text.clone(),
+                Section::GroupBreak,
+                Section::GroupBreak,
+                table.clone(),
+                Section::GroupBreak,
+            ];
+            call.hide_output = input;
+            call.input = if input { sections.clone() } else { Vec::new() };
+            call.output = if input { None } else { Some(sections) };
+            let detail = parts(&event);
+            let groups = &detail[0].groups;
+            let content = if input { &groups[..] } else { &groups[1..] };
+            assert_eq!(content.len(), 2, "input={input}");
+            assert_eq!(content[0].parts.len(), 1);
+            assert_eq!(content[1].parts.len(), 1);
+            let copied = super::super::event_list::open_text(&event);
+            assert!(!copied.contains("GroupBreak"));
+            assert!(!copied.contains("\n\n"));
+            for width in [100, 160, 220] {
+                let mut view = super::super::View::new(crate::model::Grouping::Project, false);
+                view.status_filter = 1;
+                view.set_sessions(vec![session.clone()], false);
+                view.event_session = view.selected_id().cloned();
+                view.set_event(vec![event.clone()]);
+                let area = Rect::new(0, 0, width, 80);
+                let mut buffer = Buffer::empty(area);
+                view.viewport.borrow_mut().event_panel = area;
+                view.render_event_detail(area, &mut buffer, chrono::DateTime::UNIX_EPOCH);
+                let columns = view.viewport.borrow().event_detail_columns.unwrap();
+                let panel = columns.panel;
+                for group in content {
+                    let lines: Vec<_> = group
+                        .parts
+                        .iter()
+                        .flat_map(|part| {
+                            part.lines(
+                                usize::from(if part.reading_column() {
+                                    columns.reading_width.min(columns.text.width)
+                                } else {
+                                    columns.text.width
+                                }),
+                                Style::default(),
+                                chrono::DateTime::UNIX_EPOCH,
+                            )
+                        })
+                        .map(|line| line.to_string())
+                        .collect();
+                    let widest = lines
+                        .iter()
+                        .map(|line| line.width())
+                        .max()
+                        .unwrap()
+                        .min(usize::from(columns.text.width));
+                    let needle = lines
+                        .iter()
+                        .find(|line| !line.trim().is_empty())
+                        .unwrap()
+                        .split_whitespace()
+                        .next()
+                        .unwrap();
+                    let row = (panel.y..panel.bottom())
+                        .map(|y| {
+                            (panel.x..panel.right())
+                                .map(|x| buffer[(x, y)].symbol())
+                                .collect::<String>()
+                        })
+                        .find(|row| row.contains(needle))
+                        .unwrap_or_else(|| panic!("missing {needle:?}, input={input}, width={width}"));
+                    assert_eq!(
+                        row[..row.find(needle).unwrap()].width(),
+                        usize::from(
+                            super::super::centering::centered_x(
+                                columns.panel,
+                                columns.text,
+                                widest as u16
+                            ) - panel.x
+                        ),
+                        "input={input}, width={width}, row={row:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
