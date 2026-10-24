@@ -17,29 +17,25 @@ Spawn agent codex_calls — 200 columns
 WebFetch https://render.com/docs/postgresql-instance-types — 120 columns
 WebFetch                            https://render.com/docs/postgresql-instance-types
 
-                  url: https://render.com/docs/postgresql-instance-types
-                  Quote verbatim the table of Postgres instance types with RAM, CPU, max connections
-                  (connection limit) and price. Include any sentence about how the connection limit is
-                  computed.
+             url: https://render.com/docs/postgresql-instance-types
+             Quote verbatim the table of Postgres instance types with RAM, CPU, max connections (connection
+             limit) and price. Include any sentence about how the connection limit is computed.
                                                             ↓
-                    The server returned HTTP 404 Not Found.
+          The server returned HTTP 404 Not Found.
 
-                    The response body was not retrieved. If this URL requires authentication, use an
-                    authenticated tool (e.g. gh for GitHub, or an MCP-provided fetch tool) instead of
-                    WebFetch.
+          The response body was not retrieved. If this URL requires authentication, use an authenticated tool
+          (e.g. gh for GitHub, or an MCP-provided fetch tool) instead of WebFetch.
 WebFetch https://render.com/docs/postgresql-instance-types — 200 columns
 WebFetch                                                                    https://render.com/docs/postgresql-instance-types
 
-                                                          url: https://render.com/docs/postgresql-instance-types
-                                                          Quote verbatim the table of Postgres instance types with RAM, CPU, max connections
-                                                          (connection limit) and price. Include any sentence about how the connection limit is
-                                                          computed.
+                                                     url: https://render.com/docs/postgresql-instance-types
+                                                     Quote verbatim the table of Postgres instance types with RAM, CPU, max connections (connection
+                                                     limit) and price. Include any sentence about how the connection limit is computed.
                                                                                                     ↓
-                                                            The server returned HTTP 404 Not Found.
+                                                   The server returned HTTP 404 Not Found.
 
-                                                            The response body was not retrieved. If this URL requires authentication, use an
-                                                            authenticated tool (e.g. gh for GitHub, or an MCP-provided fetch tool) instead of
-                                                            WebFetch.
+                                                   The response body was not retrieved. If this URL requires authentication, use an authenticated tool
+                                                   (e.g. gh for GitHub, or an MCP-provided fetch tool) instead of WebFetch.
 claude-in-chrome javascript tool — 120 columns
                                             claude-in-chrome javascript tool
 

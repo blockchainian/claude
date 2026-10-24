@@ -34,7 +34,7 @@ pub(super) struct EventDetailColumns {
 }
 
 /// The widest line free text wraps to, so prose stays readable in a wide pane.
-const READING_MEASURE: u16 = 85;
+const READING_MEASURE: u16 = 100;
 
 impl EventDetailColumns {
     /// Columns for a detail `panel`, computed from the panel alone.
