@@ -123,7 +123,7 @@ fn reply_output(data: &ToolData<'_>) -> Option<Body> {
     Some(Body::Sections(sections))
 }
 
-/// Separates the requests waiting for Claude into their own Attention/Thread table.
+/// Separates the requests waiting for Claude into their own Attention table.
 fn attention_sections(data: &ToolData<'_>) -> Vec<Section> {
     let Some(result) = data.result.filter(|result| !result.error) else {
         return Vec::new();
@@ -131,11 +131,11 @@ fn attention_sections(data: &ToolData<'_>) -> Vec<Section> {
     let Some(attention) = result.structured["attention"].as_array() else {
         return Vec::new();
     };
-    let entries: Vec<Value> = attention
+    let texts: Vec<Value> = attention
         .iter()
-        .map(|entry| serde_json::json!({ "Attention": entry["text"], "Thread": entry["threadId"] }))
+        .map(|entry| entry["text"].clone())
         .collect();
-    let Some(text) = markdown_table(&Value::Array(entries), "attention") else {
+    let Some(text) = markdown_table(&Value::Array(texts), "Attention") else {
         return Vec::new();
     };
     vec![
@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_manager_reply_shows_ask_reply_and_attention_by_thread() {
+    fn codex_manager_reply_shows_ask_reply_and_attention() {
         let records: Vec<serde_json::Value> =
             include_str!("../../../../tests/fixtures/claude-manager-reply.jsonl")
                 .lines()
@@ -230,16 +230,12 @@ mod tests {
         assert_eq!(reply, call["input"]["reply"].as_str().unwrap());
         let attention = result.structured["attention"].as_array().unwrap();
         let rows: Vec<&str> = text.lines().collect();
-        assert_eq!(rows[..2], ["| Attention | Thread |", "| --- | --- |"]);
+        assert_eq!(rows[..2], ["| Attention |", "| --- |"]);
         assert_eq!(rows.len(), 2 + attention.len());
         for (row, entry) in rows[2..].iter().zip(attention) {
             assert_eq!(
                 *row,
-                format!(
-                    "| {} | {} |",
-                    super::table_cell(entry["text"].as_str().unwrap()),
-                    super::table_cell(entry["threadId"].as_str().unwrap())
-                )
+                format!("| {} |", super::table_cell(entry["text"].as_str().unwrap()))
             );
         }
     }
