@@ -114,6 +114,14 @@ pub(super) const RULES: &[ToolRule] = &[
         ..DEFAULT_RULE
     },
     ToolRule {
+        name: "EnterWorktree",
+        title: &[
+            Pick::Field(Source::Input, "/name"),
+            Pick::Field(Source::Input, "/path"),
+        ],
+        ..DEFAULT_RULE
+    },
+    ToolRule {
         name: "SendUserFile",
         input: Some((Pick::Field(Source::Input, "/caption"), Format::Text)),
         ..DEFAULT_RULE
@@ -479,6 +487,24 @@ mod tests {
             let rule = super::rule(name);
             assert!(rule.title.is_empty());
             assert!(rule.input.is_none());
+        }
+    }
+
+    #[test]
+    fn enter_worktree_titles_its_name_or_path() {
+        for input in [
+            serde_json::json!({"name": "active-tab-colors"}),
+            serde_json::json!({"path": "active-tab-colors"}),
+        ] {
+            let presentation = super::presentation(
+                "EnterWorktree",
+                &super::ToolData {
+                    input: &input,
+                    result: None,
+                },
+            );
+            assert_eq!(presentation.title.as_deref(), Some("active-tab-colors"));
+            assert!(presentation.input.is_empty());
         }
     }
 
