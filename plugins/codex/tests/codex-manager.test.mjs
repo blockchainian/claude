@@ -304,6 +304,7 @@ test("hook configuration matches the plugin's thread-registering tools and both 
   for (const tool of ["start", "attach", "review"]) assert.ok(matcher.test(`mcp__plugin_codex_codex-manager__${tool}`));
   assert.ok(!matcher.test("mcp__other__start"));
   assert.ok(!matcher.test("mcp__plugin_codex_codex-manager__send"));
+  assert.ok(!matcher.test("mcp__plugin_codex_codex-manager__transfer"));
   assert.match(hooks.PostToolUse[0].hooks[0].command, /manager\.mjs.* owner$/);
   assert.equal(hooks.SubagentStop[0].hooks[0].command, hooks.Stop[0].hooks[0].command);
 });
@@ -477,7 +478,7 @@ test("mcp starts a thread that reaches Claude's tools over MCP, and relays compl
     const init = await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
     assert.equal(init.result.serverInfo.name, "codex-manager");
     const tools = await mcp.request("tools/list", {});
-    assert.deepEqual(tools.result.tools.map((tool) => tool.name), ["start", "attach", "send", "reply", "interrupt", "list", "detach", "review"]);
+    assert.deepEqual(tools.result.tools.map((tool) => tool.name), ["start", "transfer", "attach", "send", "reply", "interrupt", "list", "detach", "review"]);
 
     const started = await mcp.call("start", { cwd: "plugins", prompt: "Fix the bug", name: "fix-bug" });
     assert.equal(started.isError, false, started.text);
@@ -1739,6 +1740,98 @@ test("mcp starts a thread on an allowed model and effort, and refuses any other 
         model_reasoning_effort: effort
       });
     }
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
+// Extracted from a real Claude transcript; summary content is limited to its opening paragraph.
+const transferFixture = readFileSync(new URL("./fixtures/transfer-transcript.jsonl", import.meta.url), "utf8").trim().split("\n").map(JSON.parse);
+
+for (const scenario of ["latest summary", "independent", "no summary", "custom title", "unnamed"]) {
+  test(`transfer: ${scenario}`, { timeout: 20_000 }, async () => {
+    const home = await tempHome();
+    const script = daemonScript();
+    const daemon = await fakeDaemon(script.handler);
+    const projects = path.join(home.home, "projects");
+    const sessions = path.join(home.home, "sessions");
+    await mkdir(path.join(projects, "original-project"), { recursive: true });
+    await mkdir(sessions);
+    const current = "after-clear";
+    const records = structuredClone(transferFixture);
+    records.unshift({ type: "custom-title", customTitle: "Earlier title" });
+    if (scenario === "latest summary") {
+      records.push(transferFixture[0], { ...transferFixture[1], message: { role: "user", content: [{ type: "text", text: "Latest summary\n" }, { type: "image", source: {} }, { type: "text", text: "Continue here." }] } });
+      records.push({ type: "user", message: { content: "Conversation after compaction must stay behind." } });
+    }
+    if (scenario === "no summary") records.splice(records.findIndex((record) => record.isCompactSummary), 1);
+    if (scenario === "unnamed") records.splice(0, records.length, ...records.filter((record) => record.type !== "custom-title"));
+    await writeFile(path.join(projects, "original-project", `${scenario === "latest summary" ? current : session}.jsonl`), records.map(JSON.stringify).join("\n") + "\n");
+    // The manager's immediate ancestor is this test process, even though it isn't called claude.
+    if (scenario !== "independent" && scenario !== "unnamed") await writeFile(path.join(sessions, `${process.pid}.json`), JSON.stringify({ sessionId: session, ...(scenario === "custom title" ? {} : { name: "Session name" }) }));
+    const mcp = new McpChild(home.home, daemon.socketPath, { CODEX_MANAGER_PROJECTS_DIR: projects });
+    try {
+      await mcp.request("initialize", {});
+      if (scenario === "latest summary") await writeFile(path.join(sessions, `${process.pid}.json`), JSON.stringify({ sessionId: current, name: "Session name" }));
+      const result = await mcp.call("transfer", { cwd: "plugins", ...(scenario === "latest summary" ? { model: "gpt-6-luna", effort: "high" } : {}) });
+      if (scenario === "no summary") {
+        assert.equal(result.isError, true);
+        assert.equal(result.text, "no compaction summary in this session; run /compact first");
+        assert.equal(script.messages.length, 0);
+        return;
+      }
+      assert.equal(result.isError, false, result.text);
+      const name = scenario === "latest summary" ? "Session name" : scenario === "unnamed" ? null : transferFixture[2].customTitle;
+      assert.deepEqual(result.json, { threadId: "thread-A", turnId: "turn-1", name, cwd: path.resolve("plugins") });
+      const start = script.messages.find((message) => message.method === "thread/start").params;
+      assert.equal(start.sandbox, "workspace-write");
+      assert.equal(start.config["mcp_servers.claude-client"], undefined);
+      assert.equal(start.model, scenario === "latest summary" ? "gpt-6-luna" : undefined);
+      assert.equal(start.config.model_reasoning_effort, scenario === "latest summary" ? "high" : undefined);
+      const named = script.messages.find((message) => message.method === "thread/name/set");
+      assert.deepEqual(named?.params, name ? { threadId: "thread-A", name } : undefined);
+      const prompt = script.messages.find((message) => message.method === "turn/start").params.input[0].text;
+      assert.equal(prompt, scenario === "latest summary" ? "Latest summary\nContinue here." : transferFixture[1].message.content);
+      const [socket] = script.sockets;
+      send(socket, { method: "turn/started", params: { threadId: "thread-A", turn: { id: "turn-1" } } });
+      send(socket, { method: "turn/completed", params: { threadId: "thread-A", turn: { id: "turn-1", status: "completed" } } });
+      const listed = await mcp.call("list", {});
+      assert.deepEqual(listed.json.threads, []);
+      const state = await readFile(path.join(home.dir, "state.json"), "utf8").catch((error) => { if (error.code !== "ENOENT") throw error; return '{"threads":[]}'; });
+      assert.deepEqual(JSON.parse(state).threads, []);
+      await assert.rejects(readFile(path.join(home.home, "threads", "thread-A.json")), { code: "ENOENT" });
+      await assert.rejects(readFile(path.join(home.dir, "thread-A.jsonl")), { code: "ENOENT" });
+    } finally {
+      await mcp.close();
+      await daemon.close();
+      await home.close();
+    }
+  });
+}
+
+test("transfer validates cwd and shares start's model and effort rules", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = new McpChild(home.home, daemon.socketPath);
+  try {
+    const missing = await mcp.call("transfer", {});
+    assert.equal(missing.text, "cwd is required");
+    const tools = (await mcp.request("tools/list", {})).result.tools;
+    const start = tools.find((tool) => tool.name === "start").inputSchema;
+    const transfer = tools.find((tool) => tool.name === "transfer").inputSchema;
+    assert.deepEqual(Object.keys(transfer.properties), ["cwd", "model", "effort"]);
+    assert.deepEqual(transfer.required, ["cwd"]);
+    for (const field of ["model", "effort"]) assert.deepEqual(transfer.properties[field], start.properties[field]);
+    for (const args of [{ model: "other", effort: "high" }, { model: "gpt-6-luna" }, { effort: "high" }, { model: "gpt-6.1-sol", effort: "high" }, { model: null, effort: "high" }]) {
+      const expected = await mcp.call("start", { cwd: "plugins", prompt: "task", ...args });
+      const actual = await mcp.call("transfer", { cwd: "plugins", ...args });
+      assert.equal(actual.isError, true);
+      assert.equal(actual.text, expected.text);
+    }
+    assert.equal(script.messages.length, 0);
   } finally {
     await mcp.close();
     await daemon.close();
