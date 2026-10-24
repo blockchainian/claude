@@ -595,7 +595,7 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
                     "{field:?} overlaps New at width {width}"
                 );
             }
-            assert_eq!(top.intersects(jump), false);
+            assert!(!top.intersects(jump));
             let border_click = (top.x, top.y);
             drop(viewport);
             // The plain top border selects oldest; the labeled button still selects latest.

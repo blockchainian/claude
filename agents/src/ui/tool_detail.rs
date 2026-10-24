@@ -592,7 +592,7 @@ pub(super) fn event_detail_content(
                 title: if event.kind == Kind::Tool {
                     event.body.clone()
                 } else {
-                    super::event_list::kind_label(&event.kind).into()
+                    super::event_list::kind_label(&event.kind)
                 },
                 title_style: super::style::event_styles(&event.kind).0,
                 time: Some(time),

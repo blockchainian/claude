@@ -397,6 +397,8 @@ impl ProjectGroup {
     }
 }
 
+type AttentionOrder<'a> = ((bool, DateTime<Utc>), &'a SessionKey);
+
 fn session_order(session: &Session) -> (std::cmp::Reverse<DateTime<Utc>>, &SessionKey) {
     (std::cmp::Reverse(session.updated_at), &session.id)
 }
@@ -948,6 +950,7 @@ impl View {
         self.viewport.borrow().marker
     }
 
+    #[cfg(test)]
     pub fn grouping(&self) -> Grouping {
         self.grouping
     }
@@ -1308,9 +1311,9 @@ impl View {
         self.panels_task = selected;
         self.questions.sync(&self.rows);
         self.task_entry_pending = task_list_focused && restores_task;
-        if task_list_focused {
-            self.set_active_panel(Panel::TaskList);
-        } else if !self.restore_task_focus(shown.focus.unwrap_or_else(|| self.input_focus())) {
+        if task_list_focused
+            || !self.restore_task_focus(shown.focus.unwrap_or_else(|| self.input_focus()))
+        {
             self.set_active_panel(Panel::TaskList);
         }
         for panel in [Panel::TaskList, Panel::EventList, Panel::EventDetail] {
@@ -1423,16 +1426,13 @@ impl View {
     }
 
     /// Orders waiting tasks the way the attention queue visits them.
-    fn attention_order<'a>(&self, row: &'a Session) -> ((bool, DateTime<Utc>), &'a SessionKey) {
+    fn attention_order<'a>(&self, row: &'a Session) -> AttentionOrder<'a> {
         let since = row.ask.as_ref().map_or(row.updated_at, |ask| ask.since);
         (self.queue_position(row, since), &row.id)
     }
 
     /// Puts waiting tasks first among their neighbors, in attention queue order.
-    fn waiting_first<'a>(
-        &self,
-        row: &'a Session,
-    ) -> (bool, Option<((bool, DateTime<Utc>), &'a SessionKey)>) {
+    fn waiting_first<'a>(&self, row: &'a Session) -> (bool, Option<AttentionOrder<'a>>) {
         let waiting = row.status == SessionStatus::NeedsInput;
         (!waiting, waiting.then(|| self.attention_order(row)))
     }
