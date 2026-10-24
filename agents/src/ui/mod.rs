@@ -53,6 +53,7 @@ pub use task_ui::PinnedRow;
 use task_ui::{EventRow, TaskUi};
 mod terminal_panel;
 pub(crate) mod text;
+mod text_images;
 mod text_selection;
 mod text_selection_layout;
 mod timeline;

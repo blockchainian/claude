@@ -604,6 +604,60 @@ pub(super) fn event_detail_content(
     EventDetailContent { sections }
 }
 
+impl EventDetailContent {
+    /// Adds each text's images as independent alignment groups.
+    pub fn with_images(mut self, event: &Event, cwd: &std::path::Path) -> Self {
+        let mut seen = self
+            .sections
+            .iter()
+            .flat_map(|section| &section.groups)
+            .flat_map(|group| &group.parts)
+            .filter_map(Part::shown_image)
+            .map(|image| image.source.clone())
+            .collect::<std::collections::HashSet<_>>();
+        for section in &mut self.sections {
+            for group in std::mem::take(&mut section.groups) {
+                if group.parts.is_empty() {
+                    section.groups.push(group);
+                    continue;
+                }
+                let mut parts = Vec::new();
+                for part in group.parts {
+                    let images = if part.shown_image().is_none() {
+                        super::text_images::text_images(&part.source, cwd, &event.images, &mut seen)
+                    } else {
+                        Vec::new()
+                    };
+                    parts.push(part);
+                    if !images.is_empty() {
+                        section.groups.push(Group {
+                            parts: std::mem::take(&mut parts),
+                        });
+                        section.groups.extend(images.into_iter().map(|image| Group {
+                            parts: vec![Part::image(image, false)],
+                        }));
+                    }
+                }
+                if !parts.is_empty() {
+                    section.groups.push(Group { parts });
+                }
+            }
+        }
+        if let Some(section) = self.sections.last_mut() {
+            section.groups.extend(
+                event
+                    .images
+                    .iter()
+                    .filter(|image| seen.insert(image.source.clone()))
+                    .map(|image| Group {
+                        parts: vec![Part::image(image.clone(), true)],
+                    }),
+            );
+        }
+        self
+    }
+}
+
 /// Choose the tool section's metadata and centered title together.
 pub(super) fn call_title(call: &crate::event::ToolCall) -> (Option<String>, String) {
     let mut left = call.detail_left();
@@ -2334,3 +2388,7 @@ mod structured_text_tests;
 #[cfg(test)]
 #[path = "tool_detail_output_tests.rs"]
 mod output_tests;
+
+#[cfg(test)]
+#[path = "tool_detail_image_tests.rs"]
+mod image_tests;

@@ -138,6 +138,7 @@ impl View {
         let display = self.display_event(event);
         let sections =
             super::tool_detail::event_detail_content(&display, String::new(), Style::new().dim())
+                .with_images(&display, cwd)
                 .sections;
         let zooms = &self.event_detail.scroll.borrow().zooms;
         let mut images = self.inline_images.borrow_mut();
@@ -1818,7 +1819,9 @@ fn event_detail_layout(
         event_detail_columns(panel, list),
         cwd,
         now,
-        super::tool_detail::event_detail_content(event, String::new(), Style::new().dim()).sections,
+        super::tool_detail::event_detail_content(event, String::new(), Style::new().dim())
+            .with_images(event, cwd)
+            .sections,
     )
 }
 
@@ -2851,6 +2854,10 @@ pub(super) mod event_markdown {
 #[cfg(test)]
 #[path = "event_reading_tests.rs"]
 mod reading_tests;
+
+#[cfg(test)]
+#[path = "text_image_layout_tests.rs"]
+mod text_image_layout_tests;
 
 #[cfg(test)]
 mod panel_detail_tests {
