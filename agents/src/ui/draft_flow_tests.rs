@@ -1711,9 +1711,7 @@ fn resumable_session_settings_dispatch_only_a_changed_value() {
                     include_str!("../../tests/fixtures/codex-models-cache.json"),
                 )
                 .unwrap();
-                let provider = crate::providers::codex::CodexProvider::new(
-                    directory.path().into(),
-                );
+                let provider = crate::providers::codex::CodexProvider::new(directory.path().into());
                 view.input_choices
                     .insert(ProviderId::Codex, provider.input_choices());
                 "gpt-6.1-sol"
@@ -1907,8 +1905,9 @@ fn branch_editor_parks_when_task_details_loses_focus_without_advancing() {
                     click(&mut view, prompt.x + 2, prompt.y);
                 }
                 1 => {
-                    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
-                    key(&mut view, KeyCode::Char('j'));
+                    let rows = view.viewport.borrow().list_rows;
+                    assert!(!rows.is_empty());
+                    click(&mut view, rows.x + 1, rows.y);
                 }
                 _ => view.set_active_panel(Panel::EventDetail),
             }
@@ -1926,10 +1925,10 @@ fn branch_editor_parks_when_task_details_loses_focus_without_advancing() {
             assert!(!view.selected_draft().unwrap().working);
             assert_eq!(
                 view.active_panel,
-                if exit == 2 {
-                    Panel::EventDetail
-                } else {
-                    Panel::Prompt
+                match exit {
+                    0 => Panel::Prompt,
+                    1 => Panel::TaskList,
+                    _ => Panel::EventDetail,
                 }
             );
         }

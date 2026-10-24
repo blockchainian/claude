@@ -924,7 +924,7 @@ mod tests {
     }
 
     #[test]
-    fn waiting_for_a_prompt_activates_prompt_once() {
+    fn waiting_for_a_prompt_activates_prompt_once_and_mouse_blur_sticks() {
         let (_directory, mut app, _id) = fixture();
         draw(&mut app);
         let session = &mut app.sessions[0];
@@ -947,14 +947,25 @@ mod tests {
             crossterm::event::KeyCode::Char('x').into(),
         ));
         assert!(draw(&mut app).contains("x"));
-        app.handle_event(crossterm::event::Event::Key(
-            crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Char('w'),
-                crossterm::event::KeyModifiers::CONTROL,
-            ),
+        app.handle_event(crossterm::event::Event::Mouse(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(
+                    crossterm::event::MouseButton::Left,
+                ),
+                column: 2,
+                row: 10,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
         ));
-        app.handle_event(crossterm::event::Event::Key(
-            crossterm::event::KeyCode::Char('k').into(),
+        app.handle_event(crossterm::event::Event::Mouse(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Up(
+                    crossterm::event::MouseButton::Left,
+                ),
+                column: 2,
+                row: 10,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
         ));
         assert!(!app.view.pasting_prompt());
         app.sync_terminal();

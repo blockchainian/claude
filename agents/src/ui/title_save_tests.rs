@@ -15,14 +15,6 @@ fn editing_title(width: u16) -> (tempfile::TempDir, View, SessionKey, String) {
     (directory, view, id, original)
 }
 
-fn leave_title_with_keyboard(view: &mut View) -> Option<Action> {
-    assert_eq!(
-        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
-        None
-    );
-    view.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE))
-}
-
 fn leave_title_with_mouse(view: &mut View) -> Option<Action> {
     let prompt = view.viewport.borrow().prompt;
     assert!(!prompt.is_empty());
@@ -35,13 +27,14 @@ fn leave_title_with_mouse(view: &mut View) -> Option<Action> {
 }
 
 #[test]
-fn changed_title_keyboard_blur_parks_editor() {
+fn changed_title_mouse_blur_parks_editor() {
     for width in [100, 200] {
         let (_directory, mut view, _id, _original) = editing_title(width);
-        view.rename.set_text("  Saved by keyboard  ");
-        assert_eq!(leave_title_with_keyboard(&mut view), None);
-        assert_eq!(view.active_panel, Panel::TaskList);
+        view.rename.set_text("  Saved by mouse  ");
+        assert_eq!(leave_title_with_mouse(&mut view), None);
+        assert_eq!(view.active_panel, Panel::Prompt);
         assert!(view.rename_target.is_some());
+        assert_eq!(view.rename.text(), "  Saved by mouse  ");
         assert_eq!(view.take_pending_action(), None);
     }
 }
@@ -102,11 +95,10 @@ fn unchanged_title_enter_closes_without_provider_request() {
 #[test]
 fn unchanged_title_blur_parks_without_provider_request() {
     for width in [100, 200] {
-        for route in ["keyboard", "mouse", "automatic"] {
+        for route in ["mouse", "automatic"] {
             let (_directory, mut view, _id, original) = editing_title(width);
             view.rename.set_text(&format!("  {}  ", original.trim()));
             let action = match route {
-                "keyboard" => leave_title_with_keyboard(&mut view),
                 "mouse" => leave_title_with_mouse(&mut view),
                 "automatic" => {
                     view.set_active_panel(Panel::EventDetail);
