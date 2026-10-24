@@ -49,7 +49,9 @@ pub(crate) const SERVER: McpServer = McpServer {
         },
         ToolRule {
             name: "appium_get_page_source",
-            input: Some((Pick::With(selector_input), Format::Code(""))),
+            title: &[Pick::Field(Source::Input, "/sessionId")],
+            input: Some((Pick::With(empty_input), Format::Text)),
+            output: Some((Pick::Field(Source::Result, "/filepath"), Format::Text)),
             ..DEFAULT_RULE
         },
         ToolRule {
@@ -329,7 +331,7 @@ mod tests {
                 "accessibility id",
                 "tap",
                 "-ios predicate string",
-                "",
+                "fc1c5393-ccb0-466a-ab9c-c0f2e70a1a9d",
                 "label",
                 "tap (200, 85)",
                 "create",
@@ -349,14 +351,7 @@ mod tests {
                     )
         ));
         assert_eq!(input(5), Vec::new());
-        assert_eq!(
-            input(7),
-            vec![super::code_section(
-                "selector",
-                "",
-                "//*[contains(translate(@label,'CLASI','clasi'),'classic')]"
-            )]
-        );
+        assert_eq!(input(7), Vec::new());
         assert_eq!(input(8), prose("42010000-0000-0000-BE14-000000000000"));
         assert_eq!(input(9), Vec::new());
         assert_eq!(input(3), Vec::new());
@@ -463,6 +458,25 @@ mod tests {
         );
         assert_eq!(shown.title.as_deref(), Some("activate"));
         assert_eq!(shown.input, prose("com.amazon.mp3.AmazonCloudPlayer"));
+    }
+
+    #[test]
+    fn page_source_titles_the_session_and_outputs_only_the_file_path() {
+        let fixture = include_str!("../../../../tests/fixtures/claude-appium-page-source.jsonl");
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("transcript.jsonl");
+        std::fs::write(&transcript, fixture).unwrap();
+        let events = crate::providers::claude::event_reader::tail(&transcript, 10).unwrap();
+        let call = &events[0].calls[0];
+        assert_eq!(call.title, "fc1c5393-ccb0-466a-ab9c-c0f2e70a1a9d");
+        assert!(call.input.is_empty());
+        assert_eq!(
+            call.output,
+            Some(vec![super::text_section(
+                "output",
+                "/tmp/page-source-b8d54b54-36f0-415d-99f5-20d6bcb9b36e.xml"
+            )])
+        );
     }
 
     #[test]
