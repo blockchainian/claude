@@ -1,26 +1,26 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
                                                                             Assistant                                                                    4s ago
 
-                               完成，未提交。cache 和 streamer 的测试、类型检查、lint、格式检查全部通过；streamer 已验证从源码加载
-                               依赖。
+                                      完成，未提交。cache 和 streamer 的测试、类型检查、lint、格式检查全部通过；streamer 已
+                                      验证从源码加载依赖。
 
-                               模块     │ 测试文件 前→后 │ 测试项 前→后
-                               ─────────┼────────────────┼─────────────
-                               cache    │ 2→2            │ 48→48
-                               streamer │ 20→20          │ 270→270
+                                      模块     │ 测试文件 前→后 │ 测试项 前→后
+                                      ─────────┼────────────────┼─────────────
+                                      cache    │ 2→2            │ 48→48
+                                      streamer │ 20→20          │ 270→270
 
-                               改动文件：
-                               • packages/cache/package.json
-                               • packages/cache/tsconfig.json
-                               • packages/cache/AGENTS.md
-                               • packages/cache/scripts/runTests.ts（删除，空目录也已删除）
-                               • streamer/package.json
-                               • streamer/AGENTS.md
-                               • STYLES.md
-                               • website/STYLES.md
-                               • .semgrepignore
-                               • website/src/lib/chadwallet/api/__fixtures__/tradingActivityItems.ts
-                               • docs/axiom/api-spec.md
+                                      改动文件：
+                                      • packages/cache/package.json
+                                      • packages/cache/tsconfig.json
+                                      • packages/cache/AGENTS.md
+                                      • packages/cache/scripts/runTests.ts（删除，空目录也已删除）
+                                      • streamer/package.json
+                                      • streamer/AGENTS.md
+                                      • STYLES.md
+                                      • website/STYLES.md
+                                      • .semgrepignore
+                                      • website/src/lib/chadwallet/api/__fixtures__/tradingActivityItems.ts
+                                      • docs/axiom/api-spec.md
 
-                               负责范围内的旧路径已清理，specs/ 未改。
-                               Memory: MEMORY.md:136 · source conditions validation context
+                                      负责范围内的旧路径已清理，specs/ 未改。
+                                      Memory: MEMORY.md:136 · source conditions validation context

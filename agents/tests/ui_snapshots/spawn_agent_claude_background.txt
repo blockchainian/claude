@@ -1,14 +1,14 @@
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
                                                                                                        查 Claude 前台转后台 · Sonnet 5.5                                                                                             11:28:50
 
-                                                                     Investigate Claude Code (installed CLI claude, v2.1.302 on macOS) background sessions. Time limit:
-                                                                     10 minutes; write partial findings to the report as you go.
+                                                                             Investigate Claude Code (installed CLI claude, v2.1.302 on macOS) background
+                                                                             sessions. Time limit: 10 minutes; write partial findings to the report as you go.
 
-                                                                     Context: we build agents, a Rust TUI dashboard (repo ~/Code/.worktrees/agents-panel/agents, read-
-                                                                     only for you). It lists Claude sessions; live background jobs are attached via claude attach <job-
-                                                                     id> (see agents/src/providers/claude/mod.rs launch, agents/src/model.rs is_live_background,
-                                                                     agents/src/providers/claude/attach.rs). We plan to embed a session's terminal in a panel. For a
-                                                                     plain foreground interactive Claude session (a normal claude process running in some other
-                                                                     terminal), we want to first convert it into a background job, then claude attach it, so the panel
-                                                                     can detach freely.
-                                                                     …
+                                                                             Context: we build agents, a Rust TUI dashboard (repo
+                                                                             ~/Code/.worktrees/agents-panel/agents, read-only for you). It lists Claude sessions;
+                                                                             live background jobs are attached via claude attach <job-id> (see
+                                                                             agents/src/providers/claude/mod.rs launch, agents/src/model.rs is_live_background,
+                                                                             agents/src/providers/claude/attach.rs). We plan to embed a session's terminal in a
+                                                                             panel. For a plain foreground interactive Claude session (a normal claude process
+                                                                             running in some other terminal), we want to first convert it into a background job,
+                                                                             then claude attach it, so the panel can detach freely.…

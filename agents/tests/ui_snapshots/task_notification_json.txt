@@ -2,27 +2,28 @@
                                                                                               等 tab 线程 ✓
 
                                                                                                     ↓
-                                                       已提交并推送 d8baebe62bffe87c775a43ebf7d1fe22bd53e23b，已安装。
+                                                         已提交并推送 d8baebe62bffe87c775a43ebf7d1fe22bd53e23b，已安装。
 
-                                                       测试：cargo test 1031 通过；terminal_layout --ignored 34 通过；clippy 通过，仅有现有警告。
+                                                         测试：cargo test 1031 通过；terminal_layout --ignored 34 通过；clippy 通过，仅有现有
+                                                         警告。
 
-                                                       安装版 tmux 抓取，去掉块外缩进：
+                                                         安装版 tmux 抓取，去掉块外缩进：
 
-                                                       200 列：
+                                                         200 列：
 
-                                                       Claude 图片链接                  codex-manager start                          181h 38m
+                                                         Claude 图片链接                  codex-manager start                          181h 38m
 
-                                                       cwd: agents
-                                                       Implement workstream A of agents/scratchpad/links/plan.md (Claude provider:
+                                                         cwd: agents
+                                                         Implement workstream A of agents/scratchpad/links/plan.md (Claude provider:
 
-                                                       90 列：
+                                                         90 列：
 
-                                                       Claude 图片链接              codex-manager start                      181h 38m
+                                                         Claude 图片链接              codex-manager start                      181h 38m
 
-                                                       cwd: agents
-                                                       Implement workstream A of agents/scratchpad/links/plan.md (Claude
+                                                         cwd: agents
+                                                         Implement workstream A of agents/scratchpad/links/plan.md (Claude
 
-                                                       左侧统一优先取 description，否则取 name；正文不重复显示，宽窄只改变块的位置。
+                                                         左侧统一优先取 description，否则取 name；正文不重复显示，宽窄只改变块的位置。
 90 columns
                                        等 tab 线程 ✓
 

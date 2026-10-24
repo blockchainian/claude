@@ -1027,9 +1027,9 @@ fn equal_reading_width_wraps_prose_identically_in_wide_and_narrow_panels() {
         .into_iter()
         .find(|event| event.kind == Kind::Assistant)
         .unwrap();
-    let narrow = layout(&event, 115);
+    let narrow = layout(&event, 98);
     let wide = layout(&event, 200);
-    assert!(narrow.columns.text.width >= 100);
+    assert!(narrow.columns.text.width >= 85);
     assert_eq!(narrow.columns.reading_width(), wide.columns.reading_width());
     assert_ne!(narrow.columns.text.width, wide.columns.text.width);
     assert_eq!(
