@@ -149,6 +149,8 @@ pub struct App {
     view: View,
     clipboard: crate::clipboard::Clipboard,
     sessions: Vec<Session>,
+    /// The latest supervision relationships, used to route archive actions.
+    supervisions: Vec<crate::providers::Supervision>,
     /// Set when the user chose to hand the terminal to a provider process; the dashboard
     /// returns once it exits.
     launch: Option<Command>,
@@ -265,6 +267,7 @@ impl App {
             view,
             clipboard: crate::clipboard::Clipboard::new(),
             sessions: Vec::new(),
+            supervisions: Vec::new(),
             launch: None,
             terminal_report: terminal::Report::default(),
             terminal: None,
@@ -1097,11 +1100,12 @@ impl App {
         Snapshot {
             sessions,
             has_more,
-            supervisions: _,
+            supervisions,
         }: Snapshot,
     ) {
         self.forget_inactive_state(&sessions);
         self.sessions = sessions.clone();
+        self.supervisions = supervisions;
         self.view.set_loading(false);
         self.view.set_sessions(sessions, has_more);
     }
@@ -1359,7 +1363,8 @@ impl App {
     fn archive(&mut self, session: Session) {
         let id = session.id.clone();
         self.view.begin_removal(&id);
-        let job = match self.hub.provider(id.provider).archive(&session) {
+        let supervision = self.supervisions.iter().find(|s| s.session == id);
+        let job = match self.hub.archive(&session, supervision) {
             Ok(job) => job,
             Err(error) => return self.archived(&id, Err(error)),
         };
