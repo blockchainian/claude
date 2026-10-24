@@ -70,7 +70,7 @@ fn web_search_table_preserves_summary_and_clicks_recorded_urls() {
                     mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y,)
                 )
                 .or_else(|| view.flush_pending_click(Instant::now() + view.double_click_interval)),
-                Some(Action::OpenPath(url))
+                Some(Action::open_path(url))
             );
         }
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))

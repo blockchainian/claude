@@ -331,9 +331,15 @@ pub enum Action {
         text: String,
         label: String,
     },
-    /// Click on a drawn path, image placeholder or pull request link: open the
-    /// file, directory or URL with macOS `open`.
-    OpenPath(PathBuf),
+    /// Open a path or an image source clicked in a panel.
+    Open(crate::ui::LinkTarget),
+}
+
+impl Action {
+    pub(crate) fn open_path(path: PathBuf) -> Self {
+        Self::Open(crate::ui::LinkTarget::Path(path))
+    }
+
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

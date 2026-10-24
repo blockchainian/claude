@@ -813,7 +813,13 @@ impl EventReader {
             self.assistant = None;
         }
         self.turn = turn;
-        self.images.record(&record);
+        let image_record = self.path.as_ref().map(|path| crate::event::SourceRecord {
+            path: path.clone(),
+            offset: self.offset,
+        });
+        if let Some(source) = &image_record {
+            self.images.record(source, &record);
+        }
         if record["turnCompanion"] == true
             && let Some(id) = record["promptId"].as_str()
         {
@@ -903,7 +909,9 @@ impl EventReader {
                     if let Some((kind, sender, body)) = wrapped {
                         self.push_wrapped(&record, kind, sender, body, at);
                     } else if is_prompt_text(&record, &text) {
-                        let images = self.images.take(&record, &text)?;
+                        let images = image_record.as_ref().map_or_else(Vec::new, |source| {
+                            self.images.take(source, &record, &text)
+                        });
                         let kind = if record["isCompactSummary"] == true {
                             Kind::Compaction
                         } else {
@@ -1002,7 +1010,9 @@ impl EventReader {
                         self.push_wrapped(&record, kind, sender, body, at);
                     } else {
                         let body = prompt_body(&text);
-                        let images = self.images.take(&record, &body)?;
+                        let images = image_record.as_ref().map_or_else(Vec::new, |source| {
+                            self.images.take(source, &record, &body)
+                        });
                         self.push(Kind::User, body, at);
                         let event = &mut self.entries.last_mut().unwrap().event;
                         event.source = record["uuid"].as_str().map(str::to_owned);
@@ -1030,7 +1040,9 @@ impl EventReader {
                     let (sender, body) = peer
                         .map(|(_, sender, body)| (sender, body))
                         .unwrap_or_else(|| (None, body.to_owned()));
-                    let images = self.images.take(&record, &body)?;
+                    let images = image_record.as_ref().map_or_else(Vec::new, |source| {
+                        self.images.take(source, &record, &body)
+                    });
                     self.push(kind, body, at);
                     self.entries.last_mut().unwrap().event.images = images;
                     self.entries.last_mut().unwrap().event.source =
@@ -2548,10 +2560,10 @@ pub(crate) mod tests {
         assert_eq!(events[0].body, text);
         assert_eq!(events[0].images.len(), 1);
         assert_eq!(events[0].images[0].label, "[Image #1]");
-        let crate::images::ImageSource::File { path, .. } = &events[0].images[0].source else {
-            panic!("expected materialized image")
+        let crate::images::ImageSource::Record { .. } = &events[0].images[0].source else {
+            panic!("expected transcript image source")
         };
-        let bytes = std::fs::read(path).unwrap();
+        let bytes = events[0].images[0].source.bytes().unwrap();
         assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
         assert_eq!(super::tail(file.path(), 20).unwrap(), events);
         let summary =
@@ -2577,9 +2589,31 @@ pub(crate) mod tests {
         assert_eq!(events.len(), 2);
         for (event, numbers) in events.iter().zip([&[6][..], &[8, 9]]) {
             assert_eq!(event.kind, crate::event::Kind::User);
-            super::super::transcript::tests::assert_embedded_images(&event.images, numbers);
+            super::super::transcript::tests::assert_prompt_images(&event.images, numbers);
         }
         assert_eq!(super::tail(&path, 1).unwrap()[0].images, events[1].images);
+    }
+
+    #[test]
+    fn prompt_images_reference_their_transcript_records() {
+        let (dir, records) = super::super::transcript::tests::image_fixture();
+        let path = dir.path().join("transcript.jsonl");
+        std::fs::write(
+            &path,
+            records
+                .iter()
+                .map(|record| format!("{record}\n"))
+                .collect::<String>(),
+        )
+        .unwrap();
+        let events = super::tail(&path, 20).unwrap();
+        let image = &events[1].images[0];
+        let crate::images::ImageSource::Record { record, pointer } = &image.source else {
+            panic!("prompt image should keep its source record")
+        };
+        assert_eq!(record.path, path);
+        assert_eq!(pointer, "/message/content/1/source/data");
+        assert!(image.source.bytes().unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
     }
 
     use super::*;
@@ -4116,9 +4150,13 @@ pub(crate) mod tests {
             earliest: len,
         };
         let mut event_panel = EventReader::default();
-        super::super::transcript::walk_records(&mut measured, len, Vec::new(), false, |record| {
-            event_panel.record(record, 2)
-        })
+        super::super::transcript::walk_records(
+            &mut measured,
+            len,
+            Vec::new(),
+            false,
+            |_, record| event_panel.record(record, 2),
+        )
         .unwrap();
         assert_eq!(measured.bytes_read, 64 * 1024);
         assert_eq!(measured.earliest, len - 64 * 1024);

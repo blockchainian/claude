@@ -54,7 +54,7 @@ fn centered_project_heading_clicks_and_underline_cover_only_text() {
         let links = view.viewport.borrow().list_links.clone();
         assert_eq!(
             links,
-            vec![(Rect::new(start, area.y, end - start, 1), project.clone())]
+            vec![(Rect::new(start, area.y, end - start, 1), links::LinkTarget::Path(project.clone()))]
         );
         links::underline(&mut buf, &links);
         for x in area.x..area.right() {
@@ -75,7 +75,7 @@ fn centered_project_heading_clicks_and_underline_cover_only_text() {
                 view.flush_pending_click(Instant::now() + std::time::Duration::from_secs(1));
             assert_eq!(
                 action,
-                on_text.then(|| Action::OpenPath(project.clone())),
+                on_text.then(|| Action::open_path(project.clone())),
                 "click x={x}, width={width}"
             );
             if on_text {

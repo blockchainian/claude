@@ -152,7 +152,7 @@ fn project_heading_defers_single_open_and_double_creates_in_actual_directory() {
     assert_eq!(click(&mut view, x, y), None);
     assert_eq!(
         view.flush_pending_click(Instant::now() + Duration::from_secs(1)),
-        Some(Action::OpenPath(directory.path().into()))
+        Some(Action::open_path(directory.path().into()))
     );
     assert_eq!(click(&mut view, x, y), None);
     assert_eq!(

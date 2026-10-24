@@ -113,7 +113,7 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
             let links = view.viewport.borrow().task_details_links.clone();
             let (folder, _) = links
                 .iter()
-                .find(|(_, target)| target.as_path() == crate::test_project())
+                .find(|(_, target)| target.as_path() == Some(crate::test_project().as_path()))
                 .unwrap();
             let row = (task_details.x..task_details.right())
                 .map(|x| visible(&buf[(x, folder.y)]))
@@ -170,7 +170,7 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
                             &mut view,
                             mouse(MouseEventKind::Down(MouseButton::Left), x, rect.y)
                         ),
-                        Some(Action::OpenPath(target.clone()))
+                        Some(Action::Open(target.clone()))
                     );
                 }
             }
@@ -252,6 +252,6 @@ fn status_rule_names_a_missing_directory_without_a_link() {
         viewport
             .task_details_links
             .iter()
-            .all(|(_, target)| target != Path::new("/nonexistent/build"))
+            .all(|(_, target)| target != &Path::new("/nonexistent/build"))
     );
 }

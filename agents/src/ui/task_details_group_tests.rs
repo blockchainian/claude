@@ -91,6 +91,7 @@ fn status_rule_keeps_github_pr_hyperlink_and_visible_click_target() {
         .iter()
         .find(|(_, target)| {
             target
+                .as_path().unwrap()
                 .to_str()
                 .unwrap()
                 .starts_with("vscode://blockchainian.git/view-pr?")
@@ -108,6 +109,6 @@ fn status_rule_keeps_github_pr_hyperlink_and_visible_click_target() {
             &mut view,
             mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y)
         ),
-        Some(Action::OpenPath(target.clone()))
+        Some(Action::Open(target.clone()))
     );
 }
