@@ -92,12 +92,12 @@ pub struct Supervision {
     pub state: SupervisionState,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SupervisionState {
     /// The supervisor holds the session.
     Active,
-    /// The session waits on an ask to its supervisor.
-    Asking,
+    /// Questions awaiting the supervisor, in order of arrival.
+    Asking(Vec<String>),
     /// The supervisor has detached the session; it still nests under it.
     Detached,
 }

@@ -43,10 +43,15 @@ fn codex_manager_refreshes_cached_supervisors_and_session_source() {
     )
     .unwrap();
     let ask = state.join(&parent.id).join("thread-12.ask.pending.json");
-    fs::write(&ask, b"{}").unwrap();
+    let pending: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/supervision-ask.json")).unwrap();
+    fs::write(&ask, pending.to_string()).unwrap();
     let refreshed = provider.refresh_sessions(1, &[], &snapshot.sessions);
     assert_eq!(refreshed.sessions[0].title, snapshot.sessions[0].title);
-    assert_eq!(refreshed.supervisions[0].state, SupervisionState::Asking);
+    assert_eq!(
+        refreshed.supervisions[0].state,
+        SupervisionState::Asking(vec![pending["text"].as_str().unwrap().into()])
+    );
     fs::remove_file(ask).unwrap();
     assert_eq!(
         provider

@@ -78,6 +78,12 @@ struct Thread {
     detached: bool,
 }
 
+#[derive(Deserialize)]
+struct Ask {
+    since: u64,
+    text: String,
+}
+
 fn read<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<Option<T>> {
     match fs::read(path) {
         Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|error| {
@@ -117,13 +123,22 @@ pub(in crate::providers::claude) fn supervisions(
             let prefix = format!("{}.ask.", thread.id);
             let supervision_state = if thread.detached {
                 SupervisionState::Detached
-            } else if files
-                .iter()
-                .any(|name| name.starts_with(&prefix) && name.ends_with(".json"))
-            {
-                SupervisionState::Asking
             } else {
-                SupervisionState::Active
+                let mut asks = Vec::new();
+                for name in files
+                    .iter()
+                    .filter(|name| name.starts_with(&prefix) && name.ends_with(".json"))
+                {
+                    if let Some(ask) = read::<Ask>(&dir.join(name))? {
+                        asks.push(ask);
+                    }
+                }
+                asks.sort_by_key(|ask| ask.since);
+                if asks.is_empty() {
+                    SupervisionState::Active
+                } else {
+                    SupervisionState::Asking(asks.into_iter().map(|ask| ask.text).collect())
+                }
             };
             supervisions.push(Supervision {
                 supervisor: session.clone(),
@@ -229,16 +244,85 @@ mod tests {
         // Only the presence of an approval matters; its contents are not read here.
         payload["threads"][0]["waiting"] = serde_json::json!([{}]);
         fs::write(&state, payload.to_string()).unwrap();
-        let status = || supervisions(home, std::slice::from_ref(&parent)).unwrap()[0].state;
+        let status = || supervisions(home, std::slice::from_ref(&parent)).unwrap()[0].state.clone();
         assert_eq!(status(), SupervisionState::Active);
         fs::write(home.join("claude-parent/thread-12.ask.pending.txt"), b"{}").unwrap();
         fs::write(home.join("claude-parent/other.ask.pending.json"), b"{}").unwrap();
         assert_eq!(status(), SupervisionState::Active);
         let ask = home.join("claude-parent/thread-12.ask.pending.json");
-        fs::write(&ask, b"{}").unwrap();
-        assert_eq!(status(), SupervisionState::Asking);
+        fs::write(&ask, pending_ask().to_string()).unwrap();
+        assert_eq!(
+            status(),
+            SupervisionState::Asking(vec![pending_ask()["text"].as_str().unwrap().into()])
+        );
         fs::remove_file(ask).unwrap();
         assert_eq!(status(), SupervisionState::Active);
+    }
+
+    fn pending_ask() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/supervision-ask.json"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn asking_carries_the_question_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path();
+        let parent = attached_parent(home, "claude-parent");
+        let ask = pending_ask();
+        fs::write(
+            home.join("claude-parent/thread-12.ask.pending.json"),
+            ask.to_string(),
+        )
+        .unwrap();
+        let links = supervisions(home, &[parent]).unwrap();
+        assert_eq!(
+            links[0].state,
+            SupervisionState::Asking(vec![ask["text"].as_str().unwrap().into()])
+        );
+    }
+
+    #[test]
+    fn asking_orders_questions_by_since() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path();
+        let parent = attached_parent(home, "claude-parent");
+        let first = pending_ask();
+        let mut second = first.clone();
+        second["since"] = (first["since"].as_u64().unwrap() + 1).into();
+        second["callId"] = "later".into();
+        second["text"] = "Should the later question follow the first?".into();
+        for (name, ask) in [("a-later", &second), ("z-earlier", &first)] {
+            fs::write(
+                home.join(format!("claude-parent/thread-12.ask.{name}.json")),
+                ask.to_string(),
+            )
+            .unwrap();
+        }
+        let links = supervisions(home, &[parent]).unwrap();
+        assert_eq!(
+            links[0].state,
+            SupervisionState::Asking(vec![
+                first["text"].as_str().unwrap().into(),
+                second["text"].as_str().unwrap().into(),
+            ])
+        );
+    }
+
+    #[test]
+    fn asking_skips_files_missing_when_read() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path();
+        let parent = attached_parent(home, "claude-parent");
+        let target = home.join("ask.json");
+        fs::write(&target, pending_ask().to_string()).unwrap();
+        symlink(&target, home.join("claude-parent/thread-12.ask.pending.json")).unwrap();
+        // The directory entry remains, but reading it returns NotFound after withdrawal.
+        fs::remove_file(target).unwrap();
+        let links = supervisions(home, &[parent]).unwrap();
+        assert_eq!(links[0].state, SupervisionState::Active);
     }
 
     #[test]

@@ -161,6 +161,14 @@ fn supervision(supervisor: &Session, session: &Session, state: SupervisionState)
     }
 }
 
+fn pending_questions() -> Vec<String> {
+    let ask: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/supervision-ask.json"
+    ))
+    .unwrap();
+    vec![ask["text"].as_str().unwrap().into()]
+}
+
 fn live(session: &mut Session) {
     session.process = Some(Process {
         pid: std::process::id(),
@@ -221,9 +229,11 @@ fn page_sessions_are_not_loaded_again_and_asking_is_applied_after_enrich() {
     live(&mut root);
     let mut thread = session(target.id, "thread");
     thread.name = Some("Named thread".into());
-    owner
-        .supervisions
-        .push(supervision(&root, &thread, SupervisionState::Asking));
+    owner.supervisions.push(supervision(
+        &root,
+        &thread,
+        SupervisionState::Asking(pending_questions()),
+    ));
     owner.page.push(root.clone());
     target.page.push(thread.clone());
     let calls = target.calls.clone();
@@ -233,6 +243,7 @@ fn page_sessions_are_not_loaded_again_and_asking_is_applied_after_enrich() {
     assert_eq!(row.parent, Some(root.id));
     assert_eq!(row.title, "Named thread");
     assert_eq!(row.status, SessionStatus::NeedsInput);
+    assert_eq!(row.pending_questions, pending_questions());
     assert_eq!(result.supervisions.len(), 1);
 }
 
@@ -287,7 +298,7 @@ fn cached_rows_receive_current_supervisions_without_enrich() {
     thread.status = SessionStatus::Ready;
     owner.page = vec![root.clone(), unrelated.clone()];
     target.page = vec![thread.clone()];
-    let current = supervision(&root, &thread, SupervisionState::Asking);
+    let current = supervision(&root, &thread, SupervisionState::Asking(pending_questions()));
     owner.supervisions.push(current.clone());
     let previous = Snapshot {
         sessions: vec![root.clone(), unrelated.clone(), thread.clone()],
@@ -301,6 +312,7 @@ fn cached_rows_receive_current_supervisions_without_enrich() {
     assert_eq!(row.parent, Some(root.id));
     assert_eq!(row.title, "Cached name");
     assert_eq!(row.status, SessionStatus::NeedsInput);
+    assert_eq!(row.pending_questions, pending_questions());
     assert_eq!(result.supervisions, vec![current]);
 }
 
@@ -346,14 +358,14 @@ fn refresh_paths_selects_supervised_descendants_through_parent() {
 fn archive_routes_held_sessions_to_supervisor_and_detached_sessions_to_owner() {
     for state in [
         Some(SupervisionState::Active),
-        Some(SupervisionState::Asking),
+        Some(SupervisionState::Asking(pending_questions())),
         Some(SupervisionState::Detached),
         None,
     ] {
         let (owner, target) = providers();
         let root = session(owner.id, "root");
         let thread = session(target.id, "thread");
-        let relation = state.map(|state| supervision(&root, &thread, state));
+        let relation = state.clone().map(|state| supervision(&root, &thread, state));
         let owner_actions = owner.actions.clone();
         let target_actions = target.actions.clone();
         let hub = Hub::new(vec![Box::new(target), Box::new(owner)]);
@@ -363,7 +375,7 @@ fn archive_routes_held_sessions_to_supervisor_and_detached_sessions_to_owner() {
         job().unwrap();
         let held = matches!(
             state,
-            Some(SupervisionState::Active | SupervisionState::Asking)
+            Some(SupervisionState::Active | SupervisionState::Asking(_))
         );
         assert_eq!(
             *owner_actions.lock().unwrap(),

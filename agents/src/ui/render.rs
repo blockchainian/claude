@@ -1567,18 +1567,10 @@ impl View {
                     "Waiting for your response.".into(),
                 ]);
             } else {
-                items.extend(session.pending_questions.iter().map(|question| {
-                    truncate_line_with_ellipsis_if_overflow(
-                        super::text::summary(
-                            question,
-                            &session.cwd,
-                            width,
-                            &crate::event::Kind::Assistant,
-                            None,
-                        ),
-                        width,
-                    )
-                    .into()
+                items.extend(session.pending_questions.iter().flat_map(|question| {
+                    super::text::lines(question, &session.cwd, width, false)
+                        .into_iter()
+                        .map(Item::from)
                 }));
             }
             bodies.push(start..items.len());

@@ -51,7 +51,7 @@ impl Hub {
             Some(supervision)
                 if matches!(
                     supervision.state,
-                    SupervisionState::Active | SupervisionState::Asking
+                    SupervisionState::Active | SupervisionState::Asking(_)
                 ) =>
             {
                 self.provider(supervision.supervisor.provider).detach(supervision)
@@ -310,8 +310,9 @@ fn apply_supervisions(snapshot: &mut Snapshot, supervisions: &[Supervision]) {
             session.title.clone_from(name);
         }
         session.parent = Some(supervision.supervisor.clone());
-        if supervision.state == SupervisionState::Asking {
+        if let SupervisionState::Asking(questions) = &supervision.state {
             session.status = SessionStatus::NeedsInput;
+            session.pending_questions.clone_from(questions);
         }
     }
 }

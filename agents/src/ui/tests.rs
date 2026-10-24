@@ -7995,8 +7995,112 @@ fn ask_user_question_details_snapshot() {
     assert!(!render(&view).contains("Needs input"));
 }
 
+fn assert_question_details_snapshot(name: &str, rendered: &str) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/ui_snapshots")
+        .join(name);
+    let rendered = rendered.lines().map(str::trim_end).collect::<Vec<_>>()
+        .join("\n").trim_end().to_owned() + "\n";
+    if std::env::var_os("UPDATE_EVENT_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &rendered).unwrap();
+    }
+    assert_eq!(rendered, std::fs::read_to_string(path).unwrap());
+}
+
 #[test]
-fn pending_question_details_use_model_color_and_bold_attention_title() {
+fn supervised_question_details_show_the_complete_ask() {
+    let ask: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/supervision-ask.json")).unwrap();
+    let state =
+        crate::providers::SupervisionState::Asking(vec![ask["text"].as_str().unwrap().to_owned()]);
+    let crate::providers::SupervisionState::Asking(questions) = state else {
+        unreachable!();
+    };
+    let mut row = session("questions", "Question task", SessionStatus::NeedsInput, 0);
+    row.pending_questions = questions;
+    let mut view = test_view(Grouping::Project, false);
+    view.status_filter = 0;
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 60, 40);
+    let mut buf = Buffer::empty(area);
+    view.render_task_details(area, &mut buf, Utc::now());
+    let rendered = buf
+        .content
+        .chunks(60)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell_text(cell.symbol()))
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("May I update the shared render file?"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("The pending questions need to wrap in full."),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("Open task to review."), "{rendered}");
+    assert!(
+        !rendered.contains("Waiting for your response."),
+        "{rendered}"
+    );
+    assert_question_details_snapshot("task_details_supervised_questions_pending.txt", &rendered);
+}
+
+#[test]
+fn pending_question_details_wrap_the_complete_question() {
+    let record: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/claude-questions-pending.jsonl"
+    ))
+    .unwrap();
+    let question = record["message"]["content"][0]["input"]["questions"][0]["question"]
+        .as_str()
+        .unwrap();
+    let mut row = session("questions", "Question task", SessionStatus::NeedsInput, 0);
+    row.pending_questions = vec![question.to_owned()];
+    let mut view = test_view(Grouping::Project, false);
+    view.status_filter = 0;
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 60, 40);
+    let mut buf = Buffer::empty(area);
+    view.render_task_details(area, &mut buf, Utc::now());
+    let rendered = buf
+        .content
+        .chunks(60)
+        .map(|row| {
+            let mut text = String::new();
+            let mut cells = row.iter();
+            while let Some(cell) = cells.next() {
+                text.push_str(cell_text(cell.symbol()));
+                for _ in 1..cell_text(cell.symbol()).width() {
+                    cells.next();
+                }
+            }
+            text.trim_end().to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("怎么判断命令后面那个词是子命令？"),
+        "{rendered}"
+    );
+    assert!(
+        rendered
+            .split_whitespace()
+            .collect::<String>()
+            .contains(&question.replace('`', "").split_whitespace().collect::<String>()),
+        "{rendered}"
+    );
+    assert!(!rendered.contains('…'), "{rendered}");
+    assert!(!rendered.contains("Open task to review."), "{rendered}");
+    assert_question_details_snapshot("task_details_questions_wrapped.txt", &rendered);
+}
+
+#[test]
+fn pending_question_details_use_body_style_and_bold_attention_title() {
     let mut row = session("questions", "Question task", SessionStatus::NeedsInput, 0);
     row.pending_questions = vec!["Pick a color?".into()];
     row.activity = Some(crate::model::Activity {
@@ -8013,6 +8117,7 @@ fn pending_question_details_use_model_color_and_bold_attention_title() {
     let mut buf = Buffer::empty(area);
     view.render_task_details(area, &mut buf, Utc::now());
     let mut questions = 0;
+    let mut needs_input = false;
     for cells in buf.content.chunks(100) {
         let text = cells
             .iter()
@@ -8020,11 +8125,25 @@ fn pending_question_details_use_model_color_and_bold_attention_title() {
             .collect::<String>();
         if text.trim_start().starts_with("Pick a color?") {
             questions += 1;
-            assert_eq!(cells[43].fg, Color::Yellow);
+            let column = text.find("Pick a color?").unwrap();
+            assert_eq!(
+                cells[column].fg,
+                if needs_input {
+                    Color::Reset
+                } else {
+                    Color::Yellow
+                }
+            );
         }
-        if text.starts_with("Needs input") {
-            assert_eq!(cells[0].fg, Color::LightRed);
-            assert!(cells[0].modifier.contains(ratatui::style::Modifier::BOLD));
+        if text.trim_start().starts_with("Needs input") {
+            needs_input = true;
+            let column = text.find("Needs input").unwrap();
+            assert_eq!(cells[column].fg, Color::LightRed);
+            assert!(
+                cells[column]
+                    .modifier
+                    .contains(ratatui::style::Modifier::BOLD)
+            );
         }
     }
     assert_eq!(questions, 2);
