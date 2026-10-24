@@ -153,7 +153,7 @@ fn codex_agent_messages_show_routes_and_payload() {
     use crate::providers::Provider;
     let dir = tempfile::tempdir().unwrap();
     let provider =
-        crate::providers::codex::CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        crate::providers::codex::CodexProvider::new(dir.path().into());
     let project = dir.path().join("projects/project");
     std::fs::create_dir_all(&project).unwrap();
     std::fs::write(
@@ -578,7 +578,6 @@ fn codex_fixture() -> (
         .unwrap();
     let mut provider = crate::providers::codex::CodexProvider::new(
         dir.path().to_owned(),
-        dir.path().join("manager"),
     );
     let session = provider.refresh(1).sessions.remove(0);
     (dir, provider, session)

@@ -1713,7 +1713,6 @@ fn resumable_session_settings_dispatch_only_a_changed_value() {
                 .unwrap();
                 let provider = crate::providers::codex::CodexProvider::new(
                     directory.path().into(),
-                    directory.path().join("manager"),
                 );
                 view.input_choices
                     .insert(ProviderId::Codex, provider.input_choices());

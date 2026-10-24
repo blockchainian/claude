@@ -90,12 +90,12 @@ fn answer_real_codex_question_in_dashboard() {
     .unwrap();
     drop(db);
     let preferences = tempfile::tempdir().unwrap();
-    let provider = CodexProvider::new(home.path().into(), home.path().join("manager"));
+    let provider = CodexProvider::new(home.path().into());
     let mut app = dashboard::app(Box::new(provider), preferences.path().into());
     let session = dashboard::session(&app, &id);
     assert_eq!(session.ask.as_ref().unwrap().id, call);
     // Build a second provider instance to prove the answer survives a dashboard restart.
-    let restarted = CodexProvider::new(home.path().into(), home.path().join("manager"));
+    let restarted = CodexProvider::new(home.path().into());
     let replayed = restarted.snapshot(1).unwrap().sessions.remove(0);
     assert_eq!(replayed.ask, session.ask);
     dashboard::action(

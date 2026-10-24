@@ -306,7 +306,6 @@ fn codex_stop_refreshes_after_failure_and_reports_in_footer() {
         .unwrap();
     let provider = crate::providers::codex::CodexProvider::new(
         directory.path().to_owned(),
-        directory.path().join("manager"),
     );
     let mut app = App::new(
         Hub::new(vec![Box::new(provider)]),
@@ -554,7 +553,6 @@ fn codex_setting_actions_report_daemon_connection_failures() {
     let mut app = App::new(
         Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
             directory.path().into(),
-            directory.path().join("manager"),
         ))]),
         directory.path().into(),
     );

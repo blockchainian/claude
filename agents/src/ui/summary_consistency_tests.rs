@@ -22,7 +22,7 @@ fn recorded_summaries() -> Vec<crate::event::Event> {
     .unwrap();
     let dir = tempfile::tempdir().unwrap();
     let provider =
-        crate::providers::codex::CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        crate::providers::codex::CodexProvider::new(dir.path().into());
     let mut row = session("failed", "Failure", SessionStatus::Working, 0);
     row.transcript = Some(root.join("codex-command-failed.jsonl"));
     let failed = provider

@@ -15,7 +15,7 @@ fn codex_exit_event(code: i32) -> crate::event::Event {
     }
     std::fs::write(&path, format!("{record}\n")).unwrap();
     let provider =
-        crate::providers::codex::CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        crate::providers::codex::CodexProvider::new(dir.path().into());
     let (mut view, _) = event_fixture();
     view.rows[0].transcript = Some(path);
     provider

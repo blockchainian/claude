@@ -43,7 +43,6 @@ fn delete_dialog_covers_project_link_underlines_through_app() {
     let mut app = App::new(
         Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
             directory.path().into(),
-            directory.path().join("manager"),
         ))]),
         directory.path().into(),
     );

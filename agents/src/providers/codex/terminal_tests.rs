@@ -23,7 +23,7 @@ fn fixture() -> (tempfile::TempDir, CodexProvider, Session) {
         [path.to_str().unwrap()],
     )
     .unwrap();
-    let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut provider = CodexProvider::new(dir.path().into());
     let session = provider
         .refresh(2)
         .sessions

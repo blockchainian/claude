@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     io,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 #[derive(Serialize)]
@@ -30,6 +30,54 @@ pub(in crate::providers::codex) fn set_name(
 #[serde(rename_all = "camelCase")]
 struct ThreadParams<'a> {
     thread_id: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadParams<'a> {
+    thread_id: &'a str,
+    include_turns: bool,
+}
+
+#[derive(Deserialize)]
+struct ReadResponse {
+    thread: Thread,
+}
+
+#[derive(Deserialize)]
+struct Thread {
+    status: Status,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub(in crate::providers::codex) enum Status {
+    NotLoaded,
+    Idle,
+    SystemError,
+    #[serde(rename_all = "camelCase")]
+    Active { active_flags: Vec<String> },
+}
+
+impl Status {
+    pub(in crate::providers::codex) fn apply(&self, session: &mut crate::model::Session) {
+        if session.process.is_some()
+            && matches!(self, Self::Active { active_flags } if active_flags.iter().any(|flag| flag == "waitingOnApproval"))
+        {
+            session.status = crate::model::SessionStatus::NeedsInput;
+        }
+    }
+}
+
+pub(in crate::providers::codex) fn status(client: &mut Client, thread_id: &str) -> io::Result<Status> {
+    let response: ReadResponse = client.request(
+        "thread/read",
+        ReadParams {
+            thread_id,
+            include_turns: false,
+        },
+    )?;
+    Ok(response.thread.status)
 }
 
 #[derive(Deserialize)]
@@ -123,14 +171,15 @@ pub(in crate::providers::codex) fn interrupt(
 }
 
 /// Interrupts the running turn and waits until the daemon reports it has ended.
+#[cfg(test)]
 pub(in crate::providers::codex) fn stop(client: &mut Client, thread_id: &str) -> io::Result<()> {
     let Some(turn_id) = running_turn(client, thread_id)? else {
         return Ok(());
     };
     interrupt(client, thread_id, &turn_id)?;
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while running_turn(client, thread_id)?.is_some() {
-        if Instant::now() >= deadline {
+        if std::time::Instant::now() >= deadline {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "Codex turn did not stop before detach",
@@ -397,5 +446,42 @@ pub(in crate::providers::codex) fn background_terminals(
         if cursor.is_none() {
             return Ok(terminals);
         }
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+    use crate::{
+        model::{Process, SessionStatus},
+        providers::codex::tests::fixture,
+    };
+
+    #[test]
+    fn captured_approval_status_only_marks_live_sessions() {
+        // approval-probe/report.md: rpc.jsonl lines 45 and 53, and idle notification 64.
+        let waiting = r#"{"thread":{"id":"01a16baa-f8af-78f0-b0c1-1e6706bce89c","status":{"type":"active","activeFlags":["waitingOnApproval"]}}}"#;
+        let replied = r#"{"thread":{"id":"01a16baa-f8af-78f0-b0c1-1e6706bce89c","status":{"type":"active","activeFlags":[]}}}"#;
+        let (_dir, provider) = fixture();
+        let mut session = provider.snapshot(2).unwrap().sessions.remove(0);
+        for (payload, expected) in [(waiting, true), (replied, false)] {
+            let response: ReadResponse = serde_json::from_str(payload).unwrap();
+            session.status = SessionStatus::Working;
+            session.process = None;
+            response.thread.status.apply(&mut session);
+            assert_eq!(session.status, SessionStatus::Working);
+            session.process = Some(Process {
+                pid: std::process::id(),
+                label: None,
+                started_at: None,
+            });
+            response.thread.status.apply(&mut session);
+            assert_eq!(session.status == SessionStatus::NeedsInput, expected);
+        }
+        let idle: Status = serde_json::from_str(r#"{"type":"idle"}"#).unwrap();
+        session.status = SessionStatus::Ready;
+        idle.apply(&mut session);
+        assert_eq!(session.status, SessionStatus::Ready);
+        assert!(serde_json::from_str::<Status>(r#"{"type":"active"}"#).is_err());
     }
 }

@@ -487,7 +487,6 @@ mod tests {
         let app = App::new(
             Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
                 directory.path().into(),
-                directory.path().join("manager"),
             ))]),
             directory.path().into(),
         );
@@ -622,7 +621,6 @@ mod tests {
         };
         app.hub = Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
             directory.path().into(),
-            directory.path().join("manager"),
         ))]);
         app.terminal.as_mut().unwrap().id = codex_id.clone();
         assert!(!app.send_to_terminal(&codex_id, &SessionInput::Prompt("not sent".into())));

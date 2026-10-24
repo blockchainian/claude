@@ -19,7 +19,7 @@ fn provider_view() -> (tempfile::TempDir, View, chrono::DateTime<Utc>) {
         [transcript.to_str().unwrap()],
     )
     .unwrap();
-    let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut provider = CodexProvider::new(dir.path().into());
     let mut sessions = provider.refresh(1).sessions;
     assert_eq!(sessions.len(), 1);
     let now = "2026-10-12T02:13:00Z".parse().unwrap();

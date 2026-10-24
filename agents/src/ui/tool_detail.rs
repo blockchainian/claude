@@ -950,7 +950,6 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let provider = crate::providers::codex::CodexProvider::new(
             directory.path().into(),
-            directory.path().join("manager"),
         );
         let database = rusqlite::Connection::open(directory.path().join("state_5.sqlite")).unwrap();
         database
@@ -2381,7 +2380,6 @@ mod tests {
         let mut session = claude.refresh(1).sessions.remove(0);
         let codex = crate::providers::codex::CodexProvider::new(
             dir.path().into(),
-            dir.path().join("manager"),
         );
         for fixture in ["codex-mcp-errors.jsonl", "codex-command-failed.jsonl"] {
             session.transcript = Some(

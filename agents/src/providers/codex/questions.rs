@@ -129,7 +129,7 @@ mod tests {
             .unwrap()
             .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
             .unwrap();
-        CodexProvider::new(dir.path().into(), dir.path().join("manager"))
+        CodexProvider::new(dir.path().into())
             .snapshot(1)
             .unwrap()
             .sessions
@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn codex_answers_have_a_send_job() {
         let dir = tempfile::tempdir().unwrap();
-        let provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        let provider = CodexProvider::new(dir.path().into());
         let session = session();
         let mut ask = captured_ask();
         ask.session = session.id.clone();
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn offline_questions_offer_an_answer_from_the_rollout() {
         let dir = tempfile::tempdir().unwrap();
-        let provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        let provider = CodexProvider::new(dir.path().into());
         let mut sessions = vec![session()];
         let ask = captured_ask();
         let AskKind::Questions { questions, .. } = ask.kind;

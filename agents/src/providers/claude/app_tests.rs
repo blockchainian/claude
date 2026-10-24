@@ -1007,7 +1007,7 @@ fn child_resume_actions_reach_the_provider_or_show_the_notice() {
             .unwrap()
             .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
             .unwrap();
-        let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        let mut provider = CodexProvider::new(dir.path().into());
         let mut child = provider
             .refresh(2)
             .sessions
@@ -1078,7 +1078,7 @@ fn child_rename_only_reaches_provider_for_manager_threads() {
             .unwrap()
             .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
             .unwrap();
-        let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        let mut provider = CodexProvider::new(dir.path().into());
         let mut child = provider
             .refresh(2)
             .sessions
@@ -1131,7 +1131,7 @@ fn manager_thread_fork_reaches_app_launch() {
         .unwrap()
         .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
         .unwrap();
-    let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut provider = CodexProvider::new(dir.path().into());
     let mut child = provider
         .refresh(2)
         .sessions
@@ -1152,7 +1152,7 @@ fn manager_thread_fork_reaches_app_launch() {
 
 #[test]
 fn manager_thread_mutations_reach_app_provider_paths() {
-    use crate::providers::{Provider, codex::CodexProvider};
+    use crate::providers::codex::CodexProvider;
     use ratatui::{buffer::Buffer, layout::Rect};
     for operation in ["archive", "delete"] {
         let (dir, mut app) = fixture();
@@ -1160,27 +1160,38 @@ fn manager_thread_mutations_reach_app_provider_paths() {
             .unwrap()
             .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
             .unwrap();
+        let parent = app.sessions[0].id.id.clone();
         let manager = dir.path().join("manager");
         std::fs::create_dir_all(manager.join("threads")).unwrap();
-        std::fs::create_dir_all(manager.join("claude-parent")).unwrap();
+        std::fs::create_dir_all(manager.join(&parent)).unwrap();
+        let mut supervisor: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../../tests/fixtures/codex-manager/attached-supervisor.json"
+        )).unwrap();
+        supervisor["sessionId"] = parent.clone().into();
         std::fs::write(
             manager.join("threads/thread-12.json"),
-            include_bytes!("../../../tests/fixtures/codex-manager/attached-supervisor.json"),
+            serde_json::to_vec(&supervisor).unwrap(),
         )
         .unwrap();
-        let state = manager.join("claude-parent/state.json");
+        let state = manager.join(&parent).join("state.json");
         let bytes = include_bytes!("../../../tests/fixtures/codex-manager/attached-state.json");
         std::fs::write(&state, bytes).unwrap();
-        let mut provider = CodexProvider::new(dir.path().into(), manager);
-        let child = provider
-            .refresh(2)
+        app.hub = Hub::new(vec![
+            Box::new(CodexProvider::new(dir.path().into())),
+            Box::new(crate::providers::claude::ClaudeProvider::new(dir.path().into())
+                .with_codex_manager(manager)),
+        ]);
+        // The initial lookup reads two pages; action refreshes keep their one-page budget.
+        let snapshot = app.hub.session_source().run(2, crate::sessions::RefreshRequest::Full);
+        let child = snapshot
             .sessions
-            .into_iter()
+            .iter()
             .find(|session| session.id.id == "thread-12")
+            .cloned()
             .unwrap();
         assert!(child.parent.is_some() && child.can_resume());
-        app.hub = Hub::new(vec![Box::new(provider)]);
         app.session_refresh = SessionRefresh::new(app.hub.session_source());
+        app.supervisions = snapshot.supervisions;
         app.sessions.push(child.clone());
         let action = match operation {
             "archive" => Action::Archive(child.id),
@@ -1246,7 +1257,7 @@ fn new_key_adds_a_claude_draft_whatever_is_selected() {
         .unwrap()
         .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
         .unwrap();
-    let mut codex = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut codex = CodexProvider::new(dir.path().into());
     let mut thread = codex.refresh(1).sessions.remove(0);
     thread.cwd = dir.path().into();
     app.hub = Hub::new(vec![

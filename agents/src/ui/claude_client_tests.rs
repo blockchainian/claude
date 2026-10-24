@@ -27,7 +27,7 @@ fn claude_client_recorded_input_and_reply_snapshot() {
         )
         .unwrap();
         let mut provider =
-            CodexProvider::new(directory.path().into(), directory.path().join("manager"));
+            CodexProvider::new(directory.path().into());
         let session = provider.refresh(1).sessions.remove(0);
         let events = provider.event_panel(&session, usize::MAX, false).unwrap();
         let record: serde_json::Value = serde_json::from_str(source).unwrap();

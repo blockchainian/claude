@@ -96,8 +96,8 @@ fn background_children_keep_start_order_through_provider_refreshes() {
         );
     }
     let mut hub = crate::sessions::Hub::new(vec![
-        Box::new(ClaudeProvider::new(claude)),
-        Box::new(CodexProvider::new(codex.clone(), manager)),
+        Box::new(ClaudeProvider::new(claude).with_codex_manager(manager)),
+        Box::new(CodexProvider::new(codex.clone())),
     ]);
     let mut view = View {
         status_filter: TASK_FILTERS.len() - 1,

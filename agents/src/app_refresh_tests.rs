@@ -76,7 +76,6 @@ fn refresh_allows_first_frame_input_and_exit_while_sqlite_is_locked() {
     let mut app = App::new(
         Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
             home.path().into(),
-            home.path().join("manager"),
         ))]),
         home.path().into(),
     );
@@ -231,7 +230,6 @@ fn codex_filesystem_refresh_leaves_unrelated_rows_unchanged() {
     }
     let mut hub = Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
         home.path().into(),
-        home.path().join("manager"),
     ))]);
     let before = hub.refresh();
     let target = before.sessions[0].clone();

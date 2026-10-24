@@ -10,7 +10,7 @@ fn child_view(
         .unwrap()
         .execute_batch(include_str!("../../tests/fixtures/codex-state.sql"))
         .unwrap();
-    let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut provider = CodexProvider::new(dir.path().into());
     let sessions = provider.refresh(2).sessions;
     let mut parent = sessions
         .iter()

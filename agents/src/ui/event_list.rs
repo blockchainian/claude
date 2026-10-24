@@ -2495,7 +2495,6 @@ pub(super) mod event_markdown {
         );
         let provider = crate::providers::codex::CodexProvider::new(
             std::path::PathBuf::new(),
-            std::path::PathBuf::new(),
         );
         let events =
             crate::providers::Provider::event_panel(&provider, &session, 100, false).unwrap();
@@ -2584,7 +2583,6 @@ pub(super) mod event_markdown {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/codex-inner/file-change-without-start.jsonl");
         let provider = crate::providers::codex::CodexProvider::new(
-            std::path::PathBuf::new(),
             std::path::PathBuf::new(),
         );
         let dir = tempfile::tempdir().unwrap();

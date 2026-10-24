@@ -8,7 +8,6 @@ mod background;
 mod inner_tests;
 #[cfg(test)]
 mod lazy_tests;
-mod manager;
 #[cfg(test)]
 mod memory_tests;
 mod questions;
@@ -59,16 +58,14 @@ fn failed_snapshot(error: io::Error) -> Snapshot {
 
 pub struct CodexProvider {
     home: PathBuf,
-    manager_home: PathBuf,
     tasks: Mutex<HashMap<PathBuf, rollout::Tasks>>,
     models: Mutex<ModelCatalog>,
     background: Mutex<background::Background>,
 }
 
 impl CodexProvider {
-    pub fn new(home: PathBuf, manager_home: PathBuf) -> Self {
+    pub fn new(home: PathBuf) -> Self {
         Self {
-            manager_home,
             home,
             tasks: Mutex::new(HashMap::new()),
             models: Mutex::new(ModelCatalog::default()),
@@ -94,13 +91,7 @@ impl CodexProvider {
             )
             .join(".codex"),
         };
-        let user_home = std::env::var_os("HOME")
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is unset"))?;
-        let manager_home = std::env::var_os("CODEX_MANAGER_STATE_DIR")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(user_home).join(".local/state/codex-manager"));
-        Ok(Self::new(home, manager_home))
+        Ok(Self::new(home))
     }
 
     fn snapshot(&self, pages: usize) -> io::Result<Snapshot> {
@@ -174,7 +165,6 @@ impl CodexProvider {
         live: &HashMap<String, u32>,
     ) -> io::Result<Vec<Session>> {
         let names = indexed_names(&self.home)?;
-        let links = manager::thread_links(&self.manager_home, ids.iter().cloned())?;
         let starts = process_starts(&live.values().copied().collect::<Vec<_>>())?;
         let edges = has_edges(db).map_err(io::Error::other)?;
         let parent = if edges {
@@ -216,19 +206,6 @@ impl CodexProvider {
                     started_at: starts.get(pid).copied(),
                 });
             }
-            if let Some(link) = links.get(&session.id.id) {
-                let native_agent = session.parent.is_some();
-                session.parent = Some(link.parent.clone());
-                if session.name.is_none() {
-                    session.name = link.name.clone();
-                }
-                if !native_agent && let Some(name) = &session.name {
-                    session.title = name.clone();
-                }
-                if link.needs_input {
-                    session.status = SessionStatus::NeedsInput;
-                }
-            }
             sessions.push(session);
         }
         // Codex rewrites the cache in place, so a read can see a partial file;
@@ -263,9 +240,6 @@ impl CodexProvider {
             ids = db.prepare("SELECT child_thread_id FROM thread_spawn_edges WHERE parent_thread_id IN (SELECT value FROM json_each(?1))").map_err(io::Error::other)?
                 .query_map([serde_json::to_string(&native)?], |r| r.get(0)).map_err(io::Error::other)?
                 .collect::<rusqlite::Result<_>>().map_err(io::Error::other)?;
-        }
-        for parent in parents.iter().filter(|p| p.provider == ProviderId::Claude) {
-            ids.extend(manager::parent_links(&self.manager_home, parent)?.into_keys());
         }
         if ids.is_empty() {
             return Ok(vec![]);
@@ -356,6 +330,9 @@ impl CodexProvider {
             .iter_mut()
             .filter(|session| session.status != SessionStatus::Inactive)
         {
+            if session.process.is_some() {
+                app_server::thread::status(&mut client, &session.id.id)?.apply(session);
+            }
             let terminals =
                 match app_server::thread::background_terminals(&mut client, &session.id.id) {
                     Ok(terminals) => terminals,
@@ -681,7 +658,7 @@ fn process_starts(pids: &[u32]) -> io::Result<HashMap<u32, DateTime<Utc>>> {
 
 impl Provider for CodexProvider {
     fn session_source(&self) -> Box<dyn Provider> {
-        Box::new(Self::new(self.home.clone(), self.manager_home.clone()))
+        Box::new(Self::new(self.home.clone()))
     }
 
     fn display_name(&self) -> &'static str {
@@ -756,7 +733,6 @@ impl Provider for CodexProvider {
         Ok(["sessions", "archived_sessions", "thread-writer-locks"]
             .into_iter()
             .map(|name| self.home.join(name))
-            .chain(std::iter::once(self.manager_home.clone()))
             .filter(|path| path.is_dir())
             .collect())
     }
@@ -775,6 +751,31 @@ impl Provider for CodexProvider {
                 supervisions: vec![],
             })
             .unwrap_or_else(failed_snapshot)
+    }
+    fn load(&mut self, sessions: &[SessionKey]) -> Snapshot {
+        (|| {
+            let path = self.home.join("state_5.sqlite");
+            if !path.exists() {
+                return Ok(Snapshot {
+                    sessions: vec![],
+                    has_more: false,
+                    supervisions: vec![],
+                });
+            }
+            let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(io::Error::other)?;
+            let ids = sessions
+                .iter()
+                .filter(|session| session.provider == ProviderId::Codex)
+                .map(|session| session.id.clone())
+                .collect::<Vec<_>>();
+            Ok(Snapshot {
+                sessions: self.read_sessions(&db, &ids, &HashMap::new())?,
+                has_more: false,
+                supervisions: vec![],
+            })
+        })()
+        .unwrap_or_else(failed_snapshot)
     }
     fn enrich(&mut self, snapshot: Snapshot) -> Snapshot {
         self.enrich_sessions(snapshot)
@@ -896,30 +897,9 @@ impl Provider for CodexProvider {
             return Err(io::ErrorKind::Unsupported.into());
         }
         let home = self.home.clone();
-        let manager_home = self.manager_home.clone();
-        let config = super::claude::config_dir();
         let id = session.id.id.clone();
         let archived = session.archived;
         Ok(Box::new(move || {
-            if manager::thread_links(&manager_home, [id.clone()])?
-                .get(&id)
-                .is_some_and(|link| !link.detached)
-            {
-                let mut client = app_server::Client::connect(&home)?;
-                app_server::thread::stop(&mut client, &id)?;
-                let output =
-                    manager::detach_command(&config, &manager_home, &home, &id)?.output()?;
-                if !output.status.success() {
-                    return Err(io::Error::other(format!(
-                        "codex-manager detach failed ({}): {}",
-                        output.status,
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    )));
-                }
-                let _: serde_json::Value = serde_json::from_slice(&output.stdout)
-                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-                return Ok(());
-            }
             if archived {
                 return Ok(());
             }

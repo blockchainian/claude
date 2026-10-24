@@ -610,7 +610,7 @@ fn session_prompt_images_belong_to_first_user_message() {
         [path.to_str().unwrap()],
     )
     .unwrap();
-    let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut provider = CodexProvider::new(dir.path().into());
     let image = dir.path().join("first.png");
     std::fs::write(&image, b"image").unwrap();
     for name in ["wrapped", "fallback"] {

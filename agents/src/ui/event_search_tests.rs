@@ -35,7 +35,6 @@ fn list_search_finds_trailing_tool_name_after_non_ascii_text() {
     let dir = tempfile::tempdir().unwrap();
     let provider = crate::providers::codex::CodexProvider::new(
         dir.path().to_owned(),
-        dir.path().join("manager"),
     );
     let mut session = view.selected_row().unwrap().clone();
     session.transcript = Some(

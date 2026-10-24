@@ -1443,7 +1443,6 @@ fn archive_codex_fixture() -> (tempfile::TempDir, App) {
         .unwrap();
     let provider = crate::providers::codex::CodexProvider::new(
         directory.path().into(),
-        directory.path().join("manager"),
     );
     let mut app = App::new(Hub::new(vec![Box::new(provider)]), directory.path().into());
     app.refresh();

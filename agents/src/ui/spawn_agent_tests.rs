@@ -13,7 +13,6 @@ fn display_view() -> View {
     let claude = crate::providers::claude::ClaudeProvider::new(config.path().into());
     let codex = crate::providers::codex::CodexProvider::new(
         config.path().into(),
-        config.path().join("manager"),
     );
     let mut view = test_view(Grouping::Project, false);
     view.set_input_choices(HashMap::from([
@@ -119,7 +118,7 @@ fn spawn_agent_codex_model_and_hidden_receipt() {
         include_str!("../../tests/fixtures/codex-interaction/parent.jsonl"),
     )
     .unwrap();
-    let provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let provider = CodexProvider::new(dir.path().into());
     let mut session = fixture().rows.remove(0);
     session.transcript = Some(path);
     let events = provider.event_panel(&session, usize::MAX, false).unwrap();

@@ -24,7 +24,6 @@ fn recorded_view() -> (tempfile::TempDir, View) {
     }
     let mut provider = crate::providers::codex::CodexProvider::new(
         directory.path().into(),
-        directory.path().join("manager"),
     );
     let mut view = test_view(Grouping::Project, false);
     view.status_filter = 1;

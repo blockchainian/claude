@@ -5648,7 +5648,6 @@ fn codex_inner_task_event_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let provider = crate::providers::codex::CodexProvider::new(
         dir.path().to_owned(),
-        dir.path().join("manager"),
     );
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-inner");
     view.event_panel.clear();
@@ -7987,7 +7986,6 @@ fn pending_question_event_uses_model_color() {
     let dir = tempfile::tempdir().unwrap();
     let codex = crate::providers::codex::CodexProvider::new(
         dir.path().to_owned(),
-        dir.path().join("manager"),
     );
     for fixture in [
         "tests/fixtures/claude-questions-pending.jsonl",
@@ -11220,7 +11218,6 @@ fn weekly_usage_view() -> View {
     let hub = crate::sessions::Hub::new(vec![
         Box::new(crate::providers::codex::CodexProvider::new(
             PathBuf::new(),
-            PathBuf::new(),
         )),
         Box::new(crate::providers::claude::ClaudeProvider::new(PathBuf::new())),
     ]);
@@ -11725,7 +11722,6 @@ fn recorded_agent_settings_use_the_picker_catalog_and_shared_effort() {
     .unwrap();
     let provider = crate::providers::codex::CodexProvider::new(
         directory.path().into(),
-        directory.path().join("manager"),
     );
     let mut row = session("settings", "Settings", SessionStatus::Ready, 0);
     row.id.provider = ProviderId::Codex;
