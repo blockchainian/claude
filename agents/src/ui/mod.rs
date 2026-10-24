@@ -1059,16 +1059,7 @@ impl View {
     }
     fn matches_search(&self, s: &Session) -> bool {
         let search = self.search.text().to_lowercase();
-        search.is_empty()
-            || format!(
-                "{} {} {} {}",
-                s.name.as_deref().unwrap_or(""),
-                s.title,
-                s.prompt,
-                s.cwd.display()
-            )
-            .to_lowercase()
-            .contains(&search)
+        search.is_empty() || s.display_title().to_lowercase().contains(&search)
     }
     fn visible_indices(&self) -> Vec<usize> {
         self.visible_indices_for_filter(self.status_filter)

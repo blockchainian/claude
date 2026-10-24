@@ -2407,6 +2407,18 @@ fn search_text_wins_and_refresh_preserves_selection_and_state() {
     assert_eq!(key(&mut view, KeyCode::Esc), None);
 }
 #[test]
+fn task_search_matches_only_the_shown_title() {
+    let mut row = session("hidden", "图像显示", SessionStatus::Ready, 0);
+    row.prompt = "the tmux probe must select its own pane".into();
+    row.cwd = PathBuf::from("/tmp/flux");
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    view.search.set_text("ux");
+    assert!(view.visible_indices().is_empty());
+    view.search.set_text("图像");
+    assert_eq!(view.visible_indices().len(), 1);
+}
+#[test]
 fn task_list_actions() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Char('o')), None);
