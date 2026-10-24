@@ -398,7 +398,9 @@ impl View {
             format!(" ↓ {} New", self.event_list.unseen.get())
         };
         let width = (label.width() as u16).min(area.width.saturating_sub(2));
-        let right = event_row_areas(self.center_layout(buf.area).event_panel).1.right();
+        let right = event_row_areas(self.center_layout(buf.area).event_panel)
+            .1
+            .right();
         let jump = Rect::new(right.saturating_sub(width), area.y, width, 1);
         Clear.render(jump, buf);
         Line::from(Span::styled(label, style::rule_label_style())).render(jump, buf);
@@ -1769,7 +1771,7 @@ pub(super) struct EventDetailLayout {
 
 struct DetailImage {
     index: usize,
-    image: crate::event::ImageBlock,
+    image: crate::images::ImageSource,
     rows: std::ops::Range<usize>,
     x: u16,
     width: u16,
@@ -1871,7 +1873,7 @@ fn event_detail_parts_layout_with_images(
     cwd: &Path,
     now: DateTime<Utc>,
     sections: Vec<Section>,
-    mut image_size: impl FnMut(usize, &crate::event::ImageBlock) -> Option<(u16, u16)>,
+    mut image_size: impl FnMut(usize, &crate::images::ImageSource) -> Option<(u16, u16)>,
 ) -> EventDetailLayout {
     let width = usize::from(columns.text.width);
     let body_style = Style::default();
@@ -2283,13 +2285,19 @@ pub(super) mod event_markdown {
         let events = crate::providers::claude::event_reader::tail(&transcript, 20).unwrap();
         let event = &events[0];
         let image = &event.images[0];
+        let crate::images::ImageSource::File {
+            path: image_path, ..
+        } = &image.source
+        else {
+            panic!("expected file source")
+        };
         let layout = event_detail_layout(event, 200, dir.path(), DateTime::UNIX_EPOCH);
         assert!(
             layout
                 .links
                 .iter()
                 .flatten()
-                .any(|link| link.target == image.path)
+                .any(|link| link.target == *image_path)
         );
         let area = Rect::new(0, 0, 200, 1);
         let links = render_event(
@@ -2301,7 +2309,7 @@ pub(super) mod event_markdown {
             None,
             dir.path(),
         );
-        assert!(links.iter().any(|(_, target)| target == &image.path));
+        assert!(links.iter().any(|(_, target)| target == image_path));
     }
 
     #[test]
@@ -2894,19 +2902,13 @@ mod panel_detail_tests {
         )
     }
 
-    fn image_section() -> (Event, Vec<Section>, crate::event::ImageBlock) {
+    fn image_section() -> (Event, Vec<Section>, crate::images::ImageSource) {
         let fixture = include_str!("../../tests/fixtures/claude-read-image.jsonl");
         let record: serde_json::Value =
             serde_json::from_str(fixture.lines().nth(1).unwrap()).unwrap();
         let pointer = "/message/content/0/content/0/source/data";
         assert!(record.pointer(pointer).unwrap().is_string());
-        let image = crate::event::ImageBlock {
-            media_type: record
-                .pointer("/message/content/0/content/0/source/media_type")
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .into(),
+        let image = crate::images::ImageSource::Record {
             record: crate::event::SourceRecord {
                 path: Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("tests/fixtures/claude-read-image.jsonl"),
@@ -2919,7 +2921,10 @@ mod panel_detail_tests {
             super::tool_detail::event_detail_content(&event, String::new(), Style::new().dim())
                 .sections;
         sections[0].groups = vec![Group {
-            parts: vec![Part::image(image.clone())],
+            parts: vec![Part::image(crate::images::Image {
+                label: "[image image/png]".into(),
+                source: image.clone(),
+            })],
         }];
         (event, sections, image)
     }
@@ -3084,7 +3089,12 @@ mod panel_detail_tests {
     #[test]
     fn inline_image_order_includes_unavailable_images() {
         let (event, mut sections, image) = image_section();
-        sections[0].groups[0].parts.push(Part::image(image));
+        sections[0].groups[0]
+            .parts
+            .push(Part::image(crate::images::Image {
+                label: "[image image/png]".into(),
+                source: image,
+            }));
         let layout = event_detail_parts_layout_with_images(
             &event,
             columns(100),
@@ -3211,7 +3221,10 @@ mod panel_detail_tests {
         );
         let viewport = view.viewport.borrow();
         let layout = viewport.event_detail_layout.as_ref().unwrap();
-        assert!(layout.lines.len() > 8, "the detail must overflow the panel to scroll");
+        assert!(
+            layout.lines.len() > 8,
+            "the detail must overflow the panel to scroll"
+        );
         let mut expected = Buffer::empty(buffer.area);
         layout.lines[0].clone().render(
             super::super::render::row(layout.columns.text, EVENT_TOP, 1),

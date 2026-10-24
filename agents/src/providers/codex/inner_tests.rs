@@ -4,6 +4,22 @@ use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+fn file_source(path: PathBuf) -> crate::images::ImageSource {
+    let metadata = std::fs::metadata(&path).unwrap();
+    crate::images::ImageSource::File {
+        len: metadata.len(),
+        modified: metadata.modified().unwrap(),
+        path,
+    }
+}
+
+fn image_path(image: &crate::images::Image) -> PathBuf {
+    match &image.source {
+        crate::images::ImageSource::File { path, .. } => path.clone(),
+        crate::images::ImageSource::Record { .. } => panic!("expected file source"),
+    }
+}
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/codex-inner")
@@ -516,9 +532,9 @@ fn prompt_image_paths_use_wrapper_then_paired_completed_event() {
         assert_eq!(entries.len(), 1);
         assert_eq!(
             entries[0].images,
-            [crate::event::Image {
+            [crate::images::Image {
                 label: "[Image #1]".into(),
-                path: image.clone()
+                source: file_source(image.clone())
             }]
         );
         // The wrapper is enough when the completed event has not been written yet.
@@ -619,9 +635,9 @@ fn session_prompt_images_belong_to_first_user_message() {
         let session = sessions.iter().find(|s| s.id.id == "thread-0").unwrap();
         assert_eq!(
             session.prompt_images,
-            [crate::event::Image {
+            [crate::images::Image {
                 label: "[Image #1]".into(),
-                path: image.clone()
+                source: file_source(image.clone())
             }]
         );
         assert_eq!(session.prompt, prompt.chars().take(512).collect::<String>());
@@ -694,9 +710,9 @@ fn wrapper_path_precedes_event_path_and_unavailable_path_falls_back() {
     let mut records = relocated_image_records("wrapped", &wrapper);
     records[1]["payload"]["item"]["content"][0]["path"] = event.to_str().unwrap().into();
     write_image_records(&path, &records);
-    assert_eq!(tail(&path, 100).unwrap()[0].images[0].path, wrapper);
+    assert_eq!(image_path(&tail(&path, 100).unwrap()[0].images[0]), wrapper);
     std::fs::remove_file(&wrapper).unwrap();
-    assert_eq!(tail(&path, 100).unwrap()[0].images[0].path, event);
+    assert_eq!(image_path(&tail(&path, 100).unwrap()[0].images[0]), event);
     records[1]["payload"]["turn_id"] = "different-turn".into();
     write_image_records(&path, &records);
     assert!(tail(&path, 100).unwrap()[0].images.is_empty());

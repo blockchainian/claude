@@ -1,4 +1,5 @@
-use crate::event::{Event, Image, Kind, Section, ToolCall};
+use crate::event::{Event, Kind, Section, ToolCall};
+use crate::images::{Image, ImageSource};
 use crate::model::{Activity, SessionTask, TaskStatus};
 use crate::providers::text::printable;
 use crate::providers::tool::{self, Body, ToolData, ToolResult, list_title, tool_kind};
@@ -477,9 +478,15 @@ fn prompt_images(prompt: &Prompt, payload: &Value, completed: Option<&Value>) ->
                         .flatten()
                         .filter(|path| Path::new(path).is_file())
                 })?;
+            let path = PathBuf::from(path);
+            let metadata = std::fs::metadata(&path).ok()?;
             Some(Image {
                 label: label.clone(),
-                path: path.into(),
+                source: ImageSource::File {
+                    path,
+                    len: metadata.len(),
+                    modified: metadata.modified().ok()?,
+                },
             })
         })
         .collect()
@@ -3541,11 +3548,18 @@ mod tests {
         let Section::Image(image) = &output[1] else {
             panic!("expected image")
         };
-        assert_eq!(image.media_type, "image/png");
-        assert_eq!(image.record, crate::event::SourceRecord { path, offset: 0 });
-        assert_eq!(image.pointer, "/payload/item/result/content/1/data");
+        assert_eq!(image.label, "[image image/png]");
+        let ImageSource::Record {
+            record: source,
+            pointer,
+        } = &image.source
+        else {
+            panic!("expected record source")
+        };
+        assert_eq!(*source, crate::event::SourceRecord { path, offset: 0 });
+        assert_eq!(pointer, "/payload/item/result/content/1/data");
         assert_eq!(
-            record.pointer(&image.pointer).unwrap().as_str().unwrap(),
+            record.pointer(pointer).unwrap().as_str().unwrap(),
             record["payload"]["item"]["result"]["content"][1]["data"]
                 .as_str()
                 .unwrap()
@@ -3572,11 +3586,11 @@ mod tests {
             );
             match &call.output.as_ref().unwrap()[1] {
                 Section::Image(image) => {
-                    assert_eq!(image.media_type, "image/png");
-                    assert_eq!(
-                        record.pointer(&image.pointer),
-                        Some(&result["content"][1]["data"])
-                    );
+                    assert_eq!(image.label, "[image image/png]");
+                    let ImageSource::Record { pointer, .. } = &image.source else {
+                        panic!("expected record source")
+                    };
+                    assert_eq!(record.pointer(pointer), Some(&result["content"][1]["data"]));
                 }
                 Section::Placeholder(text) => assert_eq!(text, "[resource text/html]"),
                 Section::Structured { label, text } => {

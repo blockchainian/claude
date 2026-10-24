@@ -15,7 +15,7 @@ pub(super) struct Link {
 pub(super) type DrawnLink = (Rect, PathBuf);
 
 /// The existing paths in `text`, and the label of each of `images`.
-pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::event::Image]) -> Vec<Link> {
+pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::images::Image]) -> Vec<Link> {
     let mut links = markdown_links(text, cwd);
     for link in path_links(text, &super::paths::text_paths(text, cwd), cwd) {
         if !links
@@ -26,7 +26,10 @@ pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::event::Image])
         }
     }
     for image in images {
-        let Some(target) = existing(image.path.clone()) else {
+        if !matches!(image.source, crate::images::ImageSource::File { .. }) {
+            continue;
+        }
+        let Some(target) = image.source.local_file().ok().and_then(existing) else {
             continue;
         };
         links.extend(text.match_indices(&image.label).map(|(at, label)| Link {
@@ -314,9 +317,9 @@ mod tests {
         );
         let image = dir.path().join("1.png");
         std::fs::write(&image, "").unwrap();
-        let images = [crate::event::Image {
+        let images = [crate::images::Image {
             label: "[Image #1]".into(),
-            path: image.clone(),
+            source: file_source(image.clone()),
         }];
         let links = text_links(&text, dir.path(), &images);
         let targets: Vec<_> = links
@@ -336,11 +339,22 @@ mod tests {
 
     #[test]
     fn deleted_images_are_not_links() {
-        let images = [crate::event::Image {
+        let images = [crate::images::Image {
             label: "[Image #1]".into(),
-            path: "/nonexistent/1.png".into(),
+            source: file_source("/nonexistent/1.png".into()),
         }];
         assert!(text_links("see [Image #1]", Path::new("/"), &images).is_empty());
+    }
+
+    fn file_source(path: PathBuf) -> crate::images::ImageSource {
+        let metadata = std::fs::metadata(&path).ok();
+        crate::images::ImageSource::File {
+            path,
+            len: metadata.as_ref().map_or(0, std::fs::Metadata::len),
+            modified: metadata
+                .and_then(|metadata| metadata.modified().ok())
+                .unwrap_or(std::time::UNIX_EPOCH),
+        }
     }
 
     #[test]
