@@ -230,7 +230,7 @@ fn terminal_claude_chrome_javascript() {
     let plain = tmux.capture_when(|capture| {
         capture.contains("Tab Context:")
             && capture.contains("ORGANIZATION_ID")
-            && capture.contains("javascript_exec")
+            && capture.contains(".map(e => e.name)")
     });
     let evidence = std::env::var_os("AGENTS_JAVASCRIPT_EVIDENCE")
         .map(std::path::PathBuf::from)
@@ -239,8 +239,8 @@ fn terminal_claude_chrome_javascript() {
     std::fs::write(evidence.join("capture.txt"), &plain).unwrap();
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
     std::fs::write(evidence.join("capture.ansi"), &capture).unwrap();
-    assert!(plain.contains("\"action\": \"javascript_exec\""), "{plain}");
-    assert!(plain.contains("\"tabId\": 123456789"), "{plain}");
+    assert!(!plain.contains("\"action\""), "{plain}");
+    assert!(!plain.contains("\"tabId\""), "{plain}");
     assert!(
         plain.contains(".map(e => e.name)"),
         "formatted arrow: {plain}"
@@ -316,7 +316,7 @@ fn terminal_claude_chrome_javascript() {
     let verdict = serde_json::json!({
         "verdict":"pass", "fixture":"claude-chrome-javascript.jsonl",
         "formatted_js":true, "js_colors":colors.len(),
-        "action_preserved":true, "tab_id_preserved":true,
+        "action_hidden":true, "tab_id_hidden":true,
         "output_left_edges":[result_border, context_border],
         "output_widths":widths,
         "capture":evidence.join("capture.ansi"),

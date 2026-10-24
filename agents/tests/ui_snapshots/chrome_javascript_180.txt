@@ -63,10 +63,6 @@
                                                           ).map(n => n.replace(/[=&?]/g, ' ')),
                                                         ),
                                                       ].join('\n');
-                                                      {
-                                                        "action": "javascript_exec",
-                                                        "tabId": 123456789
-                                                      }
                                                                                           ↓
                                       https://claude.ai/v1/environment_providers/private/organizations/ORGANIZATION_ID/environments limit LIMIT
 
@@ -75,6 +71,10 @@
                                                 - Executed on tabId: 123456789
                                                 - Available tabs:
                                                   • tabId 123456789: "New session - Claude" ("https://claude.ai/new#settings/usage")
+
+
+
+
 
 
 

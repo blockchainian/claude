@@ -85,11 +85,8 @@ fn chrome_javascript_recorded_input_and_output_blocks_snapshot() {
             rendered.contains(".getEntriesByType('resource')"),
             "{rendered}"
         );
-        assert!(
-            rendered.contains("\"action\": \"javascript_exec\""),
-            "{rendered}"
-        );
-        assert!(rendered.contains("\"tabId\": 123456789"), "{rendered}");
+        assert!(!rendered.contains("\"action\""), "{rendered}");
+        assert!(!rendered.contains("\"tabId\""), "{rendered}");
         assert!(rendered.contains("- Available tabs:"), "{rendered}");
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(format!("tests/ui_snapshots/chrome_javascript_{width}.txt"));

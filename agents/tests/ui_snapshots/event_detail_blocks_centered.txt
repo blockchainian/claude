@@ -48,10 +48,6 @@ claude-in-chrome javascript tool — 120 columns
                             ).map(n => n.replace(/[=&?]/g, ' ')),
                           ),
                         ].join('\n');
-                        {
-                          "action": "javascript_exec",
-                          "tabId": 123456789
-                        }
                                                             ↓
     https://claude.ai/v1/environment_providers/private/organizations/ORGANIZATION_ID/environments limit LIMIT
 
@@ -70,10 +66,6 @@ claude-in-chrome javascript tool — 200 columns
                                                                     ).map(n => n.replace(/[=&?]/g, ' ')),
                                                                   ),
                                                                 ].join('\n');
-                                                                {
-                                                                  "action": "javascript_exec",
-                                                                  "tabId": 123456789
-                                                                }
                                                                                                     ↓
                                                 https://claude.ai/v1/environment_providers/private/organizations/ORGANIZATION_ID/environments limit LIMIT
 

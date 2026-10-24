@@ -202,6 +202,8 @@ pub(crate) enum Body {
 pub(crate) enum Format {
     Text,
     Markdown,
+    /// Formats source code in the given language as a code section.
+    Code(&'static str),
     /// A JSON array as a Markdown table: one row per element, one column per field.
     Table,
 }
@@ -503,7 +505,7 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
     },
     ToolRule {
         name: "claude-in-chrome javascript_tool",
-        input: Some((Pick::With(javascript_input), Format::Text)),
+        input: Some((Pick::Field(Source::Input, "/text"), Format::Code("js"))),
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -686,6 +688,7 @@ fn picked_sections(value: &Value, pointer: &str, format: Format, output: bool) -
         return Vec::new();
     }
     vec![match format {
+        Format::Code(lang) => code_section(label, lang, &format_code(lang, &text)),
         Format::Markdown => Section::Markdown {
             label: label.into(),
             text,
@@ -696,6 +699,36 @@ fn picked_sections(value: &Value, pointer: &str, format: Format, output: bool) -
             markdown: false,
         },
     }]
+}
+
+fn format_code(lang: &str, text: &str) -> String {
+    match lang {
+        "js" => {
+            use dprint_plugin_typescript::configuration::{
+                Configuration, ConfigurationBuilder, QuoteStyle,
+            };
+            use dprint_plugin_typescript::{FormatTextOptions, format_text};
+
+            static CONFIG: std::sync::OnceLock<Configuration> = std::sync::OnceLock::new();
+            let config = CONFIG.get_or_init(|| {
+                ConfigurationBuilder::new()
+                    .quote_style(QuoteStyle::PreferSingle)
+                    .line_width(80)
+                    .build()
+            });
+            match format_text(FormatTextOptions {
+                path: std::path::Path::new("input.js"),
+                extension: None,
+                text: text.to_owned(),
+                config,
+                external_formatter: None,
+            }) {
+                Ok(Some(formatted)) => formatted,
+                Ok(None) | Err(_) => text.to_owned(),
+            }
+        }
+        _ => text.to_owned(),
+    }
 }
 
 pub(crate) fn presentation(name: &str, data: &ToolData<'_>) -> Presentation {
@@ -817,36 +850,6 @@ fn arguments_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
             .map(|text| vec![text_section("args", text)])
             .unwrap_or_default(),
     )
-}
-fn javascript_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
-    use dprint_plugin_typescript::configuration::{
-        Configuration, ConfigurationBuilder, QuoteStyle,
-    };
-    use dprint_plugin_typescript::{FormatTextOptions, format_text};
-
-    static CONFIG: std::sync::OnceLock<Configuration> = std::sync::OnceLock::new();
-    let text = data.input.pointer("/text")?.as_str()?;
-    let config = CONFIG.get_or_init(|| {
-        ConfigurationBuilder::new()
-            .quote_style(QuoteStyle::PreferSingle)
-            .line_width(80)
-            .build()
-    });
-    let formatted = match format_text(FormatTextOptions {
-        path: std::path::Path::new("input.js"),
-        extension: None,
-        text: text.to_owned(),
-        config,
-        external_formatter: None,
-    }) {
-        Ok(Some(formatted)) => formatted,
-        Ok(None) | Err(_) => text.to_owned(),
-    };
-    let mut sections = vec![code_section("text", "js", &formatted)];
-    let mut remaining = data.input.clone();
-    remaining.as_object_mut()?.remove("text");
-    sections.extend(raw_input(&remaining));
-    Some(sections)
 }
 fn fetch_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     let mut sections = Vec::new();
@@ -1687,7 +1690,7 @@ mod tests {
     }
 
     #[test]
-    fn chrome_javascript_formats_recorded_text_and_preserves_other_fields() {
+    fn chrome_javascript_formats_recorded_text() {
         let records: Vec<Value> =
             include_str!("../../tests/fixtures/claude-chrome-javascript.jsonl")
                 .lines()
@@ -1714,7 +1717,7 @@ mod tests {
                     result: Some(&result),
                 },
             );
-            let crate::event::Section::Code { label, lang, text } = &shown.input[0] else {
+            let [crate::event::Section::Code { label, lang, text }] = shown.input.as_slice() else {
                 panic!("JavaScript must be a code section: {:?}", shown.input);
             };
             assert_eq!(label, "text");
@@ -1723,9 +1726,6 @@ mod tests {
             assert!(text.contains(" => "), "{text}");
             assert!(text.contains("'resource'"), "{text}");
             assert!(text.contains("' '"), "{text}");
-            let mut remaining = input.clone();
-            remaining.as_object_mut().unwrap().remove("text");
-            assert_eq!(&shown.input[1..], super::raw_input(&remaining));
             let Some(super::Body::Sections(output)) = shown.output else {
                 panic!("missing output")
             };
