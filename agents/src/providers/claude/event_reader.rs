@@ -1109,7 +1109,10 @@ impl EventReader {
             }
             None => summary.clone(),
         };
-        let output = field("output-file").map(|path| Section::OutputFile(path.into()));
+        let output = field("output-file").map(|path| Section::OutputFile {
+            provider: crate::providers::ProviderId::Claude,
+            path: path.into(),
+        });
         self.push(Kind::Tool, title.clone(), at);
         let event = &mut self.entries.last_mut().unwrap().event;
         event.source = source.map(str::to_owned);

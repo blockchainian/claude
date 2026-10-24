@@ -786,10 +786,10 @@ fn parts(event: &Event) -> Vec<EventDetailSection> {
 fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, text_output: bool) {
     let (label, body) = match section {
         Section::GroupBreak => return,
-        Section::OutputFile(path) => {
+        Section::OutputFile { provider, path } => {
             push_section(
                 parts,
-                &Section::read_output_file(path),
+                &crate::providers::read_output_file(*provider, path),
                 label_style,
                 text_output,
             );

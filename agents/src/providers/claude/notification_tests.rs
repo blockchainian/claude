@@ -33,7 +33,9 @@ fn notification_output(contents: Option<&str>, summary: &str) -> Vec<Section> {
         .unwrap()
         .into_iter()
         .map(|section| match section {
-            Section::OutputFile(path) => Section::read_output_file(&path),
+            Section::OutputFile { provider, path } => {
+                crate::providers::read_output_file(provider, &path)
+            }
             section => section,
         })
         .collect()

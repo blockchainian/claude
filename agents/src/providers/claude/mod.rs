@@ -8,6 +8,7 @@ mod attach;
 #[cfg(test)]
 mod attach_live_tests;
 mod background;
+pub(crate) mod background_output;
 pub(crate) mod context;
 #[cfg(test)]
 mod create_tests;

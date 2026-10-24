@@ -64,7 +64,8 @@ pub fn section(text: String) -> crate::event::Section {
 mod tests {
     use super::message;
 
-    const COMPLETED: &str = include_str!("../tests/fixtures/background/codex-await.output");
+    const COMPLETED: &str =
+        include_str!("../../../../tests/fixtures/background/codex-await.output");
 
     #[test]
     fn completed_preserves_message_markdown() {

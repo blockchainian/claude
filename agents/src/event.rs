@@ -283,8 +283,11 @@ pub struct ModelSettings {
 pub enum Section {
     /// Ends the current block; the sections after it form their own centered group.
     GroupBreak,
-    /// Background output read from its current file contents.
-    OutputFile(std::path::PathBuf),
+    /// Background output read from its current file contents by the provider that wrote the call.
+    OutputFile {
+        provider: crate::providers::ProviderId,
+        path: std::path::PathBuf,
+    },
     /// Shell source; `prefix` bytes before the command remain part of copied text.
     Shell { text: String, prefix: usize },
     /// Free text using the shared reading column.
@@ -322,64 +325,3 @@ mod agent_tests;
 #[cfg(test)]
 #[path = "event/raw_tests.rs"]
 mod raw_tests;
-
-impl Section {
-    /// Reads the current background output, retaining message-specific formatting.
-    pub(crate) fn read_output_file(path: &std::path::Path) -> Self {
-        let text = match std::fs::read_to_string(path) {
-            Ok(text) => text,
-            Err(error) => {
-                return Self::Placeholder(if error.kind() == std::io::ErrorKind::NotFound {
-                    "File no longer exists".to_owned()
-                } else {
-                    error.to_string()
-                });
-            }
-        };
-        let records = text
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(serde_json::from_str::<serde_json::Value>)
-            .collect::<Result<Vec<_>, _>>()
-            .ok()
-            .filter(|records| {
-                records.iter().all(|record| record["type"].is_string())
-                    && records.iter().any(|record| {
-                        matches!(record["type"].as_str(), Some("assistant" | "user"))
-                            && record["message"]["role"] == record["type"]
-                            && record["message"]["content"].is_array()
-                    })
-            });
-        let Some(records) = records else {
-            return crate::codex_await_output::section(text);
-        };
-        let handback = records
-            .iter()
-            .filter(|record| record["type"] == "assistant")
-            .filter_map(|record| record["message"]["content"].as_array())
-            .flatten()
-            .rfind(|block| block["type"] == "tool_use" && block["name"] == "SubagentHandback")
-            .and_then(|block| block["input"]["message"].as_str())
-            .map(str::to_owned);
-        let message = handback.or_else(|| {
-            let last = records.last()?;
-            if last["type"] != "assistant" {
-                return None;
-            }
-            last["message"]["content"]
-                .as_array()?
-                .iter()
-                .map(|block| {
-                    (block["type"] == "text")
-                        .then(|| block["text"].as_str())
-                        .flatten()
-                })
-                .collect::<Option<Vec<_>>>()
-                .map(|parts| parts.join("\n"))
-        });
-        Section::Markdown {
-            label: String::new(),
-            text: message.unwrap_or_default(),
-        }
-    }
-}

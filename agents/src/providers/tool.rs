@@ -9,6 +9,21 @@ use crate::images::{Image, ImageSource};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+/// Reads background output as plain text, retaining file-read error placeholders.
+pub(crate) fn read_plain_output_file(path: &std::path::Path) -> Section {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Section::Text {
+            label: String::new(),
+            text,
+        },
+        Err(error) => Section::Placeholder(if error.kind() == std::io::ErrorKind::NotFound {
+            "File no longer exists".to_owned()
+        } else {
+            error.to_string()
+        }),
+    }
+}
+
 pub(crate) fn json_input(value: &Value) -> Vec<Section> {
     if value.is_null() || value.as_object().is_some_and(|object| object.is_empty()) {
         Vec::new()
@@ -1145,7 +1160,10 @@ fn shell_sections(data: &ToolData<'_>, stream: Stream) -> Option<Body> {
         && let Some((path, _)) = path.split_once(". You will be notified")
         && !path.is_empty()
     {
-        return Some(Body::Sections(vec![Section::OutputFile(path.into())]));
+        return Some(Body::Sections(vec![Section::OutputFile {
+            provider: crate::providers::ProviderId::Claude,
+            path: path.into(),
+        }]));
     }
     let sections =
         if !result.error && (value.get("stdout").is_some() || value.get("stderr").is_some()) {

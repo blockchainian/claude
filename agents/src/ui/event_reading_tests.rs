@@ -896,8 +896,9 @@ fn notification_preformatted_blocks_preserve_logical_lines() {
             .unwrap()
             .iter()
             .map(|section| match section {
-                crate::event::Section::OutputFile(path) =>
-                    crate::event::Section::read_output_file(path),
+                crate::event::Section::OutputFile { provider, path } => {
+                    crate::providers::read_output_file(*provider, path)
+                }
                 section => section.clone(),
             })
             .collect::<Vec<_>>(),

@@ -269,7 +269,10 @@ impl View {
                 summary: task.description,
                 name: "background".into(),
                 input: Vec::new(),
-                output: Some(vec![crate::event::Section::OutputFile(output.into())]),
+                output: Some(vec![crate::event::Section::OutputFile {
+                    provider: crate::providers::ProviderId::Claude,
+                    path: output.into(),
+                }]),
                 exit_code: None,
                 is_error: false,
                 duration: None,

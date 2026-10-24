@@ -150,7 +150,7 @@ impl super::View {
                 .as_ref()?
                 .iter()
                 .find_map(|section| match section {
-                    crate::event::Section::OutputFile(path) => Some(path.clone()),
+                    crate::event::Section::OutputFile { path, .. } => Some(path.clone()),
                     _ => None,
                 })
         })

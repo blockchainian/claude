@@ -13,6 +13,14 @@ use std::{
     str::FromStr,
 };
 
+/// Reads a background output file in its provider's format.
+pub(crate) fn read_output_file(provider: ProviderId, path: &Path) -> event::Section {
+    match provider {
+        ProviderId::Claude => claude::background_output::read(path),
+        ProviderId::Codex => tool::read_plain_output_file(path),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ProviderId {
     Claude,
