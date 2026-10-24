@@ -84,7 +84,7 @@ fn window_navigation_preserves_editor_ctrl_w_before_other_key() {
             view.set_active_panel(Panel::Prompt);
             view.input_box.editor.insert("one two");
         }
-        assert_eq!(chord(&mut view, 'x'), Some(Action::Cut("two".into())));
+        assert_eq!(chord(&mut view, 'x'), None);
         assert_eq!(
             if search {
                 view.search.text()
@@ -92,6 +92,18 @@ fn window_navigation_preserves_editor_ctrl_w_before_other_key() {
                 view.input_box.editor.text()
             },
             "one x"
+        );
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL)),
+            None
+        );
+        assert_eq!(
+            if search {
+                view.search.text()
+            } else {
+                view.input_box.editor.text()
+            },
+            "one xtwo"
         );
     }
 }
@@ -152,11 +164,13 @@ fn window_navigation_release_and_second_ctrl_w_preserve_input() {
     release.kind = KeyEventKind::Release;
     assert_eq!(view.handle_key(release), None);
     assert_eq!(view.input_box.editor.text(), "one two three");
-    assert_eq!(
-        view.handle_key(prefix),
-        Some(Action::Cut("two three".into()))
-    );
+    assert_eq!(view.handle_key(prefix), None);
     assert_eq!(view.input_box.editor.text(), "one ");
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL)),
+        None
+    );
+    assert_eq!(view.input_box.editor.text(), "one two three");
 }
 
 #[test]
