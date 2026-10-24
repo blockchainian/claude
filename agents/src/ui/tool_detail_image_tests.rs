@@ -181,7 +181,7 @@ fn image_free_groups_keep_their_alignment() {
 }
 
 #[test]
-fn f4_existing_image_parts_are_deduplicated() {
+fn existing_image_parts_are_deduplicated() {
     let event = prompt_event();
     let mut detail = content(&event);
     detail.sections[0].groups.push(Group {
@@ -194,7 +194,7 @@ fn f4_existing_image_parts_are_deduplicated() {
 }
 
 #[test]
-fn f4_record_alias_wins_over_a_modified_file_and_its_symlink() {
+fn record_alias_wins_over_a_modified_file_and_its_symlink() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("screen.png");
     let alias = directory.path().join("alias.png");
@@ -251,11 +251,11 @@ fn noncanonical_file_attachment(canonical_body: bool) {
 }
 
 #[test]
-fn f4_noncanonical_file_attachment_and_same_text_path_draw_once() {
+fn noncanonical_file_attachment_and_same_text_path_draw_once() {
     noncanonical_file_attachment(false);
 }
 
 #[test]
-fn f4_noncanonical_file_attachment_and_canonical_text_path_draw_once() {
+fn noncanonical_file_attachment_and_canonical_text_path_draw_once() {
     noncanonical_file_attachment(true);
 }

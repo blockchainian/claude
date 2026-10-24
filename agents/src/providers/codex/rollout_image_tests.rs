@@ -482,7 +482,7 @@ fn pending_image_record_reuses_hash_when_completed() {
 }
 
 #[test]
-fn f4_prompt_paths_prefer_record_and_duplicate_output_blocks_are_removed() {
+fn prompt_paths_prefer_record_and_duplicate_output_blocks_are_removed() {
     let mut records = captured("wrapped.jsonl");
     records[0]["payload"]["content"][3]["text"] =
         Value::String("bug: [Image #1] /tmp/f4-image.png".into());

@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn f4_symlink_paths_are_one_image() {
+    fn symlink_paths_are_one_image() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("image.png");
         let alias = dir.path().join("alias.png");

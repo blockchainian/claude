@@ -1118,7 +1118,7 @@ mod tests {
 #[cfg(test)]
 mod f4_tests {
     #[test]
-    fn f4_identical_mcp_images_are_emitted_once() {
+    fn identical_mcp_images_are_emitted_once() {
         let value: serde_json::Value = serde_json::from_str(
             include_str!("../../tests/fixtures/claude-read-image.jsonl")
                 .lines()

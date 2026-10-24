@@ -207,7 +207,7 @@ fn image_caption(block: &Value) -> String {
 mod f4_tests {
     use super::*;
     #[test]
-    fn f4_companion_path_uses_record_and_duplicate_blocks_share_source() {
+    fn companion_path_uses_record_and_duplicate_blocks_share_source() {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/claude-prompt-images.jsonl");
         let records: Vec<Value> = std::fs::read_to_string(&path)
