@@ -704,11 +704,11 @@ impl View {
             None,
             buf,
         );
-        let labels = self.render_frame_labels(navigation_layout, layout, area, buf, now);
+        self.render_frame_labels(navigation_layout, layout, area, buf, now);
         if !layout.event_detail.is_empty()
             && let Some((title, _)) = footer_title
         {
-            render_section_edge(title, clear_of(layout.event_detail_top_rule, labels), buf);
+            render_section_edge(title, layout.event_detail_top_rule, buf);
         }
         if !layout.event_detail.is_empty()
             && let Some(title) = self.next_event_title()
@@ -789,7 +789,7 @@ impl View {
         }
     }
 
-    /// Renders labels on the dashboard frame and returns those on the event list's bottom edge.
+    /// Renders labels on the dashboard frame.
     fn render_frame_labels(
         &self,
         _baseline: CenterLayout,
@@ -797,8 +797,7 @@ impl View {
         area: Rect,
         buf: &mut Buffer,
         now: DateTime<Utc>,
-    ) -> [Rect; 2] {
-        let mut labels = [Rect::default(); 2];
+    ) {
         if !layout.event_panel.is_empty() {
             let panel = layout.event_panel;
             self.viewport.borrow_mut().event_borders = [
@@ -808,13 +807,9 @@ impl View {
             let left = panel.x.saturating_sub(HORIZONTAL_PADDING + 1);
             let edge = Rect::new(left, panel.bottom(), area.right() - left, 1);
             self.render_event_jump(edge, buf);
-            labels = [
-                self.viewport.borrow().event_label,
-                self.render_event_filter(edge, buf),
-            ];
+            self.render_event_filter(edge, buf);
         }
         self.render_task_frame_labels(layout, area, buf, now);
-        labels
     }
 
     pub(super) fn render_confirm_dialog(
@@ -1174,25 +1169,24 @@ impl View {
         viewport.task_details_links.extend(links);
     }
 
-    fn render_event_filter(&self, rule: Rect, buf: &mut Buffer) -> Rect {
+    fn render_event_filter(&self, rule: Rect, buf: &mut Buffer) {
         let title = match self.event_list.filter {
-            crate::event::EventFilter::All => return Rect::default(),
+            crate::event::EventFilter::All => return,
             crate::event::EventFilter::Message => "Assistant",
             crate::event::EventFilter::Tool => "Tool",
         };
         let width = title.width() as u16;
         if rule.is_empty() || rule.width < width + 4 {
-            return Rect::default();
+            return;
         }
         let (mut header, mut label) = centered_rule_label(Line::from(title), rule);
         header.style = style::rule_label_style();
         label.x = rule.x;
         if label.intersects(self.viewport.borrow().event_label) {
-            return Rect::default();
+            return;
         }
         Clear.render(label, buf);
         line(header, label, buf);
-        label
     }
 
     /// Places model and effort together or at opposite ends; each value opens its own picker.
@@ -2174,25 +2168,6 @@ fn join_separators(separators: &[(u16, u16, u16)], area: Rect, buf: &mut Buffer)
                 _ => {}
             }
         }
-    }
-}
-
-/// Narrows `edge` evenly so its center stays put and no label on its row is covered.
-fn clear_of(edge: Rect, labels: [Rect; 2]) -> Rect {
-    let inset = labels
-        .into_iter()
-        .filter(|label| !label.is_empty() && label.y == edge.y)
-        .map(|label| {
-            let left = label.right().saturating_sub(edge.x);
-            let right = edge.right().saturating_sub(label.x);
-            left.min(right)
-        })
-        .max()
-        .unwrap_or(0);
-    Rect {
-        x: edge.x + inset.min(edge.width / 2),
-        width: edge.width.saturating_sub(2 * inset),
-        ..edge
     }
 }
 

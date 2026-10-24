@@ -639,9 +639,6 @@ fn column_of(row: &str, needle: &str) -> Option<usize> {
 fn event_detail_top_edge_shows_only_a_scrolled_off_title() {
     for width in [90, 120, 160] {
         let (mut view, _) = fixture(true);
-        // Without a preceding event, the top edge carries only the section's own title.
-        view.set_event(view.event_panel[1..].to_vec());
-        view.select_event(Some(0));
         let rows = screen_rows(&view, width, 40);
         let y = usize::from(view.viewport.borrow().output_borders[0].y);
         assert!(!rows[y].contains("Assistant"));
@@ -1328,52 +1325,4 @@ fn event_detail_bottom_edge_hides_with_the_detail_panel() {
     let rows = screen_rows(&view, 160, 40);
     assert!(view.viewport.borrow().event_detail.is_empty());
     assert!(!rows[38].contains("plan.md"));
-}
-
-#[test]
-fn event_detail_top_edge_shows_the_previous_event_at_the_top() {
-    for (sort, previous) in [(EventSort::Time, "Read"), (EventSort::Duration, "Write")] {
-        for width in [90, 120, 160] {
-            let mut view = recorded_next_event_fixture(sort);
-            let title = view
-                .event_panel
-                .iter()
-                .find(|event| event.calls[0].name == previous)
-                .unwrap()
-                .calls[0]
-                .title
-                .clone();
-            for scrolled in [false, true] {
-                if scrolled {
-                    view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-                }
-                let rows = screen_rows(&view, width, 30);
-                let y = view.viewport.borrow().output_borders[0].y;
-                let row = &rows[usize::from(y)];
-                assert_eq!(row.contains(&title), !scrolled, "width {width}: {row}");
-                if !scrolled {
-                    let x = column_of(row, &title).unwrap();
-                    assert_eq!(x, (usize::from(width) - title.width() - 2) / 2 + 1);
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn event_detail_top_edge_is_empty_before_the_first_event() {
-    for sort in [EventSort::Time, EventSort::Duration] {
-        let mut view = recorded_next_event_fixture(sort);
-        view.select_event(Some(0));
-        for width in [90, 120, 160] {
-            let rows = screen_rows(&view, width, 30);
-            let y = view.viewport.borrow().output_borders[0].y;
-            let center: String = rows[usize::from(y)]
-                .chars()
-                .skip(usize::from(width / 4))
-                .take(usize::from(width / 2))
-                .collect();
-            assert!(center.chars().all(|c| c == '─'), "width {width}: {center}");
-        }
-    }
 }

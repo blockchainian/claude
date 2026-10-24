@@ -383,17 +383,9 @@ impl View {
         if layout.visible.last().copied()? + 1 != layout.lines.len() {
             return None;
         }
-        self.neighbor_event_title(self.event_list.cursor? + 1, layout)
-    }
-
-    fn neighbor_event_title(
-        &self,
-        index: usize,
-        layout: &EventDetailLayout,
-    ) -> Option<Line<'static>> {
         let width = usize::from(layout.columns.text.width);
         let session = self.selected_row()?;
-        let (_, event) = self.shown_event_rows().nth(index)?;
+        let (_, event) = self.shown_event_rows().nth(self.event_list.cursor? + 1)?;
         let title =
             super::tool_detail::event_detail_content(event, String::new(), Style::default())
                 .sections
@@ -593,21 +585,15 @@ impl View {
         } else {
             Vec::new()
         };
-        // The section on the top row keeps its title on the top edge once its title scrolls off;
-        // with the event's first row visible, the edge shows the preceding event's title instead.
+        // The section on the top row keeps its title on the top edge once its title scrolls off.
         viewport.event_detail_footer_title = visible_rows.first().and_then(|&top| {
-            let title = if top == 0 {
-                self.neighbor_event_title(self.event_list.cursor?.checked_sub(1)?, &layout)?
-            } else {
-                layout
-                    .titles
-                    .iter()
-                    .rev()
-                    .find(|(row, _)| *row <= top)
-                    .filter(|(row, _)| *row < top)
-                    .map(|(_, title)| title.clone())?
-            };
-            Some((title, columns))
+            layout
+                .titles
+                .iter()
+                .rev()
+                .find(|(row, _)| *row <= top)
+                .filter(|(row, _)| *row < top)
+                .map(|(_, title)| (title.clone(), columns))
         });
         let drawn_images = layout.drawn_images(&visible_rows, body_area);
         layout.visible = visible_rows.clone();

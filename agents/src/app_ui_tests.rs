@@ -124,7 +124,10 @@ fn event_position(buffer: &ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
 fn event_list_end(buffer: &ratatui::buffer::Buffer, prompt: u16) -> u16 {
     (prompt + 2..buffer.area.height - 1)
         .find(|&y| {
-            buffer[(0, y)].symbol() == "─"
+            (1..buffer.area.width - 1)
+                .filter(|&x| buffer[(x, y)].symbol() == "─")
+                .count()
+                > usize::from(buffer.area.width) / 2
         })
         .unwrap_or(buffer.area.height - 1)
 }

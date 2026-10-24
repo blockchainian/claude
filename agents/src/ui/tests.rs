@@ -5845,17 +5845,8 @@ fn task_event_rules_match_header_and_output_bottom_rule() {
         view.render_at(area, &mut buf, now);
         let layout = view.center_layout(area);
         let middle = layout.prompt.y - 1;
-        // The preceding event's title sits centered on the detail's top rule.
-        let title: String = (0..100)
-            .map(|x| buf[(x, layout.event_detail.y)].symbol())
-            .collect();
-        let title = unicode_width::UnicodeWidthStr::width(title.trim_matches('─')) as u16;
-        let title = (100 - title) / 2..(100 + title).div_ceil(2);
         for x in 0..100 {
             for y in [middle, layout.event_detail.y] {
-                if y == layout.event_detail.y && title.contains(&x) {
-                    continue;
-                }
                 if y != middle || x < layout.task_details.x || x >= layout.task_details.right() {
                     let rule = if (layout.task_details.x..layout.task_details.right()).contains(&x)
                     {
@@ -6429,7 +6420,7 @@ fn assert_content_shares_buffer(width: u16, height: u16, input: &str) {
         "W"
     );
     assert_eq!(
-        buf[(layout.event_detail.x, layout.event_detail.y)].symbol(),
+        buf[(layout.task_details.x, layout.event_detail.y)].symbol(),
         "─"
     );
     if large {
