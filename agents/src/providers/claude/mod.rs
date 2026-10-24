@@ -2,6 +2,8 @@
 
 mod account;
 mod api;
+#[cfg(test)]
+mod archive_live_tests;
 mod attach;
 #[cfg(test)]
 mod attach_live_tests;
@@ -1242,11 +1244,13 @@ impl Provider for ClaudeProvider {
             if !process_exists(pid)? {
                 return Err(ended());
             }
-            let bridge_id = entry
+            let Some(bridge_id) = entry
                 .bridge_session_id
                 .as_deref()
                 .filter(|id| !id.is_empty())
-                .ok_or_else(|| io::Error::other("session has no Remote Control link"))?;
+            else {
+                return stop_session(&session, &entry);
+            };
             let mut client = api::Client::connect(&config_dir)?;
             stop_session(&session, &entry)?;
             api::session::archive(&mut client, bridge_id)
@@ -1690,28 +1694,40 @@ mod tests {
     }
 
     #[test]
-    fn archive_without_remote_control_keeps_process_running() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut entry = registry::tests::fixture(dir.path());
-        entry.as_object_mut().unwrap().remove("bridgeSessionId");
-        let id = entry["sessionId"].as_str().unwrap();
-        transcript(dir.path(), id, 0);
-        let registry_path = dir
-            .path()
-            .join("sessions")
-            .join(format!("{}.json", std::process::id()));
-        fs::write(&registry_path, serde_json::to_vec(&entry).unwrap()).unwrap();
-        let mut provider = ClaudeProvider::new(dir.path().into());
-        let session = provider.refresh(1).sessions.remove(0);
-        assert!(session.process.is_some());
-        assert_eq!(
-            provider.archive(&session).unwrap()()
-                .unwrap_err()
-                .to_string(),
-            "session has no Remote Control link"
-        );
-        assert!(process_exists(std::process::id()).unwrap());
-        assert!(registry_path.exists());
+    fn archive_without_remote_control_stops_process() {
+        for bridge_id in [None, Some(serde_json::Value::Null), Some("".into())] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut child = Command::new("sleep").arg("60").spawn().unwrap();
+            let pid = child.id();
+            let reaper = std::thread::spawn(move || child.wait().unwrap());
+            let start = registry::process_starts(&[pid])[&pid][0];
+            let mut entry = registry::tests::fixture(dir.path());
+            entry["pid"] = pid.into();
+            entry["startedAt"] = start.timestamp_millis().into();
+            entry["procStart"] = start.format("%a %b %e %H:%M:%S %Y").to_string().into();
+            match bridge_id {
+                Some(value) => entry["bridgeSessionId"] = value,
+                None => {
+                    entry.as_object_mut().unwrap().remove("bridgeSessionId");
+                }
+            }
+            let id = entry["sessionId"].as_str().unwrap();
+            let path = transcript(dir.path(), id, 0);
+            let registry_path = dir.path().join("sessions").join(format!("{pid}.json"));
+            fs::write(&registry_path, serde_json::to_vec(&entry).unwrap()).unwrap();
+            let mut provider = ClaudeProvider::new(dir.path().into());
+            let session = provider.refresh(1).sessions.remove(0);
+            assert_eq!(session.process.as_ref().unwrap().pid, pid);
+            let result = provider.archive(&session).unwrap()();
+            let running = process_exists(pid).unwrap();
+            if running {
+                unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+            }
+            reaper.join().unwrap();
+            result.unwrap();
+            assert!(!running, "archiving must stop the local process");
+            assert!(path.exists(), "archiving must keep the transcript");
+        }
     }
 
     #[test]
