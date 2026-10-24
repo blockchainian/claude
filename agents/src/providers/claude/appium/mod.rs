@@ -208,6 +208,20 @@ fn gesture_title(data: &ToolData<'_>) -> Option<String> {
 }
 
 fn gesture_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    let shown = ["action", "x", "y", "sessionId"];
+    if let Some(fields) = data.input.as_object() {
+        let remaining: Vec<_> = fields
+            .iter()
+            .filter(|(key, _)| !shown.contains(&key.as_str()))
+            .collect();
+        if let [(key, Value::String(id))] = remaining.as_slice()
+            && key.as_str() == "elementUUID"
+            && !id.is_empty()
+            && data.result.is_some_and(|result| result.text().contains(id))
+        {
+            return empty_input(data);
+        }
+    }
     other_fields(data, &["action", "x", "y"])
 }
 
@@ -263,6 +277,7 @@ fn orientation_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
 #[cfg(test)]
 mod tests {
     use crate::event::{Section, ToolCall};
+    use serde_json::Value;
 
     /// The recorded calls, with the screenshot pointed at a real image file.
     fn calls(screenshot: &std::path::Path) -> Vec<ToolCall> {
@@ -333,7 +348,7 @@ mod tests {
                         "| platform | capabilities |\n| --- | --- |\n| ios | \\{\\\"appium\\:udid\\\"\\:\\\"00000000\\-0000000000000000\\\"\\,"
                     )
         ));
-        assert_eq!(input(5), prose("A5000000-0000-0000-BE14-000000000000"));
+        assert_eq!(input(5), Vec::new());
         assert_eq!(
             input(7),
             vec![super::code_section(
@@ -374,6 +389,61 @@ mod tests {
         assert_eq!(
             output_text(&calls[8]),
             "ClassicalPrivate  •  51 songs  •  4 hrs 41 min"
+        );
+    }
+
+    #[test]
+    fn gesture_keeps_input_when_the_result_does_not_cover_it() {
+        let records: Vec<Value> = include_str!("../../../../tests/fixtures/claude-appium.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let blocks: Vec<_> = records
+            .iter()
+            .flat_map(|record| record["message"]["content"].as_array().unwrap())
+            .collect();
+        let call = blocks
+            .iter()
+            .find(|block| {
+                block["name"]
+                    .as_str()
+                    .is_some_and(|name| name.ends_with("appium_gesture"))
+            })
+            .unwrap();
+        let input = &call["input"];
+        let result_block = blocks
+            .iter()
+            .find(|block| block["tool_use_id"] == call["id"])
+            .unwrap();
+        let mut result = super::ToolResult {
+            source: None,
+            content: result_block["content"].clone(),
+            structured: Value::Null,
+            error: false,
+        };
+        fn data<'a>(
+            input: &'a Value,
+            result: Option<&'a super::ToolResult>,
+        ) -> super::ToolData<'a> {
+            super::ToolData { input, result }
+        }
+        assert_eq!(
+            super::gesture_input(&data(input, Some(&result))),
+            Some(Vec::new())
+        );
+        assert!(!super::gesture_input(&data(input, None)).unwrap().is_empty());
+        let mut extra = input.clone();
+        extra["duration"] = 100.into();
+        assert!(
+            !super::gesture_input(&data(&extra, Some(&result)))
+                .unwrap()
+                .is_empty()
+        );
+        result.content = Value::String("Tap failed".into());
+        assert!(
+            !super::gesture_input(&data(input, Some(&result)))
+                .unwrap()
+                .is_empty()
         );
     }
 
