@@ -514,6 +514,11 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
         ..DEFAULT_RULE
     },
     ToolRule {
+        name: "claude-in-chrome computer",
+        input: Some((Pick::With(claude_in_chrome_computer_input), Format::Text)),
+        ..DEFAULT_RULE
+    },
+    ToolRule {
         name: "claude-client ask_claude",
         input: Some((Pick::Field(Source::Input, "/text"), Format::Markdown)),
         output: Some((Pick::With(mcp_markdown_output), Format::Text)),
@@ -868,6 +873,17 @@ fn fetch_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
         });
     }
     Some(sections)
+}
+fn claude_in_chrome_computer_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    let action = text(data.input, "action")?;
+    let text = match text(data.input, "action_summary") {
+        Some(summary) => format!("{action}  {summary}"),
+        None => action.to_owned(),
+    };
+    Some(vec![Section::Prose {
+        text,
+        markdown: false,
+    }])
 }
 fn write_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     Some(
@@ -1774,6 +1790,40 @@ mod tests {
                 markdown: false,
             }]
         );
+    }
+
+    #[test]
+    fn chrome_computer_shows_its_action_and_summary() {
+        for (input, shown) in [
+            (
+                serde_json::json!({
+                    "action": "left_click",
+                    "tabId": 665979853,
+                    "ref": "ref_21",
+                    "action_summary": "点搜索按钮执行航班搜索"
+                }),
+                "left_click  点搜索按钮执行航班搜索",
+            ),
+            (
+                serde_json::json!({"action": "wait", "tabId": 665979853, "duration": 4}),
+                "wait",
+            ),
+        ] {
+            assert_eq!(
+                super::presentation(
+                    "mcp__claude-in-chrome__computer",
+                    &super::ToolData {
+                        input: &input,
+                        result: None,
+                    },
+                )
+                .input,
+                [crate::event::Section::Prose {
+                    text: shown.into(),
+                    markdown: false,
+                }]
+            );
+        }
     }
 
     #[test]
