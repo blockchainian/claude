@@ -245,19 +245,52 @@ fn tool_fixture() -> (View, DateTime<Utc>) {
 }
 
 #[test]
-fn event_scroll_sections_reveal_under_pointer_and_keep_later_sections_visible() {
+fn event_scroll_multiple_sections_keep_full_bodies_and_scroll_as_document() {
     let (mut view, now) = tool_fixture();
     let before = panel_at(&view, now, 14);
-    assert!(before.contains("Second tool"), "{before}");
-    assert!(before.contains('…'));
+    let bodies = view.event_detail.scroll.borrow().state.bodies.clone();
+    assert!(bodies[0].len() >= 20, "first body was cut: {bodies:?}");
+    assert!(!before.contains('…'), "body must not be folded: {before}");
+    assert!(!before.contains("Second tool"), "{before}");
+    assert!(view.event_detail.scroll.borrow().state.hidden.is_empty());
+
+    wheel(&mut view, true);
+    let after = panel_at(&view, now, 14);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 3);
+    assert_eq!(view.event_detail.scroll.borrow().state.reveal, [0, 0]);
+    assert_eq!(view.event_detail.scroll.borrow().state.bodies, bodies);
+    let before_rows: Vec<_> = before.lines().collect();
+    let after_rows: Vec<_> = after.lines().collect();
+    assert_eq!(after_rows[1..10], before_rows[4..13]);
+    wheel(&mut view, false);
+    assert_eq!(panel_at(&view, now, 14), before);
+
+    let mut seen = after;
+    for _ in 0..40 {
+        if seen.contains("Second tool") {
+            break;
+        }
+        wheel(&mut view, true);
+        seen = panel_at(&view, now, 14);
+    }
+    assert!(seen.contains("Second tool"), "{seen}");
+    assert!(seen.contains("first body 20"), "{seen}");
+}
+
+#[test]
+fn event_scroll_sections_move_together_under_pointer() {
+    let (mut view, now) = tool_fixture();
+    let before = panel_at(&view, now, 14);
+    assert!(!before.contains("Second tool"), "{before}");
+    assert!(!before.contains('…'));
     let pointer = view.event_detail.scroll.borrow().state.content_top
         + view.event_detail.scroll.borrow().state.bodies[0].start as u16;
     view.scroll_content_row(true, true, pointer);
     let after = panel_at(&view, now, 14);
     assert_ne!(before, after);
-    assert_eq!(view.event_detail.scroll.borrow().state.reveal, vec![1, 0]);
-    assert!(after.contains("Second tool"), "{after}");
-    assert!(after.contains("second body"), "{after}");
+    assert_eq!(view.event_detail.scroll.borrow().state.reveal, vec![0, 0]);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 1);
+    assert!(!after.contains("Second tool"), "{after}");
 }
 
 #[test]
@@ -280,22 +313,28 @@ fn event_scroll_changed_body_folds_when_returning() {
 }
 
 #[test]
-fn event_scroll_keeps_scrolling_window_when_pointer_section_is_exhausted() {
+fn event_scroll_later_section_uses_document_offset() {
     let (mut view, now) = tool_fixture();
     panel_at(&view, now, 14);
-    assert_eq!(view.event_detail.scroll.borrow().state.hidden[1], 0);
+    assert!(view.event_detail.scroll.borrow().state.hidden.is_empty());
+    let max = view.viewport.borrow().event_detail_max;
+    view.event_detail.scroll.borrow_mut().offset = max - 1;
+    panel_at(&view, now, 14);
     let pointer = {
         let detail = view.event_detail.scroll.borrow();
-        detail.state.content_top + detail.state.bodies[1].start as u16
+        detail.state.content_top + (detail.state.bodies[1].start - detail.offset) as u16
     };
     view.scroll_content_row(true, true, pointer);
     panel_at(&view, now, 14);
-    assert_eq!(view.event_detail.scroll.borrow().state.reveal, vec![1, 0]);
+    assert_eq!(view.event_detail.scroll.borrow().state.reveal, vec![0, 0]);
+    assert_eq!(view.event_detail.scroll.borrow().offset, max);
 }
 
 #[test]
-fn event_scroll_visible_running_section_keeps_animating_after_folded_section() {
+fn event_scroll_visible_running_section_keeps_animating_after_scrolled_section() {
     let (view, now) = tool_fixture();
+    panel_at(&view, now, 14);
+    view.event_detail.scroll.borrow_mut().offset = usize::MAX;
     let text = panel_at(&view, now, 14);
     assert!(text.contains("Second tool"));
     assert!(text.contains(super::tool_detail::running_frame(now)));

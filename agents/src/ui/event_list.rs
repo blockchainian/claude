@@ -666,6 +666,7 @@ impl View {
             .collect::<Vec<_>>();
         let static_rows = layout.lines.len() - wants.iter().sum::<usize>();
         let allocations = if self.event_detail.mode != task_ui::EventDetailMode::Transcript
+            && wants.len() <= 1
             && height >= static_rows + wants.iter().filter(|&&rows| rows > 0).count()
             && !self.event_detail.search.active()
             && !external_scroll
