@@ -429,7 +429,8 @@ impl View {
             Some(layout)
                 if layout.columns == columns
                     && layout.height == height
-                    && layout.theme_generation == super::highlight::theme_generation() =>
+                    && layout.theme_generation == super::highlight::theme_generation()
+                    && !layout.file_images_changed() =>
             {
                 layout
             }
@@ -1739,6 +1740,17 @@ pub(super) struct EventDetailLayout {
     bodies: Vec<std::ops::Range<usize>>,
     body_keys: Vec<u64>,
     images: Vec<DetailImage>,
+    /// Includes files whose decoding failed, so repairing them can restore their rows.
+    file_images: std::collections::HashMap<PathBuf, Option<FileImageVersion>>,
+}
+
+type FileImageVersion = (u64, std::time::SystemTime);
+
+fn file_image_version(path: &Path) -> Option<FileImageVersion> {
+    let metadata = path.metadata().ok()?;
+    metadata
+        .is_file()
+        .then_some((metadata.len(), metadata.modified().ok()?))
 }
 
 struct DetailImage {
@@ -1750,6 +1762,12 @@ struct DetailImage {
 }
 
 impl EventDetailLayout {
+    fn file_images_changed(&self) -> bool {
+        self.file_images
+            .iter()
+            .any(|(path, version)| file_image_version(path) != *version)
+    }
+
     fn cut_text(&self, row: usize) -> bool {
         !self.images.iter().any(|image| image.rows.contains(&row))
     }
@@ -1868,6 +1886,7 @@ fn event_detail_parts_layout_with_images(
         bodies: Vec::new(),
         body_keys: Vec::new(),
         images: Vec::new(),
+        file_images: Default::default(),
     };
     for (section_index, section) in sections.into_iter().enumerate() {
         if section_index > 0 {
@@ -1921,10 +1940,25 @@ fn event_detail_parts_layout_with_images(
                     let image = part.shown_image().and_then(|image| {
                         let index = image_index;
                         image_index += 1;
-                        image_size(index, &image.source).map(|size| (index, size))
+                        let mut source = image.source.clone();
+                        if let crate::images::ImageSource::File {
+                            path,
+                            len,
+                            modified,
+                        } = &mut source
+                        {
+                            let &(size, time) = layout
+                                .file_images
+                                .entry(path.clone())
+                                .or_insert_with(|| file_image_version(path))
+                                .as_ref()?;
+                            *len = size;
+                            *modified = time;
+                        }
+                        image_size(index, &source).map(|size| (index, source, size))
                     });
-                    if let Some((_, (_, height))) = image {
-                        lines.resize(usize::from(height), Line::default());
+                    if let Some((_, _, (_, height))) = &image {
+                        lines.resize(usize::from(*height), Line::default());
                         breaks.resize(lines.len(), None);
                     }
                     (part, lines, breaks, image)
@@ -1933,9 +1967,9 @@ fn event_detail_parts_layout_with_images(
             let group_width = rendered
                 .iter()
                 .map(|(_, lines, _, image)| {
-                    image.map_or_else(
+                    image.as_ref().map_or_else(
                         || lines.iter().map(Line::width).max().unwrap_or(0),
-                        |(_, (width, _))| usize::from(width),
+                        |(_, _, (width, _))| usize::from(*width),
                     )
                 })
                 .max()
@@ -1948,14 +1982,10 @@ fn event_detail_parts_layout_with_images(
                 let id = layout.sources.len();
                 let mut maps = part.maps_in(&lines, cwd);
                 let first = layout.lines.len();
-                if let Some((index, (width, _))) = image {
+                if let Some((index, source, (width, _))) = image {
                     layout.images.push(DetailImage {
                         index,
-                        image: part
-                            .shown_image()
-                            .expect("image size belongs to an image")
-                            .source
-                            .clone(),
+                        image: source,
                         rows: first..first + lines.len(),
                         x: group_x,
                         width: width.min(columns.text.right().saturating_sub(group_x)),
@@ -3587,3 +3617,112 @@ mod turn_group_tests;
 #[cfg(test)]
 #[path = "event_identity_tests.rs"]
 mod event_identity_tests;
+
+#[cfg(test)]
+mod file_image_refresh_tests {
+    use super::*;
+    use crate::images::{Image, ImageSource};
+
+    fn event() -> Event {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-prompt-images.jsonl");
+        let mut event = crate::providers::claude::event_reader::tail(&path, 100)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.kind == Kind::User && !event.images.is_empty())
+            .unwrap();
+        event.images.clear();
+        event
+    }
+
+    fn render(view: &View, event: &Event) -> Vec<ImageSource> {
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buffer = Buffer::empty(area);
+        view.render_event_detail_content(
+            event,
+            "12:34:56",
+            area,
+            &mut buffer,
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+        );
+        view.viewport
+            .borrow()
+            .event_detail_layout
+            .as_ref()
+            .unwrap()
+            .images
+            .iter()
+            .map(|image| image.image.clone())
+            .collect()
+    }
+
+    fn view() -> View {
+        let view = View::new(Grouping::Project, false);
+        *view.inline_images.borrow_mut() = Some(super::super::inline_images::InlineImages::new(
+            Some((10, 20)),
+        ));
+        view
+    }
+
+    #[test]
+    fn file_image_cached_detail_recovers_after_corrupt_file_is_repaired() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().canonicalize().unwrap().join("screen.png");
+        std::fs::write(&path, b"broken image").unwrap();
+        let mut event = event();
+        event.body = path.to_str().unwrap().into();
+        let view = view();
+        assert!(render(&view, &event).is_empty());
+        std::fs::write(&path, crate::images::fixture_png()).unwrap();
+        let sources = render(&view, &event);
+        assert_eq!(
+            sources.len(),
+            1,
+            "repair must invalidate the cached empty layout"
+        );
+        assert!(matches!(&sources[0], ImageSource::File { len, .. }
+            if *len == path.metadata().unwrap().len()));
+    }
+
+    #[test]
+    fn file_image_cached_detail_rekeys_same_length_overwrites() {
+        for attached in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().canonicalize().unwrap().join("screen.png");
+            std::fs::write(&path, crate::images::fixture_png()).unwrap();
+            let file = std::fs::File::options().write(true).open(&path).unwrap();
+            let time =
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+            file.set_modified(time).unwrap();
+            let mut event = event();
+            event.body = if attached {
+                "[Image #1]".into()
+            } else {
+                path.to_str().unwrap().into()
+            };
+            if attached {
+                event.images.push(Image {
+                    label: event.body.clone(),
+                    source: ImageSource::File {
+                        path: path.clone(),
+                        len: path.metadata().unwrap().len(),
+                        modified: time,
+                    },
+                });
+            }
+            let view = view();
+            let first = render(&view, &event);
+            assert_eq!(first.len(), 1);
+            assert_eq!(render(&view, &event), first);
+            file.set_modified(time + std::time::Duration::from_secs(1))
+                .unwrap();
+            let second = render(&view, &event);
+            assert_eq!(second.len(), 1);
+            assert_ne!(
+                first, second,
+                "mtime must refresh the source, attached={attached}"
+            );
+        }
+    }
+}
