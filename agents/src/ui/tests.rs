@@ -6799,7 +6799,7 @@ mod event_search {
         let start = text(&buf).find("plain timeout bold").unwrap() as u16;
         for x in start + 6..start + 13 {
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buf[(x, 0)].fg, crate::theme::inline_code_color());
+            assert_eq!(buf[(x, 0)].fg, crate::ui::style::assistant_style().fg.unwrap());
         }
         key(&mut view, KeyCode::Enter);
         let buf = panel(&view, now);
@@ -6865,7 +6865,7 @@ mod event_search {
         assert!(text(&buf).contains("plain café link"));
         let start = text(&buf).find("plain café link").unwrap() as u16;
         for x in start + 6..start + 10 {
-            assert_eq!(buf[(x, 0)].fg, crate::theme::inline_code_color());
+            assert_eq!(buf[(x, 0)].fg, crate::ui::style::assistant_style().fg.unwrap());
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
         }
         assert!(!buf[(start + 11, 0)].modifier.contains(Modifier::UNDERLINED));

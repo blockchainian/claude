@@ -126,6 +126,17 @@ pub(super) fn assistant_style() -> Style {
     Style::default().fg(Color::Yellow)
 }
 
+/// A search match: bold, in the tool color on assistant text and the assistant color elsewhere.
+pub(super) fn search_match_style(style: Style) -> Style {
+    let assistant = assistant_style().fg;
+    let fg = if style.fg == assistant {
+        Some(crate::theme::text_accent_color())
+    } else {
+        assistant
+    };
+    Style { fg, ..style }.bold()
+}
+
 /// Numeric command status has its own error span; the summary keeps its tool color.
 pub(super) fn event_body_style(kind: &crate::event::Kind, exit_code: Option<i64>) -> Style {
     let kind = if *kind == crate::event::Kind::Error && exit_code.is_some_and(|code| code != 0) {

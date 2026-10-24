@@ -418,7 +418,9 @@ impl View {
             format!(" ↓ {} New", self.event_list.unseen.get())
         };
         let width = (label.width() as u16).min(area.width.saturating_sub(2));
-        let right = event_row_areas(self.center_layout(buf.area).event_panel).1.right();
+        let right = event_row_areas(self.center_layout(buf.area).event_panel)
+            .1
+            .right();
         let jump = Rect::new(right.saturating_sub(width), area.y, width, 1);
         Clear.render(jump, buf);
         Line::from(Span::styled(label, style::rule_label_style())).render(jump, buf);
@@ -2281,7 +2283,7 @@ fn highlight_indices(line: &mut Line<'static>, indices: &[u32]) {
                     true,
                 ) {
                     let style = if indices.binary_search(&offset).is_ok() {
-                        span.style.bold()
+                        style::search_match_style(span.style)
                     } else {
                         span.style
                     };
@@ -2298,6 +2300,25 @@ fn highlight_indices(line: &mut Line<'static>, indices: &[u32]) {
 pub(super) mod event_markdown {
     use super::*;
     use ratatui::style::Modifier;
+
+    #[test]
+    fn search_matches_swap_assistant_and_tool_colors_in_bold() {
+        let assistant = style::assistant_style();
+        let tool = Style::default().fg(crate::theme::text_accent_color());
+        let mut line = Line::from(vec![
+            Span::styled("ab", assistant),
+            Span::styled("cd", tool),
+            Span::raw("ef"),
+        ]);
+        highlight_indices(&mut line, &[0, 2, 4]);
+        let styles: Vec<_> = line.spans.iter().map(|span| span.style).collect();
+        assert_eq!(styles[0], tool.bold());
+        assert_eq!(styles[1], assistant);
+        assert_eq!(styles[2], assistant.bold());
+        assert_eq!(styles[3], tool);
+        assert_eq!(styles[4], assistant.bold());
+        assert_eq!(styles[5], Style::default());
+    }
 
     #[test]
     fn mixed_prompt_image_label_is_visible_and_linked_in_the_list() {
@@ -2359,13 +2380,9 @@ pub(super) mod event_markdown {
         let event = &events[0];
         let image = &event.images[0];
         let layout = event_detail_layout(event, 200, dir.path(), DateTime::UNIX_EPOCH);
-        assert!(
-            layout
-                .links
-                .iter()
-                .flatten()
-                .any(|link| link.target == super::super::links::LinkTarget::Image(image.source.clone()))
-        );
+        assert!(layout.links.iter().flatten().any(
+            |link| link.target == super::super::links::LinkTarget::Image(image.source.clone())
+        ));
         let area = Rect::new(0, 0, 200, 1);
         let links = render_event(
             event,
@@ -2376,7 +2393,10 @@ pub(super) mod event_markdown {
             None,
             dir.path(),
         );
-        assert!(links.iter().any(|(_, target)| target == &super::super::links::LinkTarget::Image(image.source.clone())));
+        assert!(
+            links.iter().any(|(_, target)| target
+                == &super::super::links::LinkTarget::Image(image.source.clone()))
+        );
     }
 
     #[test]
@@ -2591,9 +2611,7 @@ pub(super) mod event_markdown {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures/codex-inner/inline-array.jsonl"),
         );
-        let provider = crate::providers::codex::CodexProvider::new(
-            std::path::PathBuf::new(),
-        );
+        let provider = crate::providers::codex::CodexProvider::new(std::path::PathBuf::new());
         let events =
             crate::providers::Provider::event_panel(&provider, &session, 100, false).unwrap();
         let event = &events[1];
@@ -2680,9 +2698,7 @@ pub(super) mod event_markdown {
     fn file_change_without_start_shows_clock_instead_of_duration() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/codex-inner/file-change-without-start.jsonl");
-        let provider = crate::providers::codex::CodexProvider::new(
-            std::path::PathBuf::new(),
-        );
+        let provider = crate::providers::codex::CodexProvider::new(std::path::PathBuf::new());
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().join("projects/project");
         std::fs::create_dir_all(&project).unwrap();
@@ -2824,7 +2840,10 @@ pub(super) mod event_markdown {
             let targets: Vec<_> = links.into_iter().map(|link| link.target).collect();
             assert_eq!(
                 targets,
-                [crate::ui::links::LinkTarget::Path(dir.path().join("src/ui/log.rs")), crate::ui::links::LinkTarget::Path(report.clone())],
+                [
+                    crate::ui::links::LinkTarget::Path(dir.path().join("src/ui/log.rs")),
+                    crate::ui::links::LinkTarget::Path(report.clone())
+                ],
                 "{kind:?}"
             );
             assert!(
@@ -3220,15 +3239,13 @@ mod panel_detail_tests {
     #[test]
     fn inline_image_order_includes_unavailable_images() {
         let (event, mut sections, image) = image_section();
-        sections[0].groups[0]
-            .parts
-            .push(Part::image(
-                crate::images::Image {
-                    label: "[image image/png]".into(),
-                    source: image,
-                },
-                true,
-            ));
+        sections[0].groups[0].parts.push(Part::image(
+            crate::images::Image {
+                label: "[image image/png]".into(),
+                source: image,
+            },
+            true,
+        ));
         let layout = event_detail_parts_layout_with_images(
             &event,
             columns(100),
@@ -3354,7 +3371,10 @@ mod panel_detail_tests {
         );
         let viewport = view.viewport.borrow();
         let layout = viewport.event_detail_layout.as_ref().unwrap();
-        assert!(layout.lines.len() > 8, "the detail must overflow the panel to scroll");
+        assert!(
+            layout.lines.len() > 8,
+            "the detail must overflow the panel to scroll"
+        );
         let mut expected = Buffer::empty(buffer.area);
         layout.lines[0].clone().render(
             super::super::render::row(layout.columns.text, EVENT_TOP, 1),
