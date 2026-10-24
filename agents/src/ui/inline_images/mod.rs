@@ -54,9 +54,9 @@ impl InlineImages {
         if width == 0 {
             return None;
         }
-        let raster = self.raster.image(image)?;
+        let (width_pixels, height_pixels) = self.raster.dimensions(image)?;
         let (cw, ch) = self.cell_size();
-        let (w, h) = (f64::from(raster.width()), f64::from(raster.height()));
+        let (w, h) = (f64::from(width_pixels), f64::from(height_pixels));
         let fit = f64::from(width).min(w / cw);
         // Explicit row/column diacritics can address at most 297 cells per axis.
         let columns = (fit * 1.25_f64.powi(i32::from(zoom.level)))

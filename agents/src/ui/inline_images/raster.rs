@@ -11,6 +11,7 @@ type Png = ((u32, u32), Arc<Vec<u8>>);
 struct Entry {
     source: ImageSource,
     image: Option<Arc<DynamicImage>>,
+    dimensions: Option<(u32, u32)>,
     png: Option<Png>,
 }
 
@@ -49,10 +50,13 @@ impl Cache {
             self.entries.push_back(entry);
             return image;
         }
-        let image = read(source).map(Arc::new);
+        let raster = read(source, self.limit);
+        let dimensions = raster.as_ref().map(|(_, dimensions)| *dimensions);
+        let image = raster.map(|(image, _)| Arc::new(image));
         let entry = Entry {
             source: source.clone(),
             image: image.clone(),
+            dimensions,
             png: None,
         };
         if entry.bytes() <= self.limit {
@@ -61,6 +65,14 @@ impl Cache {
             self.trim();
         }
         image
+    }
+
+    pub fn dimensions(&mut self, source: &ImageSource) -> Option<(u32, u32)> {
+        self.image(source)?;
+        self.entries
+            .back()
+            .filter(|entry| entry.source == *source)?
+            .dimensions
     }
 
     pub fn png(&mut self, source: &ImageSource, pixels: (u32, u32)) -> Option<Arc<Vec<u8>>> {
@@ -84,7 +96,11 @@ impl Cache {
             .filter(|entry| entry.source == *source)
         {
             self.bytes -= entry.bytes();
-            entry.png = Some((pixels, Arc::clone(&png)));
+            // Keep the decoded raster even when this encoded size cannot share its budget.
+            entry.png = None;
+            if entry.bytes() + png.len() <= self.limit {
+                entry.png = Some((pixels, Arc::clone(&png)));
+            }
             self.bytes += entry.bytes();
             self.trim();
         }
@@ -102,7 +118,7 @@ impl Cache {
     }
 }
 
-fn read(source: &ImageSource) -> Option<DynamicImage> {
+fn read(source: &ImageSource, budget: usize) -> Option<(DynamicImage, (u32, u32))> {
     let bytes = source.bytes()?;
     let mut reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
@@ -112,7 +128,21 @@ fn read(source: &ImageSource) -> Option<DynamicImage> {
     limits.max_image_width = Some(16_384);
     limits.max_image_height = Some(16_384);
     reader.limits(limits);
-    reader.decode().ok()
+    let image = reader.decode().ok()?;
+    let dimensions = (image.width(), image.height());
+    let image = if image.as_bytes().len() > budget {
+        // Leave room for the resized PNG beside the retained raster.
+        let pixels = budget / 2 / usize::from(image.color().bytes_per_pixel());
+        let scale = (pixels as f64 / (f64::from(dimensions.0) * f64::from(dimensions.1)))
+            .sqrt()
+            .min(1.0);
+        let width = (f64::from(dimensions.0) * scale).floor().clamp(1.0, 4096.0) as u32;
+        let height = (f64::from(dimensions.1) * scale).floor().clamp(1.0, 4096.0) as u32;
+        image.resize(width, height, FilterType::Triangle)
+    } else {
+        image
+    };
+    Some((image, dimensions))
 }
 
 #[cfg(test)]
@@ -120,6 +150,32 @@ mod tests {
     use super::super::tests::fixture;
     use super::*;
     use base64::{Engine, engine::general_purpose::STANDARD};
+
+    #[test]
+    fn inline_images_raster_retains_images_larger_than_cache_budget() {
+        let source = fixture();
+        let mut cache = Cache::new();
+        cache.limit = 256 << 10;
+        let image = cache.image(&source).unwrap();
+        assert!(image.as_bytes().len() <= cache.limit / 2);
+        assert_eq!(cache.dimensions(&source), Some((960, 539)));
+        assert!(Arc::ptr_eq(&image, &cache.image(&source).unwrap()));
+        assert_eq!(cache.entries.len(), 1);
+        let png = cache.png(&source, (80, 80)).unwrap();
+        assert!(Arc::ptr_eq(&png, &cache.png(&source, (80, 80)).unwrap()));
+        assert!(cache.bytes <= cache.limit);
+    }
+
+    #[test]
+    fn inline_images_raster_png_over_budget_keeps_the_decoded_image() {
+        let source = fixture();
+        let mut cache = Cache::new();
+        let image = cache.image(&source).unwrap();
+        cache.limit = image.as_bytes().len();
+        cache.png(&source, (80, 80)).unwrap();
+        assert!(Arc::ptr_eq(&image, &cache.image(&source).unwrap()));
+        assert!(cache.bytes <= cache.limit);
+    }
 
     #[test]
     fn inline_images_raster_reads_offset_scales_png_and_reuses_cache() {
@@ -299,7 +355,11 @@ mod tests {
             cache.image(&source).is_some(),
             "eviction must permit reading the repaired record"
         );
-        assert_eq!(cache.bytes, 1024, "an image over the limit is not retained");
+        assert!(cache.bytes <= cache.limit);
+        assert!(
+            cache.entries[0].image.is_some(),
+            "the repaired image is resized and retained"
+        );
     }
 
     #[test]
