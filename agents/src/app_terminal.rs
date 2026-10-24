@@ -425,7 +425,7 @@ mod tests {
             "sh",
             &[
                 "-c",
-                r#"claude --resume "$1" --bg >/dev/null && exec claude attach "$2""#,
+                r#"claude --bg --allow-dangerously-skip-permissions --resume "$1" >/dev/null && exec claude attach "$2""#,
                 "sh",
                 &id.id,
                 &id.id[..8],

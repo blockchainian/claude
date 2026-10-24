@@ -54,6 +54,7 @@ fn create_uses_task_directory_and_optional_model_effort_before_prompt() {
         command.get_args().collect::<Vec<_>>(),
         [
             "--bg",
+            "--allow-dangerously-skip-permissions",
             "--name",
             "改 Claude Code 的颜色",
             "--model",
@@ -69,7 +70,11 @@ fn create_uses_task_directory_and_optional_model_effort_before_prompt() {
     let command = ClaudeProvider::create_command(&request);
     assert_eq!(
         command.get_args().collect::<Vec<_>>(),
-        ["--bg", request.prompt.as_str()]
+        [
+            "--bg",
+            "--allow-dangerously-skip-permissions",
+            request.prompt.as_str()
+        ]
     );
 }
 
@@ -87,7 +92,14 @@ fn image_creation_starts_idle_with_model_and_effort() {
     let command = ClaudeProvider::create_command(&request);
     assert_eq!(
         command.get_args().collect::<Vec<_>>(),
-        ["--bg", "--model", "haiku", "--effort", "high"]
+        [
+            "--bg",
+            "--allow-dangerously-skip-permissions",
+            "--model",
+            "haiku",
+            "--effort",
+            "high"
+        ]
     );
 }
 

@@ -333,6 +333,8 @@ pub struct ClaudeProvider {
     ask_user_question: Option<std::sync::Arc<ask_user_question::AskUserQuestion>>,
 }
 
+const BACKGROUND_ARGS: [&str; 2] = ["--bg", "--allow-dangerously-skip-permissions"];
+
 fn created_job(output: &std::process::Output) -> io::Result<String> {
     if !output.status.success() {
         return Err(io::Error::other(format!(
@@ -401,7 +403,7 @@ impl ClaudeProvider {
 
     fn create_command(request: &crate::tasks::NewTask) -> Command {
         let mut command = Command::new("claude");
-        command.arg("--bg").current_dir(&request.cwd);
+        command.args(BACKGROUND_ARGS).current_dir(&request.cwd);
         if let Some(name) = &request.name {
             command.args(["--name", name]);
         }
@@ -919,7 +921,10 @@ impl Provider for ClaudeProvider {
             command
                 .args([
                     "-c",
-                    r#"claude --resume "$1" --bg >/dev/null && exec claude attach "$2""#,
+                    &format!(
+                        r#"claude {} --resume "$1" >/dev/null && exec claude attach "$2""#,
+                        BACKGROUND_ARGS.join(" ")
+                    ),
                     "sh",
                     &session.id.id,
                     job,
@@ -1252,7 +1257,8 @@ impl Provider for ClaudeProvider {
 fn resume_input(session: &Session, input: &SessionInput) -> io::Result<Command> {
     let mut command = Command::new("claude");
     command
-        .args(["--bg", "--resume", &session.id.id])
+        .args(BACKGROUND_ARGS)
+        .args(["--resume", &session.id.id])
         .current_dir(&session.cwd);
     match input {
         SessionInput::Prompt(text) => {
@@ -1508,7 +1514,17 @@ mod tests {
                 .get_args()
                 .map(|arg| arg.to_str().unwrap())
                 .collect();
-            assert_eq!(args, ["--bg", "--resume", &session.id.id, option, value]);
+            assert_eq!(
+                args,
+                [
+                    "--bg",
+                    "--allow-dangerously-skip-permissions",
+                    "--resume",
+                    &session.id.id,
+                    option,
+                    value
+                ]
+            );
             assert_eq!(command.get_current_dir(), Some(session.cwd.as_path()));
         }
     }
