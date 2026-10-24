@@ -754,6 +754,9 @@ fn parts(event: &Event) -> Vec<EventDetailSection> {
                         label_style
                     };
                     for section in output {
+                        if matches!(section, Section::GroupBreak) {
+                            continue;
+                        }
                         push_section(&mut output_parts, section, style, true);
                         // Headings share the following content block's alignment.
                         if !matches!(section, Section::Label(_)) {
@@ -782,6 +785,7 @@ fn parts(event: &Event) -> Vec<EventDetailSection> {
 
 fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, text_output: bool) {
     let (label, body) = match section {
+        Section::GroupBreak => return,
         Section::OutputFile(path) => {
             push_section(
                 parts,

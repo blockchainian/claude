@@ -281,6 +281,8 @@ pub struct ModelSettings {
 /// One labelled part of a tool call's input or output, as the open event draws it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Section {
+    /// Ends the current block; the sections after it form their own centered group.
+    GroupBreak,
     /// Background output read from its current file contents.
     OutputFile(std::path::PathBuf),
     /// Shell source; `prefix` bytes before the command remain part of copied text.
