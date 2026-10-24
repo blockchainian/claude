@@ -28,6 +28,7 @@ pub(crate) const SERVER: McpServer = McpServer {
         },
         ToolRule {
             name: "appium_screenshot",
+            title: &[Pick::With(screenshot_title)],
             input: Some((Pick::With(screenshot_input), Format::Table)),
             output: Some((Pick::With(screenshot), Format::Text)),
             ..DEFAULT_RULE
@@ -154,8 +155,13 @@ fn session_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     }
 }
 
+fn screenshot_title(data: &ToolData<'_>) -> Option<String> {
+    let width = data.input.get("maxWidth").filter(|width| !width.is_null())?;
+    Some(format!("maxWidth {width}"))
+}
+
 fn screenshot_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
-    other_fields(data, &[])
+    other_fields(data, &["maxWidth"])
 }
 
 /// The saved screenshot itself in place of the sentence naming its file.
@@ -289,7 +295,7 @@ mod tests {
                 "ios real",
                 "discovery",
                 "create",
-                "",
+                "maxWidth 400",
                 "Playlists",
                 "tap",
                 "label CONTAINS[c] 'classic'",
@@ -313,7 +319,8 @@ mod tests {
         );
         assert_eq!(input(8), prose("42010000-0000-0000-BE14-000000000000"));
         assert_eq!(input(9), Vec::new());
-        for index in [3, 4, 6] {
+        assert_eq!(input(3), Vec::new());
+        for index in [4, 6] {
             let sections = input(index);
             let [Section::Markdown { text, .. }] = sections.as_slice() else {
                 panic!("input {index} must be a table: {sections:?}");
