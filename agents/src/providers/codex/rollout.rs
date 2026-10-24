@@ -965,7 +965,7 @@ fn completed_call(
                     structured: Value::Null,
                     error: tool::result_state("", item, false).is_error,
                 };
-                match tool::merged_shell_output(&ToolData {
+                match super::tools::merged_shell_output(&ToolData {
                     input: &arguments,
                     result: Some(&result),
                 }) {

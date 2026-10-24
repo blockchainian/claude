@@ -2,6 +2,9 @@ pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod text;
 pub(crate) mod tool;
+pub(crate) mod mcp;
+
+pub(crate) const TOOL_RULES: &[&tool::ToolRules] = &[&claude::TOOL_RULES, &codex::TOOL_RULES];
 
 use crate::event;
 use crate::model::{Action, Session};

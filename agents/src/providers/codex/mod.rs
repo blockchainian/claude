@@ -1,3 +1,5 @@
+mod tools;
+pub(crate) mod claude_client;
 mod app_server;
 #[cfg(test)]
 mod ask_live_tests;
@@ -937,3 +939,8 @@ impl Provider for CodexProvider {
         }))
     }
 }
+
+pub(crate) const TOOL_RULES: super::tool::ToolRules = super::tool::ToolRules {
+    native: tools::RULES,
+    servers: &[claude_client::SERVER],
+};

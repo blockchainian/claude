@@ -14,7 +14,7 @@ use crate::event::Section;
 use shape::Kind;
 
 #[derive(Clone, Copy, Default)]
-pub(super) struct Stream {
+pub(crate) struct Stream {
     pub merged_stderr: bool,
     pub trimmed: bool,
     pub exit_code: Option<i64>,

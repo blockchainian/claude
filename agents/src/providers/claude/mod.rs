@@ -1,5 +1,8 @@
 //! Session sources: the live registry and transcripts.
 
+mod tools;
+mod claude_in_chrome;
+
 mod account;
 mod api;
 #[cfg(test)]
@@ -2347,3 +2350,8 @@ mod delete_live_tests {
         }
     }
 }
+
+pub(crate) const TOOL_RULES: super::tool::ToolRules = super::tool::ToolRules {
+    native: tools::RULES,
+    servers: &[codex_manager::SERVER, claude_in_chrome::SERVER],
+};

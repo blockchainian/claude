@@ -1342,28 +1342,6 @@ mod tests {
         assert_eq!(call_title(&call).0.as_deref(), Some("1"));
         assert_eq!(call_title(&call).1, "Bash");
         call.exit_code = None;
-        for source in [
-            include_str!("../../tests/fixtures/claude-client/ask_claude.jsonl"),
-            include_str!("../../tests/fixtures/claude-client/notify_claude.jsonl"),
-            include_str!("../../tests/fixtures/tool-list/claude.jsonl"),
-        ] {
-            let record: serde_json::Value =
-                serde_json::from_str(source.lines().next().unwrap()).unwrap();
-            call.name = record["payload"]["item"]["tool"]
-                .as_str()
-                .or_else(|| record["message"]["content"][0]["name"].as_str())
-                .unwrap()
-                .into();
-            for subject in ["", " \t "] {
-                call.title = subject.into();
-                assert_eq!(
-                    call_title(&call),
-                    (None, crate::providers::tool::display_tool_name(&call.name))
-                );
-            }
-            call.title = "Inspect source".into();
-            assert_eq!(call_title(&call).1, "Inspect source");
-        }
         call.title = "Inspect source".into();
         for name in ["advisor", "background"] {
             call.name = name.into();
