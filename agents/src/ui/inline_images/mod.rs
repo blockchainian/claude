@@ -196,7 +196,8 @@ impl InlineImages {
             let control = if index == 0 {
                 format!("a=t,f=100,t=d,i={id},q=2,m={more}")
             } else {
-                format!("m={more}")
+                // iTerm2 reads q per chunk and otherwise answers on stdin.
+                format!("q=2,m={more}")
             };
             self.command(&control, chunk);
         }
@@ -641,7 +642,7 @@ mod tests {
         assert_eq!(buf[(1, 3)].symbol(), " ");
         let commands = String::from_utf8(images.take_commands()).unwrap();
         assert!(commands.starts_with("\x1b_Ga=t,f=100,t=d,i=1,q=2,m=1;"));
-        assert!(commands.contains("\x1b_Gm=0;"));
+        assert!(commands.contains("\x1b_Gq=2,m=0;"));
         assert!(commands.ends_with("\x1b_Ga=p,U=1,i=1,p=1,c=80,r=23,q=2\x1b\\"));
         let mut encoded = String::new();
         for command in commands.split("\x1b_G").skip(1) {
