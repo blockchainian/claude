@@ -28,6 +28,7 @@ fn inactive_snapshot_forgets_all_task_state_once() {
     app.apply_sessions(Snapshot {
         sessions: sessions.clone(),
         has_more: false,
+        supervisions: vec![],
     });
     let saved = Preferences::load(dir.path());
     assert!(!saved.tasks.contains_key(&id));
@@ -43,6 +44,7 @@ fn inactive_snapshot_forgets_all_task_state_once() {
     app.apply_sessions(Snapshot {
         sessions,
         has_more: false,
+        supervisions: vec![],
     });
     assert_eq!(
         std::fs::metadata(store).unwrap().modified().unwrap(),
@@ -182,6 +184,7 @@ fn inactive_snapshot_clears_displayed_and_parked_event_pins() {
     app.apply_sessions(Snapshot {
         sessions,
         has_more: false,
+        supervisions: vec![],
     });
     assert!(!app.view.has_pinned_events(&task));
     assert!(!app.view.has_pinned_events(&other.id));
@@ -213,6 +216,7 @@ fn pending_pin_restore_does_not_resurrect_forgotten_state() {
     app.apply_sessions(Snapshot {
         sessions,
         has_more: false,
+        supervisions: vec![],
     });
     super::event_search_tests::finish_search(&mut app);
     assert!(!app.view.has_pinned_events(&task));

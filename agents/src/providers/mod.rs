@@ -71,9 +71,31 @@ pub struct Capabilities {
     pub archive: bool,
 }
 
+/// A session of another provider that one of this provider's sessions supervises.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Supervision {
+    /// The supervising session, of the reporting provider.
+    pub supervisor: SessionKey,
+    /// The supervised session, of another provider.
+    pub session: SessionKey,
+    pub state: SupervisionState,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SupervisionState {
+    /// The supervisor holds the session.
+    Active,
+    /// The session waits on an ask to its supervisor.
+    Asking,
+    /// The supervisor has detached the session; it still nests under it.
+    Detached,
+}
+
 pub struct Snapshot {
     pub sessions: Vec<Session>,
     pub has_more: bool,
+    /// Other providers' sessions that the sessions in `sessions` supervise.
+    pub supervisions: Vec<Supervision>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -247,7 +269,8 @@ pub trait ScreenInput {
 pub trait Provider: Send {
     /// Creates a session reader with independent caches and the same provider configuration.
     fn session_source(&self) -> Box<dyn Provider>;
-    /// Discovers the history page while reusing unrelated session details.
+    /// Discovers the history page while reusing unrelated session details; the snapshot carries
+    /// this provider's sessions with their own-provider parents, and what they supervise.
     fn refresh_sessions(
         &mut self,
         pages: usize,
@@ -321,15 +344,24 @@ pub trait Provider: Send {
     }
     /// Returns this provider's sessions, including children with provider-qualified parents.
     fn refresh(&mut self, pages: usize) -> Snapshot;
-    /// Discovers live sessions and the requested recent history page.
+    /// Discovers live sessions and the requested recent history page, and what they supervise.
     fn discover(&mut self, pages: usize) -> Snapshot {
         self.refresh(pages)
     }
-    /// Discovers direct children of the supplied live-session tree frontier.
+    /// Discovers this provider's direct children of the supplied live-session tree frontier.
     fn children(&mut self, _parents: &[SessionKey]) -> Snapshot {
         Snapshot {
             sessions: vec![],
             has_more: false,
+            supervisions: vec![],
+        }
+    }
+    /// Reads this provider's sessions by id; ids it does not know are skipped.
+    fn load(&mut self, _sessions: &[SessionKey]) -> Snapshot {
+        Snapshot {
+            sessions: vec![],
+            has_more: false,
+            supervisions: vec![],
         }
     }
     /// Reads details for the selected sessions.
@@ -352,6 +384,10 @@ pub trait Provider: Send {
     fn delete(&self, session: &Session) -> io::Result<SessionAction>;
     /// Returns the archive job to run off the UI thread.
     fn archive(&self, session: &Session) -> io::Result<SessionAction>;
+    /// Returns the job that ends a supervision this provider reported.
+    fn detach(&self, _supervision: &Supervision) -> io::Result<SessionAction> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
 }
 
 pub fn configured() -> io::Result<(crate::sessions::Hub, PathBuf)> {

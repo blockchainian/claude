@@ -1092,7 +1092,14 @@ impl App {
         }
     }
 
-    fn apply_sessions(&mut self, Snapshot { sessions, has_more }: Snapshot) {
+    fn apply_sessions(
+        &mut self,
+        Snapshot {
+            sessions,
+            has_more,
+            supervisions: _,
+        }: Snapshot,
+    ) {
         self.forget_inactive_state(&sessions);
         self.sessions = sessions.clone();
         self.view.set_loading(false);

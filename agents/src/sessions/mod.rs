@@ -230,6 +230,7 @@ impl Hub {
                     let mut updated = provider.enrich(Snapshot {
                         sessions: details,
                         has_more: snapshot.has_more,
+                        supervisions: snapshot.supervisions,
                     });
                     updated.sessions.extend(cached);
                     updated
@@ -241,9 +242,11 @@ impl Hub {
 fn merge(snapshots: impl Iterator<Item = Snapshot>) -> Snapshot {
     let mut sessions = Vec::new();
     let mut has_more = false;
+    let mut supervisions = Vec::new();
     for snapshot in snapshots {
         sessions.extend(snapshot.sessions);
         has_more |= snapshot.has_more;
+        supervisions.extend(snapshot.supervisions);
     }
     let ids: HashSet<_> = sessions.iter().map(|s| s.id.clone()).collect();
     for session in &mut sessions {
@@ -275,6 +278,7 @@ fn merge(snapshots: impl Iterator<Item = Snapshot>) -> Snapshot {
     Snapshot {
         sessions: parents,
         has_more,
+        supervisions,
     }
 }
 

@@ -51,6 +51,7 @@ fn failed_snapshot(error: io::Error) -> Snapshot {
     Snapshot {
         sessions: vec![],
         has_more: false,
+        supervisions: vec![],
     }
 }
 
@@ -110,6 +111,7 @@ impl CodexProvider {
             return Ok(Snapshot {
                 sessions: vec![],
                 has_more: false,
+                supervisions: vec![],
             });
         }
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -156,7 +158,11 @@ impl CodexProvider {
         recent.truncate(shown);
         recent.extend(live.keys().cloned());
         let sessions = self.read_sessions(&db, &recent, &live)?;
-        Ok(Snapshot { sessions, has_more })
+        Ok(Snapshot {
+            sessions,
+            has_more,
+            supervisions: vec![],
+        })
     }
 
     fn read_sessions(
@@ -764,6 +770,7 @@ impl Provider for CodexProvider {
             .map(|sessions| Snapshot {
                 sessions,
                 has_more: false,
+                supervisions: vec![],
             })
             .unwrap_or_else(failed_snapshot)
     }

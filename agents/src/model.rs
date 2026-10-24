@@ -90,7 +90,7 @@ pub struct SessionTask {
 pub struct Session {
     /// Provider-qualified session identity.
     pub id: SessionKey,
-    /// Display parent for nesting, including codex-manager ownership links.
+    /// Display parent for nesting: an own-provider parent, or a supervisor of another provider.
     pub parent: Option<SessionKey>,
     pub cwd: PathBuf,
     /// Name the user gave the session (`/rename` or `--name`).

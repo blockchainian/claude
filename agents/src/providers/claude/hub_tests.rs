@@ -95,10 +95,12 @@ fn merge_orders_live_then_inactive_then_children_and_flattens_orphans() {
             Snapshot {
                 sessions: vec![child, orphan, live],
                 has_more: false,
+                supervisions: vec![],
             },
             Snapshot {
                 sessions: vec![descendant, inactive, earlier_child, later_live],
                 has_more: true,
+                supervisions: vec![],
             },
         ]
         .into_iter(),
@@ -137,6 +139,7 @@ fn lazy_merge_keeps_orphans_flat_and_attaches_their_children() {
         [Snapshot {
             sessions,
             has_more: false,
+            supervisions: vec![],
         }]
         .into_iter(),
     );

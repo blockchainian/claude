@@ -684,7 +684,11 @@ impl ClaudeProvider {
                 }
             }
         }
-        Snapshot { sessions, has_more }
+        Snapshot {
+            sessions,
+            has_more,
+            supervisions: vec![],
+        }
     }
 
     fn list_transcripts(&mut self) {
