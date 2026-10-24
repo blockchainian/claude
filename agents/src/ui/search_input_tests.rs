@@ -132,7 +132,7 @@ fn search_input_click_preserves_the_current_horizontal_window() {
 }
 
 #[test]
-fn search_input_render_uses_prompt_or_dim_right_aligned_query() {
+fn search_input_render_keeps_the_input_row_after_blur() {
     let row = Rect::new(3, 4, 20, 1);
     let mut input = SearchInput::default();
     input.set_text("abc");
@@ -157,12 +157,8 @@ fn search_input_render_uses_prompt_or_dim_right_aligned_query() {
     let text: String = (row.x..row.right())
         .map(|x| buf[(x, row.y)].symbol())
         .collect();
-    assert_eq!(text, "                 abc");
-    assert!(
-        buf[(row.right() - 1, row.y)]
-            .modifier
-            .contains(Modifier::DIM)
-    );
+    assert_eq!(text, "Search ❯ abc        ");
+    assert_eq!(input.caret(row), None);
 }
 
 #[test]

@@ -2031,7 +2031,7 @@ fn live_center_search_active() {
     assert_eq!(view.cursor_pos(Rect::new(0, 0, 100, 16)), Some((14, 11)));
 }
 #[test]
-fn live_center_search_blurred_keeps_dim_query_row() {
+fn live_center_search_blurred_keeps_input_row() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let mut view = simple_fixture();
     key(&mut view, KeyCode::Char('/'));
@@ -2049,27 +2049,10 @@ fn live_center_search_blurred_keeps_dim_query_row() {
     let row = view.viewport.borrow().search;
     assert_eq!(row.height, 1);
     assert!(row.width >= 16);
-    let tail = row.right() - 16;
-    let text: String = (tail..row.right())
+    let text: String = (row.x..row.right())
         .map(|x| cell_text(buf[(x, row.y)].symbol()))
         .collect();
-    let dim: String = (tail..row.right())
-        .map(|x| {
-            let cell = &buf[(x, row.y)];
-            if cell.symbol() != " " && cell.modifier.contains(ratatui::style::Modifier::DIM) {
-                'd'
-            } else {
-                ' '
-            }
-        })
-        .collect();
-    assert_eq!(
-        format!("{text}\n{dim}"),
-        "         Current\n         ddddddd"
-    );
-    for x in row.x..tail {
-        assert_eq!(buf[(x, row.y)].symbol(), " ");
-    }
+    assert_eq!(text.trim_end(), "Search ❯ Current");
     assert!(view.cursor_pos(area).is_none());
 }
 
@@ -5573,11 +5556,10 @@ fn dashboard_event_search_uses_the_row_padding() {
         assert_eq!(view.cursor_pos(area), Some((left + 13, y)));
         view.event_list.search.input.blur();
         view.render_at(area, &mut buf, now);
-        let query: String = (width - 5..width - 1)
+        let blurred: String = (left..left + 13)
             .map(|x| cell_text(buf[(x, y)].symbol()))
             .collect();
-        assert_eq!(query, "Tool");
-        assert_eq!(buf[(width - 1, y)].symbol(), " ");
+        assert_eq!(blurred, input);
     }
 }
 
@@ -6809,9 +6791,7 @@ mod event_search {
         }
         key(&mut view, KeyCode::Enter);
         let buf = panel(&view, now);
-        assert!(text(&buf).contains("timeout"));
-        assert!(buf[(99, 11)].modifier.contains(Modifier::DIM));
-        assert!(!text(&buf).contains("Search ❯ "));
+        assert!(text(&buf).contains("Search ❯ time out"));
         open(&mut view);
         assert!(text(&panel(&view, now)).contains("Search ❯ time out"));
         key(&mut view, KeyCode::Backspace);
@@ -11183,7 +11163,7 @@ fn assert_session_search_keeps_model_on_border(focused: bool) {
         let query: String = (search.x..search.right())
             .map(|x| cell_text(after[(x, search.y)].symbol()))
             .collect();
-        assert_eq!(query.trim(), if focused { "Search ❯ a" } else { "a" });
+        assert_eq!(query.trim(), "Search ❯ a");
         for (rect, field) in targets {
             assert!(view.viewport.borrow().field_targets.contains(&(rect, field)));
             for x in rect.x..rect.right() {

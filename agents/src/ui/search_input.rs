@@ -1,7 +1,7 @@
 use super::line_edit::LineEdit;
 use super::render::{render_input_row, row};
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::{buffer::Buffer, layout::Rect, style::Stylize, text::Line, widgets::Widget};
+use ratatui::{buffer::Buffer, layout::Rect};
 use unicode_width::UnicodeWidthStr;
 
 const SEARCH_PROMPT: &str = "Search ❯ ";
@@ -61,14 +61,7 @@ impl SearchInput {
         if row.is_empty() {
             return;
         }
-        if self.focused {
-            render_input_row(SEARCH_PROMPT, &self.query, row, buf);
-        } else {
-            Line::from(self.text().to_owned())
-                .dim()
-                .right_aligned()
-                .render(row, buf);
-        }
+        render_input_row(SEARCH_PROMPT, &self.query, row, buf);
     }
 
     pub fn caret(&self, row: Rect) -> Option<(u16, u16)> {
