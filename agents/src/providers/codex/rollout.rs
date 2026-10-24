@@ -943,7 +943,7 @@ fn record_turn(record: &Value) -> Option<&str> {
         .or_else(|| payload["internal_chat_message_metadata_passthrough"]["turn_id"].as_str())
 }
 
-/// ImageView completions have independent ids; their enclosing call owns the output bytes.
+/// Only a single ImageView and a single output image establish an unambiguous source.
 fn image_views(path: &Path, records: &[(u64, Value)]) -> HashMap<u64, (Image, [u64; 2])> {
     let outputs: HashMap<_, _> = records
         .iter()
@@ -996,18 +996,23 @@ fn image_views(path: &Path, records: &[(u64, Value)]) -> HashMap<u64, (Image, [u
         }
     }
     let mut owners = HashMap::new();
+    let mut view_counts = vec![0; calls.len()];
     for points in turns.values_mut() {
         points.sort_unstable();
         let mut active = std::collections::BTreeSet::new();
+        let mut views = 0;
         for &(offset, kind, index) in points.iter() {
             match kind {
                 0 => {
+                    view_counts[index] = views - view_counts[index];
                     active.remove(&index);
                 }
                 2 => {
+                    view_counts[index] = views;
                     active.insert(index);
                 }
                 _ => {
+                    views += 1;
                     #[cfg(test)]
                     IMAGE_INTERVAL_CHECKS.with(|count| count.set(count.get() + 1));
                     if active.len() == 1 {
@@ -1024,20 +1029,31 @@ fn image_views(path: &Path, records: &[(u64, Value)]) -> HashMap<u64, (Image, [u
         }
     }
     let mut images = HashMap::new();
-    for (start, end, _, output) in calls {
-        let Some(positions) = positions.get(&start) else {
+    for (call_index, (start, end, _, output)) in calls.into_iter().enumerate() {
+        if view_counts[call_index] != 1 {
+            continue;
+        }
+        let Some(positions) = positions
+            .get(&start)
+            .filter(|positions| positions.len() == 1)
+        else {
             continue;
         };
+        let mut blocks = output_image_blocks(&output["payload"]["output"]);
+        let Some((index, url)) = blocks.next() else {
+            continue;
+        };
+        if blocks.next().is_some() {
+            continue;
+        }
         let record = crate::event::SourceRecord {
             path: path.to_owned(),
             offset: end,
         };
-        for (offset, (index, url)) in positions
-            .iter()
-            .zip(output_image_blocks(&output["payload"]["output"]))
-        {
-            images.insert(*offset, (output_image(&record, index, url), [start, end]));
-        }
+        images.insert(
+            positions[0],
+            (output_image(&record, index, url), [start, end]),
+        );
     }
     images
 }

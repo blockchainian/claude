@@ -152,28 +152,101 @@ fn image_view_decodes_file_uri_when_no_output_is_available() {
 }
 
 #[test]
-fn image_views_pair_with_output_images_in_order() {
+fn image_views_with_reversed_outputs_use_files_or_labels() {
+    use base64::Engine;
     let mut records = captured("tool-view.jsonl");
+    let directory = tempfile::tempdir().unwrap();
+    let first_path = directory.path().join("first.png");
+    let second_path = directory.path().join("second.png");
+    let first_bytes = crate::images::fixture_png();
+    let mut second_image = image::load_from_memory(&first_bytes).unwrap();
+    second_image.invert();
+    let mut second_bytes = std::io::Cursor::new(Vec::new());
+    second_image
+        .write_to(&mut second_bytes, image::ImageFormat::Png)
+        .unwrap();
+    let second_bytes = second_bytes.into_inner();
+    assert_ne!(first_bytes, second_bytes);
+    std::fs::write(&first_path, &first_bytes).unwrap();
+    std::fs::write(&second_path, &second_bytes).unwrap();
+    records[1]["payload"]["item"]["path"] = url::Url::from_file_path(&first_path)
+        .unwrap()
+        .to_string()
+        .into();
     let mut second = records[1].clone();
     second["payload"]["item"]["id"] = "second-image-view".into();
-    let block = records[2]["payload"]["output"][2].clone();
+    second["payload"]["item"]["path"] = url::Url::from_file_path(&second_path)
+        .unwrap()
+        .to_string()
+        .into();
+    let mut block = records[2]["payload"]["output"][2].clone();
+    let data_url = |bytes: &[u8]| {
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )
+    };
+    records[2]["payload"]["output"][2]["image_url"] = data_url(&second_bytes).into();
+    block["image_url"] = data_url(&first_bytes).into();
     records[2]["payload"]["output"]
         .as_array_mut()
         .unwrap()
         .push(block);
     records.insert(2, second);
     let file = transcript(&records);
+    for missing in 0..=2 {
+        if missing == 1 {
+            std::fs::remove_file(&first_path).unwrap();
+        } else if missing == 2 {
+            std::fs::remove_file(&second_path).unwrap();
+        }
+        let events = tail(file.path(), usize::MAX).unwrap();
+        let calls: Vec<_> = events.iter().flat_map(|event| &event.calls).collect();
+        assert_eq!(calls.len(), 2);
+        for (index, (path, bytes)) in [(&first_path, &first_bytes), (&second_path, &second_bytes)]
+            .into_iter()
+            .enumerate()
+        {
+            let found = images(&events);
+            if index < missing {
+                assert!(
+                    calls[index].output.as_ref().is_some_and(Vec::is_empty),
+                    "missing file keeps only its tool label"
+                );
+                assert!(calls[index].input.iter().any(|section| matches!(section, Section::Structured { text, .. } if serde_json::from_str::<Value>(text).unwrap()["path"] == url::Url::from_file_path(path).unwrap().as_str())));
+            } else {
+                let image = found
+                    .iter()
+                    .find(|image| {
+                        matches!(&image.source,
+                    ImageSource::File { path: actual, .. } if actual == path)
+                    })
+                    .expect("ambiguous wrapper must use each ImageView's own file");
+                assert_eq!(image.source.bytes().as_ref(), Some(bytes));
+            }
+            assert_eq!(found.len(), 2 - missing);
+        }
+    }
+}
+
+#[test]
+fn image_view_with_multiple_output_images_uses_file() {
+    let mut records = captured("tool-view.jsonl");
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("fallback.png");
+    std::fs::write(&path, crate::images::fixture_png()).unwrap();
+    records[1]["payload"]["item"]["path"] =
+        url::Url::from_file_path(&path).unwrap().to_string().into();
+    let block = records[2]["payload"]["output"][2].clone();
+    records[2]["payload"]["output"]
+        .as_array_mut()
+        .unwrap()
+        .push(block);
+    let file = transcript(&records);
     let events = tail(file.path(), usize::MAX).unwrap();
     let found = images(&events);
-    assert_eq!(found.len(), 2);
-    for (image, index) in found.iter().zip([2, 3]) {
-        assert_record(
-            image,
-            file.path(),
-            &format!("/payload/output/{index}/image_url"),
-            &records[3]["payload"]["output"][index]["image_url"],
-        );
-    }
+    assert_eq!(found.len(), 1);
+    assert!(matches!(&found[0].source, ImageSource::File { path: actual, .. } if actual == &path));
 }
 
 #[test]
@@ -382,15 +455,10 @@ fn image_view_index_keeps_strict_intervals_and_record_order() {
         (30, output),
     ];
     let found = image_views(Path::new("captured.jsonl"), &records);
-    assert_eq!(found.len(), 2);
-    for (offset, index) in [(29, 2), (11, 3)] {
-        let (image, interval) = &found[&offset];
-        assert_eq!(*interval, [10, 30]);
-        assert!(
-            matches!(&image.source, ImageSource::Record { record, pointer }
-            if record.offset == 30 && pointer == &format!("/payload/output/{index}/image_url"))
-        );
-    }
+    assert!(
+        found.is_empty(),
+        "multiple ImageViews cannot be paired by order"
+    );
 }
 
 #[test]
