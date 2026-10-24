@@ -1,5 +1,5 @@
 use super::{
-    content::{Block, Kind},
+    content::{Block, Kind, Table},
     highlight,
 };
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
@@ -84,7 +84,6 @@ pub(super) fn blocks(text: &str) -> Vec<Block> {
                 match tag {
                     Tag::Table(_) => {
                         writer.separate();
-                        writer.kind = Kind::Preformatted;
                         writer.table = Some(Vec::new());
                     }
                     Tag::TableHead => {
@@ -252,47 +251,15 @@ impl Writer {
         self.current.spans.push(Span::styled(text, style));
     }
 
-    /// Align each column to its widest cell, divide columns with rules and underline the header.
     fn table_lines(&mut self, rows: Vec<Vec<Line<'static>>>) {
-        let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
-        let widths: Vec<usize> = (0..columns)
-            .map(|column| {
-                rows.iter()
-                    .filter_map(|row| row.get(column))
-                    .map(Line::width)
-                    .max()
-                    .unwrap_or(0)
-            })
-            .collect();
-        let style = self.style();
-        for (index, row) in rows.into_iter().enumerate() {
-            let mut cells = row.into_iter();
-            for (column, width) in widths.iter().enumerate() {
-                if column > 0 {
-                    self.current.spans.push(Span::styled(" │ ", style));
-                }
-                let cell = cells.next().unwrap_or_default();
-                let padding = width - cell.width();
-                self.current.spans.extend(cell.spans);
-                if column + 1 < columns && padding > 0 {
-                    self.current.spans.push(Span::raw(" ".repeat(padding)));
-                }
-            }
-            self.flush_code();
-            if index == 0 {
-                let rule = widths
-                    .iter()
-                    .enumerate()
-                    .map(|(column, width)| {
-                        let gaps = usize::from(column > 0) + usize::from(column + 1 < columns);
-                        "─".repeat(width + gaps)
-                    })
-                    .collect::<Vec<_>>()
-                    .join("┼");
-                self.current.spans.push(Span::styled(rule, style));
-                self.flush_code();
-            }
-        }
+        self.lines.push(Block {
+            lines: Vec::new(),
+            indent: self.indent,
+            kind: Kind::Table(Table {
+                rows,
+                style: self.style(),
+            }),
+        });
     }
 
     fn code_lines(&mut self) {
@@ -355,17 +322,16 @@ impl Writer {
         self.lines.push(Block {
             lines: vec![std::mem::take(&mut self.current)],
             indent: self.indent,
-            kind: self.kind,
+            kind: self.kind.clone(),
         });
     }
 
     fn separate(&mut self) {
         self.flush();
-        if self
-            .lines
-            .last()
-            .is_some_and(|block| block.lines.iter().any(|line| !line.spans.is_empty()))
-        {
+        if self.lines.last().is_some_and(|block| {
+            matches!(block.kind, Kind::Table(_))
+                || block.lines.iter().any(|line| !line.spans.is_empty())
+        }) {
             self.lines.push(Block {
                 lines: vec![Line::default()],
                 indent: 0,
@@ -529,6 +495,204 @@ mod tests {
         assert_eq!(maps[0][0].1, name..name + 1);
         assert!(maps[1].is_empty());
         assert_eq!(maps[2].last().unwrap().1, two + 2..two + 3);
+    }
+
+    const WIDE_TABLE: &str = "| Item | Status | Note |\n| --- | --- | --- |\n| F1 | done | The code is done and its first two tests went from failing to passing. |\n| F2 | wait | Committed as 9c4b6ab4; 118 targeted tests pass. |";
+
+    #[test]
+    fn wide_tables_wrap_cells_to_the_reading_width() {
+        let lines = render(WIDE_TABLE, 50);
+        assert_eq!(
+            plain(&lines),
+            [
+                "Item │ Status │ Note",
+                "─────┼────────┼───────────────────────────────────",
+                "F1   │ done   │ The code is done and its first two",
+                "     │        │ tests went from failing to",
+                "     │        │ passing.",
+                "─────┼────────┼───────────────────────────────────",
+                "F2   │ wait   │ Committed as 9c4b6ab4; 118",
+                "     │        │ targeted tests pass.",
+            ]
+        );
+        for line in &lines {
+            assert!(line.width() <= 50);
+            if line.to_string().contains('│') {
+                let text = line.to_string();
+                let columns: Vec<_> = text
+                    .char_indices()
+                    .filter(|(_, ch)| *ch == '│')
+                    .map(|(i, _)| unicode_width::UnicodeWidthStr::width(&text[..i]))
+                    .collect();
+                assert_eq!(columns, [5, 14]);
+            }
+        }
+    }
+
+    #[test]
+    fn wrapped_table_selection_copies_cells_without_generated_rules() {
+        use super::super::{
+            Grouping, View,
+            text_selection::{DrawnRow, Source, TextRegion},
+        };
+        use ratatui::layout::Rect;
+        let (lines, breaks): (Vec<_>, Vec<_>) = blocks(WIDE_TABLE)
+            .into_iter()
+            .map(|block| block.layout_with_breaks(textwrap::Options::new(50)))
+            .fold(
+                (Vec::new(), Vec::new()),
+                |(mut lines, mut breaks), (next, joins)| {
+                    lines.extend(next);
+                    breaks.extend(joins);
+                    (lines, breaks)
+                },
+            );
+        assert!(breaks.iter().any(Option::is_some));
+        let maps = super::super::text_selection_layout::map_lines(WIDE_TABLE, &lines, true);
+        let mut view = View::new(Grouping::Project, false);
+        view.viewport.borrow_mut().event_text = TextRegion {
+            area: Rect::new(0, 0, 50, lines.len() as u16),
+            sources: vec![Source {
+                id: 0,
+                text: WIDE_TABLE.into(),
+                label: "table".into(),
+            }],
+            rows: lines
+                .iter()
+                .zip(maps)
+                .zip(breaks)
+                .enumerate()
+                .map(|(index, ((line, cells), continuation))| DrawnRow {
+                    segment: 0,
+                    index,
+                    x: 0,
+                    y: index as u16,
+                    cells,
+                    continuation,
+                    text: line.to_string(),
+                })
+                .collect(),
+        };
+        // Select the Note cell from its first character through its last continuation.
+        view.begin_text_selection(16, 2);
+        view.extend_text_selection(24, 4);
+        let Some(super::super::Action::Copy { text, .. }) = view.finish_text_selection(24, 4)
+        else {
+            panic!("copy action")
+        };
+        assert_eq!(
+            text,
+            "The code is done and its first two tests went from failing to passing."
+        );
+        assert!(maps_for_rules_are_empty(WIDE_TABLE, &lines));
+    }
+
+    fn maps_for_rules_are_empty(source: &str, lines: &[Line<'_>]) -> bool {
+        super::super::text_selection_layout::map_lines(source, lines, true)
+            .iter()
+            .zip(lines)
+            .filter(|(_, line)| line.to_string().contains('┼'))
+            .all(|(map, _)| map.is_empty())
+    }
+
+    #[test]
+    fn tables_wrap_cjk_styles_headers_and_indentation() {
+        let source = "| **标题中文** | Note |\n| --- | --- |\n| 中文中文中文 | abcdefghijklmnopqrstuvwxyz |\n| 中文 | short |";
+        let lines = render(source, 17);
+        assert!(lines.iter().all(|line| line.width() <= 17));
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line.to_string().contains('┼'))
+                .count(),
+            2
+        );
+        for line in &lines {
+            for span in &line.spans {
+                if span.content.contains('标') || span.content.contains('题') {
+                    assert!(span.style.add_modifier.contains(Modifier::BOLD));
+                }
+            }
+        }
+        let maps = super::super::text_selection_layout::map_lines(source, &lines, true);
+        let mapped: Vec<_> = maps
+            .iter()
+            .flatten()
+            .map(|(_, bytes)| bytes.clone())
+            .collect();
+        for (event, range) in Parser::new_ext(source, Options::ENABLE_TABLES).into_offset_iter() {
+            if let Event::Text(text) = event {
+                for (offset, ch) in text.char_indices() {
+                    assert!(
+                        mapped.contains(
+                            &(range.start + offset..range.start + offset + ch.len_utf8())
+                        )
+                    );
+                }
+            }
+        }
+        let mut table = blocks(source).pop().unwrap();
+        table.indent = 4;
+        let indented = table.layout(textwrap::Options::new(21));
+        assert_eq!(
+            plain(&indented),
+            plain(&lines)
+                .iter()
+                .map(|line| format!("    {line}"))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(render(source, 0), Vec::<Line<'static>>::new());
+    }
+
+    #[test]
+    fn table_width_allocation_preserves_short_columns_and_redistributes() {
+        let source = format!(
+            "| A | B | C |\n|---|---|---|\n| {} | {} | {} |",
+            "a".repeat(6),
+            "b".repeat(35),
+            "c".repeat(100)
+        );
+        let lines = render(&source, 108);
+        assert_eq!(
+            lines[1].to_string(),
+            format!("{}┼{}┼{}", "─".repeat(7), "─".repeat(37), "─".repeat(62))
+        );
+        assert!(lines.iter().all(|line| line.width() <= 108));
+        let equal = render("| A | B |\n|---|---|\n| abcdefgh | ijklmnop |", 16);
+        assert!(equal.iter().all(|line| line.width() <= 16));
+        let narrow = render("| A | B |\n|---|---|\n| abcdefghijkl | mnopqrstuvwx |", 10);
+        assert!(narrow.iter().all(|line| line.width() <= 10));
+        assert_eq!(narrow[2].to_string(), "abcd │ mno");
+        assert_eq!(narrow[3].to_string(), "efgh │ pqr");
+    }
+
+    #[test]
+    fn wrapped_table_maps_each_column_with_prose_options() {
+        let source = "before\n\n| Path | Note |\n|---|---|\n| /one/two/three/four/five/six/seven/eight/nine | **a &amp; b** |\n| /another/very/long/path/to/a/file.rs | tail |\n\nafter";
+        let lines = render_with_options(
+            source,
+            super::super::line_truncation::prose_wrap_options(30),
+        );
+        let maps = super::super::text_selection_layout::map_lines(source, &lines, true);
+        let ranges: Vec<_> = maps
+            .iter()
+            .flatten()
+            .map(|(_, bytes)| bytes.clone())
+            .collect();
+        for label in [
+            "/one/two/three/four/five/six/seven/eight/nine",
+            "/another/very/long/path/to/a/file.rs",
+            "tail",
+            "after",
+        ] {
+            let start = source.find(label).unwrap();
+            for offset in 0..label.len() {
+                assert!(
+                    ranges.contains(&(start + offset..start + offset + 1)),
+                    "{label}: {offset}"
+                );
+            }
+        }
     }
 
     #[test]

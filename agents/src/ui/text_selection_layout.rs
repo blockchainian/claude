@@ -25,7 +25,7 @@ pub(super) fn map_lines_in(
     markdown: bool,
     cwd: Option<&std::path::Path>,
 ) -> Vec<Vec<CellMap>> {
-    let mut tokens = source_tokens(source, markdown);
+    let mut tokens = source_tokens(source, markdown, lines);
     if let Some(cwd) = cwd {
         for range in super::paths::text_paths(source, cwd) {
             if let Some(relative) = super::paths::relative_path(&source[range.clone()], cwd) {
@@ -279,7 +279,7 @@ fn path_tokens(tokens: &[Token], path: &Range<usize>, display: &str) -> Option<V
     best.map(|(_, tokens)| tokens)
 }
 
-fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
+fn source_tokens(source: &str, markdown: bool, lines: &[Line<'_>]) -> Vec<Token> {
     let mut tokens = Vec::new();
     if !markdown {
         push_text(&mut tokens, source, 0..source.len(), source, false);
@@ -288,6 +288,10 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
     let mut lists = Vec::new();
     let mut code = false;
     let mut table_cells = 0;
+    let mut table_start = 0;
+    let mut cell_start = 0;
+    let mut table_rows: Vec<Vec<Vec<Token>>> = Vec::new();
+    let mut display_cursor = 0;
     for (event, range) in Parser::new_ext(
         source,
         Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES,
@@ -295,7 +299,28 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
     .into_offset_iter()
     {
         match event {
-            Event::Start(Tag::TableHead | Tag::TableRow) => table_cells = 0,
+            Event::Start(Tag::Table(_)) => {
+                table_start = tokens.len();
+                table_rows.clear();
+            }
+            Event::Start(Tag::TableHead | Tag::TableRow) => {
+                table_cells = 0;
+                table_rows.push(Vec::new());
+            }
+            Event::End(TagEnd::TableCell) => {
+                table_rows
+                    .last_mut()
+                    .expect("table row")
+                    .push(tokens[cell_start..].to_vec());
+            }
+            Event::End(TagEnd::Table) => {
+                if let Some((displayed, end)) = table_tokens(&table_rows, &lines[display_cursor..])
+                {
+                    tokens.truncate(table_start);
+                    tokens.extend(displayed);
+                    display_cursor += end;
+                }
+            }
             Event::Start(Tag::TableCell) => {
                 if table_cells > 0 {
                     tokens.extend(" │ ".graphemes(true).map(|text| Token {
@@ -304,6 +329,7 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
                     }));
                 }
                 table_cells += 1;
+                cell_start = tokens.len();
             }
             Event::Start(Tag::CodeBlock(_)) => code = true,
             Event::End(TagEnd::CodeBlock) => code = false,
@@ -342,6 +368,84 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
         }
     }
     tokens
+}
+
+/// Reorder cell tokens into display order, retaining each cell's original source bytes.
+fn table_tokens(rows: &[Vec<Vec<Token>>], lines: &[Line<'_>]) -> Option<(Vec<Token>, usize)> {
+    use super::content::Table;
+    let table = Table {
+        rows: rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|cell| {
+                        Line::from(
+                            cell.iter()
+                                .map(|token| token.text.as_str())
+                                .collect::<String>(),
+                        )
+                    })
+                    .collect()
+            })
+            .collect(),
+        style: Default::default(),
+    };
+    let mut offset = 0;
+    let cells: std::collections::HashMap<_, _> = rows
+        .iter()
+        .flatten()
+        .flatten()
+        .map(|token| {
+            let start = offset;
+            offset += token.text.len();
+            (start, token)
+        })
+        .collect();
+    for (rule_index, rule) in lines.iter().enumerate() {
+        let text = rule.to_string();
+        let trimmed = text.trim_start();
+        if trimmed.is_empty() || !trimmed.chars().all(|ch| matches!(ch, '─' | '┼')) {
+            continue;
+        }
+        let indent = text.len() - trimmed.len();
+        let layout = table.layout(indent, textwrap::Options::new(rule.width()));
+        let header_height = layout.lines.iter().position(|line| {
+            let text = line.to_string();
+            let text = text.trim_start();
+            !text.is_empty() && text.chars().all(|ch| matches!(ch, '─' | '┼'))
+        })?;
+        let Some(start) = rule_index.checked_sub(header_height) else {
+            continue;
+        };
+        let end = start + layout.lines.len();
+        if end > lines.len()
+            || !layout
+                .lines
+                .iter()
+                .zip(&lines[start..end])
+                .all(|(expected, actual)| expected.to_string() == actual.to_string())
+        {
+            continue;
+        }
+        let mut tokens = Vec::new();
+        for (line, sources) in layout.lines.iter().zip(layout.sources) {
+            let mut x = 0;
+            for grapheme in line.to_string().graphemes(true) {
+                let source = sources
+                    .iter()
+                    .find(|(columns, _)| usize::from(columns.start) == x)
+                    .and_then(|(_, bytes)| cells.get(&bytes.start))
+                    .and_then(|token| token.source.clone());
+                tokens.push(Token {
+                    text: grapheme.to_owned(),
+                    source,
+                });
+                x += grapheme.width();
+            }
+        }
+        return Some((tokens, end));
+    }
+    None
 }
 
 fn push_text(
