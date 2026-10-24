@@ -135,9 +135,13 @@ impl TaskReplay {
                 && let Some(id) = text(&record["toolUseResult"]["task"], "id")
                 && let Some(subject) = text(&record["toolUseResult"]["task"], "subject")
             {
-                // A fresh successful create can restart numbering within a transcript.
-                if tasks.iter().any(|task| task.id == id) {
-                    tasks.clear();
+                if let Some(index) = tasks.iter().position(|task| task.id == id) {
+                    if tasks[index].status == TaskStatus::Deleted {
+                        tasks.remove(index);
+                    } else {
+                        // A fresh successful create can restart numbering within a transcript.
+                        tasks.clear();
+                    }
                 }
                 tasks.push(SessionTask {
                     id,
@@ -1348,6 +1352,56 @@ pub(super) mod tests {
         );
         assert_eq!(summary.tasks[1].status, crate::model::TaskStatus::Completed);
         assert_eq!(summary.tasks[2].status, crate::model::TaskStatus::Pending);
+    }
+
+    #[test]
+    fn task_replay_reuses_deleted_ids_without_clearing_pending_tasks() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for (index, id) in (1..=7).chain([7]).enumerate() {
+            let id = id.to_string();
+            let tool = format!("create-{index}");
+            let subject = format!("Task {index}");
+            for record in [
+                serde_json::json!({"type":"assistant", "message":{"content":[{"type":"tool_use", "id":tool, "name":"TaskCreate", "input":{"subject":subject}}]}}),
+                serde_json::json!({"type":"user", "message":{"content":[{"type":"tool_result", "tool_use_id":tool, "content":format!("Task #{id} created successfully: {subject}")}]}, "toolUseResult":{"task":{"id":id, "subject":subject}}}),
+            ] {
+                writeln!(file, "{record}").unwrap();
+            }
+            let deleted: &[&str] = match index {
+                6 => &["1", "2", "7", "3"],
+                7 => &["7"],
+                _ => &[],
+            };
+            for id in deleted {
+                writeln!(
+                    file,
+                    "{}",
+                    serde_json::json!({"type":"assistant", "message":{"content":[{"type":"tool_use", "id":format!("delete-{index}-{id}"), "name":"TaskUpdate", "input":{"taskId":id, "status":"deleted"}}]}})
+                )
+                .unwrap();
+                writeln!(
+                    file,
+                    "{}",
+                    serde_json::json!({"type":"user", "message":{"content":[{"type":"tool_result", "tool_use_id":format!("delete-{index}-{id}"), "content":format!("Updated task #{id} deleted")}]}})
+                )
+                .unwrap();
+            }
+        }
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        let visible = summary
+            .tasks
+            .iter()
+            .filter(|task| task.status != TaskStatus::Deleted)
+            .map(|task| (task.id.as_str(), task.status))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            visible,
+            [
+                ("4", TaskStatus::Pending),
+                ("5", TaskStatus::Pending),
+                ("6", TaskStatus::Pending)
+            ]
+        );
     }
 
     #[test]
