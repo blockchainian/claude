@@ -5,11 +5,13 @@ pub(crate) use attachment::ImageAttachment;
 pub(crate) use attachment::fixture_png;
 
 use std::{
+    collections::HashMap,
     fs::File,
     hash::{Hash, Hasher},
     io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write},
     os::unix::fs::DirBuilderExt,
     path::PathBuf,
+    sync::{LazyLock, Mutex},
     time::SystemTime,
 };
 
@@ -51,6 +53,17 @@ impl ImageSource {
         if let Self::File { path, .. } = self {
             return Ok(path.clone());
         }
+        static PATHS: LazyLock<Mutex<HashMap<ImageSource, PathBuf>>> =
+            LazyLock::new(|| Mutex::new(HashMap::new()));
+        let mut paths = PATHS
+            .lock()
+            .map_err(|_| io::Error::other("Image path cache lock poisoned"))?;
+        if let Some(path) = paths.get(self) {
+            if path.try_exists()? {
+                return Ok(path.clone());
+            }
+            paths.remove(self);
+        }
         let invalid = || io::Error::new(io::ErrorKind::InvalidData, "Invalid image data");
         let bytes = self.bytes().ok_or_else(invalid)?;
         let format = image::guess_format(&bytes).map_err(|_| invalid())?;
@@ -75,6 +88,7 @@ impl ImageSource {
         if std::fs::read(&path)? != bytes {
             return Err(invalid());
         }
+        paths.insert(self.clone(), path.clone());
         Ok(path)
     }
 
@@ -335,20 +349,46 @@ mod tests {
     }
 
     #[test]
-    fn local_file_materializes_record_bytes_and_reuses_the_path() {
-        let source = record_source();
+    fn local_file_caches_record_paths_and_recreates_deleted_files() {
+        let original = record_source();
+        let ImageSource::Record { record, pointer } = &original else {
+            unreachable!()
+        };
+        let transcript = std::fs::read(&record.path).unwrap();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), &transcript).unwrap();
+        let source = ImageSource::Record {
+            record: SourceRecord {
+                path: file.path().to_owned(),
+                offset: record.offset,
+            },
+            pointer: pointer.clone(),
+        };
+        let bytes = source.bytes().unwrap();
         let path = source.local_file().unwrap();
         assert_eq!(path.extension().unwrap(), "png");
         assert_eq!(
             path.parent().unwrap(),
             std::env::temp_dir().join(format!("agents-images-{}", std::process::id()))
         );
-        assert_eq!(std::fs::read(&path).unwrap(), source.bytes().unwrap());
-        assert_eq!(source.local_file().unwrap(), path);
-        std::fs::write(&path, b"corrupt").unwrap();
-        assert!(source.local_file().is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+
+        std::fs::write(file.path(), b"unavailable transcript image").unwrap();
+        assert_eq!(source.clone().local_file().unwrap(), path);
+        let other_source = ImageSource::Record {
+            record: SourceRecord {
+                path: file.path().to_owned(),
+                offset: record.offset,
+            },
+            pointer: "/missing/image".into(),
+        };
+        assert!(other_source.local_file().is_err());
+
         std::fs::remove_file(&path).unwrap();
+        assert!(source.local_file().is_err());
+        std::fs::write(file.path(), transcript).unwrap();
         assert_eq!(source.local_file().unwrap(), path);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
     }
 
     #[test]
