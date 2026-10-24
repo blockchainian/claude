@@ -205,7 +205,7 @@ fn prompt_deliveries<'a>(
         } else if record["type"] == "user"
             && record["isMeta"] != true
             && record["isCompactSummary"] != true
-            && let Some(text) = prompt_text(&record["message"]["content"])
+            && let Some(text) = super::images::prompt_text(record)
             && is_prompt_text(record, &text)
             && !wrapped_message(&text)
                 .is_some_and(|(kind, _, _)| matches!(kind, Kind::Agent | Kind::Session))
@@ -217,20 +217,6 @@ fn prompt_deliveries<'a>(
         }
     }
     deliveries
-}
-
-fn prompt_text(content: &serde_json::Value) -> Option<String> {
-    content.as_str().map(str::to_owned).or_else(|| {
-        Some(
-            content
-                .as_array()?
-                .iter()
-                .filter(|block| block["type"] == "text")
-                .filter_map(|block| block["text"].as_str())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-    })
 }
 
 /// Retains decoded records and parsed rows between file notifications.
@@ -792,6 +778,17 @@ impl EventReader {
             .collect()
     }
 
+    fn prompt_images(
+        &mut self,
+        record: &serde_json::Value,
+        body: &str,
+    ) -> io::Result<Vec<crate::images::Image>> {
+        match self.source_records().first() {
+            Some(source) => self.images.take(source, record, body),
+            None => Ok(Vec::new()),
+        }
+    }
+
     fn ready(&self, count: usize) -> bool {
         self.entries.len() > count && self.batch.is_none_or(|index| index > count)
     }
@@ -813,7 +810,9 @@ impl EventReader {
             self.assistant = None;
         }
         self.turn = turn;
-        self.images.record(&record);
+        if let Some(source) = self.source_records().first() {
+            self.images.record(source, &record);
+        }
         if record["turnCompanion"] == true
             && let Some(id) = record["promptId"].as_str()
         {
@@ -889,7 +888,7 @@ impl EventReader {
                         }
                     }
                 }
-                let text = prompt_text(content);
+                let text = super::images::prompt_text(&record);
                 let wrapped = text.as_deref().and_then(wrapped_message);
                 let is_peer = wrapped
                     .as_ref()
@@ -903,7 +902,7 @@ impl EventReader {
                     if let Some((kind, sender, body)) = wrapped {
                         self.push_wrapped(&record, kind, sender, body, at);
                     } else if is_prompt_text(&record, &text) {
-                        let images = self.images.take(&record, &text)?;
+                        let images = self.prompt_images(&record, &text)?;
                         let kind = if record["isCompactSummary"] == true {
                             Kind::Compaction
                         } else {
@@ -994,15 +993,14 @@ impl EventReader {
                 }
             }
             Some("attachment") if super::images::queued_prompt(&record).is_some() => {
-                let prompt = super::images::queued_prompt(&record).unwrap();
-                if let Some(text) = prompt_text(prompt) {
+                if let Some(text) = super::images::prompt_text(&record) {
                     if let Some((kind, sender, body)) = wrapped_message(&text)
                         .filter(|(kind, _, _)| matches!(kind, Kind::Agent | Kind::Session))
                     {
                         self.push_wrapped(&record, kind, sender, body, at);
                     } else {
                         let body = prompt_body(&text);
-                        let images = self.images.take(&record, &body)?;
+                        let images = self.prompt_images(&record, &body)?;
                         self.push(Kind::User, body, at);
                         let event = &mut self.entries.last_mut().unwrap().event;
                         event.source = record["uuid"].as_str().map(str::to_owned);
@@ -1030,7 +1028,7 @@ impl EventReader {
                     let (sender, body) = peer
                         .map(|(_, sender, body)| (sender, body))
                         .unwrap_or_else(|| (None, body.to_owned()));
-                    let images = self.images.take(&record, &body)?;
+                    let images = self.prompt_images(&record, &body)?;
                     self.push(kind, body, at);
                     self.entries.last_mut().unwrap().event.images = images;
                     self.entries.last_mut().unwrap().event.source =
@@ -3528,13 +3526,17 @@ pub(crate) mod tests {
 
     #[test]
     fn model_reply_uses_tool_end_after_any_user_content() {
+        let image: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-queued-image.jsonl"
+        ))
+        .unwrap();
         for content in [
             json!("typed prompt"),
             json!("<task-notification>finished</task-notification>"),
             json!("<agent-message>finished</agent-message>"),
             json!("<cross-session-message from-name=\"peer\">finished</cross-session-message>"),
             json!("<pasted_content>finished</pasted_content>"),
-            json!([{"type":"image", "source":{"type":"base64", "data":""}}]),
+            json!([image["attachment"]["prompt"][1]]),
         ] {
             let mut file = tempfile::NamedTempFile::new().unwrap();
             for r in [

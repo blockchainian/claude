@@ -13,10 +13,13 @@ fn file_source(path: PathBuf) -> crate::images::ImageSource {
     }
 }
 
-fn image_path(image: &crate::images::Image) -> PathBuf {
-    match &image.source {
-        crate::images::ImageSource::File { path, .. } => path.clone(),
-        crate::images::ImageSource::Record { .. } => panic!("expected file source"),
+fn prompt_record_source(path: &Path, offset: u64) -> crate::images::ImageSource {
+    crate::images::ImageSource::Record {
+        record: crate::event::SourceRecord {
+            path: path.to_owned(),
+            offset,
+        },
+        pointer: "/payload/content/1/image_url".into(),
     }
 }
 
@@ -520,7 +523,7 @@ fn write_image_records(path: &Path, records: &[Value]) {
 }
 
 #[test]
-fn prompt_image_paths_use_wrapper_then_paired_completed_event() {
+fn prompt_images_use_records_before_local_paths() {
     let dir = tempfile::tempdir().unwrap();
     let image = dir.path().join("attachment.png");
     std::fs::write(&image, b"image").unwrap();
@@ -534,20 +537,18 @@ fn prompt_image_paths_use_wrapper_then_paired_completed_event() {
             entries[0].images,
             [crate::images::Image {
                 label: "[Image #1]".into(),
-                source: file_source(image.clone())
+                source: prompt_record_source(&rollout, 0)
             }]
         );
-        // The wrapper is enough when the completed event has not been written yet.
+        assert_eq!(entries[0].images[0].source.bytes().unwrap(), b"\x89PNG");
+        // The persisted input image does not need its completed copy.
         write_image_records(&rollout, &records[..1]);
-        assert_eq!(
-            tail(&rollout, 1).unwrap()[0].images.len(),
-            usize::from(name == "wrapped")
-        );
+        assert_eq!(tail(&rollout, 1).unwrap()[0].images.len(), 1);
     }
     std::fs::remove_file(&image).unwrap();
     for name in ["wrapped", "fallback"] {
         write_image_records(&rollout, &relocated_image_records(name, &image));
-        assert!(tail(&rollout, 1).unwrap()[0].images.is_empty());
+        assert_eq!(tail(&rollout, 1).unwrap()[0].images.len(), 1);
     }
 }
 
@@ -557,8 +558,12 @@ fn prompt_image_pairing_does_not_borrow_another_prompts_paths() {
     let image = dir.path().join("attachment.png");
     std::fs::write(&image, b"image").unwrap();
     let rollout = dir.path().join("rollout.jsonl");
-    let first = relocated_image_records("fallback", &image);
-    let second = relocated_image_records("wrapped", &dir.path().join("missing.png"));
+    let mut first = relocated_image_records("fallback", &image);
+    let mut second = relocated_image_records("wrapped", &dir.path().join("missing.png"));
+    for records in [&mut first, &mut second] {
+        records[0]["payload"]["content"] =
+            Value::Array(vec![records[0]["payload"]["content"][3].clone()]);
+    }
     // An older prompt's completed event cannot supply the latest prompt.
     write_image_records(
         &rollout,
@@ -588,7 +593,7 @@ fn named_image_blocks_without_prompt_text_show_their_labels() {
     let entries = tail(&path, 100).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].body, "[Image #1]");
-    assert!(entries[0].images.is_empty());
+    assert_eq!(entries[0].images[0].source, prompt_record_source(&path, 0));
 }
 
 #[test]
@@ -621,6 +626,7 @@ fn session_prompt_images_belong_to_first_user_message() {
         ))
         .unwrap();
         let later = relocated_image_records("wrapped", &dir.path().join("missing.png"));
+        let offset = format!("{context}\n").len() as u64;
         write_image_records(
             &path,
             &[
@@ -637,7 +643,7 @@ fn session_prompt_images_belong_to_first_user_message() {
             session.prompt_images,
             [crate::images::Image {
                 label: "[Image #1]".into(),
-                source: file_source(image.clone())
+                source: prompt_record_source(&path, offset)
             }]
         );
         assert_eq!(session.prompt, prompt.chars().take(512).collect::<String>());
@@ -649,7 +655,7 @@ fn session_prompt_images_belong_to_first_user_message() {
         .into_iter()
         .find(|s| s.id.id == "thread-0")
         .unwrap();
-    assert!(session.prompt_images.is_empty());
+    assert_eq!(session.prompt_images.len(), 1);
 }
 
 #[test]
@@ -699,21 +705,25 @@ fn first_prompt_images_stop_at_the_first_completed_user_boundary() {
 }
 
 #[test]
-fn wrapper_path_precedes_event_path_and_unavailable_path_falls_back() {
+fn prompt_files_require_a_matching_completed_event_and_file_metadata() {
     let dir = tempfile::tempdir().unwrap();
-    let wrapper = dir.path().join("wrapper.png");
-    let event = dir.path().join("event.png");
-    for path in [&wrapper, &event] {
-        std::fs::write(path, b"image").unwrap();
-    }
+    let image = dir.path().join("image.png");
+    std::fs::write(&image, b"image").unwrap();
     let path = dir.path().join("rollout.jsonl");
-    let mut records = relocated_image_records("wrapped", &wrapper);
-    records[1]["payload"]["item"]["content"][0]["path"] = event.to_str().unwrap().into();
+    let mut records = relocated_image_records("wrapped", &image);
+    records[0]["payload"]["content"] =
+        Value::Array(vec![records[0]["payload"]["content"][3].clone()]);
     write_image_records(&path, &records);
-    assert_eq!(image_path(&tail(&path, 100).unwrap()[0].images[0]), wrapper);
-    std::fs::remove_file(&wrapper).unwrap();
-    assert_eq!(image_path(&tail(&path, 100).unwrap()[0].images[0]), event);
+    assert_eq!(
+        tail(&path, 100).unwrap()[0].images[0].source,
+        file_source(image.clone())
+    );
     records[1]["payload"]["turn_id"] = "different-turn".into();
+    write_image_records(&path, &records);
+    assert!(tail(&path, 100).unwrap()[0].images.is_empty());
+    records[1]["payload"]["turn_id"] =
+        records[0]["payload"]["internal_chat_message_metadata_passthrough"]["turn_id"].clone();
+    std::fs::remove_file(&image).unwrap();
     write_image_records(&path, &records);
     assert!(tail(&path, 100).unwrap()[0].images.is_empty());
 }

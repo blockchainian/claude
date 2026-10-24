@@ -642,8 +642,12 @@ mod tests {
             inner: std::io::Cursor::new(bytes),
             read: 0,
         };
-        let summary =
-            crate::providers::claude::transcript::read_subagent_tail(&mut reader, len).unwrap();
+        let summary = crate::providers::claude::transcript::read_subagent_tail(
+            Path::new("subagent.jsonl"),
+            &mut reader,
+            len,
+        )
+        .unwrap();
         assert!(reader.read <= 64 * 1024 + 1);
         assert_eq!(summary.model.as_deref(), Some("claude-opus-5-5"));
         assert_eq!(summary.subagent_records.len(), 2);

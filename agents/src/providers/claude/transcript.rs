@@ -1,3 +1,4 @@
+use crate::event::SourceRecord;
 use crate::model::{Activity, BackgroundTask, PullRequest, SessionTask, TaskStatus};
 use crate::providers::text::printable;
 use crate::providers::tool::question_texts;
@@ -467,31 +468,22 @@ fn prompt_text(record: &Value, peers: bool) -> Option<String> {
                 return None;
             }
             let text = content_text(record, false)?;
+            let text = if text.trim().is_empty() {
+                super::images::prompt_text(record)?
+            } else {
+                text
+            };
             match super::peer::wrapped_message(&text) {
                 Some((_, message)) => peer(message),
                 None => Some(typed_text(text)),
             }
         }
         "attachment" => {
-            let prompt = super::images::queued_prompt(record)?;
+            super::images::queued_prompt(record)?;
             if let Some(message) = super::peer::origin_message(record) {
                 return peer(message);
             }
-            prompt
-                .as_str()
-                .map(str::to_owned)
-                .or_else(|| {
-                    Some(
-                        prompt
-                            .as_array()?
-                            .iter()
-                            .filter(|block| block["type"] == "text")
-                            .filter_map(|block| block["text"].as_str())
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    )
-                })
-                .map(typed_text)
+            super::images::prompt_text(record).map(typed_text)
         }
         _ => None,
     }
@@ -616,6 +608,10 @@ pub(super) fn background_tasks(
     (&mut file).take(len - start).read_to_end(&mut tail)?;
     let background = read_messages(
         &mut file,
+        SourceRecord {
+            path: path.to_owned(),
+            offset: 0,
+        },
         start,
         tail,
         &mut Summary::default(),
@@ -695,6 +691,7 @@ pub(super) fn walk_records(
 
 fn read_messages(
     file: &mut (impl Read + Seek),
+    origin: SourceRecord,
     start: u64,
     bytes: Vec<u8>,
     summary: &mut Summary,
@@ -718,7 +715,11 @@ fn read_messages(
     let mut images = super::images::PromptImages::default();
     let mut image_error = None;
     let mut activity = super::event_reader::ActivityEvent::default();
-    walk_records(file, start, bytes, sidechains, |_, record| {
+    walk_records(file, start, bytes, sidechains, |offset, record| {
+        let source = SourceRecord {
+            path: origin.path.clone(),
+            offset: origin.offset + offset,
+        };
         if !descriptions_only && !activity.ready() {
             activity.record(record.clone());
         }
@@ -732,7 +733,7 @@ fn read_messages(
                 effort_found = true;
             }
         }
-        images.record(&record);
+        images.record(&source, &record);
         if !questions_found && let Some(blocks) = record["message"]["content"].as_array() {
             for block in blocks.iter().rev() {
                 if record["type"] == "user"
@@ -801,7 +802,7 @@ fn read_messages(
         {
             summary.task_details_sources[2] = record["uuid"].as_str().map(str::to_owned);
             summary.prompt = printable(&prompt);
-            match images.take(&record, &summary.prompt) {
+            match images.take(&source, &record, &summary.prompt) {
                 Ok(images) => summary.prompt_images = images,
                 Err(error) => {
                     image_error = Some(error);
@@ -913,6 +914,10 @@ fn read_summary(path: &Path, len: u64) -> io::Result<Summary> {
     if len <= 2 * CHUNK {
         read_messages(
             &mut file,
+            SourceRecord {
+                path: path.to_owned(),
+                offset: 0,
+            },
             0,
             head,
             &mut summary,
@@ -922,6 +927,10 @@ fn read_summary(path: &Path, len: u64) -> io::Result<Summary> {
     } else {
         read_messages(
             &mut file,
+            SourceRecord {
+                path: path.to_owned(),
+                offset: 0,
+            },
             len - CHUNK - 1,
             tail,
             &mut summary,
@@ -943,22 +952,28 @@ pub(super) fn read_subagent_cached(
     len: u64,
     previous: Option<&Summary>,
 ) -> io::Result<Summary> {
-    let mut summary = read_subagent_tail(&mut File::open(path)?, len)?;
+    let mut summary = read_subagent_tail(path, &mut File::open(path)?, len)?;
     read_history(path, len, previous, true, &mut summary)?;
     Ok(summary)
 }
 
-pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io::Result<Summary> {
+pub(super) fn read_subagent_tail(
+    path: &Path,
+    file: &mut (impl Read + Seek),
+    len: u64,
+) -> io::Result<Summary> {
     let start = len.saturating_sub(CHUNK + 1);
     file.seek(SeekFrom::Start(start))?;
     let mut bytes = Vec::new();
     file.take(CHUNK + 1).read_to_end(&mut bytes)?;
+    let mut origin = start;
     if start > 0 {
         let skip = bytes
             .iter()
             .position(|byte| *byte == b'\n')
             .map_or(bytes.len(), |index| index + 1);
         bytes.drain(..skip);
+        origin += skip as u64;
     }
     let mut summary = Summary::default();
     for record in records_with_sidechains(&bytes, true) {
@@ -971,6 +986,10 @@ pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io:
     // Start zero prevents the message scan from seeking before this bounded tail.
     read_messages(
         &mut std::io::Cursor::new(Vec::<u8>::new()),
+        SourceRecord {
+            path: path.to_owned(),
+            offset: origin,
+        },
         0,
         bytes,
         &mut summary,
@@ -1448,6 +1467,125 @@ pub(super) mod tests {
         let summary = read(&path, bytes.len() as u64).unwrap();
         let session = super::super::session("test".into(), summary, Some(path), Utc::now());
         assert_embedded_images(&session.prompt_images, &[8, 9]);
+    }
+
+    #[test]
+    fn prompt_image_blocks_survive_missing_ids_and_labels() {
+        let (_, records) = image_fixture();
+        for (ids, labelled) in [
+            (None, true),
+            (Some(vec![8]), true),
+            (Some(vec![8, 9]), false),
+        ] {
+            let mut record = records[4].clone();
+            record.as_object_mut().unwrap().remove("imagePasteIds");
+            if let Some(ids) = &ids {
+                record["imagePasteIds"] = serde_json::json!(ids);
+            }
+            if !labelled {
+                let text = record["message"]["content"][0]["text"].as_str().unwrap();
+                record["message"]["content"][0]["text"] =
+                    text.replace("[Image #8] [Image #9] ", "").into();
+            }
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            writeln!(file, "{record}").unwrap();
+            let expected = if labelled && ids.is_some() {
+                vec!["[Image #8]", "[image image/png]"]
+            } else {
+                vec!["[image image/png]", "[image image/png]"]
+            };
+            let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+            let events = super::super::event_reader::tail(file.path(), 20).unwrap();
+            assert_eq!(summary.prompt_images, events[0].images);
+            assert_eq!(
+                summary
+                    .prompt_images
+                    .iter()
+                    .map(|image| image.label.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn queued_prompt_image_blocks_survive_missing_ids() {
+        let mut record: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-queued-image.jsonl"
+        ))
+        .unwrap();
+        record["attachment"]
+            .as_object_mut()
+            .unwrap()
+            .remove("imagePasteIds");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{record}").unwrap();
+        let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+        let events = super::super::event_reader::tail(file.path(), 20).unwrap();
+        assert_eq!(summary.prompt_images, events[0].images);
+        assert_eq!(summary.prompt_images.len(), 1);
+        assert_eq!(summary.prompt_images[0].label, "[image image/png]");
+    }
+
+    #[test]
+    fn image_only_prompts_keep_their_image_labels() {
+        let (_, records) = image_fixture();
+        let delivery: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-queued-image.jsonl"
+        ))
+        .unwrap();
+        for mut record in [records[4].clone(), delivery] {
+            let queued = record["type"] == "attachment";
+            let (content, ids) = if queued {
+                ("/attachment/prompt", "/attachment/imagePasteIds")
+            } else {
+                ("/message/content", "/imagePasteIds")
+            };
+            record
+                .pointer_mut(content)
+                .unwrap()
+                .as_array_mut()
+                .unwrap()
+                .retain(|block| block["type"] == "image");
+            for labelled in [true, false] {
+                let mut record = record.clone();
+                let numbers = record.pointer(ids).unwrap().as_array().unwrap();
+                let expected = numbers
+                    .iter()
+                    .map(|number| {
+                        if labelled {
+                            format!("[Image #{}]", number.as_u64().unwrap())
+                        } else {
+                            "[image image/png]".to_owned()
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if !labelled {
+                    let prompt = if queued {
+                        &mut record["attachment"]
+                    } else {
+                        &mut record
+                    };
+                    prompt.as_object_mut().unwrap().remove("imagePasteIds");
+                }
+                let mut file = tempfile::NamedTempFile::new().unwrap();
+                writeln!(file, "{record}").unwrap();
+                let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
+                let events = super::super::event_reader::tail(file.path(), 20).unwrap();
+                assert_eq!(summary.prompt, expected.join(" "));
+                assert_eq!(events.len(), 1);
+                assert_eq!(events[0].body, summary.prompt);
+                assert_eq!(events[0].images, summary.prompt_images);
+                assert_eq!(
+                    summary
+                        .prompt_images
+                        .iter()
+                        .map(|image| image.label.clone())
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+            }
+        }
     }
 
     #[test]

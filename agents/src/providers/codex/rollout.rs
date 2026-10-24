@@ -6,6 +6,7 @@ use crate::providers::tool::{self, Body, ToolData, ToolResult, list_title, tool_
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufRead, Read, Seek, SeekFrom};
@@ -159,6 +160,7 @@ impl Tasks {
             (Vec::new(), None)
         } else {
             first_prompt_records(
+                &reader.path,
                 reader
                     .records
                     .iter()
@@ -448,7 +450,33 @@ fn completed_user(record: &Value) -> bool {
 
 /// Pair by prompt text and, when present, turn ID. Consume each completed
 /// event only at its preceding user message.
-fn prompt_images(prompt: &Prompt, payload: &Value, completed: Option<&Value>) -> Vec<Image> {
+fn prompt_images(
+    prompt: &Prompt,
+    payload: &Value,
+    completed: Option<&Value>,
+    source: crate::event::SourceRecord,
+) -> Vec<Image> {
+    let images: Vec<_> = payload["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter(|(_, block)| block["type"] == "input_image")
+        .enumerate()
+        .map(|(index, (content_index, _))| Image {
+            label: prompt.attachments.get(index).map_or_else(
+                || format!("[Image #{}]", index + 1),
+                |(label, _)| label.clone(),
+            ),
+            source: ImageSource::Record {
+                record: source.clone(),
+                pointer: format!("/payload/content/{content_index}/image_url"),
+            },
+        })
+        .collect();
+    if !images.is_empty() {
+        return images;
+    }
     let paired = completed.filter(|record| {
         let response_turn =
             payload["internal_chat_message_metadata_passthrough"]["turn_id"].as_str();
@@ -456,32 +484,20 @@ fn prompt_images(prompt: &Prompt, payload: &Value, completed: Option<&Value>) ->
         (response_turn.is_none() || response_turn == event_turn)
             && content_text(&record["payload"]["item"]["content"]) == prompt.text
     });
-    let paths: Vec<_> = paired
+    paired
         .and_then(|record| record["payload"]["item"]["content"].as_array())
         .into_iter()
         .flatten()
-        .filter(|block| matches!(block["type"].as_str(), Some("local_image" | "image")))
-        .map(|block| block["path"].as_str())
-        .collect();
-    prompt
-        .attachments
-        .iter()
+        .filter(|block| block["type"] == "local_image")
         .enumerate()
-        .filter_map(|(index, (label, path))| {
-            let path = path
-                .as_deref()
-                .filter(|path| Path::new(path).is_file())
-                .or_else(|| {
-                    paths
-                        .get(index)
-                        .copied()
-                        .flatten()
-                        .filter(|path| Path::new(path).is_file())
-                })?;
-            let path = PathBuf::from(path);
+        .filter_map(|(index, block)| {
+            let path = PathBuf::from(block["path"].as_str()?);
             let metadata = std::fs::metadata(&path).ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
             Some(Image {
-                label: label.clone(),
+                label: format!("[Image #{}]", index + 1),
                 source: ImageSource::File {
                     path,
                     len: metadata.len(),
@@ -1100,16 +1116,21 @@ pub(super) fn first_prompt(
         {
             continue;
         }
-        if prompt.attachments.is_empty() {
-            return Ok((Vec::new(), Some(source(&record, start))));
-        }
         let completed = lines
             .next()
             .transpose()?
             .and_then(|line| serde_json::from_slice::<Value>(&line).ok())
             .filter(completed_user);
         return Ok((
-            prompt_images(&prompt, payload, completed.as_ref()),
+            prompt_images(
+                &prompt,
+                payload,
+                completed.as_ref(),
+                crate::event::SourceRecord {
+                    path: path.to_owned(),
+                    offset: start,
+                },
+            ),
             Some(source(&record, start)),
         ));
     }
@@ -1117,6 +1138,7 @@ pub(super) fn first_prompt(
 }
 
 fn first_prompt_records<'a>(
+    path: &Path,
     records: impl IntoIterator<Item = (u64, &'a Value)>,
     line_ends: &HashMap<u64, u64>,
     first_user_message: &str,
@@ -1146,16 +1168,20 @@ fn first_prompt_records<'a>(
         {
             continue;
         }
-        let images = if prompt.attachments.is_empty() {
-            Vec::new()
-        } else {
-            let completed = records
-                .next()
-                .filter(|(next, _)| line_ends.get(&offset) == Some(next))
-                .map(|(_, record)| record)
-                .filter(|record| completed_user(record));
-            prompt_images(&prompt, payload, completed)
-        };
+        let completed = records
+            .next()
+            .filter(|(next, _)| line_ends.get(&offset) == Some(next))
+            .map(|(_, record)| record)
+            .filter(|record| completed_user(record));
+        let images = prompt_images(
+            &prompt,
+            payload,
+            completed,
+            crate::event::SourceRecord {
+                path: path.to_owned(),
+                offset,
+            },
+        );
         return (images, Some(source(record, offset)));
     }
     (Vec::new(), None)
@@ -2503,6 +2529,7 @@ fn events_with_context<'a>(
                         &prompt,
                         payload,
                         completed.as_ref().map(|(_, record)| *record),
+                        reference(offset),
                     );
                     prompt.body()
                 } else {
@@ -4781,12 +4808,94 @@ mod summary_cache_tests {
     }
 
     #[test]
-    fn prompt_attachments_recheck_paths_and_keep_physical_line_pairing() {
+    fn prompt_images_keep_record_sources_after_local_files_disappear() {
+        // Real prompt-image probe records, with the recorded base64 truncation retained.
         let records: Vec<Value> =
+            include_str!("../../../tests/fixtures/codex-images/prompt-record.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let context = include_str!("../../../tests/fixtures/codex-images/context.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        write!(file, "{context}").unwrap();
+        let offset = context.len() as u64;
+        for record in &records {
+            writeln!(file, "{record}").unwrap();
+        }
+        let prompt = user_prompt(&records[0]["payload"]["content"])
+            .body()
+            .unwrap();
+        let expected = vec![Image {
+            label: "[Image #1]".into(),
+            source: ImageSource::Record {
+                record: crate::event::SourceRecord {
+                    path: file.path().to_owned(),
+                    offset,
+                },
+                pointer: "/payload/content/1/image_url".into(),
+            },
+        }];
+        assert_eq!(tail(file.path(), 1).unwrap()[0].images, expected);
+        assert_eq!(first_prompt(file.path(), &prompt).unwrap().0, expected);
+        let mut tasks = Tasks::default();
+        tasks.summary(file.path()).unwrap();
+        assert_eq!(tasks.first_prompt(&prompt).unwrap().0, expected);
+        // The completed local-image copy is not required for the Record source.
+        file.as_file_mut().set_len(offset).unwrap();
+        file.as_file_mut().seek(SeekFrom::Start(offset)).unwrap();
+        writeln!(file, "{}", records[0]).unwrap();
+        assert_eq!(tail(file.path(), 1).unwrap()[0].images, expected);
+        assert_eq!(first_prompt(file.path(), &prompt).unwrap().0, expected);
+    }
+
+    #[test]
+    fn prompt_images_keep_each_content_index_and_label() {
+        let mut record: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/codex-images/prompt-record.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        let mut second = record["payload"]["content"].as_array().unwrap()[..3].to_vec();
+        second[0]["text"] = second[0]["text"]
+            .as_str()
+            .unwrap()
+            .replace("[Image #1]", "[Image #2]")
+            .into();
+        record["payload"]["content"]
+            .as_array_mut()
+            .unwrap()
+            .extend(second);
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{record}").unwrap();
+        let events = tail(file.path(), 1).unwrap();
+        let images = &events[0].images;
+        assert_eq!(images.len(), 2);
+        for (image, (label, index)) in images.iter().zip([("[Image #1]", 1), ("[Image #2]", 5)]) {
+            assert_eq!(image.label, label);
+            assert_eq!(
+                image.source,
+                ImageSource::Record {
+                    record: crate::event::SourceRecord {
+                        path: file.path().to_owned(),
+                        offset: 0
+                    },
+                    pointer: format!("/payload/content/{index}/image_url"),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn prompt_attachments_recheck_paths_and_keep_physical_line_pairing() {
+        let mut records: Vec<Value> =
             include_str!("../../../tests/fixtures/codex-images/fallback.jsonl")
                 .lines()
                 .map(|line| serde_json::from_str(line).unwrap())
                 .collect();
+        records[0]["payload"]["content"] =
+            Value::Array(vec![records[0]["payload"]["content"][3].clone()]);
         let mut completed = records[1].clone();
         let image = tempfile::NamedTempFile::new().unwrap();
         completed["payload"]["item"]["content"][1]["path"] = image.path().to_str().unwrap().into();
@@ -4798,7 +4907,18 @@ mod summary_cache_tests {
         writeln!(file, "{}\n{completed}", records[0]).unwrap();
         let mut tasks = Tasks::default();
         tasks.summary(file.path()).unwrap();
-        assert_eq!(tasks.first_prompt(&prompt).unwrap().0.len(), 1);
+        let metadata = image.as_file().metadata().unwrap();
+        assert_eq!(
+            tasks.first_prompt(&prompt).unwrap().0,
+            vec![Image {
+                label: "[Image #1]".into(),
+                source: ImageSource::File {
+                    path: image.path().to_owned(),
+                    len: metadata.len(),
+                    modified: metadata.modified().unwrap(),
+                },
+            }]
+        );
         image.close().unwrap();
         assert!(tasks.first_prompt(&prompt).unwrap().0.is_empty());
         std::fs::write(
