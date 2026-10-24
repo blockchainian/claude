@@ -3,7 +3,7 @@
 
 import crypto from "node:crypto";
 import readline from "node:readline";
-import { SessionStore, askTimeoutSeconds, readSupervisor, running } from "./inbox.mjs";
+import { SessionStore, askTimeoutSeconds, readSupervisor, running } from "../lib/inbox.mjs";
 
 const textArgument = { type: "object", properties: { text: { type: "string", description: "The message for Claude." } }, required: ["text"], additionalProperties: false };
 const TOOLS = [

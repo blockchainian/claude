@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { SessionStore, writeSupervisor } from "../codex-manager/inbox.mjs";
+import { SessionStore, writeSupervisor } from "../lib/inbox.mjs";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 
 const manager = path.resolve("plugins/codex/codex-manager/manager.mjs");

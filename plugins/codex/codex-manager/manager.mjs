@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ABOUTME: Lets Claude Code run codex threads on the shared app-server daemon as supervised workers.
-// ABOUTME: `mcp` serves Claude's tools and relays codex events; `await` and `pending` deliver them; `claude` serves codex.
+// ABOUTME: `mcp` serves Claude's tools and relays codex events; `await` and `pending` deliver them.
 
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -9,8 +9,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 import { readStdin } from "../lib/stdin.mjs";
-import { runClaude } from "./claude.mjs";
-import { SessionStore, askTimeoutSeconds, readSupervisor, writeSupervisor } from "./inbox.mjs";
+import { SessionStore, askTimeoutSeconds, readSupervisor, writeSupervisor } from "../lib/inbox.mjs";
 import { parentProcesses, recordedSessionId, resolveSessionId } from "./session.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -21,9 +20,7 @@ const usage = `usage:
   manager.mjs await --thread <id> [--timeout <s>]   print the next inbox events and exit
   manager.mjs detach --thread <id>                   release a thread from its owning session
   manager.mjs pending                               Stop hook: block on undelivered events and unwatched threads
-  manager.mjs owner                                 PostToolUse hook: record the thread's starting agent
-  manager.mjs claude                                serve notify_claude and ask_claude to codex over stdio
-  manager.mjs whoami                                print the resolved Claude session id`;
+  manager.mjs owner                                 PostToolUse hook: record the thread's starting agent`;
 
 const DEFAULT_DECISIONS = ["accept", "acceptForSession", "decline", "cancel"];
 const MODEL_EFFORTS = Object.freeze({ "gpt-6.1-sol": ["medium"], "gpt-6-luna": ["high"] });
@@ -38,7 +35,7 @@ const FORWARDED_ENV = ["CODEX_MANAGER_STATE_DIR", "CODEX_MANAGER_ASK_TIMEOUT"];
 /** How codex launches the server that carries notify_claude and ask_claude, as an mcp_servers entry. */
 function claudeToolsServer() {
   const env = Object.fromEntries(FORWARDED_ENV.filter((name) => process.env[name]).map((name) => [name, process.env[name]]));
-  return { command: process.execPath, args: [scriptPath, "claude"], env, tool_timeout_sec: askTimeoutSeconds() + TOOL_TIMEOUT_MARGIN_SECONDS, default_tools_approval_mode: "approve" };
+  return { command: process.execPath, args: [fileURLToPath(new URL("../claude-client/client.mjs", import.meta.url)), "mcp"], env, tool_timeout_sec: askTimeoutSeconds() + TOOL_TIMEOUT_MARGIN_SECONDS, default_tools_approval_mode: "approve" };
 }
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000, 30000];
 
@@ -713,11 +710,6 @@ export async function main(argv) {
   if (command === "detach") return runDetach(options);
   if (command === "pending") return runPending();
   if (command === "owner") return runOwner();
-  if (command === "claude") return runClaude(JSON.parse(await readFile(pluginManifestPath, "utf8")).version);
-  if (command === "whoami") {
-    process.stdout.write(`${await resolveSessionId()}\n`);
-    return 0;
-  }
   throw new Error(command ? `unknown command: ${command}` : "missing command");
 }
 

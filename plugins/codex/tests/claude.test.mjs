@@ -11,6 +11,7 @@ test("the packaged Claude client starts without a Claude host and delivers real 
   const root = path.resolve("plugins/codex");
   const manifest = JSON.parse(await readFile(path.join(root, ".codex-plugin/plugin.json"), "utf8"));
   const server = manifest.mcpServers["claude-client"];
+  assert.deepEqual(server.args, ["claude-client/client.mjs", "mcp"]);
   const state = await mkdtemp(path.join(os.tmpdir(), "claude-"));
   const child = spawn(server.command, server.args, {
     cwd: path.resolve(root, server.cwd),

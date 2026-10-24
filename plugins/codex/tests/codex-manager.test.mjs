@@ -12,6 +12,7 @@ import { fakeDaemon, send } from "./helpers/fake-daemon.mjs";
 import { parentProcesses, resolveSessionId } from "../codex-manager/session.mjs";
 
 const manager = path.resolve("plugins/codex/codex-manager/manager.mjs");
+const client = path.resolve("plugins/codex/claude-client/client.mjs");
 const session = "11111111-2222-3333-4444-555555555555";
 
 async function tempHome() {
@@ -19,9 +20,9 @@ async function tempHome() {
   return { home, dir: path.join(home, session), async close() { await rm(home, { recursive: true, force: true }); } };
 }
 
-function run(args, { env = {}, stdin } = {}) {
+function run(args, { env = {}, stdin, entry = manager } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [manager, ...args], {
+    const child = spawn(process.execPath, [entry, ...args], {
       env: { ...process.env, CLAUDE_CODE_SESSION_ID: session, ...env },
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -51,24 +52,53 @@ test("resolveSessionId prefers the environment, then the parent claude session f
   }
 });
 
-test("whoami runs when the script is reached through a symlinked plugin directory", async () => {
+test("await runs when the script is reached through a symlinked plugin directory", async () => {
   const link = await mkdtemp(path.join(os.tmpdir(), "codex-manager-link-"));
+  const home = await tempHome();
   try {
     await symlink(path.dirname(path.dirname(manager)), path.join(link, "codex"));
-    const viaLink = path.join(link, "codex", "codex-manager", "manager.mjs");
-    const result = await new Promise((resolve) => {
-      const child = spawn(process.execPath, [viaLink, "whoami"], { env: { ...process.env, CLAUDE_CODE_SESSION_ID: session }, stdio: ["ignore", "pipe", "pipe"] });
-      let stdout = "";
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk) => { stdout += chunk; });
-      child.on("close", (code) => resolve({ code, stdout }));
+    await mkdir(home.dir, { recursive: true });
+    const event = '{"kind":"notify","text":"through symlink"}\n';
+    await writeFile(path.join(home.dir, "linked-thread.jsonl"), event);
+    const result = await run(["await", "--thread", "linked-thread", "--timeout", "1"], {
+      entry: path.join(link, "codex", "codex-manager", "manager.mjs"),
+      env: { CODEX_MANAGER_STATE_DIR: home.home }
     });
-    assert.equal(result.code, 0);
-    assert.equal(result.stdout, `${session}\n`);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, event);
+    assert.equal(await readFile(path.join(home.dir, "linked-thread.cursor"), "utf8"), String(Buffer.byteLength(event)));
+  } finally {
+    await rm(link, { recursive: true, force: true });
+    await home.close();
+  }
+});
+
+test("claude-client mcp starts through a symlink without a Claude session", async () => {
+  const link = await mkdtemp(path.join(os.tmpdir(), "claude-client-link-"));
+  try {
+    await symlink(path.dirname(path.dirname(manager)), path.join(link, "codex"));
+    const result = await run(["mcp"], {
+      entry: path.join(link, "codex", "claude-client", "client.mjs"),
+      env: { CLAUDE_CODE_SESSION_ID: "", CODEX_MANAGER_SESSIONS_DIR: path.join(link, "no-sessions") },
+      stdin: '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n'
+    });
+    assert.equal(result.code, 0, result.stderr);
+    const manifest = JSON.parse(await readFile("plugins/codex/.codex-plugin/plugin.json", "utf8"));
+    assert.deepEqual(JSON.parse(result.stdout).result.serverInfo, { name: "claude-client", version: manifest.version });
   } finally {
     await rm(link, { recursive: true, force: true });
   }
 });
+
+for (const command of ["claude", "whoami"]) {
+  test(`manager rejects removed command ${command}`, async () => {
+    const result = await run([command]);
+    assert.equal(result.code, 2);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, new RegExp(`unknown command: ${command}`));
+    assert.doesNotMatch(result.stderr, /manager\.mjs (claude|whoami)/);
+  });
+}
 
 test("await prints unread lines, advances the cursor, and times out on silence", { timeout: 15_000 }, async () => {
   const home = await tempHome();
@@ -279,8 +309,8 @@ test("hook configuration matches the plugin's thread-registering tools and both 
 });
 
 class McpChild {
-  constructor(home, socketPath, env = {}, command = "mcp") {
-    this.child = spawn(process.execPath, [manager, command], {
+  constructor(home, socketPath, env = {}, entry = manager) {
+    this.child = spawn(process.execPath, [entry, "mcp"], {
       env: { ...process.env, CLAUDE_CODE_SESSION_ID: session, CODEX_MANAGER_STATE_DIR: home, CODEX_MANAGER_SESSIONS_DIR: path.join(home, "sessions"), CODEX_DAEMON_SOCKET: socketPath, ...env },
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -329,7 +359,7 @@ class McpChild {
 /** The server codex runs for notify_claude and ask_claude; it gets no Claude session id of its own. */
 class ToolsChild extends McpChild {
   constructor(home, env = {}) {
-    super(home, "unused", { CLAUDE_CODE_SESSION_ID: "", ...env }, "claude");
+    super(home, "unused", { CLAUDE_CODE_SESSION_ID: "", ...env }, client);
   }
 
   tool(name, threadId, callId, text) {
@@ -467,7 +497,7 @@ test("mcp starts a thread that reaches Claude's tools over MCP, and relays compl
     assert.equal(start.serviceName, "codex-manager");
     assert.deepEqual(start.config, {
       "sandbox_workspace_write.network_access": true,
-      "mcp_servers.claude-client": { command: process.execPath, args: [manager, "claude"], env: { CODEX_MANAGER_STATE_DIR: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" }
+      "mcp_servers.claude-client": { command: process.execPath, args: [client, "mcp"], env: { CODEX_MANAGER_STATE_DIR: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" }
     });
     assert.equal(start.dynamicTools, undefined);
     assert.deepEqual(JSON.parse(await readFile(path.join(home.home, "threads", "thread-A.json"), "utf8")), { sessionId: session, pid: mcp.child.pid });
@@ -1735,7 +1765,7 @@ test("mcp starts a thread on an allowed model and effort, and refuses any other 
       assert.equal(start.model, model);
       assert.deepEqual(start.config, {
         "sandbox_workspace_write.network_access": true,
-        "mcp_servers.claude-client": { command: process.execPath, args: [manager, "claude"], env: { CODEX_MANAGER_STATE_DIR: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" },
+        "mcp_servers.claude-client": { command: process.execPath, args: [client, "mcp"], env: { CODEX_MANAGER_STATE_DIR: home.home }, tool_timeout_sec: 360, default_tools_approval_mode: "approve" },
         model_reasoning_effort: effort
       });
     }

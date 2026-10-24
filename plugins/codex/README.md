@@ -43,7 +43,7 @@ codex plugin add claude@blockchainian
 ```
 
 The plugin registers the `claude-client` MCP server with `ask_claude` and
-`notify_claude`. It starts `node codex-manager/manager.mjs claude` from its installed
+`notify_claude`. It starts `node claude-client/client.mjs mcp` from its installed
 directory, so no absolute script path or manual global MCP entry is needed.
 Claude's PostToolUse, Stop and SubagentStop hooks are excluded from the Codex installation.
 
@@ -143,7 +143,7 @@ whatever was still held, and the manager withdraws the open questions too.
 
 ## How a tool call finds its Claude session
 
-Codex starts the tools server itself (`manager.mjs claude`), so it
+Codex starts the tools server itself (`claude-client/client.mjs mcp`), so it
 knows nothing of Claude's session. Codex sends the calling thread's id with
 every MCP tool call (`_meta.threadId`). The manager records, for each thread it
 starts, attaches or adopts, which session supervises it and the manager's pid;
