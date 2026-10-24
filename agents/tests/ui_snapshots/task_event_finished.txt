@@ -15,7 +15,7 @@
                                         run a background job                                    5s
  A long response whose whitespace collapses and whose body must be truncated before the…  11:59:20
                                               run tests                                        30s
-────────────────────────────────────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────── Assistant ─────────────────────────────────────────────
                                               run tests                                        30s
 
 
