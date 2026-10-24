@@ -2102,8 +2102,9 @@ pub(super) struct FittedBody {
 
 fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> FittedBody {
     let activity = event.activity();
+    let label = super::render::image_labels(&activity.label, &event.images);
     summary_line(
-        &activity.label,
+        &label,
         &activity.kind,
         activity.exit_code,
         &activity.paths,
@@ -2237,6 +2238,43 @@ fn highlight_indices(line: &mut Line<'static>, indices: &[u32]) {
 pub(super) mod event_markdown {
     use super::*;
     use ratatui::style::Modifier;
+
+    #[test]
+    fn mixed_prompt_image_label_is_visible_and_linked_in_the_list() {
+        let mut record: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-prompt-images.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        record["message"]["content"][0]["text"] = "Inspect image".into();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("transcript.jsonl");
+        std::fs::write(&path, format!("{record}\n")).unwrap();
+        let event = crate::providers::claude::event_reader::tail(&path, 20)
+            .unwrap()
+            .remove(0);
+        let area = Rect::new(0, 0, 120, 1);
+        let mut buffer = Buffer::empty(area);
+        let links = render_event(&event, "", false, area, &mut buffer, None, dir.path());
+        let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("Inspect image"), "{text}");
+        assert!(text.contains(&event.images[0].label), "{text}");
+        let snapshot = format!("{}\n", text.trim_end());
+        if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+            std::fs::write("tests/ui_snapshots/mixed_prompt_image_list.txt", &snapshot).unwrap();
+        }
+        assert_eq!(
+            snapshot,
+            include_str!("../../tests/ui_snapshots/mixed_prompt_image_list.txt")
+        );
+        assert_eq!(links.len(), 1);
+        assert_eq!(
+            links[0].1,
+            super::super::links::LinkTarget::Image(event.images[0].source.clone())
+        );
+    }
 
     #[test]
     fn queued_pasted_image_links_in_the_list_and_event_detail() {

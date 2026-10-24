@@ -2,6 +2,29 @@ use super::formatting::{format_duration, format_relative_time, tail_lines};
 use super::line_truncation::{truncate_line_to_width, truncate_line_with_ellipsis_if_overflow};
 use super::*;
 
+/// Adds labels for attached sources that the text does not already mention.
+pub(super) fn image_labels<'a>(
+    text: &'a str,
+    images: &[crate::images::Image],
+) -> std::borrow::Cow<'a, str> {
+    let mut seen: std::collections::HashSet<_> = images
+        .iter()
+        .filter(|image| text.contains(&image.label))
+        .map(|image| &image.source)
+        .collect();
+    let mut labelled = std::borrow::Cow::Borrowed(text);
+    for image in images {
+        if seen.insert(&image.source) {
+            let body = labelled.to_mut();
+            if !body.is_empty() {
+                body.push('\n');
+            }
+            body.push_str(&image.label);
+        }
+    }
+    labelled
+}
+
 pub(super) fn row(area: Rect, offset: u16, height: u16) -> Rect {
     let offset = offset.min(area.height);
     Rect::new(
@@ -1289,6 +1312,7 @@ impl View {
         let mut continuations = std::collections::BTreeMap::new();
         let mut bodies = Vec::new();
         // The full text a double click copies from each body, parallel to `bodies`.
+        let labelled_prompt = image_labels(&session.prompt, &session.prompt_images);
         let mut copies: Vec<Option<(&str, &'static str)>> = Vec::new();
         // A fingerprint of each body's text, parallel to `bodies`.
         let mut keys = Vec::new();
@@ -1463,7 +1487,7 @@ impl View {
             };
             separate_section(&mut items);
             items.push(Item::Decoration(prompt_header));
-            let prompt_text = match session.prompt.trim() {
+            let prompt_text = match labelled_prompt.trim() {
                 "" => "No prompt available.",
                 prompt => prompt,
             };
@@ -1477,13 +1501,13 @@ impl View {
             );
             items.extend(prompt_body.into_iter().map(Item::from));
             bodies.push(prompt_start..items.len());
-            keys.push(body_key("Prompt", &session.prompt));
+            keys.push(body_key("Prompt", &labelled_prompt));
             copies.push(
-                Some((session.prompt.as_str(), "Copied prompt"))
+                Some((labelled_prompt.as_ref(), "Copied prompt"))
                     .filter(|(prompt, _)| !prompt.trim().is_empty()),
             );
             body_links.push(super::links::text_links(
-                &session.prompt,
+                &labelled_prompt,
                 &session.cwd,
                 &session.prompt_images,
             ));
@@ -2901,5 +2925,126 @@ mod section_edge_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod prompt_image_tests {
+    use super::*;
+    use crate::providers::Provider;
+
+    #[test]
+    fn mixed_prompt_image_aliases_share_one_display_label() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-prompt-images.jsonl");
+        let event = crate::providers::claude::event_reader::tail(&path, 100)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.images.len() == 1)
+            .unwrap();
+        let mut image = event.images[0].clone();
+        image.label = "[image image/png]".into();
+        let mut alias = image.clone();
+        alias.label = "/screens/example.png".into();
+        let images = [image.clone(), alias.clone(), image.clone()];
+        assert_eq!(
+            image_labels("Inspect image", &images),
+            "Inspect image\n[image image/png]"
+        );
+        for text in [&image.label, &alias.label] {
+            assert!(matches!(
+                image_labels(text, &images),
+                std::borrow::Cow::Borrowed(_)
+            ));
+            assert_eq!(image_labels(text, &images), text.as_str());
+        }
+        assert_eq!(image_labels("No attachments", &[]), "No attachments");
+    }
+
+    #[test]
+    fn mixed_prompt_image_label_is_visible_and_clickable_in_task_details() {
+        let mut record: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-prompt-images.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        record["message"]["content"][0]["text"] = "Inspect image".into();
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("projects/probe");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+            format!("{record}\n"),
+        )
+        .unwrap();
+        let mut provider = crate::providers::claude::ClaudeProvider::new(dir.path().into());
+        let mut sessions = provider.refresh(1).sessions;
+        assert_eq!(sessions.len(), 1);
+        sessions[0].status = SessionStatus::Ready;
+        let image = sessions[0].prompt_images[0].clone();
+        let mut view = View::default();
+        view.set_sessions(sessions, false);
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, Utc::now());
+        let text = buffer
+            .content
+            .chunks(120)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell_text(cell.symbol()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Inspect image"), "{text}");
+        assert!(
+            text.contains(&image.label),
+            "label={:?}\n{text}",
+            image.label
+        );
+        let snapshot = format!(
+            "{}\n",
+            text.lines()
+                .find(|line| line.contains(&image.label))
+                .unwrap()
+                .split_once('│')
+                .unwrap()
+                .1
+                .trim_end()
+        );
+        if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+            std::fs::write("tests/ui_snapshots/mixed_prompt_image_task.txt", &snapshot).unwrap();
+        }
+        assert_eq!(
+            snapshot,
+            include_str!("../../tests/ui_snapshots/mixed_prompt_image_task.txt")
+        );
+        let target = super::super::links::LinkTarget::Image(image.source);
+        let rect = view
+            .viewport
+            .borrow()
+            .task_details_links
+            .iter()
+            .find(|(_, link)| link == &target)
+            .unwrap()
+            .0;
+        let press = crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: rect.x,
+            row: rect.y,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        };
+        assert_eq!(view.handle_mouse(press), None);
+        let action = view.handle_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+            ..press
+        });
+        let action = action.or_else(|| {
+            view.flush_pending_click(std::time::Instant::now() + view.double_click_interval)
+        });
+        assert_eq!(action, Some(Action::Open(target)));
     }
 }
