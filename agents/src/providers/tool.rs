@@ -454,11 +454,24 @@ fn format_code(lang: &str, text: &str) -> String {
     }
 }
 
+/// A string, or a list of strings joined with commas.
+fn title_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(items) => items
+            .iter()
+            .map(Value::as_str)
+            .collect::<Option<Vec<_>>>()
+            .map(|items| items.join(", ")),
+        _ => None,
+    }
+}
+
 pub(crate) fn presentation(name: &str, data: &ToolData<'_>) -> Presentation {
     let rule = rule(name);
     let title = rule.title.iter().find_map(|pick| {
         let title = match pick {
-            Pick::Field(source, pointer) => field(data, *source, pointer)?.as_str()?.to_owned(),
+            Pick::Field(source, pointer) => title_text(field(data, *source, pointer)?)?,
             Pick::With(function) => function(data)?,
         };
         (!title.trim().is_empty()).then_some(title)

@@ -4,6 +4,12 @@ pub(crate) const SERVER: McpServer = McpServer {
     name: "computer-use",
     tools: &[
         ToolRule {
+            name: "request_access",
+            title: &[Pick::Field(Source::Input, "/apps")],
+            input: Some((Pick::Field(Source::Input, "/reason"), Format::Text)),
+            ..DEFAULT_RULE
+        },
+        ToolRule {
             name: "open_application",
             title: &[Pick::Field(Source::Input, "/app")],
             ..DEFAULT_RULE
@@ -30,6 +36,37 @@ pub(crate) const SERVER: McpServer = McpServer {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn computer_use_request_access_titles_its_apps_and_shows_its_reason() {
+        let mut input = serde_json::json!({
+            "apps": ["Wispr Flow"],
+            "reason": "在 Wispr Flow 设置里找有没有还原剪贴板的开关"
+        });
+        let presentation = |input: &serde_json::Value| {
+            super::presentation(
+                "mcp__computer-use__request_access",
+                &super::ToolData {
+                    input,
+                    result: None,
+                },
+            )
+        };
+        let shown = presentation(&input);
+        assert_eq!(shown.title.as_deref(), Some("Wispr Flow"));
+        assert_eq!(
+            shown.input,
+            vec![crate::event::Section::Prose {
+                text: "在 Wispr Flow 设置里找有没有还原剪贴板的开关".into(),
+                markdown: false,
+            }]
+        );
+        input["apps"] = serde_json::json!(["Wispr Flow", "System Settings"]);
+        assert_eq!(
+            presentation(&input).title.as_deref(),
+            Some("Wispr Flow, System Settings")
+        );
+    }
+
     #[test]
     fn computer_use_open_application_titles_its_app() {
         let input = serde_json::json!({"app": "Wispr Flow"});
