@@ -162,11 +162,10 @@ impl Selector {
             )
         };
         match &self.kind {
-            SelectorKind::Repository { dir, entries, .. } => {
-                let mut rows = vec![ListRow::Text(Line::from(
-                    super::formatting::format_directory_display(dir, None).dim(),
-                ))];
-                rows.extend(entries.iter().enumerate().map(|(index, entry)| {
+            SelectorKind::Repository { entries, .. } => entries
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| {
                     let text = match entry {
                         BrowseEntry::Parent(_) => Line::from("..".dim()),
                         BrowseEntry::Folder(path) => {
@@ -175,9 +174,8 @@ impl Selector {
                         BrowseEntry::Repository(path) => Line::from(name(path)),
                     };
                     ListRow::Choice(index, text)
-                }));
-                rows
-            }
+                })
+                .collect(),
             SelectorKind::Branch { branches, .. } => branches
                 .iter()
                 .enumerate()

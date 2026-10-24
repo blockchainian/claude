@@ -17,7 +17,7 @@ fn short_pickers_align_to_bottom_with_matching_hits() {
         let mut buffer = Buffer::empty(area);
         view.render_controls(area, &mut buffer);
         let first = view.viewport.borrow().picker_rows[0].0;
-        let header = u16::from(matches!(field, Field::Directory | Field::Model));
+        let header = u16::from(field == Field::Model);
         assert_eq!(
             first.y,
             area.bottom() - count - if branch { 2 } else { 0 } + header,
