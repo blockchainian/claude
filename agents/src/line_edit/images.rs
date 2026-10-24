@@ -3,13 +3,13 @@ use crate::images::ImageAttachment;
 use std::{ops::Range, path::PathBuf};
 
 #[derive(Clone, Debug)]
-pub(super) struct ImageSpan {
+pub(crate) struct ImageSpan {
     range: Range<usize>,
     image: ImageAttachment,
 }
 
 impl LineEdit {
-    pub(in crate::ui) fn stored_input(&self) -> crate::state::StoredDraftInput {
+    pub(crate) fn stored_input(&self) -> crate::state::StoredDraftInput {
         self.preserve_images();
         crate::state::StoredDraftInput {
             text: self.text.clone(),
@@ -17,7 +17,7 @@ impl LineEdit {
         }
     }
 
-    pub(in crate::ui) fn restore_input(input: &crate::state::StoredDraftInput) -> Self {
+    pub(crate) fn restore_input(input: &crate::state::StoredDraftInput) -> Self {
         let mut edit = Self::default();
         edit.set_text(&input.text);
         let mut offset = 0;
@@ -47,7 +47,7 @@ impl LineEdit {
         edit
     }
 
-    pub(in crate::ui) fn insert_image(&mut self, image: ImageAttachment) {
+    pub(crate) fn insert_image(&mut self, image: ImageAttachment) {
         self.delete_selection();
         let number = self.images.len() + 1;
         let label = format!("[Image #{number}]");
@@ -61,20 +61,20 @@ impl LineEdit {
         self.align_cursor();
     }
 
-    pub(in crate::ui) fn image_paths(&self) -> Vec<PathBuf> {
+    pub(crate) fn image_paths(&self) -> Vec<PathBuf> {
         self.images
             .iter()
             .map(|span| span.image.path().to_owned())
             .collect()
     }
 
-    pub(in crate::ui) fn preserve_images(&self) {
+    pub(crate) fn preserve_images(&self) {
         for span in &self.images {
             span.image.preserve();
         }
     }
 
-    pub(in crate::ui) fn prompt_text(&self) -> String {
+    pub(crate) fn prompt_text(&self) -> String {
         let mut text = self.text.clone();
         for span in self.images.iter().rev() {
             text.replace_range(span.range.clone(), "");
@@ -82,7 +82,7 @@ impl LineEdit {
         text
     }
 
-    pub(in crate::ui) fn append_editor(&mut self, editor: Self) {
+    pub(crate) fn append_editor(&mut self, editor: Self) {
         self.clear_selection();
         self.end();
         let offset = self.cursor;
@@ -96,7 +96,7 @@ impl LineEdit {
         self.align_cursor();
     }
 
-    pub(super) fn relabel_images(&mut self) {
+    pub(crate) fn relabel_images(&mut self) {
         for index in 0..self.images.len() {
             let range = self.images[index].range.clone();
             let label = format!("[Image #{}]", index + 1);
@@ -125,7 +125,7 @@ impl LineEdit {
         }
     }
 
-    pub(super) fn image_caret(&self, offset: usize) -> usize {
+    pub(crate) fn image_caret(&self, offset: usize) -> usize {
         let start = self.image_boundary(offset, false);
         let end = self.image_boundary(offset, true);
         let boundary = if offset - start < end - offset {
@@ -136,7 +136,7 @@ impl LineEdit {
         self.caret_boundary(boundary, boundary >= offset)
     }
 
-    pub(super) fn caret_boundary(&self, offset: usize, forward: bool) -> usize {
+    pub(crate) fn caret_boundary(&self, offset: usize, forward: bool) -> usize {
         let mut positions = self
             .text
             .grapheme_indices(true)
@@ -156,7 +156,7 @@ impl LineEdit {
         }
     }
 
-    pub(super) fn image_boundary(&self, cursor: usize, forward: bool) -> usize {
+    pub(crate) fn image_boundary(&self, cursor: usize, forward: bool) -> usize {
         self.images
             .iter()
             .find(|span| span.range.start < cursor && cursor < span.range.end)
@@ -169,7 +169,7 @@ impl LineEdit {
             })
     }
 
-    pub(super) fn replace_images(&mut self, range: Range<usize>, text: &str) -> Range<usize> {
+    pub(crate) fn replace_images(&mut self, range: Range<usize>, text: &str) -> Range<usize> {
         let range = self.image_boundary(range.start, false)..self.image_boundary(range.end, true);
         self.images.retain_mut(|span| {
             if range.start < span.range.end && span.range.start < range.end {

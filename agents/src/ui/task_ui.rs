@@ -1,7 +1,7 @@
 //! Per-task interface state parked while another task is shown.
 
 use super::{
-    SectionScroll, draft_controls::Selector, event_search::EventMatches, line_edit::LineEdit,
+    SectionScroll, draft_controls::Selector, event_search::EventMatches, crate::line_edit::LineEdit,
     prompt_box::PromptBox, question_view::QuestionView,
 };
 use crate::{event::Event, model::EventSort};

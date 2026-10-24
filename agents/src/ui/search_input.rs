@@ -1,4 +1,4 @@
-use super::line_edit::LineEdit;
+use crate::line_edit::LineEdit;
 use super::render::{render_input_row, row};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{buffer::Buffer, layout::Rect};

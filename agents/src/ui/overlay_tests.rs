@@ -150,7 +150,7 @@ fn picker(kind: &str, check_underlines: bool) {
                 SelectorKind::Branch {
                     draft,
                     branches: vec!["main".into()],
-                    editor: super::super::line_edit::LineEdit::default(),
+                    editor: crate::line_edit::LineEdit::default(),
                     editing: false,
                 }
             }

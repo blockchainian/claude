@@ -58,7 +58,7 @@ pub(super) enum SelectorKind {
     Branch {
         draft: DraftKey,
         branches: Vec<String>,
-        editor: line_edit::LineEdit,
+        editor: crate::line_edit::LineEdit,
         editing: bool,
     },
     Model {
@@ -106,7 +106,7 @@ impl Selector {
         }
     }
 
-    pub(super) fn branch_editor(&self) -> Option<&line_edit::LineEdit> {
+    pub(super) fn branch_editor(&self) -> Option<&crate::line_edit::LineEdit> {
         match &self.kind {
             SelectorKind::Branch {
                 editor,
@@ -117,7 +117,7 @@ impl Selector {
         }
     }
 
-    pub(super) fn active_editor(&mut self) -> Option<&mut line_edit::LineEdit> {
+    pub(super) fn active_editor(&mut self) -> Option<&mut crate::line_edit::LineEdit> {
         match &mut self.kind {
             SelectorKind::Branch {
                 editor,
@@ -318,7 +318,7 @@ impl View {
             .iter()
             .position(|branch| select_current && branch == current)
             .unwrap_or(branches.len());
-        let mut editor = line_edit::LineEdit::default();
+        let mut editor = crate::line_edit::LineEdit::default();
         if let Some(name) = &draft.pending_branch {
             editor.set_text(name);
         } else if let DraftBranch::New(name) = &draft.branch {
