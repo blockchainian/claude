@@ -172,6 +172,14 @@ static ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
             None,
             false,
         ),
+        row(
+            r"open\x00(.+)",
+            &["-h", "--header"],
+            silent,
+            Plain,
+            None,
+            false,
+        ),
         row(r"sleep\x00([0-9.]+)", &[], silent, Plain, None, false),
         row(
             r"(?:head|tail)\x00-n\x00([0-9]+)\x00([^\x00]+)",
@@ -1125,6 +1133,8 @@ mod shape_tests {
             ("mkdir -p build", 0, Some(0), false, false),
             ("git add -A -- a.rs", 0, Some(0), false, false),
             ("git add -nv a.rs", 0, None, false, false),
+            ("open -a Preview a.png", 0, Some(0), false, false),
+            ("open -h stdio.h", 0, None, false, false),
             ("sleep 0.1", 0, Some(0), false, false),
             ("head -n 3 a.py", 0, Some(3), true, false),
             ("tail -n 2 a.rs", 0, Some(2), true, false),
