@@ -369,14 +369,6 @@ impl Grouping {
         }
     }
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Project => "Project",
-            Self::Status => "Status",
-            Self::Model => "Model",
-        }
-    }
-
     pub fn next(self) -> Self {
         match self {
             Self::Project => Self::Status,

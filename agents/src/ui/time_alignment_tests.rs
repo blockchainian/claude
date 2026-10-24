@@ -203,9 +203,8 @@ fn background_indicators_match_task_list_for_commands_and_child_states() {
         let (mut view, _) = frame(width);
         let parent = view.rows[view.selected].id.clone();
         let now = view.rows[view.selected].updated_at + Duration::seconds(45);
-        for (id, title, status) in [
-            ("busy-child", "Busy child", SessionStatus::Working),
-        ] {
+        {
+            let (id, title, status) = ("busy-child", "Busy child", SessionStatus::Working);
             let mut child = session(id, title, status, 0);
             child.parent = Some(parent.clone());
             child.started_at = Some(now - Duration::seconds(66));

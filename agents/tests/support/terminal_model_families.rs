@@ -32,7 +32,7 @@ fn open_model(tmux: &Tmux, label: &str) {
         .find(|(_, line)| line.contains(label) && line.contains("medium"))
         .unwrap();
     tmux.mouse(0, line[..line.find(label).unwrap()].width(), row, true);
-    tmux.wait_for(|screen| model_picker_visible(screen));
+    tmux.wait_for(model_picker_visible);
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn terminal_model_families_keep_headers_out_of_selection() {
         }
         let (x, y) = position(&capture, header);
         tmux.mouse(0, x, y, true);
-        tmux.wait_for(|screen| model_picker_visible(screen));
+        tmux.wait_for(model_picker_visible);
         tmux.run(&["send-keys", "-t", "probe", "Enter"]);
         tmux.wait_for(|screen| !model_picker_visible(screen) && screen.contains(current));
         let stored: serde_json::Value = serde_json::from_slice(

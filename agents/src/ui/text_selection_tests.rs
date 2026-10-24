@@ -161,8 +161,7 @@ fn drag_bold_at_wrap_boundary_copies_one_visible_line() {
     let rows = view.viewport.borrow().task_details_text.rows.clone();
     let last = rows
         .iter()
-        .filter(|row| row.y >= start.1 && !row.cells.is_empty())
-        .last()
+        .rfind(|row| row.y >= start.1 && !row.cells.is_empty())
         .unwrap();
     assert!(last.y > start.1);
     view.begin_text_selection(start.0, start.1);

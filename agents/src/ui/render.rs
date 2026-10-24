@@ -289,7 +289,7 @@ impl View {
             let gap = row(area, list.bottom() - area.y, u16::from(body.height > 0));
             let details = row(body, list.height + gap.height, rows - list.height);
             [list, gap, details]
-        } else if body.width >= 2 * PANEL_GAP + 1 {
+        } else if body.width > 2 * PANEL_GAP {
             let content = Rect {
                 width: body.width - PANEL_GAP,
                 ..body
@@ -2706,7 +2706,7 @@ mod title_input_tests {
             branch: String::new(),
         });
         let key = view.selected_draft().unwrap().key();
-        let color = Some(view.title_color(&key));
+        let color = view.title_color(&key);
         let rule = Rect::new(0, 0, 60, 1);
         let name_cell = |view: &View| {
             let mut buf = Buffer::empty(rule);
@@ -2722,9 +2722,9 @@ mod title_input_tests {
             buf[(label.x, label.y)].clone()
         };
         view.rename.set_text("Draft name");
-        assert_eq!(name_cell(&view).fg, color.unwrap());
+        assert_eq!(name_cell(&view).fg, color);
         assert!(view.accept_draft_name());
-        assert_eq!(name_cell(&view).fg, color.unwrap());
+        assert_eq!(name_cell(&view).fg, color);
     }
 
     #[test]

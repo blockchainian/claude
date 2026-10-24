@@ -739,17 +739,17 @@ fn tab_pins_persist_independently_and_only_active_pins_expire() {
     }
     app.handle_action(pin(&id, 0, false));
     let pins = Preferences::load(directory.path()).pinned;
-    assert_eq!(pins.active, [second.clone()]);
+    assert_eq!(pins.active, std::slice::from_ref(&second));
     assert_eq!(pins.inactive, [second.clone(), id.clone()]);
     app.handle_action(pin(&id, 0, true));
     session.status = crate::model::SessionStatus::Inactive;
     app.forget_inactive_state(&[session]);
     let pins = Preferences::load(directory.path()).pinned;
-    assert_eq!(pins.active, [second.clone()]);
+    assert_eq!(pins.active, std::slice::from_ref(&second));
     assert_eq!(pins.inactive, [second.clone(), id.clone()]);
     app.handle_action(pin(&id, 1, false));
     let pins = Preferences::load(directory.path()).pinned;
-    assert_eq!(pins.active, [second.clone()]);
+    assert_eq!(pins.active, std::slice::from_ref(&second));
     assert_eq!(pins.inactive, [second]);
 }
 

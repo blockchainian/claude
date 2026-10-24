@@ -423,7 +423,7 @@ mod tests {
             .find(|text| text.starts_with("/Users/"))
             .unwrap();
         let basename = path.rsplit('/').next().unwrap();
-        let parent = path.rsplitn(3, '/').nth(1).unwrap();
+        let parent = path.rsplit('/').nth(1).unwrap();
         let home = std::env::var("HOME").unwrap();
         let fixture_cwd = std::path::Path::new(fixture["cwd"].as_str().unwrap())
             .parent()

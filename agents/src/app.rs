@@ -335,10 +335,7 @@ impl App {
                     let _ = filesystem.send(Input::Filesystem(event));
                 })
             });
-        let mut watcher = match watch {
-            Ok(watcher) => Some(watcher),
-            Err(_) => None,
-        };
+        let mut watcher = watch.ok();
         let output = self.sender.clone();
         let mut output_watcher = crate::sessions::OutputWatcher::new(move |event| {
             let _ = output.send(Input::EventOutput(event));

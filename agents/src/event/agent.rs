@@ -112,6 +112,7 @@ pub fn name(path: &str) -> &str {
 }
 
 impl Message {
+    #[cfg(test)]
     pub fn label(&self) -> String {
         const LABELS: &[(&str, &str)] = &[
             ("MESSAGE", "Message"),

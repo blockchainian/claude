@@ -1263,10 +1263,7 @@ impl View {
                 } else if let Some(entry) = entry {
                     let entries = self.center_rows(&self.selectable_indices(), self.grouping);
                     let task = if let Some(id) = self.pressed_task.take() {
-                        let Some(index) = self.rows.iter().position(|row| row.id == id) else {
-                            return None;
-                        };
-                        index
+                        self.rows.iter().position(|row| row.id == id)?
                     } else {
                         match entries.get(entry) {
                             Some(super::navigation::CenterRow::Task(index)) => *index,

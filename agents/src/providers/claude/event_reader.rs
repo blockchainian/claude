@@ -671,6 +671,7 @@ fn result_content(value: &serde_json::Value) -> serde_json::Value {
         .map_or_else(|| value.clone(), Into::into)
 }
 
+#[cfg(test)]
 fn text_section(label: &str, text: &str) -> Section {
     Section::Text {
         label: label.to_owned(),
