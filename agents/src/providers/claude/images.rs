@@ -7,11 +7,36 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub(super) struct PromptImages {
     queued: HashMap<String, (SourceRecord, Value)>,
+    companions: HashMap<String, Vec<String>>,
+    parents: HashMap<String, String>,
     delivered: HashMap<String, Vec<(SourceRecord, Value)>>,
 }
 
 impl PromptImages {
     pub(super) fn record(&mut self, source: &SourceRecord, record: &Value) {
+        if let (Some(id), Some(parent)) = (record["uuid"].as_str(), record["parentUuid"].as_str()) {
+            self.parents.insert(parent.to_owned(), id.to_owned());
+        }
+        if record["turnCompanion"] == true {
+            let paths: Vec<_> = record["message"]["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|block| {
+                    block["text"]
+                        .as_str()?
+                        .strip_prefix("[Image: source: ")?
+                        .strip_suffix(']')
+                        .map(str::to_owned)
+                })
+                .collect();
+            for key in [record["promptId"].as_str(), record["uuid"].as_str()]
+                .into_iter()
+                .flatten()
+            {
+                self.companions.insert(key.to_owned(), paths.clone());
+            }
+        }
         if queued_prompt(record).is_some()
             && let Some(id) = record["attachment"]["source_uuid"].as_str()
         {
@@ -47,18 +72,59 @@ impl PromptImages {
         } else {
             "/message/content"
         };
-        image_blocks(record)
-            .map(|(index, label, block)| {
-                let label = label
-                    .filter(|label| body.contains(label))
-                    .unwrap_or_else(|| image_caption(block));
-                Image {
-                    label,
-                    source: ImageSource::Record {
-                        record: source.clone(),
-                        pointer: format!("{prefix}/{index}/source/data"),
-                    },
+        let paths = record["promptId"]
+            .as_str()
+            .and_then(|id| self.companions.get(id))
+            .or_else(|| {
+                let mut id = record["uuid"].as_str()?;
+                for _ in 0..self.parents.len() + 1 {
+                    if let Some(paths) = self.companions.get(id) {
+                        return Some(paths);
+                    }
+                    id = self.parents.get(id)?;
                 }
+                None
+            });
+        let mut seen = Vec::new();
+        image_blocks(record)
+            .enumerate()
+            .flat_map(|(image_index, (index, label, block))| {
+                let pointer = format!("{prefix}/{index}/source/data");
+                let encoded = block["source"]["data"].as_str();
+                let first = encoded.and_then(|encoded| {
+                    seen.iter()
+                        .find(|(data, _)| *data == encoded)
+                        .map(|(_, pointer): &(&str, String)| pointer.clone())
+                });
+                let duplicate = first.is_some();
+                let pointer = first.unwrap_or(pointer);
+                if !duplicate && let Some(encoded) = encoded {
+                    seen.push((encoded, pointer.clone()));
+                }
+                let source = ImageSource::Record {
+                    record: source.clone(),
+                    pointer,
+                };
+                let mut images = Vec::new();
+                if !duplicate {
+                    let label = label
+                        .filter(|label| body.contains(label))
+                        .unwrap_or_else(|| image_caption(block));
+                    images.push(Image {
+                        label,
+                        source: source.clone(),
+                    });
+                }
+                if let Some(path) = paths
+                    .and_then(|paths| paths.get(image_index))
+                    .filter(|path| body.contains(path.as_str()))
+                {
+                    images.push(Image {
+                        label: path.clone(),
+                        source,
+                    });
+                }
+                images
             })
             .collect()
     }
@@ -134,5 +200,36 @@ fn image_caption(block: &Value) -> String {
     match mime {
         Some(mime) => format!("[image {mime}]"),
         None => "[image]".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod f4_tests {
+    use super::*;
+    #[test]
+    fn f4_companion_path_uses_record_and_duplicate_blocks_share_source() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-prompt-images.jsonl");
+        let records: Vec<Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let mut prompt = records[0].clone();
+        let block = prompt["message"]["content"][1].clone();
+        prompt["message"]["content"]
+            .as_array_mut()
+            .unwrap()
+            .push(block);
+        let body = "/redacted/claude-session/images/6.png [Image #6]";
+        let source = SourceRecord { path, offset: 0 };
+        let mut images = PromptImages::default();
+        for record in records[..4].iter().rev() {
+            images.record(&source, record);
+        }
+        let found = images.take(&source, &prompt, body);
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].source, found[1].source);
+        assert_eq!(found[1].label, "/redacted/claude-session/images/6.png");
     }
 }

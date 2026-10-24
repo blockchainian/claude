@@ -10,6 +10,19 @@ pub(super) fn text_images(
     attached: &[Image],
     seen: &mut HashSet<ImageSource>,
 ) -> Vec<Image> {
+    let attached: Vec<_> = attached
+        .iter()
+        .map(|image| {
+            let mut image = image.clone();
+            if let ImageSource::File { path, .. } = &mut image.source
+                && let Ok(canonical) = path.canonicalize()
+            {
+                *path = canonical;
+            }
+            image
+        })
+        .collect();
+    let attachments = &attached;
     let mut attached: Vec<_> = attached
         .iter()
         .filter_map(|image| text.find(&image.label).map(|at| (at, image)))
@@ -30,7 +43,20 @@ pub(super) fn text_images(
         } else {
             cwd.join(label)
         };
-        if let Some(source) = image_file(&path)
+        let source = path
+            .canonicalize()
+            .ok()
+            .and_then(|path| {
+                attachments
+                    .iter()
+                    .find(|image| {
+                        matches!(image.source, ImageSource::Record { .. })
+                            && cwd.join(&image.label).canonicalize().ok().as_ref() == Some(&path)
+                    })
+                    .map(|image| image.source.clone())
+            })
+            .or_else(|| image_file(&path));
+        if let Some(source) = source
             && seen.insert(source.clone())
         {
             images.push(Image {
@@ -49,7 +75,7 @@ fn image_file(path: &Path) -> Option<ImageSource> {
         return None;
     }
     Some(ImageSource::File {
-        path: path.into(),
+        path: path.canonicalize().ok()?,
         len: metadata.len(),
         modified: metadata.modified().ok()?,
     })
@@ -103,6 +129,20 @@ mod tests {
     }
 
     #[test]
+    fn f4_symlink_paths_are_one_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("image.png");
+        let alias = dir.path().join("alias.png");
+        write_image(&path);
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        let text = format!("{} {}", path.display(), alias.display());
+        assert_eq!(
+            text_images(&text, dir.path(), &[], &mut HashSet::new()).len(),
+            1
+        );
+    }
+
+    #[test]
     fn attached_images_follow_label_order_and_are_seen_across_texts() {
         let (text, mut attached) = prompt_images();
         let expected = attached.clone();
@@ -114,7 +154,7 @@ mod tests {
         );
         assert!(text_images(&text, Path::new("/"), &attached, &mut seen).is_empty());
         for image in expected {
-            assert_eq!(image.source.bytes().unwrap(), b"\x89PNG\r\n");
+            assert!(image.source.bytes().unwrap().starts_with(b"\x89PNG\r\n"));
         }
     }
 
@@ -127,7 +167,7 @@ mod tests {
         let image = Image {
             label: "[Image #8]".into(),
             source: ImageSource::File {
-                path: path.clone(),
+                path: path.canonicalize().unwrap(),
                 len: metadata.len(),
                 modified: metadata.modified().unwrap(),
             },
@@ -158,7 +198,7 @@ mod tests {
             [Image {
                 label: "screens/screen.PNG".into(),
                 source: ImageSource::File {
-                    path,
+                    path: path.canonicalize().unwrap(),
                     len: metadata.len(),
                     modified: metadata.modified().unwrap(),
                 },
@@ -243,7 +283,7 @@ mod tests {
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].label, label);
         assert!(
-            matches!(&images[0].source, ImageSource::File { path: found, .. } if found == &home.join(rest))
+            matches!(&images[0].source, ImageSource::File { path: found, .. } if found == &path.canonicalize().unwrap())
         );
     }
 

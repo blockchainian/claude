@@ -607,6 +607,23 @@ pub(super) fn event_detail_content(
 impl EventDetailContent {
     /// Adds each text's images as independent alignment groups.
     pub fn with_images(mut self, event: &Event, cwd: &std::path::Path) -> Self {
+        let mut attached = event.images.clone();
+        for image in attached.iter_mut().chain(
+            self.sections
+                .iter_mut()
+                .flat_map(|section| &mut section.groups)
+                .flat_map(|group| &mut group.parts)
+                .filter_map(|part| match &mut part.body {
+                    Body::Image { image, .. } => Some(image),
+                    _ => None,
+                }),
+        ) {
+            if let crate::images::ImageSource::File { path, .. } = &mut image.source
+                && let Ok(canonical) = path.canonicalize()
+            {
+                *path = canonical;
+            }
+        }
         let mut seen = self
             .sections
             .iter()
@@ -615,7 +632,16 @@ impl EventDetailContent {
             .filter_map(Part::shown_image)
             .map(|image| image.source.clone())
             .collect::<std::collections::HashSet<_>>();
+        let mut existing = std::collections::HashSet::new();
         for section in &mut self.sections {
+            section.groups.retain_mut(|group| {
+                let empty = group.parts.is_empty();
+                group.parts.retain(|part| {
+                    part.shown_image()
+                        .is_none_or(|image| existing.insert(image.source.clone()))
+                });
+                empty || !group.parts.is_empty()
+            });
             for group in std::mem::take(&mut section.groups) {
                 if group.parts.is_empty() {
                     section.groups.push(group);
@@ -624,7 +650,7 @@ impl EventDetailContent {
                 let mut parts = Vec::new();
                 for part in group.parts {
                     let images = if part.shown_image().is_none() {
-                        super::text_images::text_images(&part.source, cwd, &event.images, &mut seen)
+                        super::text_images::text_images(&part.source, cwd, &attached, &mut seen)
                     } else {
                         Vec::new()
                     };
@@ -645,8 +671,7 @@ impl EventDetailContent {
         }
         if let Some(section) = self.sections.last_mut() {
             section.groups.extend(
-                event
-                    .images
+                attached
                     .iter()
                     .filter(|image| seen.insert(image.source.clone()))
                     .map(|image| Group {

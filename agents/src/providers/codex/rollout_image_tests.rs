@@ -412,3 +412,34 @@ fn pending_image_record_reuses_hash_when_completed() {
         tail(file.path(), usize::MAX).unwrap()
     );
 }
+
+#[test]
+fn f4_prompt_paths_prefer_record_and_duplicate_output_blocks_are_removed() {
+    let mut records = captured("wrapped.jsonl");
+    records[0]["payload"]["content"][3]["text"] =
+        Value::String("bug: [Image #1] /tmp/f4-image.png".into());
+    records[1]["payload"]["item"]["content"][1]["text"] =
+        records[0]["payload"]["content"][3]["text"].clone();
+    records[1]["payload"]["item"]["content"][0]["path"] = Value::String("/tmp/f4-image.png".into());
+    let prompt = user_prompt(&records[0]["payload"]["content"]);
+    let found = prompt_images(
+        &prompt,
+        &records[0]["payload"],
+        Some(&records[1]),
+        crate::event::SourceRecord {
+            path: PathBuf::from("unused"),
+            offset: 0,
+        },
+    );
+    assert_eq!(found.len(), 2);
+    assert_eq!(found[0].source, found[1].source);
+    let mut records = captured("tool-mcp.jsonl");
+    records.retain(|r| r["type"] == "response_item");
+    let block = records[1]["payload"]["output"][1].clone();
+    records[1]["payload"]["output"]
+        .as_array_mut()
+        .unwrap()
+        .push(block);
+    let file = transcript(&records);
+    assert_eq!(images(&tail(file.path(), usize::MAX).unwrap()).len(), 1);
+}

@@ -131,7 +131,9 @@ fn raster_paths_are_discovered_in_tool_input_and_output() {
     let images = shown(&detail);
     assert_eq!(images.len(), 2);
     for (image, path) in images.into_iter().zip(paths) {
-        assert!(matches!(&image.source, ImageSource::File { path: found, .. } if found == &path));
+        assert!(
+            matches!(&image.source, ImageSource::File { path: found, .. } if found == &path.canonicalize().unwrap())
+        );
     }
 }
 
@@ -176,4 +178,84 @@ fn image_free_groups_keep_their_alignment() {
         })
         .collect();
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn f4_existing_image_parts_are_deduplicated() {
+    let event = prompt_event();
+    let mut detail = content(&event);
+    detail.sections[0].groups.push(Group {
+        parts: vec![
+            Part::image(event.images[0].clone(), true),
+            Part::image(event.images[0].clone(), true),
+        ],
+    });
+    assert_eq!(shown(&detail.with_images(&event, Path::new("/"))).len(), 2);
+}
+
+#[test]
+fn f4_record_alias_wins_over_a_modified_file_and_its_symlink() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("screen.png");
+    let alias = directory.path().join("alias.png");
+    std::fs::write(&path, crate::images::fixture_png()).unwrap();
+    std::os::unix::fs::symlink(&path, &alias).unwrap();
+    let mut event = prompt_event();
+    event.images.truncate(1);
+    let source = event.images[0].source.clone();
+    event.images.push(Image {
+        label: path.to_str().unwrap().into(),
+        source: source.clone(),
+    });
+    event.body = format!(
+        "{} {} {}",
+        alias.display(),
+        path.display(),
+        event.images[0].label
+    );
+    let detail = content(&event).with_images(&event, directory.path());
+    let images = shown(&detail);
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].source, source);
+    std::fs::write(&path, b"changed on disk").unwrap();
+    let detail = content(&event).with_images(&event, directory.path());
+    assert_eq!(shown(&detail).len(), 1);
+    assert_eq!(shown(&detail)[0].source, source);
+    assert_ne!(source.bytes().unwrap(), std::fs::read(&path).unwrap());
+}
+
+fn noncanonical_file_attachment(canonical_body: bool) {
+    let directory = tempfile::tempdir().unwrap();
+    let canonical = directory.path().canonicalize().unwrap().join("screen.png");
+    let path = canonical
+        .strip_prefix("/private")
+        .map(|rest| Path::new("/").join(rest))
+        .unwrap_or_else(|_| canonical.clone());
+    std::fs::write(&path, crate::images::fixture_png()).unwrap();
+    let metadata = path.metadata().unwrap();
+    let mut event = prompt_event();
+    event.images = vec![Image {
+        label: "[Image #1]".into(),
+        source: ImageSource::File {
+            path: path.clone(),
+            len: metadata.len(),
+            modified: metadata.modified().unwrap(),
+        },
+    }];
+    event.body = if canonical_body { canonical } else { path }
+        .to_str()
+        .unwrap()
+        .into();
+    let detail = content(&event).with_images(&event, directory.path());
+    assert_eq!(shown(&detail).len(), 1);
+}
+
+#[test]
+fn f4_noncanonical_file_attachment_and_same_text_path_draw_once() {
+    noncanonical_file_attachment(false);
+}
+
+#[test]
+fn f4_noncanonical_file_attachment_and_canonical_text_path_draw_once() {
+    noncanonical_file_attachment(true);
 }

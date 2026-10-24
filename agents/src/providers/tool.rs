@@ -51,17 +51,18 @@ pub(crate) fn mcp_content(
             }]
         };
     }
+    let mut seen = Vec::new();
     content
         .as_array()
         .into_iter()
         .flatten()
         .enumerate()
-        .map(|(index, block)| {
+        .filter_map(|(index, block)| {
             if let Some(text) = block["text"].as_str().filter(|_| block["type"] == "text") {
-                return Section::Text {
+                return Some(Section::Text {
                     label: "output".into(),
                     text: text.into(),
-                };
+                });
             }
             let kind = block["type"].as_str().unwrap_or("unknown");
             let mime = block["mimeType"]
@@ -77,18 +78,25 @@ pub(crate) fn mcp_content(
                 } else {
                     "data"
                 };
-                return Section::Image(Image {
+                let encoded = block.pointer(&format!("/{data}")).and_then(Value::as_str);
+                if let Some(encoded) = encoded {
+                    if seen.contains(&encoded) {
+                        return None;
+                    }
+                    seen.push(encoded);
+                }
+                return Some(Section::Image(Image {
                     label: format!("[image {mime}]"),
                     source: ImageSource::Record {
                         record: record.clone(),
                         pointer: format!("{pointer}/{index}/{data}"),
                     },
-                });
+                }));
             }
-            Section::Placeholder(match mime {
+            Some(Section::Placeholder(match mime {
                 Some(mime) => format!("[{kind} {mime}]"),
                 None => format!("[{kind}]"),
-            })
+            }))
         })
         .filter(|section| !matches!(section, Section::Text { text, .. } if text.is_empty()))
         .collect()
@@ -1091,5 +1099,29 @@ mod tests {
                 ))]
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod f4_tests {
+    #[test]
+    fn f4_identical_mcp_images_are_emitted_once() {
+        let value: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-read-image.jsonl")
+                .lines()
+                .nth(1)
+                .unwrap(),
+        )
+        .unwrap();
+        let block = value["message"]["content"][0]["content"][0].clone();
+        let source = (
+            crate::event::SourceRecord {
+                path: std::path::PathBuf::from("unused"),
+                offset: 0,
+            },
+            "/message/content/0/content".to_owned(),
+        );
+        let sections = super::mcp_content(&serde_json::json!([block, block]), Some(&source));
+        assert_eq!(sections.len(), 1);
     }
 }

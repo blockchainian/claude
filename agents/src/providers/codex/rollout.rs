@@ -456,27 +456,6 @@ fn prompt_images(
     completed: Option<&Value>,
     source: crate::event::SourceRecord,
 ) -> Vec<Image> {
-    let images: Vec<_> = payload["content"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .enumerate()
-        .filter(|(_, block)| block["type"] == "input_image")
-        .enumerate()
-        .map(|(index, (content_index, _))| Image {
-            label: prompt.attachments.get(index).map_or_else(
-                || format!("[Image #{}]", index + 1),
-                |(label, _)| label.clone(),
-            ),
-            source: ImageSource::Record {
-                record: source.clone(),
-                pointer: format!("/payload/content/{content_index}/image_url"),
-            },
-        })
-        .collect();
-    if !images.is_empty() {
-        return images;
-    }
     let paired = completed.filter(|record| {
         let response_turn =
             payload["internal_chat_message_metadata_passthrough"]["turn_id"].as_str();
@@ -484,6 +463,73 @@ fn prompt_images(
         (response_turn.is_none() || response_turn == event_turn)
             && content_text(&record["payload"]["item"]["content"]) == prompt.text
     });
+    let local_paths: Vec<_> = paired
+        .and_then(|record| record["payload"]["item"]["content"].as_array())
+        .into_iter()
+        .flatten()
+        .filter(|block| block["type"] == "local_image")
+        .filter_map(|block| block["path"].as_str())
+        .collect();
+    let mut seen = Vec::new();
+    let images: Vec<_> = payload["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter(|(_, block)| block["type"] == "input_image")
+        .enumerate()
+        .flat_map(|(index, (content_index, block))| {
+            let encoded = block["image_url"].as_str();
+            let pointer = format!("/payload/content/{content_index}/image_url");
+            let first = encoded.and_then(|encoded| {
+                seen.iter()
+                    .find(|(data, _)| *data == encoded)
+                    .map(|(_, pointer): &(&str, String)| pointer.clone())
+            });
+            let duplicate = first.is_some();
+            let pointer = first.unwrap_or(pointer);
+            if !duplicate && let Some(encoded) = encoded {
+                seen.push((encoded, pointer.clone()));
+            }
+            let image = Image {
+                label: prompt.attachments.get(index).map_or_else(
+                    || format!("[Image #{}]", index + 1),
+                    |(label, _)| label.clone(),
+                ),
+                source: ImageSource::Record {
+                    record: source.clone(),
+                    pointer,
+                },
+            };
+            let mut images = Vec::new();
+            if !duplicate {
+                images.push(image.clone());
+            }
+            for path in prompt
+                .attachments
+                .get(index)
+                .and_then(|(_, path)| path.as_deref())
+                .into_iter()
+                .chain(local_paths.get(index).copied())
+            {
+                if prompt
+                    .text
+                    .as_deref()
+                    .is_some_and(|text| text.contains(path))
+                    && !images.iter().any(|image| image.label == path)
+                {
+                    images.push(Image {
+                        label: path.into(),
+                        source: image.source.clone(),
+                    });
+                }
+            }
+            images
+        })
+        .collect();
+    if !images.is_empty() {
+        return images;
+    }
     paired
         .and_then(|record| record["payload"]["item"]["content"].as_array())
         .into_iter()
@@ -2652,6 +2698,7 @@ fn events_with_images<'a>(
                     .filter(|(_, output, _)| output_image_blocks(output).next().is_some())
                     .map(|(_, output, offset)| {
                         let source = reference(*offset);
+                        let mut seen_images = Vec::new();
                         output
                             .as_array()
                             .unwrap()
@@ -2664,6 +2711,8 @@ fn events_with_images<'a>(
                                 }),
                                 "input_image" => {
                                     let url = block["image_url"].as_str()?;
+                                    if seen_images.contains(&url) { return None; }
+                                    seen_images.push(url);
                                     (!(payload["name"] == "wait"
                                         && image_hashes[offset]
                                             .output
@@ -5189,6 +5238,14 @@ mod summary_cache_tests {
         )
         .unwrap();
         let mut second = record["payload"]["content"].as_array().unwrap()[..3].to_vec();
+        let distinct: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/codex-images/wrapped.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        second[1]["image_url"] = distinct["payload"]["content"][1]["image_url"].clone();
         second[0]["text"] = second[0]["text"]
             .as_str()
             .unwrap()
