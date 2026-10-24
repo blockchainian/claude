@@ -1826,22 +1826,23 @@ pub(crate) mod tests {
             }
             assert!(!images.is_empty(), "{fixture}");
             for image in images {
-                let crate::images::ImageSource::Record {
-                    record: source,
-                    pointer,
-                } = &image.source
-                else {
-                    panic!("expected record source")
-                };
-                assert_eq!(source.path, path);
+                assert_eq!(image.record.path, path);
+                assert_eq!(
+                    image.media_type,
+                    if fixture == "claude-read-image.jsonl" {
+                        "image/png"
+                    } else {
+                        "image/jpeg"
+                    }
+                );
                 let mut reader = std::io::BufReader::new(std::fs::File::open(&path).unwrap());
                 reader
-                    .seek(std::io::SeekFrom::Start(source.offset))
+                    .seek(std::io::SeekFrom::Start(image.record.offset))
                     .unwrap();
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
                 let record: Value = serde_json::from_str(&line).unwrap();
-                let data = record.pointer(pointer).unwrap().as_str().unwrap();
+                let data = record.pointer(&image.pointer).unwrap().as_str().unwrap();
                 let block = &record["message"]["content"][0]["content"];
                 let original = block
                     .as_array()
@@ -1852,12 +1853,10 @@ pub(crate) mod tests {
                 assert_eq!(data, original["source"]["data"].as_str().unwrap());
                 if fixture == "claude-read-image.jsonl" {
                     use base64::Engine;
-                    let bytes = base64::engine::general_purpose::STANDARD
-                        .decode(data)
-                        .unwrap();
+                    let bytes = base64::engine::general_purpose::STANDARD.decode(data).unwrap();
                     assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
                 }
-                assert!(pointer.starts_with("/message/content/0/content/"));
+                assert!(image.pointer.starts_with("/message/content/0/content/"));
             }
         }
     }
@@ -1883,25 +1882,15 @@ pub(crate) mod tests {
                         panic!("expected image")
                     };
                     assert_eq!(
-                        image.label,
-                        format!(
-                            "[image {}]",
-                            block["source"]["media_type"].as_str().unwrap()
-                        )
+                        image.media_type,
+                        block["source"]["media_type"].as_str().unwrap()
                     );
-                    let crate::images::ImageSource::Record {
-                        record: source,
-                        pointer,
-                    } = &image.source
-                    else {
-                        panic!("expected record source")
-                    };
                     assert_eq!(
-                        pointer.as_str(),
+                        image.pointer,
                         format!("/message/content/0/content/{index}/source/data")
                     );
-                    assert!(events[0].source_records.contains(source));
-                    assert_eq!(source.offset, result_offset);
+                    assert!(events[0].source_records.contains(&image.record));
+                    assert_eq!(image.record.offset, result_offset);
                 } else {
                     assert_eq!(
                         output[index],
@@ -2548,10 +2537,7 @@ pub(crate) mod tests {
         assert_eq!(events[0].body, text);
         assert_eq!(events[0].images.len(), 1);
         assert_eq!(events[0].images[0].label, "[Image #1]");
-        let crate::images::ImageSource::File { path, .. } = &events[0].images[0].source else {
-            panic!("expected materialized image")
-        };
-        let bytes = std::fs::read(path).unwrap();
+        let bytes = std::fs::read(&events[0].images[0].path).unwrap();
         assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
         assert_eq!(super::tail(file.path(), 20).unwrap(), events);
         let summary =
@@ -2606,15 +2592,8 @@ pub(crate) mod tests {
             )
         );
         assert_eq!(read.summary, format!("Read {}", read.title));
-        let event = events
-            .iter()
-            .find(|event| event.calls.contains(read))
-            .unwrap();
-        let paths: Vec<_> = event
-            .paths
-            .iter()
-            .map(|range| &event.body[range.clone()])
-            .collect();
+        let event = events.iter().find(|event| event.calls.contains(read)).unwrap();
+        let paths: Vec<_> = event.paths.iter().map(|range| &event.body[range.clone()]).collect();
         assert_eq!(paths, [file["filePath"].as_str().unwrap()]);
         assert!(read.input.is_empty());
         let edit = calls.iter().find(|call| call.name == "Edit").unwrap();

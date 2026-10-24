@@ -244,10 +244,11 @@ fn image_fixture() -> (tempfile::TempDir, View) {
     (directory, view)
 }
 
-fn drawn_image(view: &View) -> crate::images::ImageSource {
+fn drawn_image(view: &View) -> crate::event::ImageBlock {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-read-image.jsonl");
     let payload = std::fs::read_to_string(&path).unwrap();
-    let image = crate::images::ImageSource::Record {
+    let image = crate::event::ImageBlock {
+        media_type: "image/png".into(),
         record: crate::event::SourceRecord {
             path,
             offset: (payload.lines().next().unwrap().len() + 1) as u64,
@@ -394,11 +395,9 @@ fn image_zoom_wheel_without_decodable_size_does_nothing() {
     enter_image_zoom(&mut view);
     view.inline_images
         .replace(Some(super::super::inline_images::InlineImages::new(None)));
-    if let crate::images::ImageSource::Record { pointer, .. } =
-        &mut view.viewport.borrow_mut().event_detail_images[0].image
-    {
-        *pointer = "/missing".into();
-    }
+    view.viewport.borrow_mut().event_detail_images[0]
+        .image
+        .pointer = "/missing".into();
     let offset = view.event_detail.scroll.borrow().offset;
     for kind in [MouseEventKind::ScrollUp, MouseEventKind::ScrollDown] {
         view.handle_mouse(image_mouse(kind, 30, 12));

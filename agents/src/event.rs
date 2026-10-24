@@ -98,8 +98,8 @@ pub struct Event {
     pub duration: Option<chrono::Duration>,
     /// The preceding event's end, including hidden turn starters for Assistant replies.
     pub previous_end: Option<DateTime<Utc>>,
-    /// Images attached to this prompt.
-    pub images: Vec<crate::images::Image>,
+    /// Images attached to this prompt whose files still exist.
+    pub images: Vec<Image>,
     /// The tool calls a Tool, Error or Denied row stands for, in the order they ran.
     pub calls: Vec<ToolCall>,
 }
@@ -124,8 +124,17 @@ pub struct FileLink {
     pub line: u64,
 }
 
+/// An image content block inside a transcript record, read on demand.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImageBlock {
+    pub media_type: String,
+    pub record: SourceRecord,
+    /// The JSON pointer of the block's base64 data within the record.
+    pub pointer: String,
+}
+
 /// A transcript line retained by its file position, decoded only when requested.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceRecord {
     pub path: std::path::PathBuf,
     pub offset: u64,
@@ -294,7 +303,7 @@ pub enum Section {
     /// An unsupported content block, displayed dimly without its payload.
     Placeholder(String),
     /// An image block; drawn inline when the terminal supports images, else as its placeholder text.
-    Image(crate::images::Image),
+    Image(ImageBlock),
     /// Code highlighted by `lang`, a syntax token or file extension such as "bash" or "rs".
     Code {
         label: String,
@@ -311,6 +320,14 @@ pub enum Section {
     Markdown { label: String, text: String },
     /// Plain text wrapped at the panel width.
     Text { label: String, text: String },
+}
+
+/// An image attached to a prompt: its placeholder in the prompt text, such as
+/// `[Image #1]`, and the file it was attached from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Image {
+    pub label: String,
+    pub path: std::path::PathBuf,
 }
 
 #[cfg(test)]

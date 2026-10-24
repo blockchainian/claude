@@ -9,14 +9,14 @@ use ratatui::{
     style::{Color, Style},
 };
 
-use crate::images::ImageSource;
+use crate::event::ImageBlock;
 
 const UPLOAD_BYTES: usize = 64 << 20;
 const CHUNK: usize = 4096;
 const GRID_LIMIT: u16 = 297;
 
 struct Uploaded {
-    source: ImageSource,
+    source: ImageBlock,
     id: u8,
     placements: Vec<((u16, u16), u32)>,
     bytes: usize,
@@ -50,7 +50,7 @@ impl InlineImages {
 
     /// The cells `image` covers in a panel `width` cells wide at `zoom`;
     /// `None` when its data cannot be read or decoded.
-    pub fn size(&mut self, image: &ImageSource, width: u16, zoom: Zoom) -> Option<(u16, u16)> {
+    pub fn size(&mut self, image: &ImageBlock, width: u16, zoom: Zoom) -> Option<(u16, u16)> {
         if width == 0 {
             return None;
         }
@@ -76,7 +76,7 @@ impl InlineImages {
     /// time `image` is drawn at this size.
     pub fn draw(
         &mut self,
-        image: &ImageSource,
+        image: &ImageBlock,
         zoom: Zoom,
         first_row: u16,
         area: Rect,
@@ -143,7 +143,7 @@ impl InlineImages {
         }
     }
 
-    fn prepare(&mut self, image: &ImageSource, size: (u16, u16)) -> Option<(u8, u32)> {
+    fn prepare(&mut self, image: &ImageBlock, size: (u16, u16)) -> Option<(u8, u32)> {
         if let Some(index) = self
             .uploaded
             .iter()
@@ -556,25 +556,12 @@ mod tests {
     use crate::event::SourceRecord;
     use ratatui::style::Color;
 
-    fn record(source: &ImageSource) -> &SourceRecord {
-        match source {
-            ImageSource::Record { record, .. } => record,
-            ImageSource::File { .. } => unreachable!(),
-        }
-    }
-
-    fn record_mut(source: &mut ImageSource) -> &mut SourceRecord {
-        match source {
-            ImageSource::Record { record, .. } => record,
-            ImageSource::File { .. } => unreachable!(),
-        }
-    }
-
-    pub(super) fn fixture() -> ImageSource {
+    pub(super) fn fixture() -> ImageBlock {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/claude-read-image.jsonl");
         let bytes = std::fs::read(&path).unwrap();
-        ImageSource::Record {
+        ImageBlock {
+            media_type: "image/png".into(),
             record: SourceRecord {
                 path,
                 offset: (bytes.iter().position(|b| *b == b'\n').unwrap() + 1) as u64,
@@ -781,9 +768,7 @@ mod tests {
     fn inline_images_evicts_least_recently_drawn_image_at_byte_limit() {
         let first = fixture();
         let mut second = first.clone();
-        if let ImageSource::Record { pointer, .. } = &mut second {
-            *pointer = "/toolUseResult/file/base64".into();
-        }
+        second.pointer = "/toolUseResult/file/base64".into();
         let mut images = InlineImages::new(Some((10, 20)));
         let area = Rect::new(0, 0, 80, 1);
         let mut buf = Buffer::empty(area);
@@ -795,9 +780,9 @@ mod tests {
         images.limit /= 2;
         // A third source uses another real record, without changing its payload.
         let temp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::copy(&record(&first).path, temp.path()).unwrap();
+        std::fs::copy(&first.record.path, temp.path()).unwrap();
         let mut third = first.clone();
-        record_mut(&mut third).path = temp.path().to_owned();
+        third.record.path = temp.path().to_owned();
         images.draw(&third, Zoom::default(), 0, area, &mut buf);
         let commands = String::from_utf8(images.take_commands()).unwrap();
         assert!(commands.starts_with("\x1b_Ga=d,d=I,i=2,q=2\x1b\\\x1b_Ga=d,d=I,i=1,q=2\x1b\\"));
@@ -810,26 +795,26 @@ mod tests {
         use std::io::Write;
 
         let mut source = fixture();
-        let fixture = std::fs::read(&record(&source).path).unwrap();
-        let record = &fixture[record(&source).offset as usize..];
+        let fixture = std::fs::read(&source.record.path).unwrap();
+        let record = &fixture[source.record.offset as usize..];
         let mut temp = tempfile::NamedTempFile::new().unwrap();
         for _ in 0..256 {
             temp.write_all(record).unwrap();
         }
-        record_mut(&mut source).path = temp.path().to_owned();
+        source.record.path = temp.path().to_owned();
         let mut images = InlineImages::new(None);
         let area = Rect::new(0, 0, 1, 1);
         let mut buf = Buffer::empty(area);
         for index in 0..255 {
-            record_mut(&mut source).offset = index * record.len() as u64;
+            source.record.offset = index * record.len() as u64;
             images.draw(&source, Zoom::default(), 0, area, &mut buf);
             assert_eq!(buf[(0, 0)].fg, Color::Indexed((index + 1) as u8));
             images.take_commands();
         }
-        record_mut(&mut source).offset = 0;
+        source.record.offset = 0;
         images.draw(&source, Zoom::default(), 0, area, &mut buf);
         assert!(images.take_commands().is_empty());
-        record_mut(&mut source).offset = 255 * record.len() as u64;
+        source.record.offset = 255 * record.len() as u64;
         images.draw(&source, Zoom::default(), 0, area, &mut buf);
         let commands = String::from_utf8(images.take_commands()).unwrap();
         assert!(commands.starts_with("\x1b_Ga=d,d=I,i=2,q=2\x1b\\\x1b_Ga=t,f=100,t=d,i=2,"));
@@ -841,14 +826,12 @@ mod tests {
     fn inline_images_unreadable_or_invalid_data_has_no_size_or_commands() {
         let mut image = fixture();
         let mut images = InlineImages::new(None);
-        if let ImageSource::Record { pointer, .. } = &mut image {
-            *pointer = "/missing".into();
-        }
+        image.pointer = "/missing".into();
         assert_eq!(images.size(&image, 80, Zoom::default()), None);
         let area = Rect::new(0, 0, 80, 2);
         images.draw(&image, Zoom::default(), 0, area, &mut Buffer::empty(area));
         assert!(images.take_commands().is_empty());
-        record_mut(&mut image).path = record(&image).path.with_extension("absent");
+        image.record.path = image.record.path.with_extension("absent");
         assert_eq!(images.size(&image, 80, Zoom::default()), None);
     }
 }

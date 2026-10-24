@@ -4571,13 +4571,7 @@ fn background_box_dims_title_but_not_indicator_or_output() {
         .find(|y| buf[(14, *y)].symbol() == "●")
         .expect("background indicator");
     assert!(!buf[(14, top)].modifier.contains(Modifier::DIM));
-    assert_eq!(
-        buf[(14, top)].fg,
-        View::status_indicator(SessionStatus::Working)
-            .style
-            .fg
-            .unwrap()
-    );
+    assert_eq!(buf[(14, top)].fg, View::status_indicator(SessionStatus::Working).style.fg.unwrap());
     assert_eq!(cell_text(buf[(16, top)].symbol()), "R");
     assert!(buf[(16, top)].modifier.contains(Modifier::DIM));
     let (tool_view, _) = open_tool_fixture();
@@ -5352,10 +5346,7 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
                 .ends_with("25s")
         );
         assert_eq!(
-            text(y, left + 1, right)
-                .trim_end_matches([' ', '╶', '─'])
-                .chars()
-                .count() as u16,
+            text(y, left + 1, right).trim_end_matches([' ', '╶', '─']).chars().count() as u16,
             right - left - 2 - u16::from(width < 150),
             "background time at {width}"
         );
@@ -5364,8 +5355,7 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
             for x in [left + 1, right - 1] {
                 let background_tail = x == right - 1 && ["╶", "─"].contains(&buf[(x, y)].symbol());
                 assert!(
-                    buf[(x, y)].symbol() == " "
-                        || background_tail
+                    buf[(x, y)].symbol() == " " || background_tail
                         || x == left + 1 && buf[(x, y)].symbol() == "╴",
                     "padding ({x}, {y}) at {width}"
                 );
@@ -8634,15 +8624,6 @@ fn temp_event_path(filename: &str) -> (tempfile::TempDir, PathBuf) {
     (dir, target)
 }
 
-fn file_image_source(path: PathBuf) -> crate::images::ImageSource {
-    let metadata = std::fs::metadata(&path).unwrap();
-    crate::images::ImageSource::File {
-        path,
-        len: metadata.len(),
-        modified: metadata.modified().unwrap(),
-    }
-}
-
 #[test]
 fn task_event_click_on_a_shortened_tool_path_opens_the_full_path() {
     let (mut view, now) = event_fixture();
@@ -8697,9 +8678,9 @@ fn task_event_click_on_an_image_placeholder_opens_the_image() {
     let (mut view, now) = event_fixture();
     let (_dir, image) = temp_event_path("2.png");
     view.event_panel[0].body = "Please look at [Image #1] and [Image #2]".into();
-    view.event_panel[0].images = vec![crate::images::Image {
+    view.event_panel[0].images = vec![crate::event::Image {
         label: "[Image #2]".into(),
-        source: file_image_source(image.clone()),
+        path: image.clone(),
     }];
     let list = event_screen(&view, 100, 40, now);
     assert!(list.contains("[Image #1] and [Image #2]"), "{list}");
@@ -8738,9 +8719,9 @@ fn task_details_prompt_links_its_shortened_path_and_image_placeholder() {
     std::fs::write(&image, "").unwrap();
     let selected = &mut view.rows[view.selected];
     selected.prompt = format!("Look at [Image #1] and the report in {path} please");
-    selected.prompt_images = vec![crate::images::Image {
+    selected.prompt_images = vec![crate::event::Image {
         label: "[Image #1]".into(),
-        source: file_image_source(image.clone()),
+        path: image.clone(),
     }];
     let rendered = screen(&view, 120, 40);
     assert!(!rendered.contains(path), "{rendered}");

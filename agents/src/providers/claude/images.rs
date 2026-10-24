@@ -1,4 +1,4 @@
-use crate::images::{Image, ImageSource};
+use crate::event::Image;
 use base64::Engine;
 use serde_json::Value;
 use std::{collections::HashMap, path::PathBuf};
@@ -67,15 +67,9 @@ impl PromptImages {
                 body.contains(&label).then_some((label, block))
             })
             .map(|(label, block)| {
-                let path = embedded_image(&block["source"])?;
-                let metadata = std::fs::metadata(&path)?;
                 Ok(Image {
                     label,
-                    source: ImageSource::File {
-                        path,
-                        len: metadata.len(),
-                        modified: metadata.modified()?,
-                    },
+                    path: embedded_image(&block["source"])?,
                 })
             })
             .collect()

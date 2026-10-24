@@ -92,7 +92,7 @@ impl ImageAttachment {
 #[cfg(test)]
 pub(crate) fn fixture_png() -> Vec<u8> {
     let event: serde_json::Value = serde_json::from_str(
-        include_str!("../../tests/fixtures/claude-queued-image.jsonl")
+        include_str!("../tests/fixtures/claude-queued-image.jsonl")
             .lines()
             .next()
             .unwrap(),

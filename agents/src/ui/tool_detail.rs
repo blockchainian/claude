@@ -22,7 +22,7 @@ enum Body {
     /// A section label, in the given style.
     Label(Style),
     /// A transcript image, with placeholder text as its copy source.
-    Image(crate::images::Image),
+    Image(crate::event::ImageBlock),
     /// An input/output arrow without selectable source bytes.
     Arrow,
     /// The dim animation that a call has no output yet.
@@ -69,13 +69,13 @@ impl Part {
         }
     }
 
-    pub fn image(image: crate::images::Image) -> Self {
-        Self::new(image.label.clone(), Body::Image(image))
+    pub fn image(image: crate::event::ImageBlock) -> Self {
+        Self::new(format!("[image {}]", image.media_type), Body::Image(image))
     }
 
-    pub fn image_block(&self) -> Option<&crate::images::ImageSource> {
+    pub fn image_block(&self) -> Option<&crate::event::ImageBlock> {
         match &self.body {
-            Body::Image(image) => Some(&image.source),
+            Body::Image(image) => Some(image),
             _ => None,
         }
     }
