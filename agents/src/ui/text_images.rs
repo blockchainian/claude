@@ -129,6 +129,42 @@ mod tests {
     }
 
     #[test]
+    fn f7_existing_filenames_and_dot_paths_find_real_images_under_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("screens")).unwrap();
+        for name in ["screen.png", "screens/screen.png"] {
+            write_image(&dir.path().join(name));
+        }
+        for label in ["screen.png", "./screen.png", "./screens/screen.png"] {
+            let images = text_images(label, dir.path(), &[], &mut HashSet::new());
+            assert_eq!(images.len(), 1, "{label}");
+            assert_eq!(images[0].label, label);
+            assert!(matches!(&images[0].source, ImageSource::File { path, .. }
+                    if path == &dir.path().join(label).canonicalize().unwrap()));
+            assert_eq!(
+                images[0].source.bytes().unwrap(),
+                crate::images::fixture_png()
+            );
+        }
+        let mut seen = HashSet::new();
+        assert_eq!(
+            text_images("screen.png ./screen.png", dir.path(), &[], &mut seen).len(),
+            1
+        );
+        std::fs::create_dir(dir.path().join("directory.png")).unwrap();
+        write_image(&dir.path().join("screen.txt"));
+        assert!(
+            text_images(
+                "missing.png ./missing.png ./screens/missing.png directory.png screen.txt",
+                dir.path(),
+                &[],
+                &mut HashSet::new()
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
     fn f4_symlink_paths_are_one_image() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("image.png");
