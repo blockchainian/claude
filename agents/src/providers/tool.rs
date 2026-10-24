@@ -515,6 +515,7 @@ pub(crate) const TOOL_RULES: &[ToolRule] = &[
     ToolRule {
         name: "claude-in-chrome find",
         title: &[Pick::Field(Source::Input, "/query")],
+        remaining_input: Some(Format::Table),
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -1789,7 +1790,7 @@ mod tests {
                     "tabId": 665979853
                 }),
                 "Refresh link near the calendar/summary panel",
-                super::raw_input(&serde_json::json!({"tabId": 665979853})),
+                table("| tabId |\n| --- |\n| 665979853 |"),
             ),
             (
                 "mcp__claude-in-chrome__computer",
