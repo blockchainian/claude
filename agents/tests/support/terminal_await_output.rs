@@ -56,11 +56,8 @@ fn terminal_background_await_shows_message_without_task_id() {
     let capture =
         tmux.capture_when(|capture| capture.contains("d0b23338c838499217c04732ac1dd23ec36a8ddf"));
     let rows: Vec<_> = capture.lines().collect();
-    let rule = rows
-        .iter()
-        .rposition(|line| line.matches('─').count() > 100)
-        .unwrap();
-    let detail = rows[rule + 1..rows.len() - 1].join("\n");
+    let detail_rows = event_detail_rows(&capture, 200).unwrap();
+    let detail = rows[detail_rows.clone()].join("\n");
     assert!(detail.contains("已提交并推送 agents-panel"), "{capture}");
     for raw in [
         "Task b9wi31ww0",
@@ -77,7 +74,8 @@ fn terminal_background_await_shows_message_without_task_id() {
     let (row, column) = rows
         .iter()
         .enumerate()
-        .skip(rule + 1)
+        .skip(detail_rows.start)
+        .take(detail_rows.len())
         .find_map(|(y, line)| line.find("agents-panel").map(|x| (y, line[..x].width())))
         .unwrap();
     let code = parser.screen().cell(row as u16, column as u16).unwrap();

@@ -2,19 +2,11 @@ use super::*;
 
 const WIDTH: usize = 240;
 
-fn event_divider(capture: &str) -> Option<usize> {
-    capture
-        .lines()
-        .enumerate()
-        .filter(|(_, row)| row.matches('─').count() > WIDTH / 2)
-        .map(|(index, _)| index)
-        .last()
-}
-
 fn list_row<'a>(capture: &'a str, label: &str) -> Option<(usize, &'a str)> {
-    let divider = event_divider(capture)?;
+    let divider = event_detail_rows(capture, WIDTH)?.start - 1;
     capture.lines().take(divider).enumerate().find(|(_, row)| {
-        row.rsplit_once('│')
+        row.trim_end_matches(" │")
+            .rsplit_once('│')
             .is_some_and(|(_, list)| list.contains(label))
     })
 }
@@ -27,17 +19,22 @@ fn select_tool(tmux: &Tmux, label: &str) -> String {
     let subject = subject.trim_start_matches('{').split(',').next().unwrap();
     tmux.mouse(0, column, row, true);
     tmux.capture_when(|capture| {
+        let detail = event_detail_rows(capture, WIDTH)
+            .unwrap_or_else(|| panic!("missing event detail boundaries: {capture}"));
         capture
             .lines()
-            .skip(event_divider(capture).unwrap() + 1)
+            .skip(detail.start)
+            .take(detail.len())
             .any(|row| row.trim_start().starts_with(name) && row.contains(subject))
     })
 }
 
 fn assert_title(capture: &str, name: &str, subject: &str) {
+    let detail = event_detail_rows(capture, WIDTH).unwrap();
     let title = capture
         .lines()
-        .skip(event_divider(capture).unwrap() + 1)
+        .skip(detail.start)
+        .take(detail.len())
         .find(|row| row.trim_start().starts_with(name) && row.contains(subject))
         .unwrap_or_else(|| panic!("missing {name} / {subject} detail title: {capture}"));
     assert_eq!(title[..title.find(name).unwrap()].width(), 1, "{capture}");
@@ -127,7 +124,7 @@ fn terminal_claude_tool_list_names_groups_and_paths() {
             .all(|label| list_row(capture, label).is_some())
     });
     let (_, bash_row) = list_row(&capture, &description).unwrap();
-    let bash_list = bash_row.rsplit_once('│').unwrap().1;
+    let bash_list = bash_row.trim_end_matches(" │").rsplit_once('│').unwrap().1;
     assert!(!bash_list.contains("Bash"), "{capture}");
     assert!(
         !capture.contains(project.path().to_str().unwrap()),
@@ -171,9 +168,11 @@ fn terminal_codex_tool_list_shell_group() {
     let capture = tmux.capture_when(|capture| {
         capture.contains("Exec command") && capture.contains("git status --short")
     });
+    let detail = event_detail_rows(&capture, WIDTH).unwrap();
     let title = capture
         .lines()
-        .skip(event_divider(&capture).unwrap() + 1)
+        .skip(detail.start)
+        .take(detail.len())
         .find(|row| row.trim_start().starts_with("Exec command"))
         .unwrap();
     assert_eq!(title.find("Exec command"), Some(1), "{capture}");
@@ -217,7 +216,11 @@ fn terminal_claude_shell_commands_without_description() {
         tmux.capture_when(|capture| list_row(capture, "git {status, diff}, sed").is_some());
     let (_, row) = list_row(&capture, "git {status, diff}, sed").unwrap();
     assert!(
-        !row.rsplit_once('│').unwrap().1.contains("Bash"),
+        !row.trim_end_matches(" │")
+            .rsplit_once('│')
+            .unwrap()
+            .1
+            .contains("Bash"),
         "{capture}"
     );
     write_verdict("claude-shell-commands", &[capture]);
