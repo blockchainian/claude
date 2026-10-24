@@ -6,7 +6,9 @@ pub(crate) use attachment::fixture_png;
 
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Read, Seek, SeekFrom},
+    hash::{Hash, Hasher},
+    io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write},
+    os::unix::fs::DirBuilderExt,
     path::PathBuf,
     time::SystemTime,
 };
@@ -39,6 +41,38 @@ pub(crate) enum ImageSource {
 }
 
 impl ImageSource {
+    /// Returns the file itself, or persists decoded record bytes for opening.
+    pub(crate) fn local_file(&self) -> io::Result<PathBuf> {
+        if let Self::File { path, .. } = self {
+            return Ok(path.clone());
+        }
+        let invalid = || io::Error::new(io::ErrorKind::InvalidData, "Invalid image data");
+        let bytes = self.bytes().ok_or_else(invalid)?;
+        let format = image::guess_format(&bytes).map_err(|_| invalid())?;
+        let extension = format.extensions_str().first().ok_or_else(invalid)?;
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut hash);
+        let directory = std::env::temp_dir().join(format!("agents-images-{}", std::process::id()));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .recursive(true)
+            .create(&directory)?;
+        let path = directory.join(format!("{:016x}.{extension}", hash.finish()));
+        if !path.exists() {
+            let mut file = tempfile::NamedTempFile::new_in(&directory)?;
+            file.write_all(&bytes)?;
+            match file.persist_noclobber(&path) {
+                Ok(_) => {}
+                Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error.error),
+            }
+        }
+        if std::fs::read(&path)? != bytes {
+            return Err(invalid());
+        }
+        Ok(path)
+    }
+
     /// Reads the image bytes on demand.
     pub(crate) fn bytes(&self) -> Option<Vec<u8>> {
         match self {
@@ -91,6 +125,23 @@ mod tests {
     }
 
     #[test]
+    fn local_file_materializes_record_bytes_and_reuses_the_path() {
+        let source = record_source();
+        let path = source.local_file().unwrap();
+        assert_eq!(path.extension().unwrap(), "png");
+        assert_eq!(
+            path.parent().unwrap(),
+            std::env::temp_dir().join(format!("agents-images-{}", std::process::id()))
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), source.bytes().unwrap());
+        assert_eq!(source.local_file().unwrap(), path);
+        std::fs::write(&path, b"corrupt").unwrap();
+        assert!(source.local_file().is_err());
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(source.local_file().unwrap(), path);
+    }
+
+    #[test]
     fn record_images_decode_using_their_transcript_position() {
         let source = record_source();
         let bytes = source.bytes().unwrap();
@@ -123,6 +174,8 @@ mod tests {
             modified: metadata.modified().unwrap(),
         };
         assert_eq!(source.bytes().unwrap(), bytes);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(source.local_file().unwrap(), path);
 
         let oversized = directory.path().join("oversized.png");
         File::create(&oversized)

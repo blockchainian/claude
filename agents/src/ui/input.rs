@@ -21,7 +21,7 @@ pub(super) enum ClickTarget {
         label: &'static str,
     },
     Background(crate::model::BackgroundTask),
-    Link(PathBuf),
+    Link(LinkTarget),
     Heading(PathBuf),
     Title(SessionKey),
 }
@@ -115,8 +115,10 @@ impl View {
         let click = self.pending_click.take().expect("click is due");
         match click.target {
             ClickTarget::Event { .. } | ClickTarget::ListBorder { .. } => None,
-            ClickTarget::Link(path) => Some(Action::OpenPath(path)),
-            ClickTarget::Heading(path) => click.open_heading.then_some(Action::OpenPath(path)),
+            ClickTarget::Link(target) => Some(Action::Open(target)),
+            ClickTarget::Heading(path) => click
+                .open_heading
+                .then_some(Action::Open(LinkTarget::Path(path))),
             ClickTarget::TaskDetails { .. }
             | ClickTarget::Background(_)
             | ClickTarget::Title(_) => None,
@@ -1223,7 +1225,7 @@ impl View {
                     }
                     return None;
                 }
-                return Some(Action::OpenPath(target));
+                return Some(Action::Open(target));
             }
         }
         let fold_toggle = self
@@ -1383,7 +1385,7 @@ impl View {
     }
 
     /// What the link drawn at `position` opens, if one is there.
-    fn link_at(&self, position: ratatui::layout::Position) -> Option<PathBuf> {
+    fn link_at(&self, position: ratatui::layout::Position) -> Option<LinkTarget> {
         let viewport = self.viewport.borrow();
         [
             &viewport.list_links,

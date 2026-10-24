@@ -152,7 +152,7 @@ fn app_task_details_groups_and_project_links_follow_panel_rules() {
             for x in pr_x..pr_x + 3 {
                 assert_eq!(click_link(&mut app, MouseEvent {
                     kind: MouseEventKind::Down(MouseButton::Left), column: x, row: status_y, modifiers: KeyModifiers::NONE,
-                }), Some(Action::OpenPath(format!("vscode://blockchainian.git/view-pr?repo={}&url=https%3A%2F%2Fgithub.com%2Fblockchainian%2Fclaude%2Fpull%2F13", crate::test_project().to_str().unwrap().replace('/', "%2F")).into())));
+                }), Some(Action::Open(crate::ui::links::LinkTarget::Path(format!("vscode://blockchainian.git/view-pr?repo={}&url=https%3A%2F%2Fgithub.com%2Fblockchainian%2Fclaude%2Fpull%2F13", crate::test_project().to_str().unwrap().replace('/', "%2F")).into()))));
             }
             assert_eq!(
                 click_link(
@@ -164,7 +164,9 @@ fn app_task_details_groups_and_project_links_follow_panel_rules() {
                         modifiers: KeyModifiers::NONE,
                     }
                 ),
-                Some(Action::OpenPath(crate::test_project()))
+                Some(Action::Open(crate::ui::links::LinkTarget::Path(
+                    crate::test_project()
+                )))
             );
         }
     }

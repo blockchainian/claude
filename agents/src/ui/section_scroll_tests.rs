@@ -384,7 +384,7 @@ mod task_details_curtain {
             .task_details_links
             .iter()
             .find(|(_, target)| {
-                target
+                crate::ui::link_path(target)
                     .to_string_lossy()
                     .contains("https://example.com/pull/833")
             })
@@ -615,7 +615,7 @@ fn task_details_border_links_and_title_keep_actions_without_scrolling() {
             for _ in 0..2 {
                 assert_eq!(
                     click_mouse(&mut view, click),
-                    Some(Action::OpenPath(target.clone()))
+                    Some(Action::Open(target.clone()))
                 );
                 assert_eq!(
                     view.viewport.borrow().task_details_scroll.position(),

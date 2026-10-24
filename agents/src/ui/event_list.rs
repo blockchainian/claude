@@ -2017,7 +2017,7 @@ fn event_detail_parts_layout_with_images(
                     if let Some(target) = super::vscode::file_line_link(&link.path, link.line) {
                         links.push(super::links::Link {
                             range: link.range.clone(),
-                            target: target.into(),
+                            target: super::links::LinkTarget::Path(target.into()),
                         });
                     }
                 }
@@ -2285,19 +2285,13 @@ pub(super) mod event_markdown {
         let events = crate::providers::claude::event_reader::tail(&transcript, 20).unwrap();
         let event = &events[0];
         let image = &event.images[0];
-        let crate::images::ImageSource::File {
-            path: image_path, ..
-        } = &image.source
-        else {
-            panic!("expected file source")
-        };
         let layout = event_detail_layout(event, 200, dir.path(), DateTime::UNIX_EPOCH);
         assert!(
             layout
                 .links
                 .iter()
                 .flatten()
-                .any(|link| link.target == *image_path)
+                .any(|link| link.target == super::super::links::LinkTarget::Image(image.source.clone()))
         );
         let area = Rect::new(0, 0, 200, 1);
         let links = render_event(
@@ -2309,7 +2303,7 @@ pub(super) mod event_markdown {
             None,
             dir.path(),
         );
-        assert!(links.iter().any(|(_, target)| target == image_path));
+        assert!(links.iter().any(|(_, target)| target == &super::super::links::LinkTarget::Image(image.source.clone())));
     }
 
     #[test]
@@ -2759,7 +2753,7 @@ pub(super) mod event_markdown {
             let targets: Vec<_> = links.into_iter().map(|link| link.target).collect();
             assert_eq!(
                 targets,
-                [dir.path().join("src/ui/log.rs"), report.clone()],
+                [crate::ui::links::LinkTarget::Path(dir.path().join("src/ui/log.rs")), crate::ui::links::LinkTarget::Path(report.clone())],
                 "{kind:?}"
             );
             assert!(

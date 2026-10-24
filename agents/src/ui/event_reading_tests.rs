@@ -213,11 +213,9 @@ fn codex_agent_messages_show_routes_and_payload() {
                         .contains(ratatui::style::Modifier::BOLD)
             }));
             assert!(
-                drawn
-                    .links
-                    .iter()
-                    .flatten()
-                    .any(|link| link.target == Path::new("https://example.com/report"))
+                drawn.links.iter().flatten().any(
+                    |link| link.target == LinkTarget::Path("https://example.com/report".into())
+                )
             );
         }
     }

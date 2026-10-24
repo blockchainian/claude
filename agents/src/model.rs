@@ -333,7 +333,7 @@ pub enum Action {
     },
     /// Click on a drawn path, image placeholder or pull request link: open the
     /// file, directory or URL with macOS `open`.
-    OpenPath(PathBuf),
+    Open(crate::ui::links::LinkTarget),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

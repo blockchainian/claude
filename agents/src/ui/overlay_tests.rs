@@ -261,7 +261,7 @@ fn overlay_confirmation_emits_left_border_after_wide_text() {
                         &mut before,
                         &[(
                             Rect::new(cover.x - 1, y, text.width() as u16, 1),
-                            _directory.path().into(),
+                            crate::ui::links::LinkTarget::Path(_directory.path().into()),
                         )],
                     );
                 }

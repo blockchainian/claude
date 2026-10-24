@@ -29,7 +29,7 @@ mod input;
 mod key_name;
 mod line_edit;
 mod line_truncation;
-mod links;
+pub(crate) mod links;
 mod markdown;
 mod navigation;
 mod paths;
@@ -75,6 +75,7 @@ use chrono::{DateTime, Utc};
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+use links::LinkTarget;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Margin, Rect},
@@ -1546,3 +1547,11 @@ impl Viewport {
 
 #[cfg(test)]
 mod background_order_tests;
+
+#[cfg(test)]
+fn link_path(target: &LinkTarget) -> &std::path::Path {
+    match target {
+        LinkTarget::Path(path) => path,
+        LinkTarget::Image(_) => panic!("expected path link"),
+    }
+}

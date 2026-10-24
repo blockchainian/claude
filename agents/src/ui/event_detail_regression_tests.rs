@@ -161,7 +161,9 @@ fn event_detail_body_uses_default_foreground_and_preserves_title_and_markdown_st
                     .borrow()
                     .event_links
                     .iter()
-                    .any(|(_, target)| target.to_string_lossy().contains("example.com"))
+                    .any(|(_, target)| crate::ui::link_path(target)
+                        .to_string_lossy()
+                        .contains("example.com"))
             );
         }
         let mut list = Buffer::empty(Rect::new(0, 0, 120, 1));

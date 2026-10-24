@@ -113,7 +113,7 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
             let links = view.viewport.borrow().task_details_links.clone();
             let (folder, _) = links
                 .iter()
-                .find(|(_, target)| target.as_path() == crate::test_project())
+                .find(|(_, target)| crate::ui::link_path(target) == crate::test_project())
                 .unwrap();
             let row = (task_details.x..task_details.right())
                 .map(|x| visible(&buf[(x, folder.y)]))
@@ -170,7 +170,7 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
                             &mut view,
                             mouse(MouseEventKind::Down(MouseButton::Left), x, rect.y)
                         ),
-                        Some(Action::OpenPath(target.clone()))
+                        Some(Action::Open(target.clone()))
                     );
                 }
             }
@@ -220,7 +220,7 @@ fn status_rule_names_a_worktree_task_by_its_repository_and_opens_the_worktree() 
         let mut buf = Buffer::empty(Rect::new(0, 0, 150, 50));
         view.render(buf.area, &mut buf);
         let (folder, target) = view.viewport.borrow().task_details_links[0].clone();
-        assert_eq!(&target, cwd);
+        assert_eq!(crate::ui::link_path(&target), cwd);
         assert_eq!(
             (folder.x..folder.right())
                 .map(|x| visible(&buf[(x, folder.y)]))
@@ -252,6 +252,6 @@ fn status_rule_names_a_missing_directory_without_a_link() {
         viewport
             .task_details_links
             .iter()
-            .all(|(_, target)| target != Path::new("/nonexistent/build"))
+            .all(|(_, target)| crate::ui::link_path(target) != Path::new("/nonexistent/build"))
     );
 }

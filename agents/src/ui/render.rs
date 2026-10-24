@@ -1127,13 +1127,13 @@ impl View {
         if let Some(area) = folder_area
             && let Some(target) = super::links::existing(cwd.clone())
         {
-            links.push((area, target));
+            links.push((area, LinkTarget::Path(target)));
         }
         if let (Some(area), Some(pr)) = (right_area, &session.pr) {
             let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
                 .unwrap_or_else(|| pr.url.clone());
             super::hyperlink::hyperlink(buf, area, &url);
-            links.push((area, PathBuf::from(url)));
+            links.push((area, LinkTarget::Path(PathBuf::from(url))));
         }
         super::links::underline(buf, &links);
         viewport.task_details_links.extend(links);
@@ -1300,7 +1300,7 @@ impl View {
         let mut body_links: Vec<Vec<super::links::Link>> = Vec::new();
         // The columns each item draws a link on, parallel to `items`; bodies fill theirs
         // once their rows are mapped to their text.
-        let mut item_links: Vec<Vec<(std::ops::Range<u16>, PathBuf)>> = Vec::new();
+        let mut item_links: Vec<Vec<(std::ops::Range<u16>, LinkTarget)>> = Vec::new();
 
         // The agent appends an exit marker to the output file when the
         // command ends, which lands before the completion notification does.

@@ -467,7 +467,7 @@ mod tests {
                     .iter()
                     .map(|range| super::super::links::Link {
                         range: range.clone(),
-                        target: path.into(),
+                        target: crate::ui::links::LinkTarget::Path(path.into()),
                     })
                     .collect();
                 let drawn = super::super::links::row_links(&maps[0], &links);
@@ -476,8 +476,14 @@ mod tests {
                 assert_eq!(
                     drawn,
                     [
-                        (first..first + label.width() as u16, path.into()),
-                        (second..second + label.width() as u16, path.into()),
+                        (
+                            first..first + label.width() as u16,
+                            crate::ui::links::LinkTarget::Path(path.into())
+                        ),
+                        (
+                            second..second + label.width() as u16,
+                            crate::ui::links::LinkTarget::Path(path.into())
+                        ),
                     ],
                     "{cwd}: {label}"
                 );
@@ -508,11 +514,14 @@ mod tests {
         assert_eq!(maps[0].len(), display.chars().count());
         let links = [super::super::links::Link {
             range: 0..source.len(),
-            target: target.clone(),
+            target: crate::ui::links::LinkTarget::Path(target.clone()),
         }];
         assert_eq!(
             super::super::links::row_links(&maps[0], &links),
-            [(0..display.width() as u16, target)]
+            [(
+                0..display.width() as u16,
+                crate::ui::links::LinkTarget::Path(target)
+            )]
         );
         assert_eq!(maps[0].first().unwrap().1.start, 0);
         assert_eq!(maps[0].last().unwrap().1.end, source.len());

@@ -188,7 +188,7 @@ impl View {
                 {
                     let link =
                         Rect::new(rect.x, rect.y, group.width() as u16, 1).intersection(rect);
-                    let links = [(link, directory)];
+                    let links = [(link, LinkTarget::Path(directory))];
                     state.list_links.extend(links);
                 }
                 continue;

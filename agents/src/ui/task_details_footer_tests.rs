@@ -52,7 +52,11 @@ fn task_details_status_links_keep_underlines_and_click_targets_in_both_layouts()
             PathBuf::from("https://example.com/pull/833"),
             crate::test_project(),
         ] {
-            let rect = links.iter().find(|(_, path)| *path == target).unwrap().0;
+            let rect = links
+                .iter()
+                .find(|(_, path)| *path == LinkTarget::Path(target.clone()))
+                .unwrap()
+                .0;
             assert_eq!(rect.y, area.bottom());
             assert!(buf[(rect.x, rect.y)].symbol().contains("\x1b[4:4m"));
             assert_eq!(
@@ -60,7 +64,7 @@ fn task_details_status_links_keep_underlines_and_click_targets_in_both_layouts()
                     &mut view,
                     mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y)
                 ),
-                Some(Action::OpenPath(target))
+                Some(Action::Open(crate::ui::links::LinkTarget::Path(target)))
             );
         }
     }
