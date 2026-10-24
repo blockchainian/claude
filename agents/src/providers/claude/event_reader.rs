@@ -4095,9 +4095,13 @@ pub(crate) mod tests {
             earliest: len,
         };
         let mut event_panel = EventReader::default();
-        super::super::transcript::walk_records(&mut measured, len, Vec::new(), false, |record| {
-            event_panel.record(record, 2)
-        })
+        super::super::transcript::walk_records(
+            &mut measured,
+            len,
+            Vec::new(),
+            false,
+            |_, record| event_panel.record(record, 2),
+        )
         .unwrap();
         assert_eq!(measured.bytes_read, 64 * 1024);
         assert_eq!(measured.earliest, len - 64 * 1024);

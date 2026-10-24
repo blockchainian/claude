@@ -645,14 +645,15 @@ impl<R: Seek> Seek for CountingReader<R> {
     }
 }
 
-/// Walk complete transcript records newest first, retaining a split first line.
+/// Walk complete transcript records newest first with their starting byte offsets.
+/// Retain a split first line for the preceding block.
 /// The callback returns false once it has all the records it needs.
 pub(super) fn walk_records(
     file: &mut (impl Read + Seek),
     mut start: u64,
     mut bytes: Vec<u8>,
     sidechains: bool,
-    mut visit: impl FnMut(Value) -> bool,
+    mut visit: impl FnMut(u64, Value) -> bool,
 ) -> io::Result<()> {
     let mut chunk = CHUNK;
     loop {
@@ -665,9 +666,14 @@ pub(super) fn walk_records(
                 .position(|byte| *byte == b'\n')
                 .map_or(bytes.len(), |index| index + 1)
         };
-        for record in records_with_sidechains(&bytes[skip..], sidechains).rev() {
-            if !visit(record) {
-                return Ok(());
+        let mut line_start = bytes.len();
+        for line in bytes[skip..].split_inclusive(|byte| *byte == b'\n').rev() {
+            line_start -= line.len();
+            let line = line.strip_suffix(b"\n").unwrap_or(line);
+            for record in records_with_sidechains(line, sidechains) {
+                if !visit(start + line_start as u64, record) {
+                    return Ok(());
+                }
             }
         }
         if start == 0 {
@@ -712,7 +718,7 @@ fn read_messages(
     let mut images = super::images::PromptImages::default();
     let mut image_error = None;
     let mut activity = super::event_reader::ActivityEvent::default();
-    walk_records(file, start, bytes, sidechains, |record| {
+    walk_records(file, start, bytes, sidechains, |_, record| {
         if !descriptions_only && !activity.ready() {
             activity.record(record.clone());
         }
@@ -978,6 +984,63 @@ pub(super) fn read_subagent_tail(file: &mut (impl Read + Seek), len: u64) -> io:
 pub(super) mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn walk_records_offsets_point_to_transcript_line_starts() {
+        for fixture in [
+            include_str!("../../../tests/fixtures/claude-prompt-images.jsonl"),
+            include_str!("../../../tests/fixtures/claude-tool-calls.jsonl"),
+            include_str!("../../../tests/fixtures/claude-subagent-model-history.jsonl"),
+        ] {
+            let bytes = fixture.repeat(3 * CHUNK as usize / fixture.len() + 1);
+            let mut transcript = tempfile::NamedTempFile::new().unwrap();
+            transcript.write_all(bytes.as_bytes()).unwrap();
+            let mut offset = 0;
+            let lines: Vec<_> = bytes
+                .split_inclusive('\n')
+                .map(|line| {
+                    let at = offset;
+                    offset += line.len() as u64;
+                    (at, serde_json::from_str::<Value>(line).unwrap())
+                })
+                .collect();
+            let len = bytes.len() as u64;
+            // Cover a full buffer, an empty tail, a split line, and a line boundary.
+            for start in [0, len, len - CHUNK - 1, lines[lines.len() / 2].0] {
+                for sidechains in [false, true] {
+                    let expected: Vec<_> = lines
+                        .iter()
+                        .rev()
+                        .filter(|(_, record)| sidechains || record["isSidechain"] != true)
+                        .cloned()
+                        .collect();
+                    let mut actual = Vec::new();
+                    walk_records(
+                        transcript.as_file_mut(),
+                        start,
+                        bytes.as_bytes()[start as usize..].to_vec(),
+                        sidechains,
+                        |offset, record| {
+                            actual.push((offset, record));
+                            true
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(actual, expected, "start={start}, sidechains={sidechains}");
+                    let mut file = BufReader::new(File::open(transcript.path()).unwrap());
+                    for (offset, record) in actual {
+                        if offset > 0 {
+                            assert_eq!(bytes.as_bytes()[offset as usize - 1], b'\n');
+                        }
+                        file.seek(SeekFrom::Start(offset)).unwrap();
+                        let mut line = String::new();
+                        file.read_line(&mut line).unwrap();
+                        assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), record);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn background_branch_reaches_task_details_border() {
