@@ -282,7 +282,7 @@ impl Writer {
             .collect::<String>();
         let mut highlighted = lang
             .filter(|lang| highlight::find_syntax(lang).is_some())
-            .map(|lang| highlight::code_lines(&text, &lang).into_iter());
+            .map(|lang| highlight::code_block(&text, &lang).into_iter());
         for part in text.split_inclusive('\n') {
             if let Some(lines) = &mut highlighted {
                 let line = lines.next().expect("highlighted code line");
@@ -922,7 +922,7 @@ mod tests {
         let code = "/* comment\n   continued */\nfn main() {\n    let text = \"中文\";\n}\n";
         for info in ["rust", "rs", "rust extra words"] {
             let lines = render(&format!("```{info}\n{code}```"), 80);
-            assert_eq!(lines, super::super::highlight::code_lines(code, "rs"));
+            assert_eq!(lines, super::super::highlight::code_block(code, "rs"));
         }
     }
 
