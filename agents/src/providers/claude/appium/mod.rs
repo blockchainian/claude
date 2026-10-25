@@ -202,13 +202,12 @@ fn element_ids(data: &ToolData<'_>) -> Option<Body> {
     )]))
 }
 
+/// A gesture that seeks an element shows only its selector; others show their fields.
 fn gesture_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
-    let mut sections: Vec<_> = text(data.input, "selector")
-        .map(|selector| code_section("selector", "", selector))
-        .into_iter()
-        .collect();
-    sections.extend(other_fields(data, &["action", "selector"])?);
-    Some(sections)
+    match data.input.get("selector") {
+        Some(selector) => Some(picked_sections(selector, "/selector", Format::Text, false)),
+        None => other_fields(data, &["action"]),
+    }
 }
 
 /// The strategy a find uses, followed by any other fields.
@@ -489,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn appium_gesture_shows_its_selector_as_code_and_the_rest_as_a_table() {
+    fn appium_gesture_with_a_selector_shows_only_the_selector() {
         let input = serde_json::json!({
             "action": "scroll_to_element",
             "strategy": "-ios predicate string",
@@ -506,15 +505,7 @@ mod tests {
             },
         );
         assert_eq!(shown.title.as_deref(), Some("scroll_to_element"));
-        assert_eq!(
-            shown.input[0],
-            super::code_section("selector", "", "label == 'Bohemian Rhapsody'")
-        );
-        let [_, Section::Markdown { text, .. }] = shown.input.as_slice() else {
-            panic!("the other fields must follow as a table: {:?}", shown.input);
-        };
-        assert!(text.contains("scrollDistancePreset"), "{text}");
-        assert!(!text.contains("selector") && !text.contains("sessionId"), "{text}");
+        assert_eq!(shown.input, prose("label == 'Bohemian Rhapsody'"));
     }
 
     #[test]
