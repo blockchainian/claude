@@ -3,7 +3,7 @@
                      project                      │                     Prompt
  ● Example thread 0        Needs input     6d ago │               Inspect the project
                                                   │ …
-─╴gpt-6.1-sol ──────────────────────────── medium╶┴╴project ──────── Example thr… ─ example-branch╶─
+─╴gpt-6.1-sol ──────────────────────────── medium╶┴╴project ────── Example thread 0 ─ example-bra…╶─
   Color
 
  Pick a color?
