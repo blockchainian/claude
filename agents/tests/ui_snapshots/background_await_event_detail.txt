@@ -3,7 +3,7 @@
                                                                        Real background output                                                            12:00:00
 
                                                                                   ↓
-                                        已提交并推送 agents-panel：d0b23338c838499217c04732ac1dd23ec36a8ddf。
+                                        已提交并推送 example.com：d0b23338c838499217c04732ac1dd23ec36a8ddf。
                                         • Space / Enter 原本语义相同；现在单击单选会选中并提交，多题时进入下一页
                                         • 多选单击切换选中状态，双击只切换一次
                                         • 三项回归测试先失败后通过；全量 cargo test 主机复验 1471 通过，cargo clippy --all-

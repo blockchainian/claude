@@ -763,10 +763,10 @@ mod tests {
 
     #[test]
     fn splits_real_bash_command() {
-        let source = r#"cd ~/Code/example-org/example-repo && F="darwin/Library/Application Support/Code/User/settings.json" && git diff --stat -- "$F"; sed -i '' 's/^  "workbench.panel.defaultLocation": "left",$/  "workbench.panel.defaultLocation": "left",\n  "workbench.panel.showLabels": false,/' "$F" && sed -n 6,9p "$F""#;
+        let source = r#"cd ~/Code/example/project && F="darwin/Library/Application Support/Code/User/settings.json" && git diff --stat -- "$F"; sed -i '' 's/^  "workbench.panel.defaultLocation": "left",$/  "workbench.panel.defaultLocation": "left",\n  "workbench.panel.showLabels": false,/' "$F" && sed -n 6,9p "$F""#;
         let result = commands(source);
         assert_eq!(result.len(), 5);
-        assert_eq!(result[0], ("cd ~/Code/example-org/example-repo", true));
+        assert_eq!(result[0], ("cd ~/Code/example/project", true));
         assert_eq!(
             result[1],
             (

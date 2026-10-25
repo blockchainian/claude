@@ -1723,7 +1723,7 @@ pub(crate) mod tests {
         assert!(events.iter().all(|event| event.turn == Some(turn)));
         let steering = events
             .iter()
-            .find(|event| event.body == "说的是起一个，不是七个。")
+            .find(|event| event.body == "先暂停检查。")
             .unwrap();
         assert_eq!(steering.kind, Kind::User);
         assert_eq!(
@@ -3927,15 +3927,15 @@ pub(crate) mod tests {
                 "call",
                 "file",
                 name,
-                json!({"file_path":"~/Users/project/src/main.rs"}),
+                json!({"file_path":"~/Users/example-user/src/main.rs"}),
             )]);
             assert_eq!(
                 events[0].body,
-                format!("{name} ~/Users/project/src/main.rs")
+                format!("{name} ~/Users/example-user/src/main.rs")
             );
             assert_eq!(
                 &events[0].body[events[0].paths[0].clone()],
-                "~/Users/project/src/main.rs"
+                "~/Users/example-user/src/main.rs"
             );
         }
     }

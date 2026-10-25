@@ -28,7 +28,7 @@ Agent toolu_01Jh2saBdGuVcXWa4bGuH4sW — 120 columns
                                                      写工具详情计划
 
                   Write an implementation plan for a feature in the agents Rust TUI session dashboard,
-                  at agents/agents (git worktree on branch agents-panel; read agents/AGENTS.md and
+                  at agents/agents (git worktree on branch example.com; read agents/AGENTS.md and
                   agents/AGENTS.md first). The plan will be run by the /feature:ship skill, so follow
                   the format in agents/plugins/feature/skills/ship/minimal-plan-template.md exactly
                   (read SKILL.md in the same dir only for what the plan sections must contain). Write
@@ -108,7 +108,7 @@ Agent toolu_01Jh2saBdGuVcXWa4bGuH4sW — 200 columns
                                                                                              写工具详情计划
 
                                                           Write an implementation plan for a feature in the agents Rust TUI session dashboard,
-                                                          at agents/agents (git worktree on branch agents-panel; read agents/AGENTS.md and
+                                                          at agents/agents (git worktree on branch example.com; read agents/AGENTS.md and
                                                           agents/AGENTS.md first). The plan will be run by the /feature:ship skill, so follow
                                                           the format in agents/plugins/feature/skills/ship/minimal-plan-template.md exactly
                                                           (read SKILL.md in the same dir only for what the plan sections must contain). Write
@@ -199,7 +199,7 @@ Skill                                                                           
 SendMessage tool-2 — 120 columns
                                                   ← hide-idle-teammates
 
-                  Is the uncommitted edit to agents/src/ui/line_truncation.rs in the agents-panel
+                  Is the uncommitted edit to agents/src/ui/line_truncation.rs in the example.com
                   worktree yours? I'm add-codex-support; my Codex thread (step 4 of the provider
                   refactor) is mid-gate in that same tree and its cargo fmt --check fails on that file.
                   It won't touch or commit it. If it's yours: please run cargo fmt on it and commit it
@@ -211,7 +211,7 @@ SendMessage tool-2 — 120 columns
 SendMessage tool-2 — 200 columns
                                                                                           ← hide-idle-teammates
 
-                                                          Is the uncommitted edit to agents/src/ui/line_truncation.rs in the agents-panel
+                                                          Is the uncommitted edit to agents/src/ui/line_truncation.rs in the example.com
                                                           worktree yours? I'm add-codex-support; my Codex thread (step 4 of the provider
                                                           refactor) is mid-gate in that same tree and its cargo fmt --check fails on that file.
                                                           It won't touch or commit it. If it's yours: please run cargo fmt on it and commit it

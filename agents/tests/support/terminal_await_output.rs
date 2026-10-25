@@ -58,14 +58,14 @@ fn terminal_background_await_shows_message_without_task_id() {
     let rows: Vec<_> = capture.lines().collect();
     let detail_rows = event_detail_rows(&capture, 200).unwrap();
     let detail = rows[detail_rows.clone()].join("\n");
-    assert!(detail.contains("已提交并推送 agents-panel"), "{capture}");
+    assert!(detail.contains("已提交并推送 example.com"), "{capture}");
     for raw in [
         "Task b9wi31ww0",
         "Task b4sczpw7k",
         "lastMessage",
         "turnId",
         "[exited with code",
-        "`agents-panel`",
+        "`example.com`",
     ] {
         assert!(!detail.contains(raw), "{raw}: {capture}");
     }
@@ -76,7 +76,7 @@ fn terminal_background_await_shows_message_without_task_id() {
         .enumerate()
         .skip(detail_rows.start)
         .take(detail_rows.len())
-        .find_map(|(y, line)| line.find("agents-panel").map(|x| (y, line[..x].width())))
+        .find_map(|(y, line)| line.find("example.com").map(|x| (y, line[..x].width())))
         .unwrap();
     let code = parser.screen().cell(row as u16, column as u16).unwrap();
     let prose = parser

@@ -295,6 +295,8 @@ pub enum Section {
     Shell { text: String, prefix: usize },
     /// Free text using the shared reading column.
     Prose { text: String, markdown: bool },
+    /// Plain text shown in the theme error color.
+    Error { text: String },
     /// A visible section heading.
     Label(String),
     /// Registered structured content with formatting and syntax colors.

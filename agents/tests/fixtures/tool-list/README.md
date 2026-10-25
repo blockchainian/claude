@@ -1,6 +1,6 @@
 # Tool list records
 
-Claude assistant tool calls captured in the agents-panel project:
+Claude assistant tool calls captured in the example.com project:
 
 - `0661ce7b-dc8a-4703-abea-7572bd880b12.jsonl:2333`: Read.
 - `594feebb-ddc6-4bbc-bd61-3f544e1d6ce3.jsonl:534`: Write.
@@ -18,5 +18,5 @@ Codex completed items captured from:
 - `2026/10/13/rollout-2026-10-13T18-52-03-01a1381c-06e5-7743-9a95-fb1f47beb709.jsonl:291`: two-file update.
 - `2026/10/18/rollout-2026-10-18T12-46-13-01a1508c-e69a-73c0-923b-792e07f29aa3.jsonl:86`: file creation.
 
-Project and home paths use `/workspace` and `/home/user`. Output/content retain
+Project and home paths use `/workspace` and `/home/example-user`. Output/content retain
 the first line; unified diffs retain their first hunk header and first changed lines.

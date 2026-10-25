@@ -65,7 +65,7 @@ fn assert_clean_complete(body: &str) {
         "完成，未提交。cache 和 streamer",
         "270→270",
         "packages/cache/scripts/runTests.ts",
-        "website/src/lib/example-app/api/__fixtures__/tradingActivityItems.ts",
+        "website/src/lib/example.com/api/__fixtures__/tradingActivityItems.ts",
         "负责范围内的旧路径已清理",
         "未改。",
     ] {

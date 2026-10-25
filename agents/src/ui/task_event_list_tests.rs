@@ -52,6 +52,71 @@ fn show(view: &mut View, id: &SessionKey, events: Vec<crate::event::Event>) {
 }
 
 #[test]
+fn last_timeline_event_with_untitled_pinned_tool_keeps_detail_border() {
+    let (_dir, mut view, _, id, _) = fixture();
+    for row in &mut view.rows {
+        row.status = SessionStatus::Ready;
+    }
+    view.status_filter = 0;
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let events = crate::providers::claude::event_reader::tail_session(
+        &root.join("tests/fixtures/turn-groups/claude-steer.jsonl"),
+        usize::MAX,
+        true,
+    )
+    .unwrap();
+    let pinned = crate::providers::claude::event_reader::tail_session(
+        &root.join("tests/fixtures/claude-chrome-browser-batch.jsonl"),
+        usize::MAX,
+        true,
+    )
+    .unwrap()
+    .remove(0);
+    assert_eq!(pinned.calls[0].name, "mcp__claude-in-chrome__browser_batch");
+    assert!(pinned.calls[0].title.is_empty());
+    view.set_event(events);
+    view.set_pinned_events(
+        &id,
+        vec![super::task_ui::PinnedRow {
+            pin: crate::state::PinnedEvent {
+                source: pinned.source.clone().unwrap(),
+                records: pinned.source_records.clone(),
+            },
+            event: pinned,
+        }],
+    );
+    view.select_event(view.newest_event_position());
+    let area = Rect::new(0, 0, 120, 25);
+    let mut buffer = Buffer::empty(area);
+    view.render(area, &mut buffer);
+    view.set_active_panel(Panel::EventDetail);
+    view.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+    view.render(area, &mut buffer);
+    let viewport = view.viewport.borrow();
+    let timeline = view.event_timeline_height();
+    assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(3)));
+    assert_eq!(
+        viewport.event_row_at(timeline - 1),
+        Some(EventRow::Timeline(3))
+    );
+    assert_eq!(viewport.event_row_at(timeline), None);
+    assert_eq!(
+        viewport.event_row_at(timeline + 1),
+        Some(EventRow::Pinned(0))
+    );
+    assert_eq!(
+        view.event_detail.scroll.borrow().offset,
+        viewport.event_detail_max
+    );
+    assert_eq!(view.next_event_title().unwrap().width(), 0);
+    let border = viewport.output_borders[1];
+    let text: String = (border.x..border.right())
+        .map(|x| buffer[(x, border.y)].symbol())
+        .collect();
+    assert!(text.chars().all(|cell| cell == '─'), "{text}");
+}
+
+#[test]
 fn task_event_list_restores_selection_position_and_unseen() {
     let (_dir, mut view, events, first, second) = fixture();
     view.select_event(Some(2));

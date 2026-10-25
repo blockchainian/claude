@@ -27,6 +27,23 @@ pub(crate) fn read_plain_output_file(path: &std::path::Path) -> Section {
     }
 }
 
+/// Reads a text block at its original position in a content array.
+pub(crate) fn content_text(content: &Value, index: usize) -> Option<&str> {
+    let block = content.as_array()?.get(index)?;
+    (block["type"] == "text")
+        .then(|| block["text"].as_str())
+        .flatten()
+}
+
+/// Shows the body of a complete system reminder in the error color.
+pub(crate) fn system_reminder_section(text: &str) -> Option<Section> {
+    let (_, rest) = text.split_once("<system-reminder>")?;
+    let (body, _) = rest.split_once("</system-reminder>")?;
+    Some(Section::Error {
+        text: body.to_owned(),
+    })
+}
+
 pub(crate) fn json_input(value: &Value) -> Vec<Section> {
     if value.is_null() || value.as_object().is_some_and(|object| object.is_empty()) {
         Vec::new()
@@ -1130,6 +1147,45 @@ fn label_section(section: Section) -> Vec<Section> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn system_reminder_section_extracts_complete_tags() {
+        let records: Vec<serde_json::Value> =
+            include_str!("../../tests/fixtures/claude-chrome-tabs-context.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let content = &records[1]["message"]["content"][0]["content"];
+        let text = content[2]["text"].as_str().unwrap();
+        let body = text
+            .strip_prefix("<system-reminder>")
+            .unwrap()
+            .strip_suffix("</system-reminder>")
+            .unwrap();
+        assert_eq!(
+            super::system_reminder_section(text),
+            Some(crate::event::Section::Error { text: body.into() })
+        );
+        assert_eq!(
+            super::system_reminder_section(content[1]["text"].as_str().unwrap()),
+            None
+        );
+        assert_eq!(
+            super::system_reminder_section("<system-reminder>incomplete"),
+            None
+        );
+    }
+
+    #[test]
+    fn content_text_checks_the_block_at_the_given_index() {
+        let content = serde_json::json!([
+            {"type":"image"}, {"type":"text", "text":"body"}, {"type":"image", "text":"not text"}
+        ]);
+        assert_eq!(super::content_text(&content, 0), None);
+        assert_eq!(super::content_text(&content, 1), Some("body"));
+        assert_eq!(super::content_text(&content, 2), None);
+        assert_eq!(super::content_text(&content, 3), None);
+    }
+
     fn recorded_heredoc_command() -> String {
         let record: serde_json::Value = serde_json::from_str(include_str!(
             "../../tests/fixtures/claude-shell-heredoc.jsonl"

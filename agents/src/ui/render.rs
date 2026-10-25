@@ -2220,6 +2220,9 @@ fn render_section_edge(title: Line<'static>, edge: Rect, buf: &mut Buffer) {
         return;
     }
     let title = truncate_line_with_ellipsis_if_overflow(title, usize::from(edge.width - 4));
+    if title.width() == 0 {
+        return;
+    }
     let mut header = Line::from(" ");
     header.spans.extend(title.spans);
     header.spans.push(" ".into());
@@ -2449,7 +2452,7 @@ fn box_height(lines: usize) -> usize {
 mod wrapped_path_tests {
     use super::*;
 
-    const MESSAGE: &str = "报告已写到 /private/tmp/claude-501/-Users-example-user-Code-blockchainian-claude/0ed4978e-9ece-4b9d-9bc5-04bf44fedacb/scratchpad/background-research/report.md，并已发给 team-lead。";
+    const MESSAGE: &str = "报告已写到 /private/tmp/claude-501/-Users-user-Code-blockchainian-claude/0ed4978e-9ece-4b9d-9bc5-04bf44fedacb/scratchpad/background-research/report.md，并已发给 team-lead。";
 
     #[test]
     fn task_details_and_event_share_structured_message_layout() {

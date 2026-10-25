@@ -1,0 +1,24 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "personal-home-path"
+description = "Home directory containing a non-placeholder account name"
+regex = '''(?:^|[\s"'`=:(\[{,])/(?:Users|home)/([^/\s"'\\<>]+)/'''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "Documented synthetic account names"
+regexTarget = "secret"
+regexes = ['''(?i)^(?:example-user|runner)$''']
+
+[[rules]]
+id = "json-personal-home-path"
+description = "Slash-escaped home directory in JSON working directory or branch fields"
+regex = '''"(?:cwd|gitBranch)"\s*:\s*"\\/(?:Users|home)\\/([^\\/"\s]+)\\/'''
+secretGroup = 1
+
+[[rules.allowlists]]
+description = "Documented synthetic account names"
+regexTarget = "secret"
+regexes = ['''(?i)^(?:example-user|runner)$''']

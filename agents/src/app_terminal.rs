@@ -316,6 +316,7 @@ mod tests {
             directory.path().to_owned(),
         );
         app.refresh();
+        app.sessions[0].cwd = directory.path().to_owned();
         app.sessions[0].status = crate::model::SessionStatus::Working;
         app.view.set_sessions(app.sessions.clone(), false);
         app.handle_event(crossterm::event::Event::Key(
