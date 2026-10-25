@@ -124,7 +124,10 @@ export function checkOutput(md, words, source = "") {
     for (const value of values) out.set(value, (out.get(value) || 0) + 1);
     return out;
   };
-  const notes = text => [...new Set([...text.matchAll(/<sup\b[^>]*>\s*(\d+)\s*<\/sup>/gi)].map(m => `<sup>${m[1]}</sup>`))];
+  const notes = text => [...new Set([...text.matchAll(/<sup\b[^>]*>([\s\S]*?)<\/sup>/gi)]
+    .map(m => m[1].replace(/<[^>]*>/g, "").trim())
+    .filter(value => /^\d+$/.test(value))
+    .map(value => `<sup>${value}</sup>`))];
   const missing = [], extra = [];
   for (const [before, after] of [[counts(tokens(source)), counts(tokens(md))], [counts(notes(source)), counts(notes(md))]]) {
     for (const key of new Set([...before.keys(), ...after.keys()])) {

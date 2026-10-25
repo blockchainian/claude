@@ -108,3 +108,29 @@ test("answer preserves placeholder multiplicities and numeric sup marker set", (
   assert.match(tr.checkOutput(good + '<sup>30</sup>', 1, src), /extra.*<sup>30<\/sup>/);
   assert.equal(tr.checkOutput(good + '<sup>12</sup>', 1, src), null);
 });
+
+describe("Kindle footnote markers", () => {
+  const source = `appear in a document structure.<sup>
+${" "}
+
+<font size="2">
+<font color="blue">
+<u>3</u>
+</font>
+</font>
+
+
+</sup>
+ Its subclasses define`;
+
+  test("accepts the same number in a plain or nested sup", () => {
+    const translated = '# 标题\n\n出现在文档结构中。<sup>3</sup>其子类定义';
+    assert.equal(tr.checkOutput(translated, 1, source), null);
+    assert.equal(tr.checkOutput('# 标题\n\n正文' + source, 1, translated), null);
+  });
+
+  test("reports a missing nested footnote", () => {
+    assert.equal(tr.checkOutput('# 标题\n\n出现在文档结构中。其子类定义', 1, source),
+      'protected tokens mismatch: missing [<sup>3</sup>]; extra []');
+  });
+});
