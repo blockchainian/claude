@@ -493,9 +493,9 @@ impl View {
                 .expect("running span exists")
                 .content = super::tool_detail::running_frame(now).into();
         }
-        // The scrollbar sits in the panel's right padding, outside the body.
-        let scrollbar_x = area.right();
-        let overflow = layout.lines.len() > height && scrollbar_x < buf.area.right();
+        // The scrollbar sits in the panel's left padding, outside the body.
+        let scrollbar_x = (areas.panel.x < area.x).then_some(areas.panel.x);
+        let overflow = layout.lines.len() > height;
         for (source, links) in layout.sources.iter().zip(&mut layout.links) {
             super::links::add_commits(&source.text, cwd, links);
         }
@@ -509,22 +509,20 @@ impl View {
             .collect::<Vec<_>>();
         let kept = rows.kept;
         let mut thumb_rows = 0..0;
-        if overflow && height > 0 {
+        if let Some(x) = scrollbar_x.filter(|_| overflow && height > 0) {
             let thumb = (height * height)
                 .div_ceil(height + viewport.event_detail_max)
                 .max(1)
                 .min(height);
             let top = scroll * (height - thumb) / viewport.event_detail_max.max(1);
             thumb_rows = top..top + thumb;
-            // A mirrored scrollbar sits in the left padding when the panel has one.
-            let left = (areas.panel.x < area.x).then_some(areas.panel.x);
             for row in 0..height {
                 let y = body_area.y + row as u16;
-                let thumb = thumb_rows.contains(&row);
-                buf[(scrollbar_x, y)].set_symbol(if thumb { "▕" } else { " " });
-                if let Some(x) = left {
-                    buf[(x, y)].set_symbol(if thumb { "▏" } else { " " });
-                }
+                buf[(x, y)].set_symbol(if thumb_rows.contains(&row) {
+                    "▏"
+                } else {
+                    " "
+                });
             }
         }
         let visible_rows = kept
@@ -632,16 +630,13 @@ impl View {
             }
         }
         // Merged calls' titles reach into the pane padding, like the task details' background titles.
-        // The scrollbar thumbs hide them so the thumbs stay whole.
+        // The scrollbar thumb hides the left one so the thumb stays whole.
         if areas.panel.x < columns.text.x && areas.panel.right() > columns.time.right() {
             for row in call_titles {
-                if let Some(row) = visible_rows
-                    .iter()
-                    .position(|&source| source == row)
-                    .filter(|row| !thumb_rows.contains(row))
-                {
+                if let Some(row) = visible_rows.iter().position(|&source| source == row) {
                     let y = body_area.y + row as u16;
-                    for (x, cap) in [(areas.panel.x, "╴"), (areas.panel.right() - 1, "╶")] {
+                    let left = (!thumb_rows.contains(&row)).then_some((areas.panel.x, "╴"));
+                    for (x, cap) in left.into_iter().chain([(areas.panel.right() - 1, "╶")]) {
                         buf[(x, y)]
                             .set_symbol(cap)
                             .set_style(Style::default().dim());
@@ -3030,7 +3025,7 @@ pub(super) mod event_markdown {
     }
 
     #[test]
-    fn overflowing_detail_mirrors_the_scrollbar_into_the_left_padding() {
+    fn overflowing_detail_draws_its_scrollbar_in_the_left_padding() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         for id in (0..12).map(|id| id.to_string()) {
             let record = serde_json::json!({
@@ -3058,23 +3053,19 @@ pub(super) mod event_markdown {
             .map(|y| {
                 (
                     buffer[(panel.x, y)].symbol().to_string(),
-                    buffer[(content.right(), y)].symbol().to_string(),
+                    buffer[(panel.right() - 1, y)].symbol().to_string(),
                     buffer[(content.x, y)].symbol() == "R",
                 )
             })
             .collect();
         assert!(rows.iter().any(|(left, _, title)| left == "▏" && !*title));
-        assert!(
-            rows.iter()
-                .any(|(left, right, title)| *title && left == "▏" && right == "▕")
-        );
+        assert!(rows.iter().any(|(left, _, title)| left == "▏" && *title));
+        assert!(rows.iter().any(|(left, _, title)| left == "╴" && *title));
         for (left, right, title) in rows {
-            if title && right != "▕" {
-                assert_eq!([left.as_str(), right.as_str()], ["╴", "╶"]);
-            } else if right == "▕" {
-                assert_eq!(left, "▏");
-            } else {
-                assert_ne!(left, "▏");
+            assert_ne!(right, "▕");
+            if title {
+                assert!(["▏", "╴"].contains(&left.as_str()), "{left}");
+                assert_eq!(right, "╶");
             }
         }
     }

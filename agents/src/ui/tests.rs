@@ -9612,10 +9612,10 @@ fn open_view_scrollbar() {
     let area = view.viewport.borrow().event_text.area;
     let layout = view.center_layout(Rect::new(0, 0, 100, 25));
     assert_eq!(area.right() + 12, layout.event_detail.right());
-    let scrollbar_x = layout.event_detail.right() - 1;
+    let scrollbar_x = layout.event_detail.x;
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(buf.area, &mut buf, now);
-    assert_eq!(buf[(scrollbar_x, area.top())].symbol(), "▕");
+    assert_eq!(buf[(scrollbar_x, area.top())].symbol(), "▏");
     assert_eq!(buf[(scrollbar_x, area.top())].fg, Color::Reset);
     assert_eq!(buf[(scrollbar_x, area.bottom() - 1)].symbol(), " ");
     assert_eq!(buf[(scrollbar_x, layout.event_detail.top())].symbol(), "─");
@@ -9624,12 +9624,12 @@ fn open_view_scrollbar() {
         "─"
     );
     for y in area.top()..area.bottom() {
-        assert_ne!(buf[(area.right() - 1, y)].symbol(), "▕");
+        assert_ne!(buf[(area.x, y)].symbol(), "▏");
     }
     view.event_detail.scroll.borrow_mut().offset = usize::MAX;
     event_screen(&view, 100, 25, now);
     view.render_at(buf.area, &mut buf, now);
-    assert_eq!(buf[(scrollbar_x, area.bottom() - 1)].symbol(), "▕");
+    assert_eq!(buf[(scrollbar_x, area.bottom() - 1)].symbol(), "▏");
 }
 
 #[test]
