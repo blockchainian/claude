@@ -294,7 +294,8 @@ mod tests {
                     view.confirm_dialog = Some(ConfirmDialog {
                         action: ConfirmAction::Delete("claude:footer".parse().unwrap()),
                         title: "Task".into(),
-                        confirm: false,
+                        selected: 0,
+                        worktree: None,
                     })
                 }
                 5 => {

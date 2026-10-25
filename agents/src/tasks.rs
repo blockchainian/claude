@@ -39,6 +39,36 @@ fn git(directory: &Path, args: &[&std::ffi::OsStr]) -> io::Result<String> {
         .map(|text| text.trim().to_owned())
         .map_err(io::Error::other)
 }
+/// The linked checkout containing `directory`; primary checkouts have no removable worktree.
+pub fn linked_worktree(directory: &Path) -> Option<PathBuf> {
+    let identity = crate::repository::repository_identity(directory)?;
+    let mut root = fs::canonicalize(directory).ok()?;
+    for _ in identity.relative_cwd.components() {
+        root.pop();
+    }
+    (root != identity.primary_root).then_some(root)
+}
+
+/// Removes a linked checkout only when git can do so without discarding local changes.
+pub fn remove_worktree(path: &Path) -> io::Result<()> {
+    use std::ffi::OsStr;
+    let path = fs::canonicalize(path)?;
+    let identity = crate::repository::repository_identity(&path)
+        .ok_or_else(|| io::Error::other("Cannot identify worktree repository"))?;
+    if !identity.relative_cwd.as_os_str().is_empty() || path == identity.primary_root {
+        return Err(io::Error::other("Directory is not a linked worktree root"));
+    }
+    git(
+        &identity.primary_root,
+        &[
+            OsStr::new("worktree"),
+            OsStr::new("remove"),
+            path.as_os_str(),
+        ],
+    )?;
+    Ok(())
+}
+
 fn trunk_ref(root: &Path) -> io::Result<String> {
     use std::ffi::OsStr;
     if let Ok(reference) = git(
@@ -487,13 +517,13 @@ pub fn trust_directory(config_path: &Path, directory: &Path) -> io::Result<()> {
     Ok(())
 }
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::{
         os::unix::fs::{PermissionsExt, symlink},
         process::Command,
     };
-    fn git(path: &Path, args: &[&str]) -> String {
+    pub(crate) fn git(path: &Path, args: &[&str]) -> String {
         let o = Command::new("git")
             .args(args)
             .current_dir(path)
@@ -502,7 +532,7 @@ mod tests {
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8(o.stdout).unwrap().trim().to_owned()
     }
-    fn repo() -> tempfile::TempDir {
+    pub(crate) fn repo() -> tempfile::TempDir {
         let d = tempfile::tempdir().unwrap();
         git(d.path(), &["init", "-b", "main"]);
         fs::create_dir(d.path().join("sub")).unwrap();
@@ -522,6 +552,37 @@ mod tests {
         );
         d
     }
+    pub(crate) fn worktree() -> (tempfile::TempDir, PathBuf) {
+        let repo = repo();
+        let linked = repo.path().join("linked");
+        git(
+            repo.path(),
+            &["worktree", "add", "-b", "linked", linked.to_str().unwrap()],
+        );
+        (repo, linked)
+    }
+
+    #[test]
+    fn linked_worktree_excludes_primary_and_handles_subdirectories_and_detached_head() {
+        let (repo, linked) = worktree();
+        let linked = fs::canonicalize(linked).unwrap();
+        assert_eq!(linked_worktree(repo.path()), None);
+        assert_eq!(linked_worktree(&repo.path().join("sub")), None);
+        assert_eq!(linked_worktree(&linked), Some(linked.clone()));
+        assert_eq!(linked_worktree(&linked.join("sub")), Some(linked.clone()));
+        assert_eq!(linked_worktree(&linked.join("missing")), None);
+        let plain = tempfile::tempdir().unwrap();
+        assert_eq!(linked_worktree(plain.path()), None);
+        git(&linked, &["checkout", "--detach"]);
+        assert_eq!(linked_worktree(&linked), Some(linked.clone()));
+        assert!(remove_worktree(repo.path()).is_err());
+        assert!(remove_worktree(&linked.join("sub")).is_err());
+        assert!(linked.exists());
+        remove_worktree(&linked).unwrap();
+        assert!(!linked.exists());
+        assert!(repo.path().exists());
+    }
+
     #[test]
     fn optional_repository_distinguishes_plain_directories_from_git_errors() {
         let plain = tempfile::tempdir().unwrap();

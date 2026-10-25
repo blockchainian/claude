@@ -2845,7 +2845,7 @@ fn double_clicking_the_name_edits_on_the_rule_and_escape_keeps_the_title() {
 fn delete_dialog_defaults_to_cancel_and_requires_enter() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Backspace), None);
-    assert!(!view.confirm_dialog.as_ref().unwrap().confirm);
+    assert_eq!(view.confirm_dialog.as_ref().unwrap().selected, 0);
     let rendered = screen(&view, 120, 48);
     assert!(rendered.find("1. Cancel").unwrap() < rendered.find("2. Permanently delete").unwrap());
     assert_eq!(view.center_footer_hints().to_string(), "? help");
@@ -2863,7 +2863,7 @@ fn delete_dialog_defaults_to_cancel_and_requires_enter() {
     assert!(view.confirm_dialog.is_none());
     key(&mut view, KeyCode::Backspace);
     assert_eq!(key(&mut view, KeyCode::End), None);
-    assert!(view.confirm_dialog.as_ref().unwrap().confirm);
+    assert_eq!(view.confirm_dialog.as_ref().unwrap().selected, 1);
     for code in [
         KeyCode::Char('o'),
         KeyCode::Char('n'),
@@ -3010,11 +3010,11 @@ fn delete_dialog_cancel_and_position_keys() {
     for code in [KeyCode::End, KeyCode::PageDown] {
         let mut view = fixture();
         key(&mut view, KeyCode::Backspace);
-        assert!(!view.confirm_dialog.as_ref().unwrap().confirm);
+        assert_eq!(view.confirm_dialog.as_ref().unwrap().selected, 0);
         key(&mut view, code);
-        assert!(view.confirm_dialog.as_ref().unwrap().confirm);
+        assert_eq!(view.confirm_dialog.as_ref().unwrap().selected, 1);
         key(&mut view, KeyCode::Home);
-        assert!(!view.confirm_dialog.as_ref().unwrap().confirm);
+        assert_eq!(view.confirm_dialog.as_ref().unwrap().selected, 0);
         key(&mut view, code);
         assert_eq!(
             key(&mut view, KeyCode::Enter),
@@ -12434,5 +12434,127 @@ fn tool_image_caption_click_opens_transcript_image_without_graphics() {
             );
             assert!(!viewport.event_links.iter().any(|(_, link)| *link == target));
         }
+    }
+}
+
+#[test]
+fn delete_dialog_linked_worktree_options_and_controls() {
+    let (repo, linked) = crate::tasks::tests::worktree();
+    let mut view = fixture();
+    view.rows[view.selected].cwd = linked.join("sub");
+    view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
+        id: "fixture".into(),
+        needs: None,
+        awaits_prompt: false,
+    });
+    let label = "3. Permanently delete task, child agents and worktree";
+    key(&mut view, KeyCode::Backspace);
+    let rendered = screen(&view, 120, 48);
+    assert!(rendered.contains(label), "{rendered}");
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 10));
+    view.render_confirm_dialog(
+        view.confirm_dialog.as_ref().unwrap(),
+        buffer.area,
+        &mut buffer,
+    );
+    let snapshot = buffer
+        .content
+        .chunks(80)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/delete_worktree_dialog.txt");
+    if std::env::var_os("UPDATE_DELETE_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+
+    assert!(!rendered.contains("Worktrees and"));
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
+    for codes in [
+        vec![KeyCode::Down, KeyCode::Down],
+        vec![KeyCode::Up],
+        vec![KeyCode::Char('j'), KeyCode::Char('j')],
+        vec![KeyCode::Char('k')],
+        vec![KeyCode::End],
+        vec![KeyCode::PageDown],
+    ] {
+        key(&mut view, KeyCode::Backspace);
+        for code in codes {
+            key(&mut view, code);
+        }
+        let action = key(&mut view, KeyCode::Enter).unwrap();
+        assert_eq!(
+            action,
+            Action::DeleteWorktree {
+                id: session_key("42"),
+                path: std::fs::canonicalize(&linked).unwrap()
+            }
+        );
+    }
+    for c in ['n', 'j', 'p', 'k', 'f'] {
+        key(&mut view, KeyCode::Backspace);
+        let count = if matches!(c, 'n' | 'j') { 2 } else { 1 };
+        for _ in 0..count {
+            view.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+        }
+        let action = key(&mut view, KeyCode::Enter).unwrap();
+        assert_eq!(
+            action,
+            Action::DeleteWorktree {
+                id: session_key("42"),
+                path: std::fs::canonicalize(&linked).unwrap()
+            }
+        );
+    }
+    key(&mut view, KeyCode::Backspace);
+    assert_eq!(
+        key(&mut view, KeyCode::Char('2')),
+        Some(Action::Delete(session_key("42")))
+    );
+    key(&mut view, KeyCode::Backspace);
+    let action = key(&mut view, KeyCode::Char('3')).unwrap();
+    assert_eq!(
+        action,
+        Action::DeleteWorktree {
+            id: session_key("42"),
+            path: std::fs::canonicalize(&linked).unwrap()
+        }
+    );
+    key(&mut view, KeyCode::Backspace);
+    screen(&view, 120, 48);
+    let rect = view.viewport.borrow().confirm_options[2].0;
+    let action = click_mouse(
+        &mut view,
+        mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y),
+    )
+    .unwrap();
+    assert_eq!(
+        action,
+        Action::DeleteWorktree {
+            id: session_key("42"),
+            path: std::fs::canonicalize(&linked).unwrap()
+        }
+    );
+    for cwd in [repo.path().to_path_buf(), crate::test_project()] {
+        view.rows[view.selected].cwd = cwd;
+        key(&mut view, KeyCode::Backspace);
+        let rendered = screen(&view, 120, 48);
+        assert!(!rendered.contains(label));
+        assert!(rendered.contains("Worktrees and"), "{rendered}");
+        assert!(
+            rendered.contains("branches created by agents remain."),
+            "{rendered}"
+        );
+        assert_eq!(key(&mut view, KeyCode::Char('3')), None);
+        assert!(view.confirm_dialog.is_some());
+        key(&mut view, KeyCode::Esc);
     }
 }

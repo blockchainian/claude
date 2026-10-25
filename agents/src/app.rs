@@ -82,7 +82,7 @@ enum Input {
     },
     Deleted {
         id: SessionKey,
-        result: io::Result<()>,
+        result: io::Result<Option<String>>,
     },
     Archived {
         id: SessionKey,
@@ -1320,13 +1320,19 @@ impl App {
     }
 
     /// Removes the session from the list while its deletion runs on a worker thread.
-    fn delete(&mut self, session: Session) {
+    fn delete(&mut self, session: Session, worktree: Option<PathBuf>) {
         let id = session.id.clone();
         self.view.begin_removal(&id);
         let job = match self.hub.provider(id.provider).delete(&session) {
             Ok(job) => job,
             Err(error) => return self.deleted(&id, Err(error)),
         };
+        let job = Box::new(move || {
+            job()?;
+            Ok(worktree
+                .and_then(|path| crate::tasks::remove_worktree(&path).err())
+                .map(|error| error.to_string()))
+        });
         if let Err(error) = self.run_session_job(
             id.clone(),
             job,
@@ -1357,13 +1363,13 @@ impl App {
         }
     }
 
-    fn run_session_job(
+    fn run_session_job<T: Send + 'static>(
         &self,
         id: SessionKey,
-        job: SessionAction,
+        job: Box<dyn FnOnce() -> io::Result<T> + Send>,
         name: &str,
         panic_message: &'static str,
-        complete: fn(SessionKey, io::Result<()>) -> Input,
+        complete: fn(SessionKey, io::Result<T>) -> Input,
     ) -> io::Result<()> {
         let sender = self.sender.clone();
         thread::Builder::new().name(name.into()).spawn(move || {
@@ -1382,12 +1388,16 @@ impl App {
         }
     }
 
-    fn deleted(&mut self, id: &SessionKey, result: io::Result<()>) {
+    fn deleted(&mut self, id: &SessionKey, result: io::Result<Option<String>>) {
         match result {
-            Ok(()) => {
+            Ok(worktree_error) => {
                 let saved = self.preferences.forget_task(&self.config_dir, id);
                 self.report_save(saved);
                 self.request_refresh();
+                if let Some(error) = worktree_error {
+                    self.view
+                        .show_error(format!("Cannot remove worktree: {error}"));
+                }
             }
             Err(error) => {
                 self.view.finish_removal(id);
@@ -1407,6 +1417,7 @@ impl App {
             | Action::Fork(id)
             | Action::Rename { id, .. }
             | Action::Delete(id)
+            | Action::DeleteWorktree { id, .. }
             | Action::Archive(id)
             | Action::Stop(id) => Some(id),
             _ => None,
@@ -1538,7 +1549,13 @@ impl App {
             }
             Action::Delete(id) => {
                 let generation = self.request_refresh();
-                self.session_refresh.deletes.push((generation, id));
+                self.session_refresh.deletes.push((generation, id, None));
+            }
+            Action::DeleteWorktree { id, path } => {
+                let generation = self.request_refresh();
+                self.session_refresh
+                    .deletes
+                    .push((generation, id, Some(path)));
             }
             Action::Archive(id) => {
                 if let Some(session) = self.session(&id) {

@@ -177,7 +177,7 @@ struct Viewport {
     title_input: Rect,
     /// The selected task's name on the task details panel's lower rule.
     task_details_title: Rect,
-    confirm_options: Vec<(Rect, bool)>,
+    confirm_options: Vec<(Rect, usize)>,
     hint_targets: Vec<hints::HintTarget>,
     /// Where the last render drew the button that jumps back to the newest event row.
     event_jump: Rect,
@@ -240,7 +240,14 @@ struct BackgroundReturn {
 struct ConfirmDialog {
     action: ConfirmAction,
     title: String,
-    confirm: bool,
+    selected: usize,
+    worktree: Option<PathBuf>,
+}
+
+impl ConfirmDialog {
+    fn options(&self) -> usize {
+        if self.worktree.is_some() { 3 } else { 2 }
+    }
 }
 
 enum ConfirmAction {

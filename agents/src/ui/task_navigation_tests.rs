@@ -204,7 +204,8 @@ fn escape_closes_overlays_without_consuming_history() {
                 view.confirm_dialog = Some(ConfirmDialog {
                     action: ConfirmAction::Delete(second.clone().unwrap()),
                     title: "Task".into(),
-                    confirm: false,
+                    selected: 0,
+                    worktree: None,
                 })
             }
             3 => {

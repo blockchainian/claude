@@ -6,7 +6,7 @@ pub(super) struct SessionRefresh {
     pending: Option<RefreshRequest>,
     generation: u64,
     pub stops: Vec<(u64, SessionKey, bool)>,
-    pub deletes: Vec<(u64, SessionKey)>,
+    pub deletes: Vec<(u64, SessionKey, Option<PathBuf>)>,
 }
 
 impl SessionRefresh {
@@ -84,24 +84,24 @@ impl App {
             }
         }
         let deletes = std::mem::take(&mut self.session_refresh.deletes);
-        for (requested, id) in deletes {
+        for (requested, id, worktree) in deletes {
             if requested <= generation {
-                self.delete_after_refresh(id);
+                self.delete_after_refresh(id, worktree);
             } else {
-                self.session_refresh.deletes.push((requested, id));
+                self.session_refresh.deletes.push((requested, id, worktree));
             }
         }
         self.start_session_refresh();
         Ok(())
     }
 
-    fn delete_after_refresh(&mut self, id: SessionKey) {
+    fn delete_after_refresh(&mut self, id: SessionKey, worktree: Option<PathBuf>) {
         if let Some(session) = self.session(&id) {
             if !session.can_resume() {
                 return;
             }
             if session.transcript.is_some() {
-                self.delete(session);
+                self.delete(session, worktree);
                 return;
             }
         }

@@ -375,7 +375,8 @@ impl View {
                 self.confirm_dialog = Some(ConfirmDialog {
                     action: ConfirmAction::Delete(draft.key()),
                     title: name.clone(),
-                    confirm: false,
+                    selected: 0,
+                    worktree: None,
                 });
             } else {
                 self.discard_selected_draft();

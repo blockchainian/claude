@@ -898,10 +898,13 @@ impl View {
                         .find(|(rect, _)| rect.contains(position) && rect.contains((x, y).into()))
                         .map(|(_, confirm)| *confirm);
                     if let Some(confirm) = choice {
-                        return Some(if confirm {
+                        return Some(if confirm != 0 {
                             let dialog =
                                 self.confirm_dialog.take().expect("confirm dialog is open");
-                            self.accept_confirmation(dialog)
+                            self.accept_confirmation(ConfirmDialog {
+                                selected: confirm,
+                                ..dialog
+                            })
                         } else {
                             self.cancel_confirmation();
                             None
@@ -1857,39 +1860,43 @@ impl View {
         }
         self.feedback = None;
         if let Some(dialog) = &mut self.confirm_dialog {
+            let options = dialog.options();
             if plain {
                 match key.code {
-                    KeyCode::Esc => {
-                        self.cancel_confirmation();
-                    }
+                    KeyCode::Esc => self.cancel_confirmation(),
                     KeyCode::Enter => {
-                        if dialog.confirm {
+                        if dialog.selected != 0 {
                             let dialog =
                                 self.confirm_dialog.take().expect("confirm dialog is open");
                             return self.accept_confirmation(dialog);
                         }
                         self.cancel_confirmation();
                     }
-                    KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k') => {
-                        dialog.confirm = !dialog.confirm;
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        dialog.selected = (dialog.selected + options - 1) % options;
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        dialog.selected = (dialog.selected + 1) % options;
                     }
                     // Each item's number accepts it at once.
-                    KeyCode::Char('1') => {
-                        self.cancel_confirmation();
-                    }
-                    KeyCode::Char('2') => {
+                    KeyCode::Char('1') => self.cancel_confirmation(),
+                    KeyCode::Char(c @ '2'..='3') if (c as usize - '1' as usize) < options => {
+                        dialog.selected = c as usize - '1' as usize;
                         let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
                         return self.accept_confirmation(dialog);
                     }
-                    KeyCode::Home | KeyCode::PageUp => dialog.confirm = false,
-                    KeyCode::End | KeyCode::PageDown => dialog.confirm = true,
+                    KeyCode::Home | KeyCode::PageUp => dialog.selected = 0,
+                    KeyCode::End | KeyCode::PageDown => dialog.selected = options - 1,
                     _ => {}
                 }
             } else if key.modifiers.contains(KeyModifiers::CONTROL) {
                 match key.code {
-                    KeyCode::Char('p' | 'k' | 'n' | 'j') => dialog.confirm = !dialog.confirm,
-                    KeyCode::Char('b') => dialog.confirm = false,
-                    KeyCode::Char('f') => dialog.confirm = true,
+                    KeyCode::Char('p' | 'k') => {
+                        dialog.selected = (dialog.selected + options - 1) % options
+                    }
+                    KeyCode::Char('n' | 'j') => dialog.selected = (dialog.selected + 1) % options,
+                    KeyCode::Char('b') => dialog.selected = 0,
+                    KeyCode::Char('f') => dialog.selected = options - 1,
                     _ => {}
                 }
             }
@@ -2056,7 +2063,8 @@ impl View {
                     self.confirm_dialog = Some(ConfirmDialog {
                         action: ConfirmAction::Delete(session.id.clone()),
                         title: session.display_title().to_owned(),
-                        confirm: false,
+                        selected: 0,
+                        worktree: crate::tasks::linked_worktree(&session.cwd),
                     });
                 }
             }
