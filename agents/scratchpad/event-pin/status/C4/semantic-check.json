@@ -1,6 +1,0 @@
-{
-  "input.rs": "pass; task tests compare existing prefix, module order normalized",
-  "mod.rs": "pass; task tests compare existing prefix, module order normalized",
-  "task_event_list_tests.rs": "pass; task tests compare existing prefix, module order normalized",
-  "chronological_event_tests.rs": "pass; task tests compare existing prefix, module order normalized"
-}
