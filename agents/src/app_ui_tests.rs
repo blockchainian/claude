@@ -1569,6 +1569,12 @@ fn archive_success_keeps_active_tab_and_releases_hidden_task() {
     let event = app.receiver.recv_timeout(Duration::from_secs(2)).unwrap();
     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+    assert!(
+        !lines(&draw(&mut app, 120))
+            .join("\n")
+            .contains(target.display_title()),
+        "archived task must stay hidden until a refresh lists it as archived"
+    );
     app.finish_refreshes();
     draw(&mut app, 120);
     assert!(
