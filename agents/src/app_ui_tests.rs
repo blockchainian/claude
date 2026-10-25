@@ -125,7 +125,7 @@ fn event_list_end(buffer: &ratatui::buffer::Buffer, prompt: u16) -> u16 {
     (prompt + 2..buffer.area.height - 1)
         .find(|&y| {
             (1..buffer.area.width - 1)
-                .filter(|&x| buffer[(x, y)].symbol() == "─")
+                .filter(|&x| matches!(buffer[(x, y)].symbol(), "─" | "━"))
                 .count()
                 > usize::from(buffer.area.width) / 2
         })
@@ -161,9 +161,10 @@ fn assert_event_cursor(buffer: &ratatui::buffer::Buffer, row: u16) {
         .collect();
     let task_row = (2..position(buffer, "❯").1)
         .find(|&y| {
-            buffer[(0, y)]
-                .modifier
-                .contains(ratatui::style::Modifier::BOLD)
+            buffer[(0, y)].symbol() != "━"
+                && buffer[(0, y)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::BOLD)
         })
         .expect("selected task cursor");
     let cursor = buffer[(0, task_row)].style();
@@ -630,7 +631,7 @@ fn event_detail_content(buffer: &ratatui::buffer::Buffer) -> String {
     let bottom = rendered.len() - 2;
     let separator = rendered[..bottom]
         .iter()
-        .rposition(|line| line.contains("────"))
+        .rposition(|line| line.contains("────") || line.contains("━━━━"))
         .unwrap();
     rendered[separator + 1..bottom].join("\n")
 }

@@ -1326,3 +1326,31 @@ fn event_detail_bottom_edge_hides_with_the_detail_panel() {
     assert!(view.viewport.borrow().event_detail.is_empty());
     assert!(!rows[38].contains("plan.md"));
 }
+
+/// Whether each event detail rule, top then bottom, is drawn heavy.
+fn heavy_output_borders(view: &View) -> [bool; 2] {
+    let rows = screen_rows(view, 120, 40);
+    view.viewport
+        .borrow()
+        .output_borders
+        .map(|rule| rows[usize::from(rule.y)].contains('━'))
+}
+
+#[test]
+fn event_detail_rules_turn_heavy_at_the_boundary_a_scroll_would_leave() {
+    let (mut view, _) = fixture(true);
+    assert_eq!(heavy_output_borders(&view), [true, false]);
+    event_detail_wheel(&mut view, true);
+    assert_eq!(heavy_output_borders(&view), [false, false]);
+    for _ in 0..60 {
+        if heavy_output_borders(&view)[1] {
+            break;
+        }
+        event_detail_wheel(&mut view, true);
+    }
+    assert_eq!(view.event_list.cursor, Some(1));
+    assert_eq!(heavy_output_borders(&view), [false, true]);
+
+    let (view, _) = fixture(false);
+    assert_eq!(heavy_output_borders(&view), [false, false]);
+}

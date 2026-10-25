@@ -735,6 +735,16 @@ impl View {
             );
         }
         viewport.event_detail_max = rows.max;
+        let edges = [false, true].map(|forward| {
+            let top = detail.state.content_top;
+            !detail.state.clone().scroll_window(forward, top)
+        });
+        // Content that never scrolls has no boundary to warn about.
+        viewport.event_detail_edges = if edges == [true, true] {
+            [false, false]
+        } else {
+            edges
+        };
         detail.offset = rows.scroll;
         rows
     }

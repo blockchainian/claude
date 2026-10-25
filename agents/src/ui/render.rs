@@ -703,6 +703,7 @@ impl View {
             viewport.event_detail = inset(layout.event_detail);
         }
         self.render_event(layout.event_panel, buf, now);
+        self.viewport.borrow_mut().event_detail_edges = [false, false];
         if !layout.event_detail.is_empty() {
             self.viewport.borrow_mut().output_borders =
                 [layout.event_detail_top_rule, layout.footer_rule];
@@ -751,6 +752,16 @@ impl View {
             && self.attention_selection.as_ref() == self.selected_id()
         {
             for rule in [layout.prompt_top_rule, layout.prompt_bottom_rule] {
+                heavy_rule(rule, buf);
+            }
+        }
+        // An event detail rule a further scroll would cross into another event is heavy too.
+        let edges = self.viewport.borrow().event_detail_edges;
+        for (rule, edge) in [layout.event_detail_top_rule, layout.footer_rule]
+            .into_iter()
+            .zip(edges)
+        {
+            if edge {
                 heavy_rule(rule, buf);
             }
         }

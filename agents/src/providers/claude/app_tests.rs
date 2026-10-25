@@ -175,7 +175,7 @@ fn event_detail_at(app: &App, area: ratatui::layout::Rect) -> String {
         .rev()
         .find(|&y| {
             (0..area.width)
-                .filter(|&x| crate::ui::cell_text(buffer[(x, y)].symbol()) == "─")
+                .filter(|&x| matches!(crate::ui::cell_text(buffer[(x, y)].symbol()), "─" | "━"))
                 .count()
                 > usize::from(area.width / 2)
         })

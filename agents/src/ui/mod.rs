@@ -190,6 +190,8 @@ struct Viewport {
     event_timeline_rows: usize,
     event_separator: Option<usize>,
     event_detail_max: usize,
+    /// Whether a scroll up, then down, would leave the event detail for another event.
+    event_detail_edges: [bool; 2],
     /// The title of the section on the detail's top row once that title scrolls off.
     event_detail_footer_title: Option<(Line<'static>, event_detail::EventDetailColumns)>,
     /// The selected event's layout, cached until its content or size changes.
@@ -215,7 +217,7 @@ struct Viewport {
     marker: Option<(u16, u16)>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct SectionScroll {
     reveal: Vec<usize>,
     hidden: Vec<usize>,
