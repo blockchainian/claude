@@ -1173,7 +1173,7 @@ fn app_event_padding_and_clicks_follow_real_transcript_rows() {
                 "clicked event must open below the prompt"
             );
             assert_eq!(event_detail_x, width / 2 - "User".len() as u16 / 2);
-            assert_eq!(buffer[(0, event_detail_y)].symbol(), "▏");
+            assert_eq!(buffer[(width - 1, event_detail_y)].symbol(), "▕");
             assert_eq!(
                 (1..width - 1).rfind(|&x| buffer[(x, event_detail_y)].symbol() != " "),
                 Some(width - 3)

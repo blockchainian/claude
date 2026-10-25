@@ -493,8 +493,8 @@ impl View {
                 .expect("running span exists")
                 .content = super::tool_detail::running_frame(now).into();
         }
-        // The scrollbar sits in the panel's left padding, outside the body.
-        let scrollbar_x = (areas.panel.x < area.x).then_some(areas.panel.x);
+        // The scrollbar sits in the panel's right padding, outside the body.
+        let scrollbar_x = Some(area.right()).filter(|&x| x < buf.area.right());
         let overflow = layout.lines.len() > height;
         for (source, links) in layout.sources.iter().zip(&mut layout.links) {
             super::links::add_commits(&source.text, cwd, links);
@@ -519,7 +519,7 @@ impl View {
             for row in 0..height {
                 let y = body_area.y + row as u16;
                 buf[(x, y)].set_symbol(if thumb_rows.contains(&row) {
-                    "▏"
+                    "▕"
                 } else {
                     " "
                 });
@@ -630,13 +630,14 @@ impl View {
             }
         }
         // Merged calls' titles reach into the pane padding, like the task details' background titles.
-        // The scrollbar thumb hides the left one so the thumb stays whole.
+        // The scrollbar thumb hides the right one so the thumb stays whole.
         if areas.panel.x < columns.text.x && areas.panel.right() > columns.time.right() {
             for row in call_titles {
                 if let Some(row) = visible_rows.iter().position(|&source| source == row) {
                     let y = body_area.y + row as u16;
-                    let left = (!thumb_rows.contains(&row)).then_some((areas.panel.x, "╴"));
-                    for (x, cap) in left.into_iter().chain([(areas.panel.right() - 1, "╶")]) {
+                    let right =
+                        (!thumb_rows.contains(&row)).then_some((areas.panel.right() - 1, "╶"));
+                    for (x, cap) in [(areas.panel.x, "╴")].into_iter().chain(right) {
                         buf[(x, y)]
                             .set_symbol(cap)
                             .set_style(Style::default().dim());
@@ -3025,7 +3026,7 @@ pub(super) mod event_markdown {
     }
 
     #[test]
-    fn overflowing_detail_draws_its_scrollbar_in_the_left_padding() {
+    fn overflowing_detail_draws_its_scrollbar_in_the_right_padding() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         for id in (0..12).map(|id| id.to_string()) {
             let record = serde_json::json!({
@@ -3058,14 +3059,14 @@ pub(super) mod event_markdown {
                 )
             })
             .collect();
-        assert!(rows.iter().any(|(left, _, title)| left == "▏" && !*title));
-        assert!(rows.iter().any(|(left, _, title)| left == "▏" && *title));
-        assert!(rows.iter().any(|(left, _, title)| left == "╴" && *title));
+        assert!(rows.iter().any(|(_, right, title)| right == "▕" && !*title));
+        assert!(rows.iter().any(|(_, right, title)| right == "▕" && *title));
+        assert!(rows.iter().any(|(_, right, title)| right == "╶" && *title));
         for (left, right, title) in rows {
-            assert_ne!(right, "▕");
+            assert_ne!(left, "▏");
             if title {
-                assert!(["▏", "╴"].contains(&left.as_str()), "{left}");
-                assert_eq!(right, "╶");
+                assert_eq!(left, "╴");
+                assert!(["▕", "╶"].contains(&right.as_str()), "{right}");
             }
         }
     }
