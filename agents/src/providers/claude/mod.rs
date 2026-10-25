@@ -348,15 +348,9 @@ pub struct ClaudeProvider {
 }
 
 const BACKGROUND_ARGS: [&str; 2] = ["--bg", "--allow-dangerously-skip-permissions"];
-
-fn background_resume_args(session: &Session) -> &'static [&'static str] {
-    // Saved background options must be inherited: passing them again copies the session.
-    if session.background_job.is_some() {
-        &["--bg"]
-    } else {
-        &BACKGROUND_ARGS
-    }
-}
+// A resume passes no options of its own: Claude copies a background session given
+// options, and otherwise wakes it with the options it was started with.
+const RESUME_ARG: &str = "--bg";
 
 fn created_job(output: &std::process::Output) -> io::Result<String> {
     if !output.status.success() {
@@ -969,8 +963,7 @@ impl Provider for ClaudeProvider {
                 .args([
                     "-c",
                     &format!(
-                        r#"claude {} --resume "$1" >/dev/null && exec claude attach "$2""#,
-                        background_resume_args(session).join(" ")
+                        r#"claude {RESUME_ARG} --resume "$1" >/dev/null && exec claude attach "$2""#
                     ),
                     "sh",
                     &session.id.id,
@@ -1350,14 +1343,9 @@ impl Provider for ClaudeProvider {
 }
 
 fn resume_input(session: &Session, input: &SessionInput) -> io::Result<Command> {
-    let args = if matches!(input, SessionInput::Prompt(_)) {
-        background_resume_args(session)
-    } else {
-        &BACKGROUND_ARGS
-    };
     let mut command = Command::new("claude");
     command
-        .args(args)
+        .arg(RESUME_ARG)
         .args(["--resume", &session.id.id])
         .current_dir(&session.cwd);
     match input {
