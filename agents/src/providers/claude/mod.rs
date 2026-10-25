@@ -395,18 +395,24 @@ fn finish_creation(
     settings: &Path,
     created: &dyn Fn(String),
 ) -> io::Result<std::process::Output> {
+    let input = (!request.images.is_empty()).then_some(SessionInput::PromptWithImages {
+        text: request.prompt,
+        images: request.images,
+    });
+    finish_background(output, &request.cwd, settings, input, created)
+}
+
+fn finish_background(
+    output: std::process::Output,
+    cwd: &Path,
+    settings: &Path,
+    input: Option<SessionInput>,
+    created: &dyn Fn(String),
+) -> io::Result<std::process::Output> {
     let job_id = created_job(&output)?;
     created(job_id.clone());
-    if !request.images.is_empty() {
-        attach::send(
-            &job_id,
-            &request.cwd,
-            settings,
-            SessionInput::PromptWithImages {
-                text: request.prompt,
-                images: request.images,
-            },
-        )?;
+    if let Some(input) = input {
+        attach::send(&job_id, cwd, settings, input)?;
     }
     Ok(output)
 }
@@ -1208,6 +1214,17 @@ impl Provider for ClaudeProvider {
             }
             Some(_) => Err(io::Error::other(FOREGROUND_SESSION)),
             None => match input {
+                input @ SessionInput::PromptWithImages { .. } => {
+                    let output = resume_input(&session, &input)?.output()?;
+                    finish_background(
+                        output,
+                        &session.cwd,
+                        &config.join("settings.json"),
+                        Some(input),
+                        &|_| {},
+                    )?;
+                    Ok(())
+                }
                 input @ (SessionInput::Prompt(_)
                 | SessionInput::SetModel(_)
                 | SessionInput::SetEffort(_)) => {
@@ -1349,6 +1366,7 @@ fn resume_input(session: &Session, input: &SessionInput) -> io::Result<Command> 
         .args(["--resume", &session.id.id])
         .current_dir(&session.cwd);
     match input {
+        SessionInput::PromptWithImages { .. } => {}
         SessionInput::Prompt(text) => {
             command.arg(text);
         }
