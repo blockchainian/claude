@@ -9,7 +9,7 @@ Write                                                  tmp/tail.py              
                                                  continue
                                                             ↓
                                                            ·•·
-"user": Indexed(29)
+"user": Rgb(0, 101, 71)
 
 /tmp/Dockerfile
 Write                                                tmp/Dockerfile                                            12:34:56

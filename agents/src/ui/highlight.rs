@@ -1262,3 +1262,7 @@ mod tests {
         assert_eq!(lines[3].spans[0].style.fg, None);
     }
 }
+
+#[cfg(test)]
+#[path = "highlight_scope_tests.rs"]
+mod scope_tests;
