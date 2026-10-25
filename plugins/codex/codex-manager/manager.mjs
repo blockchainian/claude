@@ -79,6 +79,14 @@ function claudeToolsServer() {
 }
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000, 30000];
 
+/** The approval, sandbox and tool settings a thread this manager starts runs under. */
+function threadSettings({ sandbox, claudeTools }) {
+  const settings = { approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandbox };
+  if (sandbox === "workspace-write") settings.config = { "sandbox_workspace_write.network_access": true };
+  if (claudeTools) settings.config = { ...settings.config, "mcp_servers.claude-client": claudeToolsServer() };
+  return settings;
+}
+
 function log(message) {
   process.stderr.write(`codex-manager: ${message}\n`);
 }
@@ -305,20 +313,23 @@ class Manager {
   }
 
   /**
-   * Subscribes to a thread and returns its latest turn. The turns a resume returns show a finished
-   * review as still running, so the turn is listed instead.
+   * Subscribes to a thread and returns its latest turn. A thread this manager started gets its start
+   * settings again, which a daemon that unloaded the thread no longer holds. The turns a resume returns
+   * show a finished review as still running, so the turn is listed instead.
    */
   async subscribe(client, threadId) {
-    await client.request("thread/resume", { threadId });
+    const recorded = this.state().threads.find((thread) => thread.id === threadId);
+    const settings = !recorded || recorded.attached ? {} : threadSettings(recorded.review ? { sandbox: "read-only" } : { sandbox: "workspace-write", claudeTools: true });
+    await client.request("thread/resume", { threadId, ...settings });
     const turns = await client.request("thread/turns/list", { threadId, limit: 1, sortDirection: "desc", itemsView: "full" });
     return turns.data?.[0];
   }
 
-  /** Subscribes to a detached attached session again; refuses a thread this session started, which detach archived. */
+  /** Subscribes to a detached thread again, first unarchiving one this session started, which detach archived. */
   async listenAgain(client, threadId) {
     const thread = this.thread(threadId);
     if (!thread.detached) return;
-    if (!thread.attached) throw new Error(`thread ${threadId} was detached and archived; start a new thread`);
+    if (!thread.attached) await client.request("thread/unarchive", { threadId });
     await this.subscribe(client, threadId);
     this.updateThread(threadId, { detached: undefined });
   }
@@ -409,9 +420,7 @@ class Manager {
   }
 
   async startThread(client, { cwd, name, sandbox, claudeTools, record, model, effort, tier }) {
-    const params = { cwd, approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandbox, serviceName: "codex-manager", ephemeral: false };
-    if (sandbox === "workspace-write") params.config = { "sandbox_workspace_write.network_access": true };
-    if (claudeTools) params.config = { ...params.config, "mcp_servers.claude-client": claudeToolsServer() };
+    const params = { cwd, ...threadSettings({ sandbox, claudeTools }), serviceName: "codex-manager", ephemeral: false };
     if (model !== undefined) {
       params.model = model;
       params.config = { ...params.config, model_reasoning_effort: effort };
@@ -496,7 +505,9 @@ class Manager {
   async attach({ thread }) {
     if (!thread) throw new Error("thread is required");
     const client = await this.connect();
-    const found = await this.findThread(client, thread);
+    // The daemon does not list archived threads, so a detached thread this session started is found by its record.
+    const found = this.state().threads.findLast((recorded) => recorded.detached && !recorded.attached && (recorded.id === thread || recorded.name === thread))
+      ?? await this.findThread(client, thread);
     if (!this.owns(found.id)) {
       // Recorded before the resume so a turn that ends right behind the response is not missed.
       this.updateThread(found.id, { name: found.name ?? null, cwd: found.cwd, turnId: null, lastStatus: "idle", attached: true });
@@ -613,7 +624,7 @@ function reviewInstructions(base, plan, decisions, stance, focus) {
   return `Review the code changes since commit ${base}. Run \`git diff ${base}\` to inspect the changes.${spec}${decided}${adversarial}${focused}${close}Provide prioritized, actionable findings.`;
 }
 
-const INSTRUCTIONS = `Create a thread with start, then run the returned await command with run_in_background. A thread with no activity for a minute, however long it has run, is stuck: send it a pointed hint, and never steer it toward faked tests or workarounds, in a hint or an answer. A thread is finished only when its turn completed (not failed, interrupted, or waiting on an ask), you have checked and accepted its result, and you plan no further message. Detach it in that same turn; a thread you started is then archived and takes no further send. Before ending a multi-thread run, list with state: ["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] and detach every finished one. When a thread asks, check list with state: ["waiting"] for waiting requests before you reply: await can return an ask already answered.`;
+const INSTRUCTIONS = `Create a thread with start, then run the returned await command with run_in_background. A thread with no activity for a minute, however long it has run, is stuck: send it a pointed hint, and never steer it toward faked tests or workarounds, in a hint or an answer. A thread is finished only when its turn completed (not failed, interrupted, or waiting on an ask), you have checked and accepted its result, and you plan no further message. Detach it in that same turn; a thread you started is then archived until a later send or attach takes it back. Before ending a multi-thread run, list with state: ["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] and detach every finished one. When a thread asks, check list with state: ["waiting"] for waiting requests before you reply: await can return an ask already answered.`;
 
 const MODEL_PROPERTIES = { model: { type: "string", enum: Object.keys(MODEL_EFFORTS), description: "Worker model; supply effort with it, or omit both for daemon defaults." }, effort: { type: "string", enum: [...new Set(Object.values(MODEL_EFFORTS).flat())], description: `Required effort for the selected model; supply model with it. ${Object.entries(MODEL_EFFORTS).map(([model, efforts]) => `${model} allows ${efforts.join(" or ")}`).join("; ")}.` }, tier: { type: "string", enum: Object.keys(SERVICE_TIERS), description: "Service tier; omit it for the daemon default." } };
 
@@ -625,7 +636,7 @@ const TOOLS = [
   { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. Pass the request's text as ask and your answer as reply. The reply becomes the result of its ask call. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, ask: { type: "string", description: "The waiting request's text, verbatim: the ask question." }, reply: { type: "string", description: "The answer to its question." } }, required: ["threadId", "ask", "reply"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "list", description: "List the codex threads this session started or attached, with each one's state, what it is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: { state: { type: "array", items: { type: "string", enum: ["detached", "waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] }, description: "Return only threads in these states; omit for all threads. Detached takes precedence over waiting on an ask, then the last turn status applies." } } } },
-  { name: "detach", description: "Release a thread you no longer need. A thread you started is archived with its spawned agents and takes no further send; an attached session stays open in its own client, and send or attach takes it back. Refused while a turn is running.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
+  { name: "detach", description: "Release a thread you no longer need. A thread you started is archived with its spawned agents; an attached session stays open in its own client. A later send or attach takes either back. Refused while a turn is running.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "review", description: "Review the commits since a base sha in a read-only thread with codex's built-in review mode, and save the rendered review, priority-tagged findings with an overall verdict, to a file. Pass `stance: \"adversarial\"` for a challenge review. Returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute path of the checkout to review." }, base: { type: "string", description: "Commit the changes start after (excluded)." }, plan: { type: "string", description: "Path of the plan or spec the changes implement, relative to cwd." }, decisions: { type: "string", description: "Path of the file listing the rules decided while the changes were built, relative to cwd or absolute." }, out: { type: "string", description: "File that receives the review text." }, name: { type: "string", description: "Short human-readable thread name." }, stance: { type: "string", enum: ["adversarial"], description: "adversarial: the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. Omit for the plain review." }, focus: { type: "string", description: "What the reviewer should weigh most, in a phrase." } }, required: ["cwd", "base", "out"] } }
 ];
 
