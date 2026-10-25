@@ -1381,10 +1381,14 @@ impl App {
     }
 
     fn archived(&mut self, id: &SessionKey, result: io::Result<()>) {
-        self.view.finish_removal(id);
-        self.request_refresh();
-        if let Err(error) = result {
-            self.view.show_error(format!("Cannot archive: {error}"));
+        let generation = self.request_refresh();
+        match result {
+            // The row stays hidden until a refresh lists the session as archived.
+            Ok(()) => self.session_refresh.archives.push((generation, id.clone())),
+            Err(error) => {
+                self.view.finish_removal(id);
+                self.view.show_error(format!("Cannot archive: {error}"));
+            }
         }
     }
 

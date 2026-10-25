@@ -7,6 +7,7 @@ pub(super) struct SessionRefresh {
     generation: u64,
     pub stops: Vec<(u64, SessionKey, bool)>,
     pub deletes: Vec<(u64, SessionKey, Option<PathBuf>)>,
+    pub archives: Vec<(u64, SessionKey)>,
 }
 
 impl SessionRefresh {
@@ -17,6 +18,7 @@ impl SessionRefresh {
             generation: 0,
             stops: Vec::new(),
             deletes: Vec::new(),
+            archives: Vec::new(),
         }
     }
 }
@@ -89,6 +91,14 @@ impl App {
                 self.delete_after_refresh(id, worktree);
             } else {
                 self.session_refresh.deletes.push((requested, id, worktree));
+            }
+        }
+        let archives = std::mem::take(&mut self.session_refresh.archives);
+        for (requested, id) in archives {
+            if requested <= generation {
+                self.view.finish_removal(&id);
+            } else {
+                self.session_refresh.archives.push((requested, id));
             }
         }
         self.start_session_refresh();
