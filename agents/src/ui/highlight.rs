@@ -299,13 +299,26 @@ pub(super) fn code_lines(text: &str, lang: &str) -> Vec<Line<'static>> {
     if find_syntax(lang).map(|syntax| syntax.scope)
         == find_syntax("bash").map(|syntax| syntax.scope)
     {
-        for script in super::shell_commands::scripts(text) {
+        let scripts = crate::shell_commands::scripts(text);
+        // Shells with multiple heredocs in one command keep their shell highlighting.
+        if crate::shell_commands::split(text).is_some_and(|commands| {
+            commands.iter().any(|command| {
+                scripts
+                    .iter()
+                    .filter(|script| command.range.contains(&script.range.start))
+                    .count()
+                    > 1
+            })
+        }) {
+            return lines;
+        }
+        for script in scripts {
             let syntax = match script.syntax {
-                super::shell_commands::SyntaxSource::Interpreter(interpreter) => {
+                crate::shell_commands::SyntaxSource::Interpreter(interpreter) => {
                     let shebang = format!("#!/usr/bin/env {interpreter}");
                     syntax_set().find_syntax_by_first_line(&shebang)
                 }
-                super::shell_commands::SyntaxSource::Extension(extension) => find_syntax(extension),
+                crate::shell_commands::SyntaxSource::Extension(extension) => find_syntax(extension),
             };
             if let Some(syntax) = syntax
                 && let Some(embedded) = highlighted(&text[script.range.clone()], &syntax.name)

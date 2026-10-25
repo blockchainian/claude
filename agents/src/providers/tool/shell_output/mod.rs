@@ -49,7 +49,7 @@ pub(super) fn sections(
     stream: Stream,
 ) -> Option<Vec<Section>> {
     // shapes splits commands with their separators before describing pipelines.
-    let commands = crate::ui::shell_commands::split_with_separators(command)?;
+    let commands = crate::shell_commands::split_with_separators(command)?;
     let programs: Vec<_> = commands
         .iter()
         .filter_map(|part| {

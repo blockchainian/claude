@@ -46,7 +46,6 @@ mod search_input_tests;
 #[path = "section_scroll.rs"]
 mod section_scroll;
 mod selection_tabs;
-pub(crate) mod shell_commands;
 mod shortcut_help;
 mod structured_text;
 mod style;

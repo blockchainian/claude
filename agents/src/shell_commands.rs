@@ -151,8 +151,8 @@ fn parse(source: &str, separated: bool) -> Option<Vec<SeparatedCommand>> {
                 if !groups.is_empty() || bytes.get(index + 2) == Some(&b'<') {
                     return None;
                 }
-                let (end, delimiter, tabs) = heredoc_delimiter(source, index + 2)?;
-                heredocs.push((delimiter, tabs));
+                let (end, heredoc) = heredoc_delimiter(source, index + 2)?;
+                heredocs.push(heredoc);
                 index = end;
             }
             b'&' if groups.is_empty() && bytes.get(index + 1) == Some(&b'&') => {
@@ -211,10 +211,11 @@ fn parse(source: &str, separated: bool) -> Option<Vec<SeparatedCommand>> {
                 let mut end = index;
                 if !heredocs.is_empty() {
                     index += 1;
-                    for (delimiter, tabs) in heredocs.drain(..) {
-                        let (_, marker_end) = heredoc_body(source, index, &delimiter, tabs)?;
+                    for heredoc in heredocs.drain(..) {
+                        let (_, marker_end) =
+                            heredoc_body(source, index, &heredoc.delimiter, heredoc.strip_tabs)?;
                         end = marker_end;
-                        index = marker_end;
+                        index = marker_end + usize::from(marker_end < bytes.len());
                     }
                 }
                 let command = source[start..end].trim();
@@ -226,7 +227,7 @@ fn parse(source: &str, separated: bool) -> Option<Vec<SeparatedCommand>> {
                     push_command(source, start, end, separator, &mut commands)?;
                     separator = Separator::Semicolon;
                 }
-                index += usize::from(index < bytes.len());
+                index = end + usize::from(end < bytes.len());
                 start = index;
             }
             _ => {
@@ -307,7 +308,13 @@ fn push_command(
     Some(())
 }
 
-fn heredoc_delimiter(source: &str, mut index: usize) -> Option<(usize, String, bool)> {
+struct Heredoc {
+    delimiter: String,
+    strip_tabs: bool,
+    quoted: bool,
+}
+
+fn heredoc_delimiter(source: &str, mut index: usize) -> Option<(usize, Heredoc)> {
     let bytes = source.as_bytes();
     let tabs = bytes.get(index) == Some(&b'-');
     index += usize::from(tabs);
@@ -317,12 +324,17 @@ fn heredoc_delimiter(source: &str, mut index: usize) -> Option<(usize, String, b
     let start = index;
     let mut delimiter = Vec::new();
     let mut quote = None;
+    let mut quoted = false;
     while let Some(&byte) = bytes.get(index) {
         match (quote, byte) {
             (Some(mark), byte) if mark == byte => quote = None,
-            (None, b'\'' | b'"') => quote = Some(byte),
+            (None, b'\'' | b'"') => {
+                quote = Some(byte);
+                quoted = true;
+            }
             (None, byte) if is_word_boundary(byte) => break,
             (_, b'\\') if quote != Some(b'\'') => {
+                quoted = true;
                 index += 1;
                 let &escaped = bytes.get(index)?;
                 if escaped == b'\n' {
@@ -337,7 +349,14 @@ fn heredoc_delimiter(source: &str, mut index: usize) -> Option<(usize, String, b
     if quote.is_some() || start == index {
         return None;
     }
-    Some((index, String::from_utf8(delimiter).ok()?, tabs))
+    Some((
+        index,
+        Heredoc {
+            delimiter: String::from_utf8(delimiter).ok()?,
+            strip_tabs: tabs,
+            quoted,
+        },
+    ))
 }
 
 /// The body and delimiter's end use the same boundaries for layout and highlighting.
@@ -365,20 +384,28 @@ fn heredoc_body(
     }
 }
 
-pub(super) enum SyntaxSource<'a> {
+#[derive(Clone, Copy)]
+pub(crate) enum SyntaxSource<'a> {
     Interpreter(&'a str),
     Extension(&'a str),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScriptKind {
+    Heredoc { literal: bool, strip_tabs: bool },
+    Argument,
+}
+
 /// Embedded code, excluding the shell's quotes and delimiter.
-pub(super) struct Script<'a> {
+pub(crate) struct Script<'a> {
+    pub kind: ScriptKind,
     pub syntax: SyntaxSource<'a>,
     pub range: Range<usize>,
 }
 
 /// Recognizes interpreter invocations and cat file heredocs without changing source bytes.
 /// Compounds that `split` cannot safely group keep their shell highlighting.
-pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
+pub(crate) fn scripts(source: &str) -> Vec<Script<'_>> {
     let Some(commands) = split(source) else {
         return Vec::new();
     };
@@ -390,8 +417,8 @@ pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
         };
         let interpreter = &source[interpreter];
         if interpreter == "cat" {
-            if let Some(script) = cat_heredoc(source, index, command.range.end) {
-                scripts.push(script);
+            if let Some(found) = cat_heredocs(source, index, command.range.end) {
+                scripts.extend(found);
             }
             continue;
         }
@@ -404,17 +431,8 @@ pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
                 if source[index..].starts_with("<<<") {
                     break;
                 }
-                let Some((end, delimiter, tabs)) = heredoc_delimiter(source, index + 2) else {
-                    break;
-                };
-                if let Some(newline) = source[end..].find('\n') {
-                    let start = end + newline + 1;
-                    if let Some((range, _)) = heredoc_body(source, start, &delimiter, tabs) {
-                        scripts.push(Script {
-                            syntax: SyntaxSource::Interpreter(interpreter),
-                            range,
-                        });
-                    }
+                if let Some(found) = interpreter_heredocs(source, index, interpreter) {
+                    scripts.extend(found);
                 }
                 break;
             }
@@ -429,6 +447,7 @@ pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
             if matches!(option, "-c" | "-e" | "--eval") {
                 if let Some(range) = argument(source, &mut index) {
                     scripts.push(Script {
+                        kind: ScriptKind::Argument,
                         syntax: SyntaxSource::Interpreter(interpreter),
                         range,
                     });
@@ -443,17 +462,69 @@ pub(super) fn scripts(source: &str) -> Vec<Script<'_>> {
     scripts
 }
 
-fn cat_heredoc(source: &str, mut index: usize, end: usize) -> Option<Script<'_>> {
+fn interpreter_heredocs<'a>(
+    source: &'a str,
+    mut index: usize,
+    interpreter: &'a str,
+) -> Option<Vec<Script<'a>>> {
+    let mut heredocs = Vec::new();
+    loop {
+        let (end, heredoc) = heredoc_delimiter(source, index + 2)?;
+        heredocs.push(heredoc);
+        index = end;
+        while matches!(source.as_bytes().get(index), Some(b' ' | b'\t')) {
+            index += 1;
+        }
+        if !source[index..].starts_with("<<") || source[index..].starts_with("<<<") {
+            let newline = source[index..].find('\n')?;
+            return heredoc_scripts(
+                source,
+                index + newline + 1,
+                heredocs,
+                SyntaxSource::Interpreter(interpreter),
+            );
+        }
+    }
+}
+
+fn heredoc_scripts<'a>(
+    source: &'a str,
+    mut start: usize,
+    heredocs: Vec<Heredoc>,
+    syntax: SyntaxSource<'a>,
+) -> Option<Vec<Script<'a>>> {
+    let mut scripts = Vec::new();
+    for heredoc in heredocs {
+        let (range, end) = heredoc_body(source, start, &heredoc.delimiter, heredoc.strip_tabs)?;
+        let literal = heredoc.quoted || !source[range.clone()].contains(['$', '`', '\\']);
+        scripts.push(Script {
+            kind: ScriptKind::Heredoc {
+                literal,
+                strip_tabs: heredoc.strip_tabs,
+            },
+            syntax,
+            range,
+        });
+        start = end + usize::from(end < source.len());
+    }
+    Some(scripts)
+}
+
+fn cat_heredocs(source: &str, mut index: usize, end: usize) -> Option<Vec<Script<'_>>> {
     let bytes = source.as_bytes();
     let mut extension = None;
-    let mut heredoc = None;
+    let mut heredocs = Vec::new();
     while index < end {
         while matches!(bytes.get(index), Some(b' ' | b'\t')) {
             index += 1;
         }
         match bytes.get(index) {
             Some(b'>') if extension.is_none() => {
-                index += if bytes.get(index + 1) == Some(&b'>') { 2 } else { 1 };
+                index += if bytes.get(index + 1) == Some(&b'>') {
+                    2
+                } else {
+                    1
+                };
                 let path = argument(source, &mut index)?;
                 let literal = &source[path.clone()];
                 let quote = path.start.checked_sub(1).map(|i| bytes[i]);
@@ -465,18 +536,18 @@ fn cat_heredoc(source: &str, mut index: usize, end: usize) -> Option<Script<'_>>
                 }
                 extension = Some(std::path::Path::new(literal).extension()?.to_str()?);
             }
-            Some(b'<') if heredoc.is_none() && bytes.get(index + 1) == Some(&b'<') => {
-                let (next, delimiter, tabs) = heredoc_delimiter(source, index + 2)?;
+            Some(b'<') if bytes.get(index + 1) == Some(&b'<') => {
+                let (next, heredoc) = heredoc_delimiter(source, index + 2)?;
                 index = next;
-                heredoc = Some((delimiter, tabs));
+                heredocs.push(heredoc);
             }
             Some(b'\n') => {
-                let (delimiter, tabs) = heredoc?;
-                let (range, _) = heredoc_body(source, index + 1, &delimiter, tabs)?;
-                return Some(Script {
-                    syntax: SyntaxSource::Extension(extension?),
-                    range,
-                });
+                return heredoc_scripts(
+                    source,
+                    index + 1,
+                    heredocs,
+                    SyntaxSource::Extension(extension?),
+                );
             }
             _ => return None,
         }
@@ -529,6 +600,75 @@ fn argument(source: &str, index: &mut usize) -> Option<Range<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classifies_heredoc_literals_and_tabs() {
+        for (source, literal, strip_tabs) in [
+            ("node <<'EOF'\n$value `name` \\\nEOF", true, false),
+            ("node <<\"EOF\"\n$value\nEOF", true, false),
+            ("node <<E'OF'\n$value\nEOF", true, false),
+            ("node <<\\EOF\n$value\nEOF", true, false),
+            ("node <<EOF\nconsole.log(1)\nEOF", true, false),
+            ("node <<EOF\n$value\nEOF", false, false),
+            ("node <<EOF\n`name`\nEOF", false, false),
+            ("node <<EOF\nconsole.log(\\n)\nEOF", false, false),
+            ("node <<-EOF\n\tconsole.log(1)\n\tEOF", true, true),
+            ("cat > file.js <<EOF\n$value\nEOF", false, false),
+            ("cat > file.js <<'EOF'\n$value\nEOF", true, false),
+        ] {
+            let parsed = scripts(source);
+            assert_eq!(parsed.len(), 1, "{source}");
+            assert_eq!(
+                parsed[0].kind,
+                ScriptKind::Heredoc {
+                    literal,
+                    strip_tabs
+                },
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn classifies_eval_arguments() {
+        for source in [
+            "node -e 'console.log(1)'",
+            "sh -c 'echo hello'",
+            "node --eval 'console.log(1)'",
+        ] {
+            let parsed = scripts(source);
+            assert_eq!(parsed.len(), 1, "{source}");
+            assert_eq!(parsed[0].kind, ScriptKind::Argument);
+            assert!(!source[parsed[0].range.clone()].contains('\''));
+        }
+    }
+
+    #[test]
+    fn classifies_two_heredocs_in_source_order() {
+        for header in ["node", "cat > file.js"] {
+            let source =
+                format!("{header} <<'FIRST' <<-SECOND\n$value\nFIRST\n\tconsole.log(2)\n\tSECOND");
+            let parsed = scripts(&source);
+            assert_eq!(parsed.len(), 2, "{source}");
+            assert_eq!(&source[parsed[0].range.clone()], "$value\n");
+            assert_eq!(&source[parsed[1].range.clone()], "\tconsole.log(2)\n");
+            assert!(parsed[0].range.end < parsed[1].range.start);
+            assert_eq!(
+                parsed[0].kind,
+                ScriptKind::Heredoc {
+                    literal: true,
+                    strip_tabs: false
+                }
+            );
+            assert_eq!(
+                parsed[1].kind,
+                ScriptKind::Heredoc {
+                    literal: true,
+                    strip_tabs: true
+                }
+            );
+        }
+    }
 
     fn commands(source: &str) -> Vec<(&str, bool)> {
         split(source)

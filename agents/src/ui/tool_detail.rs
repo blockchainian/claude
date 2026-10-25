@@ -33,7 +33,7 @@ enum Body {
     /// Code highlighted as the given language.
     Code(String),
     /// Shell command ranges retain original bytes while separators are display-only.
-    Shell(Vec<super::shell_commands::Command>),
+    Shell(Vec<crate::shell_commands::Command>),
     /// Parsed structured content with its format-owned rendering.
     Structured(Box<dyn Document>),
     Diff(String),
@@ -376,7 +376,7 @@ impl Part {
 
 /// Use original source offsets for selection, including separators between selected rows.
 fn shell_part(source: String, prefix: usize) -> Part {
-    let Some(mut commands) = super::shell_commands::split(&source[prefix..]) else {
+    let Some(mut commands) = crate::shell_commands::split(&source[prefix..]) else {
         return Part::new(source, Body::Code("bash".into()));
     };
     for command in &mut commands {
@@ -402,7 +402,7 @@ pub(super) fn bracket_style() -> Style {
 }
 
 /// Shell chains carry display-only brackets; unchained rows reserve the same two cells.
-fn shell_lines(source: &str, commands: &[super::shell_commands::Command]) -> Vec<Line<'static>> {
+fn shell_lines(source: &str, commands: &[crate::shell_commands::Command]) -> Vec<Line<'static>> {
     let prefixed = commands.iter().any(|command| command.and_next);
     let mut lines = Vec::new();
     let mut first = 0;
@@ -440,7 +440,7 @@ fn shell_lines(source: &str, commands: &[super::shell_commands::Command]) -> Vec
 
 fn shell_maps(
     source: &str,
-    commands: &[super::shell_commands::Command],
+    commands: &[crate::shell_commands::Command],
     lines: &[Line<'_>],
 ) -> Vec<Vec<super::text_selection_layout::CellMap>> {
     let mut displayed = String::new();

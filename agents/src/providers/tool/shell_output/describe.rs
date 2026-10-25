@@ -939,7 +939,7 @@ fn pipeline_description(source: &str) -> Pipeline {
             upstream_failure: last > 0,
         };
     }
-    let Some(parts) = crate::ui::shell_commands::split_with_separators(&literal) else {
+    let Some(parts) = crate::shell_commands::split_with_separators(&literal) else {
         return Pipeline::unknown();
     };
     let upstream_failure = parts.len() > 1;
@@ -1071,7 +1071,7 @@ fn pipeline_shape(source: &str, stream: &Stream, success: bool) -> OutputShape {
 
 /// Describe command outputs for the stream; unsupported shell syntax returns None.
 pub fn shapes(command: &str, stream: &Stream) -> Option<Vec<OutputShape>> {
-    use crate::ui::shell_commands::{Separator, split_with_separators};
+    use crate::shell_commands::{Separator, split_with_separators};
 
     let commands = split_with_separators(command)?;
     let mut groups: Vec<(std::ops::Range<usize>, Separator)> = Vec::new();

@@ -15,6 +15,7 @@ mod refresh;
 mod repository;
 mod session_terminal;
 mod sessions;
+mod shell_commands;
 mod state;
 mod tasks;
 mod terminal;
