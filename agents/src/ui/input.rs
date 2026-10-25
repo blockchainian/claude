@@ -1832,9 +1832,10 @@ impl View {
             && self.confirm_dialog.is_none()
             && !self.help
             && !self.search_focused()
-            && self
-                .selected_row()
-                .is_some_and(|session| !session.can_resume())
+            && self.selected_row().is_some_and(|session| {
+                !session.can_resume()
+                    && !(session.id.provider == ProviderId::Codex && key.code == KeyCode::Char('a'))
+            })
             && plain
             && matches!(
                 key.code,

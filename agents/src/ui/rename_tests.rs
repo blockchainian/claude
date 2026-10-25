@@ -91,13 +91,23 @@ fn manager_child_session_keys_operate() {
 }
 
 #[test]
+fn codex_spawn_child_archive_emits_action() {
+    let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
+    let id = view.selected_id().unwrap().clone();
+    assert!(!view.selected_row().unwrap().can_resume());
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+        Some(Action::Archive(id))
+    );
+}
+
+#[test]
 fn codex_spawn_child_session_keys_emit_unsupported() {
     for (code, modifiers, label) in [
         (KeyCode::Char('l'), KeyModifiers::CONTROL, None),
         (KeyCode::Char('f'), KeyModifiers::NONE, Some("Fork")),
         (KeyCode::Char('r'), KeyModifiers::NONE, Some("Rename")),
         (KeyCode::Char('x'), KeyModifiers::NONE, Some("Stop")),
-        (KeyCode::Char('a'), KeyModifiers::NONE, Some("Archive")),
         (KeyCode::Backspace, KeyModifiers::NONE, Some("Delete")),
     ] {
         for notice in [None, Some("Keep this notice".to_owned())] {

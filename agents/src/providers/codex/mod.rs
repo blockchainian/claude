@@ -893,9 +893,6 @@ impl Provider for CodexProvider {
         app_server::thread::set_name(&mut client, &session.id.id, name)
     }
     fn archive(&self, session: &Session) -> io::Result<SessionAction> {
-        if !session.can_resume() {
-            return Err(io::ErrorKind::Unsupported.into());
-        }
         let home = self.home.clone();
         let id = session.id.id.clone();
         let archived = session.archived;

@@ -1402,6 +1402,7 @@ impl App {
             return false;
         };
         let target = match &action {
+            Action::Archive(id) if id.provider == ProviderId::Codex => None,
             Action::Resume(id)
             | Action::OpenTerminal(id)
             | Action::Fork(id)
