@@ -229,6 +229,35 @@ fn draft_title_rule_places_directory_left_and_branch_right() {
                 .collect::<String>()
         };
         assert_eq!(text(directory), "agents");
-        assert_eq!(text(branch), "feature/border");
+        let title = (title.x..title.right())
+            .map(|x| cell_text(buf[(x, title.y)].symbol()))
+            .collect::<String>();
+        assert_eq!(title, "Border task");
+        let branch = text(branch);
+        assert!(
+            branch == "feature/border"
+                || "feature/border".starts_with(branch.trim_end_matches('…')),
+            "{branch}"
+        );
+    }
+}
+
+#[test]
+fn title_rule_keeps_the_task_name_whole_and_abbreviates_the_sides() {
+    for width in [100, 160] {
+        let mut view = fixture();
+        let selected = &mut view.rows[view.selected];
+        selected.name = Some("Codex Manager start".into());
+        selected.pr = None;
+        selected.git_branch = Some("codex-manager-start-with-a-long-branch-name".into());
+        let mut buf = Buffer::empty(Rect::new(0, 0, width, 50));
+        view.render(buf.area, &mut buf);
+        let area = view.viewport.borrow().task_details;
+        let text = (area.x..area.right())
+            .map(|x| cell_text(buf[(x, area.bottom())].symbol()))
+            .collect::<String>();
+        assert!(text.contains(" Codex Manager start "), "{text}");
+        assert!(text.contains("codex"), "{text}");
+        assert!(text.contains("…"), "{text}");
     }
 }

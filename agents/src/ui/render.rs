@@ -1029,8 +1029,17 @@ impl View {
         // The name, shown or edited, keeps the color it has in the task list.
         let name_style = self.title_style(&key);
         let title_style = name_style.bold();
-        let folder_width = usize::from(rule.width).saturating_sub(title.width().min(20) + 10) / 2;
-        let folder_width = folder_width.min(usize::from(rule.width / 3));
+        // A name that fits beside an ellipsis on each side is shown whole, and the folder and
+        // branch share what is left; a longer name is cut and shares the rule with them.
+        let rule_width = usize::from(rule.width);
+        let whole_title = !settings_on_edge && title.width() + 12 <= rule_width;
+        let title_width = if whole_title {
+            title.width()
+        } else {
+            title.width().min(20)
+        };
+        let folder_width = rule_width.saturating_sub(title_width + 10) / 2;
+        let folder_width = folder_width.min(rule_width / 3);
         let folder = super::formatting::format_directory_display(&heading, Some(folder_width));
         let right = match (session, draft) {
             (Some(session), _) => session
@@ -1060,9 +1069,13 @@ impl View {
         } else {
             right.map(Line::from)
         };
-        // Keep short branch labels intact; longer labels share the folder's width budget.
-        let right =
-            right.map(|span| truncate_line_with_ellipsis_if_overflow(span, folder_width.max(20)));
+        // Short branch labels stay intact next to a cut name.
+        let right_width = if whole_title {
+            folder_width
+        } else {
+            folder_width.max(20)
+        };
+        let right = right.map(|span| truncate_line_with_ellipsis_if_overflow(span, right_width));
         if settings_on_edge {
             self.render_task_model(
                 rule,
@@ -1082,15 +1095,20 @@ impl View {
             .max()
             .unwrap_or(0);
         // The title stays centered on the whole rule, so the wider side label's width is kept
-        // clear on both sides, plus the corner, one rule cell and a space on each side.
-        let side = right
-            .as_ref()
-            .map_or(0, |line| line.width())
-            .max(if settings_on_edge {
-                model_width
-            } else {
-                folder.width()
-            });
+        // clear on both sides, plus the corner, one rule cell and a space on each side. A whole
+        // name only keeps an ellipsis clear, which the folder and branch shrink to.
+        let side = if whole_title {
+            1
+        } else {
+            right
+                .as_ref()
+                .map_or(0, |line| line.width())
+                .max(if settings_on_edge {
+                    model_width
+                } else {
+                    folder.width()
+                })
+        };
         let width = usize::from(rule.width).saturating_sub(6 + 2 * (side + 2));
         let editor = self.title_editor();
         let title = if let Some(editor) = editor {
