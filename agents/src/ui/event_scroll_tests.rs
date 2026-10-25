@@ -846,7 +846,10 @@ fn output_border_jump(bottom: bool) {
             // The medium layout shares this rule with the event list.
             let x = view.viewport.borrow().event_panel.x;
             if bottom {
-                assert_eq!(buffer[(0, y)].symbol(), "─", "missing lower rule");
+                assert!(
+                    matches!(buffer[(0, y)].symbol(), "─" | "━"),
+                    "missing lower rule"
+                );
                 assert_eq!(output.bottom(), y);
             }
             view.set_active_panel(Panel::TaskList);
@@ -1337,7 +1340,7 @@ fn heavy_output_borders(view: &View) -> [bool; 2] {
 }
 
 #[test]
-fn event_detail_rules_turn_heavy_only_where_the_next_scroll_would_leave() {
+fn event_detail_rules_turn_heavy_three_scrolls_before_leaving_the_event() {
     let (mut view, _) = fixture(true);
     // Opening an event that starts at its top is no scroll inside it.
     assert_eq!(heavy_output_borders(&view), [false, false]);
@@ -1349,7 +1352,12 @@ fn event_detail_rules_turn_heavy_only_where_the_next_scroll_would_leave() {
         }
         event_detail_wheel(&mut view, true);
     }
-    assert_eq!(view.event_list.cursor, Some(1));
+    // The warning shows while two more wheel steps stay inside and the third leaves.
+    for _ in 0..2 {
+        assert_eq!(view.event_list.cursor, Some(1));
+        assert_eq!(heavy_output_borders(&view), [false, true]);
+        event_detail_wheel(&mut view, true);
+    }
     assert_eq!(heavy_output_borders(&view), [false, true]);
 
     // Returning from the next event lands at the bottom without a scroll inside it.
@@ -1364,6 +1372,10 @@ fn event_detail_rules_turn_heavy_only_where_the_next_scroll_would_leave() {
         }
         event_detail_wheel(&mut view, false);
     }
-    assert_eq!(view.event_list.cursor, Some(1));
-    assert_eq!(heavy_output_borders(&view), [true, false]);
+    for _ in 0..3 {
+        assert_eq!(view.event_list.cursor, Some(1));
+        assert_eq!(heavy_output_borders(&view), [true, false]);
+        event_detail_wheel(&mut view, false);
+    }
+    assert_eq!(view.event_list.cursor, Some(0));
 }

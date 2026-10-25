@@ -737,8 +737,11 @@ impl View {
         }
         viewport.event_detail_max = rows.max;
         let top = detail.state.content_top;
+        // The warning starts while two wheel steps still stay inside, so the third would leave.
         viewport.event_detail_edges = [false, true].map(|forward| {
-            detail.scrolled == Some(forward) && !detail.state.clone().scroll_window(forward, top)
+            let mut ahead = detail.state.clone();
+            ahead.scroll_rows(forward, top, 2 * super::input::WHEEL_ROWS);
+            detail.scrolled == Some(forward) && !ahead.scroll_window(forward, top)
         });
         detail.offset = rows.scroll;
         rows
