@@ -24,6 +24,7 @@ plist = "1"
 prettyplease = "0.2.37"
 pulldown-cmark = { version = "0.10", default-features = false }
 roxmltree = "0.21.1"
+ruff_python_formatter = "=0.0.15"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "unstable-widget-ref"] }
 rusqlite = { version = "0.38", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

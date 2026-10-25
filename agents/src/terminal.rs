@@ -356,7 +356,7 @@ mod tests {
             .to_rgb8();
         // Low-bit texture makes the slide's upload large enough to exercise transport framing.
         let mut texture = 1_u32;
-        for byte in tall.as_mut() {
+        for byte in tall.iter_mut() {
             texture ^= texture << 13;
             texture ^= texture >> 17;
             texture ^= texture << 5;

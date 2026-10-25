@@ -1,4 +1,5 @@
 mod javascript;
+mod python;
 mod rust;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -6,6 +7,7 @@ pub(crate) enum Language {
     JavaScript,
     TypeScript,
     Rust,
+    Python,
 }
 
 impl Language {
@@ -14,6 +16,7 @@ impl Language {
         match name.to_ascii_lowercase().as_str() {
             "js" | "mjs" | "cjs" => Some(Self::JavaScript),
             "ts" | "mts" | "cts" => Some(Self::TypeScript),
+            "py" | "pyi" => Some(Self::Python),
             "rs" => Some(Self::Rust),
             _ => None,
         }
@@ -23,6 +26,13 @@ impl Language {
     pub(crate) fn from_interpreter(name: &str) -> Option<Self> {
         match std::path::Path::new(name).file_name()?.to_str()? {
             "node" => Some(Self::JavaScript),
+            "python" | "python3" => Some(Self::Python),
+            name if name.strip_prefix("python3.").is_some_and(|minor| {
+                !minor.is_empty() && minor.bytes().all(|byte| byte.is_ascii_digit())
+            }) =>
+            {
+                Some(Self::Python)
+            }
             _ => None,
         }
     }
@@ -32,6 +42,7 @@ impl Language {
         let path = match self {
             Self::JavaScript => "input.js",
             Self::TypeScript => "input.ts",
+            Self::Python => return python::format(text),
             Self::Rust => return rust::format(text),
         };
         javascript::format(path, text)
@@ -56,7 +67,7 @@ mod tests {
                 Some(Language::TypeScript)
             );
         }
-        for extension in ["", "javascript", "node", "py", "input.js"] {
+        for extension in ["", "javascript", "node", "input.js"] {
             assert_eq!(Language::from_extension(extension), None);
         }
     }
@@ -69,7 +80,7 @@ mod tests {
                 Some(Language::JavaScript)
             );
         }
-        for interpreter in ["", "js", "ts", "python", "/usr/bin/python", "nodejs"] {
+        for interpreter in ["", "js", "ts", "python2", "nodejs"] {
             assert_eq!(Language::from_interpreter(interpreter), None);
         }
     }
@@ -87,3 +98,6 @@ mod tests {
 
 #[cfg(test)]
 mod rust_tests;
+
+#[cfg(test)]
+mod python_tests;

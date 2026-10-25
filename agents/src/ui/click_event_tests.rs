@@ -39,7 +39,13 @@ fn multiline_tool_view() -> (View, chrono::DateTime<Utc>, String, String) {
     let Section::Shell { text, .. } = &mut call.input[0] else {
         panic!("Bash command")
     };
-    *text = text.lines().skip(1).take(2).collect::<Vec<_>>().join("\n");
+    *text = text
+        .lines()
+        .skip(1)
+        .filter(|line| !line.is_empty())
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("\n");
     let input = text.clone();
     let Section::Text { text, .. } = &mut call.output.as_mut().unwrap()[0] else {
         panic!("Bash output")
@@ -51,7 +57,7 @@ fn multiline_tool_view() -> (View, chrono::DateTime<Utc>, String, String) {
         .collect::<Vec<_>>()
         .join("\n");
     let output = text.clone();
-    assert_eq!(input, "import json,sys\nlast=None");
+    assert_eq!(input, "import json, sys\nlast = None");
     assert!(output.starts_with("Traceback"));
     view.select_fixture_event(Some(event));
     (view, now, input, output)
