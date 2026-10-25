@@ -70,7 +70,8 @@ with its app-server daemon running (`codex agents` starts one).
 
 | Tool | Does |
 |---|---|
-| `start(cwd, prompt, name?, model?, effort?)` | `thread/start` on the daemon (approval `on-request` with `approvalsReviewer: "auto_review"`, sandbox `workspace-write` with network access, and the `claude-client` MCP server in its config), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. Omit both `model` and `effort` to keep the daemon defaults, or pass both: `gpt-6.1-sol` with `medium`, or `gpt-6-luna` with `high`. Other pairs are refused. |
+| `start(cwd, prompt, name?, model?, effort?, tier?)` | `thread/start` on the daemon (approval `on-request` with `approvalsReviewer: "auto_review"`, sandbox `workspace-write` with network access, and the `claude-client` MCP server in its config), name it, `turn/start` with the prompt, return immediately with the thread id and the await command. Omit both `model` and `effort` to keep the daemon defaults, or pass both as `gpt-6.1-sol` with `medium`. Other pairs are refused. `tier` is `fast` (serviceTier `priority`) or `standard` (serviceTier `default`); omit it for the daemon's configured tier. |
+| `transfer(cwd, model?, effort?, tier?)` | Transfer this session to an independent Codex thread with the same name. Run `/compact` manually first; only the latest compaction summary is sent, excluding later conversation. This session receives no messages from the thread. `model`, `effort` and `tier` follow the same rules as `start`. |
 | `attach(thread)` | Take over a session that is already running elsewhere (the codex TUI, say), found by its thread id or exact name. `thread/resume` with nothing but the id subscribes to it, so its settings stay as its own client set them. After that `send`, `reply`, `interrupt`, `list` and the await command work on it. |
 | `send(threadId, prompt)` | `turn/start` on an existing thread. When a turn is still running the prompt is injected into it (the daemon's start-or-steer rule); the result says which happened. |
 | `reply(threadId, ask, reply, callId?)` | Answer what the thread is waiting for, quoting the request's text as `ask`: the reply becomes the result of its `ask` call. `callId` picks one when several are waiting. |
@@ -260,6 +261,7 @@ MIT
 | --- | --- | --- | --- |
 | `CODEX_MANAGER_STATE_DIR` | Manager state; default ~/.local/state/codex-manager | Optional | Shell environment |
 | `CODEX_DAEMON_SOCKET` | Daemon Unix socket path | Optional | Shell environment |
+| `CODEX_MANAGER_PROJECTS_DIR` | Claude transcripts; default ~/.claude/projects | Optional | Shell environment |
 | `CODEX_MANAGER_SESSIONS_DIR` | Claude sessions; default ~/.claude/sessions | Optional | Shell environment |
 | `CODEX_MANAGER_ASK_TIMEOUT` | Supervisor reply timeout; default 300 seconds | Optional | Shell environment |
 

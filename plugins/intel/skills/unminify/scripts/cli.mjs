@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { runChunkWorkers } from './chunk-workers.mjs';
+import { runSyntaxPreflight } from './syntax-preflight.mjs';
+import { syntaxFingerprint } from './syntax/stage.mjs';
+import { importMergeVersion } from './merge-imports.mjs';
 import { loadHistory, loadImportContext } from './history.mjs';
 import { createChunkIgnore } from './chunk-manifest.mjs';
 import { runMergeFile } from './merge-imports.mjs';
@@ -117,7 +121,7 @@ export async function run(options, dependencies) {
     const siblings = chunkDriver.jobs.flatMap(chunk => chunk.files).filter(file => !listed.has(file));
     for (const file of await api.listFiles(siblings.map(file => join(root, file)), { root, ignores, pool: syntaxPool })) listed.add(file);
     const files = [...listed].sort();
-    const fragmentContext = loadFragmentContext(root, files);
+    const fragmentContext = await loadFragmentContext(root, files, syntaxPool);
     const { fragments } = fragmentContext;
     chunkDriver.select(selectedFiles, fragments);
     const planOptions = { minSymbolLength: settings.minSymbolLength, maxInputTokens: settings.maxInputTokens };
@@ -174,20 +178,26 @@ export async function run(options, dependencies) {
       }
     }
     if (settings.command === 'rename-bindings') {
+      const endPreflight = phase('syntax_preflight');
       const [chunkPending, ordinaryPending] = await Promise.all([
         chunkDriver.syntaxPending({ fragmentContext, pool: syntaxPool }),
         syntaxFiles(async file => {
-          const source = readFileSync(join(root, file), 'utf8');
-          const restored = await syntaxPool.run({ kind: 'transform', source,
-            options: { fragment: fragments.has(file), fragmentContext } });
-          const merged = await syntaxPool.run({ kind: 'merge', sources: new Map([[file, restored.source]]) });
-          return source !== merged.get(file) ? file : null;
+          const result = await runSyntaxPreflight(root, {scope: file, files: [file], fragmentContext,
+            syntaxFingerprint, importMergeVersion}, async () => {
+            const source = readFileSync(join(root, file), 'utf8');
+            const restored = await syntaxPool.run({ kind: 'transform', source,
+              options: { fragment: fragments.has(file), fragmentContext } });
+            const merged = await syntaxPool.run({ kind: 'merge', sources: new Map([[file, restored.source]]) });
+            return source !== merged.get(file) ? [file] : [];
+          });
+          return result.pending[0] ?? null;
         }),
       ]);
+      endPreflight();
       const pending = [...chunkPending, ...ordinaryPending.filter(Boolean)];
       if (pending.length) throw new Error(`Run restore-syntax before rename-bindings:\n${[...new Set(pending)].sort().join('\n')}`);
     }
-    await syntaxPool.close(); syntaxPool = undefined;
+    if (!syncing) { await syntaxPool.close(); syntaxPool = undefined; }
     if (naming) namer = await api.createNamer({ concurrency: settings.concurrency, codexHome: settings.codexHome, log, runId, queued: () => waiters.length,
       event(record) {
         event(record);
@@ -263,10 +273,17 @@ export async function run(options, dependencies) {
                       }
                       return;
                     }
-                    const entries = Object.entries(payload.placeholders);
-                    if (!response.names || entries.some(([placeholder]) => typeof response.names[placeholder] !== 'string') || Object.keys(response.names).length !== entries.length) throw new Error(`invalid names for ${file}:${batchIds.join(',')}`);
+                    if (!response.names || Object.entries(response.names).some(([placeholder, name]) => !Object.hasOwn(payload.placeholders, placeholder) || typeof name !== 'string')) throw new Error(`invalid names for ${file}:${batchIds.join(',')}`);
                     for (const { batch, payload: original } of parts) {
-                      journal.response(`proposal:${batch.id}`, new Map(Object.entries(original.placeholders).map(([placeholder, key]) => [key, response.names[placeholder]])));
+                      const names = new Map(Object.entries(original.placeholders).filter(([placeholder]) => Object.hasOwn(response.names, placeholder))
+                        .map(([placeholder, key]) => [key, response.names[placeholder]]));
+                      if (!names.size) {
+                        batchFailed = true;
+                        summary.failedBatches++;
+                        emit({ file, status: 'batch-failed', batch: batch.id, reason: 'No complete names received.' });
+                        continue;
+                      }
+                      journal.response(`proposal:${batch.id}`, names);
                     }
                   });
                 } finally { metrics.last_batch_at = Date.now(); }
@@ -324,14 +341,25 @@ export async function run(options, dependencies) {
       // Keep a second window ready while request slots drain or files write back.
       let tasks = naming ? [...chunkDriver.jobs, ...files.filter(file => !chunkDriver.files.has(file))] : [];
       do {
-        const fileConcurrency = Math.min(tasks.length, settings.concurrency * 2);
-        let nextFile = 0;
-        async function worker() {
-          while (nextFile < tasks.length) {
-            const task = tasks[nextFile++], file = typeof task === 'string' ? task : task.id;
+        const ordinary = tasks.filter(task => typeof task === 'string');
+        const fileConcurrency = Math.min(ordinary.length, settings.concurrency * 2);
+        const largeChunks = [], smallChunks = [];
+        for (const task of tasks.filter(task => typeof task !== 'string')) {
+          // Small groups cost less to parse than starting another isolate.
+          const bytes = task.files.reduce((sum, file) => sum + statSync(join(root, file)).size, 0);
+          (bytes >= 256 * 1024 ? largeChunks : smallChunks).push(task);
+        }
+        const fileQueue = ordinary.values(), chunkQueue = smallChunks.values();
+        async function worker(queue) {
+          for (const task of queue) {
+            const file = typeof task === 'string' ? task : task.id;
             try {
               if (typeof task === 'string') await processFile(task);
-              else await chunkDriver.process(task, { api, namer, withSlot, emit, summary, sources, phase, fragmentContext });
+              else {
+                const cpu_ms = {};
+                try { await withTimings(cpu_ms, () => chunkDriver.process(task, { api, namer, withSlot, emit, summary, sources, phase, fragmentContext })); }
+                finally { emit({chunk: task.id, status: 'cpu-timing', cpu_ms, threadId: 0}); }
+              }
             }
             catch (error) {
               summary.exitCode = 1;
@@ -339,7 +367,13 @@ export async function run(options, dependencies) {
             }
           }
         }
-        await Promise.all(Array.from({ length: fileConcurrency }, worker));
+        const chunkWork = runChunkWorkers(largeChunks, { root, settings, selected: selectedFiles, fragmentContext,
+          namer, withSlot, emit, summary, sources, phase }).catch(error => {
+            summary.exitCode = 1;
+            emit({status: 'interrupted', reason: error.message});
+          });
+        await Promise.all([...Array.from({ length: fileConcurrency }, () => worker(fileQueue)), worker(chunkQueue), chunkWork]);
+        if (syncing && largeChunks.length) chunkDriver.prepareImports(sources, largeChunks, true);
         if (!syncing) break;
         if (!naming) await chunkDriver.prepareImports(sources);
         loadHistory(root, { sources, journals, chunks: chunkDriver, ignores, emit });
@@ -356,22 +390,28 @@ export async function run(options, dependencies) {
         loadImportContext(root, sources);
         const endImports = phase('followImports');
         let changes;
-        const chunkImports = chunkDriver.importOptions(journals);
+        const chunkImports = await chunkDriver.importOptions(journals, syntaxPool);
         chunkImports.readOnly = new Set([...sources.keys()].filter(file => !journals.get(file)?.done && !chunkImports.chunkBindings.has(file)));
         try {
-          changes = await api.followImports(sources, (file, task) => {
+          changes = await api.followImports(sources, async (file, task) => {
             const end = phase('followImports', file);
-            try { return fileMetrics.has(file) ? withTimings(fileMetrics.get(file).cpu_ms, task) : task(); }
+            try { return await (fileMetrics.has(file) ? withTimings(fileMetrics.get(file).cpu_ms, task) : task()); }
             finally { end(); }
-          }, fragments, chunkImports, settings);
-        }
+          }, fragments, chunkImports, { ...settings, pool: syntaxPool });
+        } catch (error) { chunkImports.release(); throw error; }
         finally {
           endImports();
           for (const metrics of fileMetrics.values()) {
             if (!changes?.has(metrics.file) || !journals.get(metrics.file)?.done) event({ type: 'file_end', phase: 'followImports', ...metrics, written_at: null, at: Date.now() });
           }
         }
-        chunkImports?.apply(sources, emit, summary);
+        try { await chunkImports.apply(sources, emit, summary); }
+        finally { chunkImports.release(); }
+        const importChecks = new Map(await syntaxPool.map([...changes].filter(([file]) => journals.get(file)?.done), async ([file, after]) => {
+          const before = sources.get(file);
+          const reason = await withTimings(fileMetricsFor(file).cpu_ms, () => syntaxPool.run({ kind: 'import-check', before, after, options: { fragment: fragments.has(file) } }));
+          return [file, reason];
+        }));
         for (const [file, after] of changes) {
           if (!sources.has(file)) throw new Error(`followImports returned an unknown file: ${file}`);
           // Unfinished journals retain batch positions and the original source fingerprint.
@@ -381,7 +421,7 @@ export async function run(options, dependencies) {
           const endWriting = phase('check_write', file);
           try {
             const before = sources.get(file), journal = journals.get(file);
-            const reason = await withTimings(metrics.cpu_ms, () => timed('checkRewrite', () => api.checkRewrite(before, after, { fragment: fragments.has(file) })));
+            const reason = importChecks.get(file);
             if (reason !== null) {
               journal.rejectImports(reason);
               summary.rejected++;
@@ -419,7 +459,7 @@ export async function run(options, dependencies) {
       summary.tokens.total_tokens = summary.tokens.input_tokens + summary.tokens.output_tokens;
       if (!Object.keys(summary.quota).length) summary.quota = "没测到";
       summary.total_ms = endedAt - startedAt;
-      summary.phase_ms = Object.fromEntries(['selection_plan', ...(phases.syntax ? ['syntax'] : []), ...(phases.merge_imports ? ['merge_imports'] : []), 'model', 'followImports', 'check_write']
+      summary.phase_ms = Object.fromEntries(['selection_plan', ...(phases.syntax ? ['syntax'] : []), ...(phases.syntax_preflight ? ['syntax_preflight'] : []), ...(phases.merge_imports ? ['merge_imports'] : []), 'model', 'followImports', 'check_write']
         .map(key => [key, intervalMs(phases[key] ?? [])]));
       Object.assign(summary, requestStats(requests, pauses, summary.total_ms));
       event({ type: 'run_end', at: endedAt, total_ms: summary.total_ms });

@@ -1,5 +1,6 @@
 import { availableParallelism } from 'node:os';
 import { Worker } from 'node:worker_threads';
+import { captureTimings } from '../timing.mjs';
 
 /** Lazily allocate workers; each owns at most one syntax tree at a time. */
 export function createSyntaxPool({ size = availableParallelism(), onWorker } = {}) {
@@ -29,6 +30,7 @@ export function createSyntaxPool({ size = availableParallelism(), onWorker } = {
           slot.job = null;
           if (!job) return fail(new Error('unexpected syntax worker response'));
           try {
+            job.recordTimings(message.timings);
             onWorker?.({ threadId: worker.threadId, kind: job.task.kind });
             if (message.error) {
               const error = new Error(message.error.message);
@@ -49,9 +51,24 @@ export function createSyntaxPool({ size = availableParallelism(), onWorker } = {
     }
   }
   return {
+    size,
+    async map(items, task) {
+      const values = Array.from(items), results = new Array(values.length);
+      let next = 0, stopped = false;
+      const finished = await Promise.allSettled(Array.from({ length: Math.min(size, values.length) }, async () => {
+        while (!stopped && next < values.length) {
+          const index = next++;
+          try { results[index] = await task(values[index], index); }
+          catch (error) { stopped = true; throw error; }
+        }
+      }));
+      const rejected = finished.find(result => result.status === 'rejected');
+      if (rejected) throw rejected.reason;
+      return results;
+    },
     run(task) {
       if (closed || failure) return Promise.reject(failure ?? new Error('syntax pool is closed'));
-      return new Promise((resolve, reject) => { queue.push({ task, resolve, reject }); dispatch(); });
+      return new Promise((resolve, reject) => { queue.push({ task, resolve, reject, recordTimings: captureTimings() }); dispatch(); });
     },
     async close() {
       closed = true;

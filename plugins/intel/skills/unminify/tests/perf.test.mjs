@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http2';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
@@ -170,13 +170,42 @@ test('file duration ends at its main write while import writes are reported sepa
   assert.match(await readFile(join(root, 'a-sample.js'), 'utf8'), /a as sampleCount3/);
   const report = JSON.parse((await execute(process.execPath, [perfScript.pathname, root])).stdout);
   const sample = report.slow_files.find(row => row.file === 'a-sample.js');
-  assert(sample.total_ms < summary.total_ms / 2, `${sample.total_ms} vs run ${summary.total_ms}`);
-  assert(Math.abs(sample.total_ms - (main.written_at - main.started_at)) <= 20);
+  const mainEndIndex = performance.indexOf(main);
+  const mainWriteEndIndex = performance.findIndex(row => row.type === 'phase_end' && row.phase === 'check_write' && row.file === main.file);
+  const importsStartIndex = performance.findIndex(row => row.type === 'phase_start' && row.phase === 'followImports');
+  assert(mainWriteEndIndex >= 0 && mainWriteEndIndex < mainEndIndex);
+  assert(mainEndIndex < importsStartIndex);
   assert.equal(sample.started_at, main.started_at);
   assert.equal(sample.total_ms, main.at - main.started_at);
   assert.equal(sample.written_at, main.written_at);
   assert.equal(main.phase, 'main');
   assert.equal(imports.phase, 'followImports');
   assert.equal(sample.followImports.written_at, imports.written_at);
-  assert.equal(report.slow_files[0].file, 'consumer.js');
+  assert.equal(report.slow_files.length, 2);
+  assert(report.slow_files.every((row, index, rows) => index === 0 || rows[index - 1].total_ms >= row.total_ms));
+});
+
+test('perf keeps main durations separate from write cleanup and later import writes', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'unminify-perf-records-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  execFileSync('git', ['init', '--initial-branch=main', root], { stdio: 'ignore' });
+  const main = { file: 'sample.js', started_at: 1000, last_batch_at: 1700, written_at: 1750, cpu_ms: { parse: 1 } };
+  const consumer = { file: 'consumer.js', started_at: 1800, last_batch_at: 1805, written_at: 1815, cpu_ms: { parse: 2 } };
+  const events = [
+    { type: 'run_start', at: 1000 },
+    { type: 'file_end', phase: 'main', ...main, at: 1800 },
+    { type: 'file_end', phase: 'main', ...consumer, at: 1820 },
+    { type: 'file_end', phase: 'followImports', ...main, written_at: 1980, at: 1990 },
+    { type: 'run_end', at: 2000, total_ms: 1000 },
+    { type: 'summary', at: 2000, total_ms: 1000, phase_ms: {} },
+  ];
+  await mkdir(join(root, '.unminify'));
+  await writeFile(join(root, '.unminify', 'performance.jsonl'),
+    events.map(event => JSON.stringify({ ...event, run_id: 'main-duration-fixture' })).join('\n') + '\n');
+  const report = JSON.parse((await execute(process.execPath, [perfScript.pathname, root])).stdout);
+  assert.equal(report.total_ms, 1000);
+  assert.deepEqual(report.slow_files, [
+    { ...main, total_ms: 800, followImports: { written_at: 1980 } },
+    { ...consumer, total_ms: 20 },
+  ]);
 });

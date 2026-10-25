@@ -3,14 +3,15 @@
 // ABOUTME: `mcp` serves Claude's tools and relays codex events; `await` and `pending` deliver them.
 
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 import { readStdin } from "../lib/stdin.mjs";
 import { SessionStore, askTimeoutSeconds, readSupervisor, writeSupervisor } from "../lib/inbox.mjs";
-import { parentProcesses, recordedSessionId, resolveSessionId } from "./session.mjs";
+import { defaultSessionsDir, parentProcesses, recordedSessionId, resolveSessionId } from "./session.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const pluginManifestPath = path.resolve(path.dirname(scriptPath), "../.claude-plugin/plugin.json");
@@ -22,7 +23,51 @@ const usage = `usage:
   manager.mjs pending                               Stop hook: block on undelivered events and unwatched threads
   manager.mjs owner                                 PostToolUse hook: record the thread's starting agent`;
 
-const MODEL_EFFORTS = Object.freeze({ "gpt-6.1-sol": ["medium"], "gpt-6-luna": ["high"] });
+const MODEL_EFFORTS = Object.freeze({ "gpt-6.1-sol": ["medium"] });
+// Maps each tier to its app-server serviceTier id; the daemon silently drops ids it doesn't know.
+const SERVICE_TIERS = Object.freeze({ fast: "priority", standard: "default" });
+
+function validateModelEffort(model, effort, tier) {
+  if (model !== undefined || effort !== undefined) {
+    if (typeof model !== "string" || !Object.hasOwn(MODEL_EFFORTS, model)) throw new Error(`model must be one of ${Object.keys(MODEL_EFFORTS).join(", ")}`);
+    if (!MODEL_EFFORTS[model].includes(effort)) throw new Error(`${model} runs only at ${MODEL_EFFORTS[model].join(" or ")} effort`);
+  }
+  if (tier !== undefined && (typeof tier !== "string" || !Object.hasOwn(SERVICE_TIERS, tier))) throw new Error(`tier must be one of ${Object.keys(SERVICE_TIERS).join(", ")}`);
+}
+
+function defaultProjectsDir(env = process.env) {
+  return env.CODEX_MANAGER_PROJECTS_DIR || path.join(os.homedir(), ".claude", "projects");
+}
+
+async function sessionTranscript(sessionId) {
+  const root = defaultProjectsDir();
+  for (const project of await readdir(root, { withFileTypes: true })) {
+    if (!project.isDirectory()) continue;
+    let text;
+    try {
+      text = await readFile(path.join(root, project.name, `${sessionId}.jsonl`), "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
+    return text.split("\n").filter((line) => line.trim()).map((line) => JSON.parse(line));
+  }
+  throw new Error(`cannot find transcript for session ${sessionId}`);
+}
+
+async function sessionName(parents) {
+  for (const { pid } of parents) {
+    let record;
+    try {
+      record = JSON.parse(await readFile(path.join(defaultSessionsDir(), `${pid}.json`), "utf8"));
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
+    if (record.name) return record.name;
+  }
+  return undefined;
+}
 // Codex gives up on a tool call after its own timeout, so that one has to outlast the wait for Claude's answer.
 const TOOL_TIMEOUT_MARGIN_SECONDS = 60;
 const FORWARDED_ENV = ["CODEX_MANAGER_STATE_DIR", "CODEX_MANAGER_ASK_TIMEOUT"];
@@ -155,10 +200,11 @@ async function runPending() {
 // --- mcp ---------------------------------------------------------------------
 
 class Manager {
-  constructor(store, socketPath, version) {
+  constructor(store, socketPath, version, parents) {
     this.store = store;
     this.socketPath = socketPath;
     this.version = version;
+    this.parents = parents;
     this.client = undefined;
     this.connecting = undefined;
     this.lastMessages = new Map();
@@ -362,7 +408,7 @@ class Manager {
     return entries.length ? entries : undefined;
   }
 
-  async startThread(client, { cwd, name, sandbox, claudeTools, record, model, effort }) {
+  async startThread(client, { cwd, name, sandbox, claudeTools, record, model, effort, tier }) {
     const params = { cwd, approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandbox, serviceName: "codex-manager", ephemeral: false };
     if (sandbox === "workspace-write") params.config = { "sandbox_workspace_write.network_access": true };
     if (claudeTools) params.config = { ...params.config, "mcp_servers.claude-client": claudeToolsServer() };
@@ -370,24 +416,41 @@ class Manager {
       params.model = model;
       params.config = { ...params.config, model_reasoning_effort: effort };
     }
+    if (tier !== undefined) params.serviceTier = SERVICE_TIERS[tier];
     const started = await client.request("thread/start", params);
     const threadId = started.thread.id;
     if (name) await client.request("thread/name/set", { threadId, name });
-    this.updateThread(threadId, { name: name ?? null, cwd, turnId: null, lastStatus: "idle", ...record });
+    if (record !== false) this.updateThread(threadId, { name: name ?? null, cwd, turnId: null, lastStatus: "idle", ...record });
     return threadId;
   }
 
-  async start({ cwd, prompt, name, model, effort }) {
+  async start({ cwd, prompt, name, model, effort, tier }) {
     if (!cwd || !prompt) throw new Error("cwd and prompt are required");
-    if (model !== undefined || effort !== undefined) {
-      if (typeof model !== "string" || !Object.hasOwn(MODEL_EFFORTS, model)) throw new Error(`model must be one of ${Object.keys(MODEL_EFFORTS).join(", ")}`);
-      if (!MODEL_EFFORTS[model].includes(effort)) throw new Error(`${model} runs only at ${MODEL_EFFORTS[model].join(" or ")} effort`);
-    }
+    validateModelEffort(model, effort, tier);
     const client = await this.connect();
     const absolute = path.resolve(cwd);
-    const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", claudeTools: true, model, effort });
+    const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", claudeTools: true, model, effort, tier });
     const turn = await this.startTurn(client, threadId, prompt);
     return { threadId, turnId: turn.id, name: name ?? null, cwd: absolute, await: awaitCommand(threadId), note: "Run the await command with run_in_background; it exits when codex finishes the turn, calls notify or ask." };
+  }
+
+  async transfer({ cwd, model, effort, tier }) {
+    if (!cwd) throw new Error("cwd is required");
+    validateModelEffort(model, effort, tier);
+    const parents = this.parents ?? parentProcesses();
+    const sessionId = await recordedSessionId({ parents }) ?? this.store.sessionId;
+    const transcript = await sessionTranscript(sessionId);
+    const summary = transcript.findLast((record) => record.isCompactSummary === true);
+    if (!summary) throw new Error("no compaction summary in this session; run /compact first");
+    const content = summary.message.content;
+    const prompt = Array.isArray(content) ? content.filter((item) => item.type === "text").map((item) => item.text).join("") : content;
+    if (typeof prompt !== "string" || !prompt) throw new Error("compaction summary must contain text");
+    const name = await sessionName(parents) ?? transcript.findLast((record) => record.type === "custom-title")?.customTitle;
+    const client = await this.connect();
+    const absolute = path.resolve(cwd);
+    const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", claudeTools: false, record: false, model, effort, tier });
+    const turn = await this.startTurn(client, threadId, prompt);
+    return { threadId, turnId: turn.id, name: name ?? null, cwd: absolute };
   }
 
   /** Runs codex's own review mode (its rubric and priorities) over the commits since base; the rendered review lands in out. */
@@ -452,7 +515,7 @@ class Manager {
 
   async startTurn(client, threadId, prompt) {
     const response = await client.request("turn/start", { threadId, input: [{ type: "text", text: prompt, text_elements: [] }] });
-    this.updateThread(threadId, { turnId: response.turn.id, lastStatus: "inProgress" });
+    if (this.owns(threadId)) this.updateThread(threadId, { turnId: response.turn.id, lastStatus: "inProgress" });
     return response.turn;
   }
 
@@ -552,10 +615,13 @@ function reviewInstructions(base, plan, decisions, stance, focus) {
 
 const INSTRUCTIONS = `Create a thread with start, then run the returned await command with run_in_background. A thread with no activity for a minute, however long it has run, is stuck: send it a pointed hint, and never steer it toward faked tests or workarounds, in a hint or an answer. A thread is finished only when its turn completed (not failed, interrupted, or waiting on an ask), you have checked and accepted its result, and you plan no further message. Detach it in that same turn; a thread you started is then archived and takes no further send. Before ending a multi-thread run, list with state: ["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] and detach every finished one. When a thread asks, check list with state: ["waiting"] for waiting requests before you reply: await can return an ask already answered.`;
 
+const MODEL_PROPERTIES = { model: { type: "string", enum: Object.keys(MODEL_EFFORTS), description: "Worker model; supply effort with it, or omit both for daemon defaults." }, effort: { type: "string", enum: [...new Set(Object.values(MODEL_EFFORTS).flat())], description: `Required effort for the selected model; supply model with it. ${Object.entries(MODEL_EFFORTS).map(([model, efforts]) => `${model} allows ${efforts.join(" or ")}`).join("; ")}.` }, tier: { type: "string", enum: Object.keys(SERVICE_TIERS), description: "Service tier; omit it for the daemon default." } };
+
 const TOOLS = [
-  { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task; returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute checkout or worktree root, not a subdirectory." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation: its goal, the files involved, test-first, the gate, and commit+push." }, name: { type: "string", description: "Short human-readable thread name." }, model: { type: "string", enum: Object.keys(MODEL_EFFORTS), description: "Worker model; supply effort with it, or omit both for daemon defaults." }, effort: { type: "string", enum: [...new Set(Object.values(MODEL_EFFORTS).flat())], description: `Required effort for the selected model; supply model with it. ${Object.entries(MODEL_EFFORTS).map(([model, efforts]) => `${model} allows ${efforts.join(" or ")}`).join("; ")}.` } }, required: ["cwd", "prompt"] } },
+  { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task; returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute checkout or worktree root, not a subdirectory." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation: its goal, the files involved, test-first, the gate, and commit+push. Write it as technical writing." }, name: { type: "string", description: "Short human-readable thread name." }, ...MODEL_PROPERTIES }, required: ["cwd", "prompt"] } },
+  { name: "transfer", description: "Transfer this session to an independent Codex thread. Run /compact manually first; only the latest compaction summary is sent, excluding later conversation. This session receives no messages from the thread.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute checkout or worktree root, not a subdirectory." }, ...MODEL_PROPERTIES }, required: ["cwd"] } },
   { name: "attach", description: "Take over a codex session already running elsewhere, found by its thread id or exact name, so that send, interrupt and the await command work on it.", inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or exact session name." } }, required: ["thread"] } },
-  { name: "send", description: "Send a follow-up prompt to a codex thread: it starts a new turn when the thread is idle and is injected into the running turn otherwise. Keep follow-ups small and related, at most three items; start a new thread for unrelated work.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, prompt: { type: "string" } }, required: ["threadId", "prompt"] } },
+  { name: "send", description: "Send a follow-up prompt to a codex thread: it starts a new turn when the thread is idle and is injected into the running turn otherwise. Keep follow-ups small and related, at most three items; start a new thread for unrelated work.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, prompt: { type: "string", description: "The follow-up, written as technical writing." } }, required: ["threadId", "prompt"] } },
   { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. Pass the request's text as ask and your answer as reply. The reply becomes the result of its ask call. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, ask: { type: "string", description: "The waiting request's text, verbatim: the ask question." }, reply: { type: "string", description: "The answer to its question." } }, required: ["threadId", "ask", "reply"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },
   { name: "list", description: "List the codex threads this session started or attached, with each one's state, what it is waiting for, and how many inbox events are still unread.", inputSchema: { type: "object", properties: { state: { type: "array", items: { type: "string", enum: ["detached", "waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"] }, description: "Return only threads in these states; omit for all threads. Detached takes precedence over waiting on an ask, then the last turn status applies." } } } },
@@ -567,9 +633,9 @@ async function runMcp() {
   const plugin = JSON.parse(await readFile(pluginManifestPath, "utf8"));
   const sessionId = await resolveSessionId();
   const store = new SessionStore(sessionId);
-  const manager = new Manager(store, daemonSocketPath(process.env.CODEX_DAEMON_SOCKET), plugin.version);
-  log(`session ${sessionId}, state in ${store.dir}`);
   const parents = parentProcesses();
+  const manager = new Manager(store, daemonSocketPath(process.env.CODEX_DAEMON_SOCKET), plugin.version, parents);
+  log(`session ${sessionId}, state in ${store.dir}`);
   if (manager.listening()) manager.connect().catch((error) => log(`adoption deferred: ${error.message}`));
 
   const reply = (id, body) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...body })}\n`);

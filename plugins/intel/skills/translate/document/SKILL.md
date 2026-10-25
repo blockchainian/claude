@@ -1,22 +1,24 @@
 ---
-name: translate-pdf
+name: translate
 description: >
   Translate an English document we print ourselves, a web page (course reading, lab handout, blog post), a Markdown
   note or a plain-text transcript, into a Chinese PDF in the translate-epub skill's book look: same page size, dark theme, Baskerville/Songti body,
   黑体 bold, boxed code, Mermaid diagrams, MathJax math, bookmarks. Code, identifiers, math and diagram labels stay
-  English; prose, headings, captions and exercise text are translated through `codex exec`. Translating from the
-  source keeps structure, code blocks, exercises and images exact. Use for "/translate-pdf <url or .md>", "把这个网页
+  English; prose, headings, captions and exercise text are translated through the Codex Responses client. Translating from the
+  source keeps structure, code blocks, exercises and images exact. Use for "/translate <url or .md>", "把这个网页
   翻译成中文 PDF", "translate these course pages", or to re-render after editing a translation. NOT for a PDF that only
   exists as a PDF (papers, slides, scans: use translate-paper, translate-presentation or translate-scan), and NOT for an
   EPUB book (use translate-epub).
 ---
 
-# Translate PDF
+# Translate
 
 ## Skill directory
 
 Set `SKILL_DIR` to the absolute directory of this loaded `SKILL.md` in every shell call. The scripts import from the
-sibling `translate-epub` and `fetch-x-mentions` skills, so keep the whole intel plugin installed.
+sibling `translate-epub` and `fetch-x-mentions` skills by relative paths. The shared
+`runCodex` calls `unminify/scripts/codex-api-client.mjs` directly with the existing Codex login,
+so keep the whole intel plugin installed.
 
 ```sh
 SKILL_DIR="/absolute/path/to/loaded/skill"
@@ -27,7 +29,7 @@ SKILL_DIR="/absolute/path/to/loaded/skill"
 | Variable | Purpose | Required | Set in |
 | --- | --- | --- | --- |
 | `CODEX_HOME` | Existing Codex login directory; default ~/.codex | No | Shell environment |
-| `INTEL_STATE_DIR` | State root; work dirs go under `translate-pdf/`; default `~/.local/state/intel` | Optional | `~/.config/intel/.env` |
+| `INTEL_STATE_DIR` | State root; work dirs go under `translate-document/`; default `~/.local/state/intel` | Optional | `~/.config/intel/.env` |
 | `ISP_PROXY_URL` | Proxy for a page fetch that gets HTTP 429 | Optional | `~/.config/intel/.env` |
 
 ## Setup
@@ -55,7 +57,7 @@ It runs the translate-epub skill's setup (poppler, uv, codex login, Chrome) and 
 "$SKILL_DIR/scripts/translate_doc.sh" --url https://blog.example.com/post --reader --out ~/Documents/zh/post.pdf
 ```
 
-A 10k-word page takes about a minute: eight codex calls of about 1,500 words run at once.
+A 10k-word page takes about a minute: eight Codex Responses requests of about 1,500 words run at once.
 
 - `--title` names the document in the prompt (default: the output's file name); `--context` says what it is, such
   as "MIT 6.1020 course reading". Both set the translator's register.
@@ -70,7 +72,7 @@ A 10k-word page takes about a minute: eight codex calls of about 1,500 words run
 - `--drop-heading TEXT` removes each section whose heading contains TEXT, such as a login-only tutor section.
 - `--skip-bookmark TEXT` drops outline entries titled TEXT, such as the "阅读练习" heading every exercise block
   repeats.
-- `--work DIR` sets the work dir (default `$INTEL_STATE_DIR/translate-pdf/<name>`).
+- `--work DIR` sets the work dir (default `$INTEL_STATE_DIR/translate-document/<name>`).
 
 ## How it works
 
@@ -80,7 +82,7 @@ A 10k-word page takes about a minute: eight codex calls of about 1,500 words run
    blocks; `pre`, code-only text, scripts and SVG are never sent. Each tag's attributes become `k="n"`, so the model
    sees short tags, and join puts them back. Segment ids are hashes of their text, so the cache survives a changed
    page.
-2. Translate. `translate_segments.mjs` sends consecutive segments as one JSON object per `codex exec` call through
+2. Translate. `translate_segments.mjs` sends consecutive segments as one JSON object per Codex Responses request through
    the translate-epub skill's `runCodex` and checks each answer: every link target, `k="n"` and whole code element must
    come back; on a page that loads MathJax or KaTeX no formula may run into Chinese text (a lost delimiter); where
    the source has no TeX, none may be added. A failing segment is retried in a smaller batch, then alone at medium

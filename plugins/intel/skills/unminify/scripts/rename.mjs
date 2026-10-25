@@ -277,10 +277,8 @@ function externalName(node) {
   return node.name ?? node.value;
 }
 
-export function followImports(files, withFile = (file, task) => task(), fragments = new Set(), chunks, { minSymbolLength = 4 } = {}) {
-  const modules = new Map();
-  const paths = new Map([...files.keys()].map(file => [resolve(file), file]));
-  const targetFile = (file, specifier) => {
+export function summarizeImportFile(source, { file, paths, fragment = false, chunkBindings, minSymbolLength = 4 }) {
+  const targetFile = (specifier) => {
     if (!specifier.startsWith('./') && !specifier.startsWith('../')) return null;
     const base = resolve(dirname(file), specifier);
     for (const candidate of [base, `${base}.js`, `${base}.mjs`, resolve(base, 'index.js'), resolve(base, 'index.mjs')]) {
@@ -288,53 +286,53 @@ export function followImports(files, withFile = (file, task) => task(), fragment
     }
     return null;
   };
-  for (const [file, source] of files) {
-    modules.set(file, withFile(file, () => {
-      const analysis = analyze(source, { fragment: fragments.has(file) });
-      const exports = new Map();
-      const stars = [];
-      const imports = [];
-      const local = node => {
-        const binding = analysis.program.scope.getBinding(node.name);
-        return binding ? { file, key: binding.identifier.start } : chunks?.chunkBindings.get(file)?.get(node.name) ?? null;
-      };
-      for (const node of analysis.ast.program.body) {
-        if (node.type === 'ImportDeclaration') {
-          const target = targetFile(file, node.source.value);
-          for (const specifier of node.specifiers) {
-            if (specifier.type === 'ImportNamespaceSpecifier') continue;
-            if (target === null && (specifier.type !== 'ImportSpecifier'
-              || externalName(specifier.imported).length < minSymbolLength
-              || specifier.local.name === externalName(specifier.imported))) continue;
-            imports.push({ key: specifier.local.start, target, name: specifier.type === 'ImportDefaultSpecifier' ? 'default' : externalName(specifier.imported) });
-          }
-        } else if (node.type === 'ExportNamedDeclaration') {
-          if (node.declaration) {
-            for (const { binding } of analysis.bindings.values()) {
-              if (binding.scope === analysis.program.scope && binding.identifier.start >= node.declaration.start && binding.identifier.end <= node.declaration.end) exports.set(binding.identifier.name, { file, key: binding.identifier.start });
-            }
-          }
-          for (const specifier of node.specifiers) {
-            if (specifier.type !== 'ExportSpecifier') continue;
-            exports.set(externalName(specifier.exported), node.source
-              ? { target: targetFile(file, node.source.value), name: externalName(specifier.local) }
-              : local(specifier.local));
-          }
-        } else if (node.type === 'ExportDefaultDeclaration') {
-          const declaration = node.declaration;
-          if (declaration.type === 'Identifier') exports.set('default', local(declaration));
-          else if (declaration.id) exports.set('default', local(declaration.id));
-        } else if (node.type === 'ExportAllDeclaration') {
-          const target = targetFile(file, node.source.value);
-          if (target !== null) stars.push(target);
+
+  const analysis = analyze(source, { fragment });
+  const exports = new Map();
+  const stars = [];
+  const imports = [];
+  const local = node => {
+    const binding = analysis.program.scope.getBinding(node.name);
+    return binding ? { file, key: binding.identifier.start } : chunkBindings?.get(node.name) ?? null;
+  };
+  for (const node of analysis.ast.program.body) {
+    if (node.type === 'ImportDeclaration') {
+      const target = targetFile(node.source.value);
+      for (const specifier of node.specifiers) {
+        if (specifier.type === 'ImportNamespaceSpecifier') continue;
+        if (target === null && (specifier.type !== 'ImportSpecifier'
+          || externalName(specifier.imported).length < minSymbolLength
+          || specifier.local.name === externalName(specifier.imported))) continue;
+        imports.push({ key: specifier.local.start, target, name: specifier.type === 'ImportDefaultSpecifier' ? 'default' : externalName(specifier.imported) });
+      }
+    } else if (node.type === 'ExportNamedDeclaration') {
+      if (node.declaration) {
+        for (const { binding } of analysis.bindings.values()) {
+          if (binding.scope === analysis.program.scope && binding.identifier.start >= node.declaration.start && binding.identifier.end <= node.declaration.end) exports.set(binding.identifier.name, { file, key: binding.identifier.start });
         }
       }
-      // Retain names and offsets across modules, never Babel nodes or scopes.
-      const bindings = new Map(Object.values(analysis.program.scope.bindings)
-        .map(binding => [binding.identifier.start, binding.identifier.name]));
-      return { source, bindings, exports, stars, imports, fragment: analysis.fragment };
-    }));
+      for (const specifier of node.specifiers) {
+        if (specifier.type !== 'ExportSpecifier') continue;
+        exports.set(externalName(specifier.exported), node.source
+          ? { target: targetFile(node.source.value), name: externalName(specifier.local) }
+          : local(specifier.local));
+      }
+    } else if (node.type === 'ExportDefaultDeclaration') {
+      const declaration = node.declaration;
+      if (declaration.type === 'Identifier') exports.set('default', local(declaration));
+      else if (declaration.id) exports.set('default', local(declaration.id));
+    } else if (node.type === 'ExportAllDeclaration') {
+      const target = targetFile(node.source.value);
+      if (target !== null) stars.push(target);
+    }
   }
+  // Retain names and offsets across modules, never Babel nodes or scopes.
+  const bindings = new Map(Object.values(analysis.program.scope.bindings)
+    .map(binding => [binding.identifier.start, binding.identifier.name]));
+  return { source, bindings, exports, stars, imports, fragment: analysis.fragment };
+}
+
+function importPlanner(modules, chunks) {
   function findExport(file, name, seen = new Set()) {
     const token = JSON.stringify([file, name]);
     if (seen.has(token)) return null;
@@ -357,38 +355,97 @@ export function followImports(files, withFile = (file, task) => task(), fragment
     return found;
   }
   const resolved = new Map();
-  function plan(file, visiting = new Set()) {
+  function* plan(file, visiting = new Set()) {
     if (resolved.has(file)) return resolved.get(file);
     if (visiting.has(file)) return new Map();
-    const branch = new Set(visiting).add(file);
-    const module = modules.get(file);
-    const proposals = new Map();
-    if (chunks?.readOnly?.has(file) || module.fragment && !chunks?.chunkBindings.has(file)) {
-      resolved.set(file, proposals);
-      return proposals;
-    }
-    for (const imported of module.imports) {
-      if (imported.target === null) {
-        proposals.set(imported.key, imported.name);
-        continue;
+    const members = chunks?.groupFiles?.(file) ?? [file];
+    const branch = new Set([...visiting, ...members]), grouped = new Map();
+    for (const member of members) {
+      const module = modules.get(member), proposals = new Map();
+      grouped.set(member, proposals);
+      if (chunks?.readOnly?.has(member) || module.fragment && !chunks?.chunkBindings.has(member)) continue;
+      for (const imported of module.imports) {
+        if (imported.target === null) { proposals.set(imported.key, imported.name); continue; }
+        const exported = findExport(imported.target, imported.name);
+        if (!exported) continue;
+        const names = yield* plan(exported.file, branch);
+        const name = names.get(exported.key) ?? modules.get(exported.file).bindings.get(exported.key);
+        if (chunks?.chunkBindings.has(member) && !names.has(exported.key)
+          && !chunks.renamedExports.has(`${exported.file}\0${name}`)) continue;
+        proposals.set(imported.key, name);
       }
-      const exported = findExport(imported.target, imported.name);
-      if (!exported) continue;
-      const names = plan(exported.file, branch);
-      const name = names.get(exported.key) ?? modules.get(exported.file).bindings.get(exported.key);
-      if (chunks?.chunkBindings.has(file) && !names.has(exported.key)
-        && !chunks.renamedExports.has(`${exported.file}\0${name}`)) continue;
-      proposals.set(imported.key, name);
     }
-    const names = chunks?.chunkBindings.has(file) ? chunks.resolve(file, proposals)
-      : withFile(file, () => timed('resolveNames', () => resolveNames(module.source, proposals, { fragment: fragments.has(file), restoreExternalImports: true })));
-    resolved.set(file, names);
-    return names;
+    if (chunks?.groupFiles?.(file)) {
+      const names = yield { file, grouped };
+      for (const member of members) resolved.set(member, names.get(member));
+    } else {
+      const proposals = grouped.get(file);
+      if (chunks?.readOnly?.has(file) || modules.get(file).fragment && !chunks?.chunkBindings.has(file)) resolved.set(file, proposals);
+      else resolved.set(file, yield { file, proposals });
+    }
+    return resolved.get(file);
   }
+  return { plan, resolved };
+}
+
+export function followImports(files, withFile = (file, task) => task(), fragments = new Set(), chunks, { minSymbolLength = 4, pool } = {}) {
+  if (pool) return followImportsParallel(files, withFile, fragments, chunks, { minSymbolLength, pool });
+  const modules = new Map();
+  const paths = new Map([...files.keys()].map(file => [resolve(file), file]));
+  for (const [file, source] of files) {
+    modules.set(file, withFile(file, () => summarizeImportFile(source, {
+      file, paths, fragment: fragments.has(file), chunkBindings: chunks?.chunkBindings.get(file), minSymbolLength,
+    })));
+  }
+  const { plan } = importPlanner(modules, chunks);
+  const namesFor = file => {
+    const iterator = plan(file);
+    let step = iterator.next();
+    while (!step.done) {
+      const { file, proposals, grouped } = step.value;
+      const names = grouped ? chunks.resolveGroup(grouped) : chunks?.chunkBindings.has(file) ? chunks.resolve(file, proposals)
+        : withFile(file, () => timed('resolveNames', () => resolveNames(modules.get(file).source, proposals, {
+          fragment: fragments.has(file), restoreExternalImports: true,
+        })));
+      step = iterator.next(names);
+    }
+    return step.value;
+  };
   const changed = new Map();
   for (const [file, module] of modules) {
-    const names = plan(file);
+    const names = namesFor(file);
     if (names.size && !chunks?.chunkBindings.has(file)) changed.set(file, withFile(file, () => timed('applyRenames', () => applyRenames(module.source, names))));
   }
   return changed;
+}
+
+async function followImportsParallel(files, withFile, fragments, chunks, { minSymbolLength, pool }) {
+  const modules = new Map();
+  const paths = new Map([...files.keys()].map(file => [resolve(file), file]));
+  const entries = [...files];
+  const summaries = await pool.map(entries, ([file, source]) => withFile(file, () => pool.run({
+    kind: 'import-analyze', source, options: {
+      file, paths, fragment: fragments.has(file), chunkBindings: chunks?.chunkBindings.get(file), minSymbolLength,
+    },
+  })));
+  entries.forEach(([file], index) => modules.set(file, summaries[index]));
+  const { plan, resolved } = importPlanner(modules, chunks);
+  // Resolve dependency chains in insertion order, preserving cyclic graph behavior.
+  for (const file of modules.keys()) {
+    const iterator = plan(file);
+    let step = iterator.next();
+    while (!step.done) {
+      const { file, proposals, grouped } = step.value;
+      const names = grouped ? await chunks.resolveGroup(grouped) : chunks?.chunkBindings.has(file) ? await chunks.resolve(file, proposals)
+        : await withFile(file, () => pool.run({ kind: 'import-resolve', source: modules.get(file).source, proposals,
+          options: { fragment: fragments.has(file), restoreExternalImports: true } }));
+      step = iterator.next(names);
+    }
+  }
+  const edits = await pool.map(entries, async ([file, source]) => {
+    const names = resolved.get(file);
+    if (!names.size || chunks?.chunkBindings.has(file)) return null;
+    return withFile(file, () => pool.run({ kind: 'import-apply', source, names }));
+  });
+  return new Map(entries.flatMap(([file], index) => edits[index] === null ? [] : [[file, edits[index]]]));
 }

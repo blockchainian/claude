@@ -1,14 +1,15 @@
 import { createRequire } from 'node:module';
 import { parse } from '@babel/parser';
 import traverseModule from '@babel/traverse';
-import { isLexicalIdentifier, isLexicalReference, isModelBinding, restoredImportEdit, identifierBinding } from './identifiers.mjs';
+import { isLexicalIdentifier, isLexicalReference, isModelBinding, restoredImportEdit } from './identifiers.mjs';
 import { toIdentifier, applyRenames, bindingContext, importCollisionName, sameImportedBinding, orderImportRestores } from './rename.mjs';
 import { checkRewrite } from './checks.mjs';
+import { analyzeImportChunkFile, applyImportChunkFile } from './import-chunk-file.mjs';
 import { estimateInputTokens } from './prompt.mjs';
 
 const traverse = traverseModule.default ?? traverseModule;
 const require = createRequire(import.meta.url);
-const knownGlobals = new Set([
+export const knownGlobals = new Set([
   ...require('@babel/helper-globals/data/builtin-lower.json'),
   ...require('@babel/helper-globals/data/builtin-upper.json'),
   ...require('@babel/helper-globals/data/browser-upper.json'),
@@ -23,6 +24,9 @@ const knownGlobals = new Set([
 ]);
 
 const inspections = new WeakMap();
+export function releaseChunkAnalysis(sources) {
+  inspections.delete(sources);
+}
 function inspect(sources) {
   const cached = inspections.get(sources);
   if (cached && cached.sources.length === sources.size && cached.sources.every(([file, source]) => sources.get(file) === source)) return cached.analysis;
@@ -81,6 +85,7 @@ function inspect(sources) {
       ast,
       program,
       lexical,
+      lexicalByStart: lexical.map((_, index) => index).sort((a, b) => lexical[a].node.start - lexical[b].node.start),
       bindings
     });
   }
@@ -89,6 +94,7 @@ function inspect(sources) {
     files,
     declarations,
     usages,
+    placeholderNames: [...declarations.keys()].filter(name => /^v[1-9]\d*$/.test(name)),
     dynamicScope
   };
   inspections.set(sources, {
@@ -96,6 +102,22 @@ function inspect(sources) {
     analysis
   });
   return analysis;
+}
+
+function bindingRecord(name, declarations, usages) {
+  const declaration = declarations[0],
+    references = usages ?? [],
+    files = new Set(declarations.map(entry => entry.file));
+  for (const reference of references) files.add(reference.file);
+  return {
+    name,
+    file: declaration.file,
+    key: declaration.binding.identifier.start,
+    kind: declaration.binding.kind,
+    files,
+    references,
+    declarations
+  };
 }
 
 /** A manifest chunk owns only program bindings; nested bindings retain file scope. */
@@ -125,21 +147,8 @@ export function analyzeChunk(sources, {
   };
   for (const [name, declarationsForName] of declarations) {
     const declaration = declarationsForName[0],
-      references = [],
-      touched = new Set(declarationsForName.map(entry => entry.file));
-    for (const reference of usages.get(name) ?? []) {
-      references.push(reference);
-      touched.add(reference.file);
-    }
-    const record = {
-      name,
-      file: declaration.file,
-      key: declaration.binding.identifier.start,
-      kind: declaration.binding.kind,
-      files: touched,
-      references,
-      declarations: declarationsForName
-    };
+      record = bindingRecord(name, declarationsForName, usages.get(name)),
+      touched = record.files;
     bindings.set(name, record);
     let reason;
     if (dynamicScope) reason = 'dynamicScope';else if (declarationsForName.length > 1) reason = 'duplicate';else if ([...touched].some(file => ignored.has(file))) reason = 'ignored';else if (knownGlobals.has(name)) reason = 'knownGlobal';else if (!chunkSiblings && [...touched].some(file => !selected.has(file))) reason = 'outsideSelection';
@@ -274,31 +283,35 @@ export function applyChunkRenames(sources, names) {
   }
   return output;
 }
-function identityFacts(analysis) {
-  const result = [];
-  for (const [file, record] of analysis.files) {
-    const local = [];
-    traverse(record.ast, {
-      Scope(path) {
-        for (const binding of Object.values(path.scope.bindings)) if (!local.includes(binding)) local.push(binding);
-      }
+// Keep only scalar facts across files; Babel paths and scopes stay file-local.
+function rewriteFacts(sources) {
+  const files = new Map(), declarations = new Map();
+  let hasWith = false, directEval = false;
+  for (const [file, source] of sources) {
+    const record = analyzeImportChunkFile(source);
+    const bindings = record.bindings.map(binding => binding.name);
+    for (const [index, name] of bindings.entries()) {
+      if (!declarations.has(name)) declarations.set(name, []);
+      declarations.get(name).push({ file, index });
+    }
+    files.set(file, {
+      bindings,
+      allBindings: record.allBindings,
+      lexical: record.lexical.filter(token => !token.exported)
+        .map(token => ({ name: token.name, local: token.identityLocal })),
     });
-    local.sort((a, b) => a.identifier.start - b.identifier.start);
-    const declarations = new Map(local.map(binding => [binding.identifier, binding]));
-    result.push([file, record.lexical.filter(path => !path.parentPath.isExportSpecifier()).map(path => {
-      const name = path.node.name,
-        binding = identifierBinding(path, declarations),
-        owners = analysis.declarations.get(name);
-      if (binding && binding.scope !== record.program.scope) return `local:${local.indexOf(binding)}`;
-      if (owners?.length === 1) {
-        const owner = owners[0],
-          index = analysis.files.get(owner.file).bindings.indexOf(owner.binding);
-        return `chunk:${owner.file}:${index}`;
-      }
-      return owners?.length > 1 ? `ambiguous:${name}` : `global:${name}`;
-    })]);
+    hasWith ||= record.hasWith;
+    directEval ||= record.directEval;
   }
-  return JSON.stringify(result);
+  return { files, declarations, dynamicScope: hasWith || directEval && !declarations.has('eval') };
+}
+function identityFacts(analysis) {
+  return JSON.stringify([...analysis.files].map(([file, record]) => [file, record.lexical.map(token => {
+    if (token.local !== null) return `local:${token.local}`;
+    const owners = analysis.declarations.get(token.name);
+    if (owners?.length === 1) return `chunk:${owners[0].file}:${owners[0].index}`;
+    return owners?.length > 1 ? `ambiguous:${token.name}` : `global:${token.name}`;
+  })]));
 }
 
 /** Invert only proven program renames, then reuse the strict single-file guard. */
@@ -306,19 +319,10 @@ export function checkChunkRewrite(before, after) {
   try {
     if (JSON.stringify([...before.keys()]) !== JSON.stringify([...after.keys()])) return 'CHUNK_FILES_CHANGED';
     if ([...before].every(([file, source]) => after.get(file) === source)) return null;
-    const a = inspect(before),
-      b = inspect(after),
-      inverse = new Map();
+    const a = rewriteFacts(before), b = rewriteFacts(after), inverse = new Map();
     if (a.dynamicScope) {
-      const bindingNames = analysis => [...analysis.files].map(([file, record]) => {
-        const bindings = new Set();
-        traverse(record.ast, {
-          Scope(path) {
-            for (const binding of Object.values(path.scope.bindings)) bindings.add(binding);
-          }
-        });
-        return [file, [...bindings].sort((left, right) => left.identifier.start - right.identifier.start).map(binding => binding.identifier.name)];
-      });
+      const bindingNames = analysis => [...analysis.files].map(([file, record]) =>
+        [file, record.allBindings.map(binding => binding.name)]);
       if (JSON.stringify(bindingNames(a)) !== JSON.stringify(bindingNames(b))) return 'CHUNK_DYNAMIC_SCOPE';
     }
     if (identityFacts(a) !== identityFacts(b)) return 'CHUNK_BINDING_CHANGED';
@@ -326,41 +330,32 @@ export function checkChunkRewrite(before, after) {
       const next = b.files.get(file);
       if (record.bindings.length !== next.bindings.length) return 'CHUNK_BINDINGS_CHANGED';
       for (let i = 0; i < record.bindings.length; i++) {
-        const original = record.bindings[i].identifier.name,
-          renamed = next.bindings[i].identifier.name;
+        const original = record.bindings[i], renamed = next.bindings[i];
         if (original !== renamed) {
-          if ((a.declarations.get(original)?.length ?? 0) > 1) return 'CHUNK_DUPLICATE_CHANGED';
+          if (a.declarations.get(original).length > 1) return 'CHUNK_DUPLICATE_CHANGED';
           if (inverse.has(renamed) && inverse.get(renamed) !== original) return 'CHUNK_DUPLICATE_ADDED';
           inverse.set(renamed, original);
         }
       }
     }
-    // Restore nested names first so inversion cannot capture a legal local
-    // rename that happens to reuse a program binding's original spelling.
-    const localsRestored = new Map(after);
+    const localNames = new Map();
     for (const [file, original] of a.files) {
-      const current = b.files.get(file),
-        bindingsOf = record => {
-          const entries = new Set();
-          traverse(record.ast, {
-            Scope(path) {
-              for (const binding of Object.values(path.scope.bindings)) if (binding.scope !== record.program.scope) entries.add(binding);
-            }
-          });
-          return [...entries].sort((x, y) => x.identifier.start - y.identifier.start);
-        };
-      const oldBindings = bindingsOf(original),
-        newBindings = bindingsOf(current),
+      const oldBindings = original.allBindings.filter(binding => !binding.top),
+        newBindings = b.files.get(file).allBindings.filter(binding => !binding.top),
         names = new Map();
       if (oldBindings.length !== newBindings.length) return 'CHUNK_BINDINGS_CHANGED';
-      for (let i = 0; i < oldBindings.length; i++) if (oldBindings[i].identifier.name !== newBindings[i].identifier.name) names.set(newBindings[i].identifier.start, oldBindings[i].identifier.name);
-      if (names.size) localsRestored.set(file, applyRenames(after.get(file), names));
+      for (let i = 0; i < oldBindings.length; i++) if (oldBindings[i].name !== newBindings[i].name)
+        names.set(newBindings[i].key, oldBindings[i].name);
+      localNames.set(file, names);
     }
-    const restored = applyChunkRenames(localsRestored, inverse);
+    // Restore nested names before program inversion so legal local reuse cannot capture it.
+    // Parse, edit and check one member at a time, retaining no chunk-wide AST graphs.
     for (const [file, source] of before) {
-      const reason = checkRewrite(source, restored.get(file), {
-        fragment: false, sharedProgram: true
-      });
+      const names = localNames.get(file);
+      let restored = names.size ? applyRenames(after.get(file), names) : after.get(file);
+      restored = applyImportChunkFile(restored, inverse, analyzeImportChunkFile(restored));
+      if (source === restored) continue;
+      const reason = checkRewrite(source, restored, { fragment: false, sharedProgram: true });
       if (reason) return `${file}: ${reason}`;
     }
     return null;
@@ -391,16 +386,15 @@ export function renderChunkBatch(sources, batch, renames = new Map(), {
     placeholders[placeholder] = key;
     targets.set(key, placeholder);
   });
-  const analysis = analyzeChunk(sources, {
-    minSymbolLength: Number.MAX_SAFE_INTEGER
-  });
+  const analysis = inspect(sources);
   // Context-only collisions must not confuse the model's unique placeholders.
   let contextIndex = 0;
-  for (const name of analysis.bindings.keys()) if (!targets.has(name) && /^v[1-9]\d*$/.test(name) && Number(name.slice(1)) <= placeholderCount) targets.set(name, `_context${++contextIndex}`);
+  for (const name of analysis.placeholderNames) if (!targets.has(name) && Number(name.slice(1)) <= placeholderCount) targets.set(name, `_context${++contextIndex}`);
   const snippets = [];
   for (const key of batch.keys) {
-    const record = analysis.bindings.get(key);
-    if (!record) throw new Error(`Unknown chunk binding: ${key}`);
+    const declarations = analysis.declarations.get(key);
+    if (!declarations) throw new Error(`Unknown chunk binding: ${key}`);
+    const record = bindingRecord(key, declarations, analysis.usages.get(key));
     for (const file of record.files) {
       const centers = record.references.filter(ref => ref.file === file).map(ref => ref.path.node.start);
       if (file === record.file) centers.unshift(record.key);
@@ -416,7 +410,20 @@ export function renderChunkBatch(sources, batch, renames = new Map(), {
       end = Math.min(record.source.length, center + radius);
     let cursor = start,
       text = '';
-    for (const path of record.lexical) {
+    function lowerBound(offset) {
+      let low = 0, high = record.lexicalByStart.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (record.lexical[record.lexicalByStart[middle]].node.start < offset) low = middle + 1;
+        else high = middle;
+      }
+      return low;
+    }
+    // Preserve traversal order even for syntax whose Babel visitor order differs
+    // from source order, while visiting only identifiers inside this excerpt.
+    const indices = record.lexicalByStart.slice(lowerBound(start), lowerBound(end)).sort((a, b) => a - b);
+    for (const index of indices) {
+      const path = record.lexical[index];
       const node = path.node;
       if (node.start < cursor || node.end > end) continue;
       const binding = path.scope.getBinding(node.name);

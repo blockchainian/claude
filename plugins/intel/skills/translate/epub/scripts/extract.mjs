@@ -325,11 +325,10 @@ export function itertext(el) {
   return s;
 }
 
-/** Map each content file (basename, fragment dropped) to its TOC title, from the EPUB3 nav or EPUB2 ncx.
- * The first title seen for a file wins, which is the file-level entry (sub-section entries carry #fragments). */
+/** Map archive-relative hrefs, including fragments, to EPUB3 nav or EPUB2 ncx titles. */
 export function epubTitles(z, navHref, ncxHref) {
   const titles = {};
-  const base = (href) => path.posix.basename(href.split("#")[0]);
+  const target = (toc, href) => normpath(posixJoin(dirnameOf(toc), href));
   const parse = (href) => {
     try {
       return fromstring(z.read(href));
@@ -344,7 +343,7 @@ export function epubTitles(z, navHref, ncxHref) {
       for (const a of iterElements(root)) {
         if (a.tag === "a" && a.attrs.href) {
           const txt = pySplit(itertext(a)).join(" ");
-          const b = base(a.attrs.href);
+          const b = target(navHref, a.attrs.href);
           if (txt && b && !Object.hasOwn(titles, b)) titles[b] = txt;
         }
       }
@@ -363,7 +362,7 @@ export function epubTitles(z, navHref, ncxHref) {
         }
         if (label !== null && content !== null && content.attrs.src) {
           const txt = pySplit(itertext(label)).join(" ");
-          const b = base(content.attrs.src);
+          const b = target(ncxHref, content.attrs.src);
           if (txt && !Object.hasOwn(titles, b)) titles[b] = txt;
         }
       }
@@ -571,6 +570,49 @@ export function extractEpub(source, work, keepImages, pageSize) {
     if (el.tag === "itemref" && el.attrs.idref !== undefined && Object.hasOwn(manifest, el.attrs.idref)) spine.push(el.attrs.idref);
   }
   const titles = epubTitles(z, navHref, ncxHref);
+  // TOC anchors delimit sections in reading order; a file prefix continues the preceding section.
+  const continuations = new Set();
+  let precedingTarget = false;
+  if (Object.keys(titles).some(href => href.includes("#"))) {
+    for (let i = 0; i < spine.length; i++) {
+      const idref = spine[i], item = manifest[idref];
+      if (!item.media.startsWith("application/xhtml")) continue;
+      const raw = z.read(item.href).toString("utf8");
+      const body = raw.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      if (!body) continue;
+      const targets = new Map(Object.keys(titles).filter(href => href.startsWith(item.href + "#"))
+        .map(href => [decodeURIComponent(href.slice(item.href.length + 1)), href]));
+      const cuts = [];
+      for (const tag of body[1].matchAll(/<[a-z][^>]*>/gi)) {
+        for (const attr of tag[0].matchAll(/\s(id|name)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
+          if (attr[1].toLowerCase() === "name" && !/^<a\b/i.test(tag[0])) continue;
+          const href = targets.get(unescapeXml(attr[2] ?? attr[3] ?? attr[4]));
+          if (href) { cuts.push({ at: tag.index, href }); targets.delete(decodeURIComponent(href.split("#")[1])); break; }
+        }
+      }
+      if (targets.size) throw new Error(`TOC anchor not found: ${[...targets.values()].join(", ")}`);
+      if (!cuts.length) {
+        if (Object.hasOwn(titles, item.href)) precedingTarget = true;
+        else if (precedingTarget) continuations.add(item.href);
+        continue;
+      }
+      const ids = [];
+      if (precedingTarget || Object.hasOwn(titles, item.href)) {
+        fragments.set(item.href, `<html><body>${body[1].slice(0, cuts[0].at)}</body></html>`);
+        if (!Object.hasOwn(titles, item.href)) continuations.add(item.href);
+        ids.push(idref);
+      } else cuts[0].at = 0; // retain material before the first TOC target
+      cuts.forEach((cut, n) => {
+        const id = `${idref}-anchor-${n}`;
+        manifest[id] = { ...item, href: cut.href };
+        fragments.set(cut.href, `<html><body>${body[1].slice(cut.at, cuts[n + 1]?.at)}</body></html>`);
+        ids.push(id);
+      });
+      spine.splice(i, 1, ...ids);
+      i += ids.length - 1;
+      precedingTarget = true;
+    }
+  }
   // An appendix can share a spine file with a chapter. Split sibling sections before grouping files.
   for (let i = 0; i < spine.length; i++) {
     const item = manifest[spine[i]];
@@ -600,12 +642,13 @@ export function extractEpub(source, work, keepImages, pageSize) {
     spine.splice(i + 1, 0, ...ids);
   }
   const titleOf = (href) => {
+    if (href.includes("#") && Object.hasOwn(titles, href)) return titles[href];
     const raw = z.read(href).toString("utf8");
     if (/<(?:section|nav)\b[^>]*(?:data-type|epub:type)=["'](?:titlepage|copyright-page|toc)["']/i.test(raw)) {
       return /(?:data-type|epub:type)=["']toc["']/i.test(raw) ? "Contents" : "Title Page";
     }
     const heading = epubFirstHeading(z, href);
-    return heading && /^appendix\b/i.test(heading) ? heading : titles[path.posix.basename(href)] || heading || stemOf(href);
+    return heading && /^appendix\b/i.test(heading) ? heading : titles[href] || heading || stemOf(href);
   };
 
   fs.mkdirSync(path.join(work, "text"), { recursive: true });
@@ -641,6 +684,7 @@ export function extractEpub(source, work, keepImages, pageSize) {
     // lastChapterPos drifts and the back-matter latch arms on the wrong file.
     const item = manifest[idref];
     if (!item.media.startsWith("application/xhtml")) return null;
+    if (continuations.has(item.href)) return null;
     const stitle = titleOf(item.href);
     let [chap] = parseTitle(stitle);
     if (chap === null && !(PART_TITLE.test(stitle)) && PART_TITLE_RE.test(stitle)) {
@@ -660,8 +704,18 @@ export function extractEpub(source, work, keepImages, pageSize) {
     if (!item.media.startsWith("application/xhtml")) continue;
     if (inBackmatter) continue; // the book's terminal back-matter has started — skip it and everything after
     const href = item.href;
-    const stem = stemOf(path.posix.basename(href));
-    const navTitled = Object.hasOwn(titles, path.posix.basename(href));
+    if (continuations.has(href)) {
+      if (cur !== null && !skipping) {
+        const [frag, secImgs, next] = epubFragment(z, href, work, keepImages, counter, codes);
+        counter = next;
+        cur.frag += "\n\n" + frag;
+        Object.assign(images, secImgs);
+      }
+      continue;
+    }
+    const stem = stemOf(path.posix.basename(href.split("#")[0]));
+    const navTitled = Object.hasOwn(titles, href);
+    const anchorTitled = navTitled && href.includes("#");
     if (skipping && !navTitled && !epubFirstHeading(z, href)) continue;
     skipping = false;
     const stitle = titleOf(href);
@@ -688,13 +742,13 @@ export function extractEpub(source, work, keepImages, pageSize) {
       continue;
     }
     const kind = classify(stitle, chapter, seenChapter);
-    if (kind === "cover" || kind === "contents" || kind === "skip") { skipping = kind === "skip"; continue; }
+    if (kind === "cover" || kind === "contents" || kind === "skip") { skipping = anchorTitled || kind === "skip"; continue; }
     // A subsection (1.1 …) or a chapter's trailing notes (its Bibliographical Remarks etc.) belong under the
     // current chapter, becoming ## sub-headings, so a per-subsection-file EPUB groups into one section per
     // chapter like a per-chapter-file one. A Conclusion/Epilogue/Afterword is substantial standalone content,
     // so it opens its own section instead — its own untitled continuation files then append to it.
     const isOwnBack = kind === "back" && OWN_BACK_SECTION.test(clean || stitle);
-    if (cur !== null && (isSubsection || (kind === "back" && !isOwnBack))) {
+    if (cur !== null && !anchorTitled && (isSubsection || (kind === "back" && !isOwnBack))) {
       cur.frag += "\n\n" + frag;
       Object.assign(images, secImgs);
       continue;

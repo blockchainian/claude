@@ -65,18 +65,26 @@ path.
 
 Each skill's `SKILL.md` covers its usage, setup and requirements.
 
-Unminify plans and packs batches within each file and stage using `--context-tokens`
+Unminify plans and packs batches within each file and stage using `--max-input-tokens`
 (default 100000). The budget counts instructions, prompt and rendered context with
-`js-tiktoken` 1.0.21 (`o200k_base`); there is no name-count cap. Oversized contexts are
-shortened; an irreducible batch that still cannot fit fails before sending. Top-level
-naming finishes before function naming, and journals retain original batch IDs.
+`js-tiktoken` 1.0.21 (`o200k_base`); planning has no name-count cap. Naming requests
+keep their planned names together. When a response reaches its output limit, complete string pairs are accepted and missing names are requested once with
+the same context. Names still missing keep their original bindings. Combined replies
+are journaled under the original batch IDs; a packed batch with no accepted names
+stays unfinished for resume. Oversized contexts are shortened; an irreducible batch that still cannot fit fails before sending. Top-level
+naming finishes before function naming, and journals retain original batch IDs. Large chunks use memory-bounded worker threads;
+unchanged successful syntax prechecks are cached for resume. Packed chunk replies retain
+their per-batch journal records and sync the response together.
 Every run, including an interrupted run, updates import names in journal-completed files.
 Unfinished files supply their current export names without being rewritten, preserving resume.
 
 Unminify appends safe HTTP-attempt timing, queue/concurrency, retry and session metadata to
 `.unminify/requests.jsonl`, and run/file/phase timings, local-step totals, 429 pauses and final
 performance summaries to `.unminify/performance.jsonl` in the target Git root. Telemetry
-contains no credentials or source text. Analyze the latest run locally with
+records selected error fields with credentials redacted and messages capped at 2048 characters,
+along with request IDs, SSE event counts, timing, received bytes and output-text character counts.
+It retains no request or output text. Each attempt's `failure` records its own error; HTTP 200
+and token usage alone do not establish success. Analyze the latest run locally with
 `node plugins/intel/skills/unminify/scripts/perf.mjs <target-repo>`; optional `--run-id <id>`,
 `--window-seconds 10` and `--slow-files 10` select the run, window size and slow-file count.
 The JSON report and run summary include model HTTP-attempt count and median/mean names per

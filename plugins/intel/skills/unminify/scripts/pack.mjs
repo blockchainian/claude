@@ -1,8 +1,13 @@
+import { timed } from './timing.mjs';
 import { estimateInputTokens } from './prompt.mjs';
 
 /** Pack one file's pending stage, measuring the complete naming input. */
 export function packBatches(batches, render, { maxInputTokens }) {
-  const requests = [];
+  return [...iterateBatches(batches, render, { maxInputTokens })];
+}
+
+/** Render only the next request, releasing search candidates before yielding. */
+export function* iterateBatches(batches, render, { maxInputTokens }) {
   const placeholderCount = batches.reduce((sum, batch) => sum + batch.keys.length, 0);
   for (let start = 0; start < batches.length;) {
     const rendered = new Map(), candidates = new Map();
@@ -20,7 +25,7 @@ export function packBatches(batches, render, { maxInputTokens }) {
           .map(({ batch, payload }) => `// Batch ${batch.id}\n${payload.context}`).join('\n\n'),
         placeholders: Object.assign({}, ...parts.map(part => part.payload.placeholders)),
       };
-      const request = { parts, payload, estimated_input_tokens: estimateInputTokens(payload) };
+      const request = { parts, payload, estimated_input_tokens: timed('estimateInputTokens', () => estimateInputTokens(payload)) };
       candidates.set(length, request);
       return request;
     }
@@ -40,8 +45,10 @@ export function packBatches(batches, render, { maxInputTokens }) {
       if (requestFor(middle).estimated_input_tokens <= maxInputTokens) length = middle;
       else high = middle - 1;
     }
-    requests.push(requestFor(length));
+    const request = requestFor(length);
+    rendered.clear();
+    candidates.clear();
     start += length;
+    yield request;
   }
-  return requests;
 }

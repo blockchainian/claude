@@ -1,0 +1,3 @@
+{"type": "system", "subtype": "compact_boundary", "content": "Conversation compacted", "level": "info", "uuid": "41e31f1a-a9e3-4ad4-945a-f2e5d20cd791", "timestamp": "2026-10-22T15:17:05.129Z"}
+{"parentUuid": "41e31f1a-a9e3-4ad4-945a-f2e5d20cd791", "type": "user", "isCompactSummary": true, "message": {"role": "user", "content": "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation."}}
+{"type": "custom-title", "customTitle": "Claude Code 屏幕匹配", "sessionId": "786fb3e0-7981-48a2-9acd-b90ab6105f74"}

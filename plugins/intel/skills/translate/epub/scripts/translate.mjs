@@ -1,18 +1,17 @@
 #!/usr/bin/env node
-// ABOUTME: Translates each extracted section into Chinese Markdown with one no-tool codex exec call per section
-// ABOUTME: (gpt-6-luna by default), many sections in flight at once, in a private CODEX_HOME; resumable.
+// ABOUTME: Translates each extracted section into Chinese Markdown with one tool-free Responses call per section
+// ABOUTME: (gpt-6-luna by default), many sections in flight at once; resumable.
 //
 // Usage: translate.mjs <work dir> [--only 04,05] [--jobs 20] [--model gpt-6-luna] [--effort low]
 //                      [--service-tier priority] [--glossary <file>] [--force] [--dry-run]
 // Reads <work>/sections.json; writes <work>/translated/<id>-<slug>.md (+ .events.jsonl); skips sections whose .md exists.
-import { spawn } from "node:child_process";
+import { requestCodex } from "./codex.mjs";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { pyDumps, pyStrip } from "./extract.mjs";
-import { loadEnvFile, tmpDir } from "../../../fetch-x-mentions/scripts/env.mjs";
+import { loadEnvFile } from "../../../fetch-x-mentions/scripts/env.mjs";
 
 export const RULES = `You are a professional literary translator (English -> Simplified Chinese) working on a published
 non-fiction book. Everything you need is in the message: do not run commands, do not read or write files.
@@ -125,7 +124,10 @@ export function checkOutput(md, words, source = "") {
     for (const value of values) out.set(value, (out.get(value) || 0) + 1);
     return out;
   };
-  const notes = text => [...new Set([...text.matchAll(/<sup\b[^>]*>\s*(\d+)\s*<\/sup>/gi)].map(m => `<sup>${m[1]}</sup>`))];
+  const notes = text => [...new Set([...text.matchAll(/<sup\b[^>]*>([\s\S]*?)<\/sup>/gi)]
+    .map(m => m[1].replace(/<[^>]*>/g, "").trim())
+    .filter(value => /^\d+$/.test(value))
+    .map(value => `<sup>${value}</sup>`))];
   const missing = [], extra = [];
   for (const [before, after] of [[counts(tokens(source)), counts(tokens(md))], [counts(notes(source)), counts(notes(md))]]) {
     for (const key of new Set([...before.keys(), ...after.keys()])) {
@@ -137,102 +139,8 @@ export function checkOutput(md, words, source = "") {
   return null;
 }
 
-export const OFF = ["shell_tool", "unified_exec", "unified_exec_tty", "view_image", "sleep_tool", "tool_suggest", "multi_agent",
-  "plugins", "apps", "skill_search", "memories", "goals", "image_generation", "browser_use", "computer_use", "hooks"];
-
-/** Python's "[Errno 2] No such file or directory: 'path'" for a missing file, so failures read the same. */
-function pyOsError(e, file) {
-  if (e && e.code === "ENOENT") return new Error(`[Errno 2] No such file or directory: '${file}'`);
-  return e;
-}
-
-/** A private CODEX_HOME: the login copied from ~/.codex, no user config, AGENTS.md, plugins or hooks. */
-export function codexHome(dir, model, effort, instructions, serviceTier) {
-  const home = path.join(dir, "home");
-  fs.mkdirSync(home, { recursive: true });
-  const src = path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "auth.json");
-  try {
-    fs.copyFileSync(src, path.join(home, "auth.json"));
-  } catch (e) {
-    throw pyOsError(e, src);
-  }
-  const tier = serviceTier === "standard" || serviceTier === "default" ? "" : `service_tier = "${serviceTier}"\n`;
-  fs.writeFileSync(path.join(home, "config.toml"), `model = "${model}"\nmodel_reasoning_effort = "${effort}"\n` +
-    `model_instructions_file = "${instructions}"\nproject_doc_max_bytes = 0\n${tier}`);
-  return home;
-}
-
-/** The codex exec command line for one translation call (stdin carries the prompt). */
-export function codexArgs(dir, last) {
-  const args = ["exec", "--ignore-rules", "--skip-git-repo-check", "--ephemeral", "-C", dir, "-s", "read-only"];
-  for (const f of OFF) args.push("--disable", f);
-  args.push("--json", "-o", last, "-");
-  return args;
-}
-
-/** subprocess.run(args, input=, capture_output=True, text=True, timeout=): resolves {returncode, stdout, stderr},
- * or rejects with a TimeoutExpired-like error (code "ETIMEDOUT") after killing the child. */
-function runProcess(cmd, args, input, env, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { env, stdio: ["pipe", "pipe", "pipe"] });
-    const out = [];
-    const err = [];
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeoutMs);
-    child.stdout.on("data", (d) => out.push(d));
-    child.stderr.on("data", (d) => err.push(d));
-    child.on("error", (e) => { clearTimeout(timer); reject(pyOsError(e, cmd)); });
-    child.on("close", (code, signal) => {
-      clearTimeout(timer);
-      if (timedOut) { const e = new Error("timeout"); e.code = "ETIMEDOUT"; reject(e); return; }
-      resolve({ returncode: code === null ? -os.constants.signals[signal] : code,
-        stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") });
-    });
-    child.stdin.on("error", () => {});
-    child.stdin.end(input);
-  });
-}
-
-export async function runCodex(prompt, model, effort, serviceTier, { events = null, timeout = 3600, tries = 2, rules = RULES } = {}) {
-  const dir = fs.mkdtempSync(path.join(tmpDir("translate"), "codex-"));
-  // The scratch dir holds a copy of the Codex login, so it goes as soon as the call ends.
-  try {
-    const instructions = path.join(dir, "instructions.md");
-    fs.writeFileSync(instructions, rules);
-    const last = path.join(dir, "last.txt");
-    const home = codexHome(dir, model, effort, instructions, serviceTier);
-    const args = codexArgs(dir, last);
-    const t0 = Date.now();
-    let err = null;
-    let r = null;
-    let ok = false;
-    for (let i = 0; i < tries; i++) {
-      try {
-        r = await runProcess("codex", args, prompt, { ...process.env, CODEX_HOME: home }, timeout * 1000);
-      } catch (e) {
-        if (e.code !== "ETIMEDOUT") throw e;
-        err = `codex exec timed out after ${timeout}s`;
-        continue;
-      }
-      if (events) fs.writeFileSync(events, r.stdout);
-      if (r.returncode === 0 && fs.existsSync(last)) { ok = true; break; }
-      err = `codex exec exited ${r.returncode}: ${r.stderr.slice(-2000)}`;
-    }
-    if (!ok) throw new Error(err);
-    let usage = null;
-    for (const line of r.stdout.split(/\r?\n/)) {
-      let ev;
-      try {
-        ev = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (ev && ev.type === "turn.completed") usage = ev.usage ?? null;
-    }
-    return [fs.readFileSync(last, "utf8"), usage, Math.round((Date.now() - t0) / 1000)];
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+export async function runCodex(prompt, model, effort, serviceTier, { events = null, timeout = 3600, rules = RULES } = {}) {
+  return requestCodex(prompt, model, effort, serviceTier, { events, timeout, rules });
 }
 
 function stemOf(file) {

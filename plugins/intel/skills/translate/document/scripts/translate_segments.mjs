@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ABOUTME: Translates a document's text segments (Markdown blocks or HTML fragments) into Chinese through the
-// ABOUTME: translate-epub skill's codex exec call, a batch of consecutive segments per call, many calls in flight; resumable.
+// ABOUTME: translate-epub skill's Codex Responses client, a batch of consecutive segments per call, many calls in flight; resumable.
 //
 // Usage: translate_segments.mjs <segments.json> <out.json> --format md|html [--title T] [--glossary g.md]
 //                               [--context "course material"] [--words 1500] [--jobs 8] [--model gpt-6-luna]

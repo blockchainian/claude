@@ -1,24 +1,11 @@
 #!/usr/bin/env node
 // ABOUTME: Translates the unique text blocks of a slide deck (blocks.json from slides.py extract) into Chinese
-// through the translate-epub skill's no-tool codex exec call, in batches run in parallel, and writes zh.json.
+// through the translate-epub skill's Codex Responses client, in batches run in parallel, and writes zh.json.
 // Usage: translate_slides.mjs <work dir> --title "<course: deck>" [--glossary g.md] [--model M] [--effort E]
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-
-/** The translate-epub skill's scripts dir: the sibling skill in this plugin, else the newest installed copy. */
-function translateSkillScripts() {
-  const sibling = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "epub", "scripts");
-  if (fs.existsSync(path.join(sibling, "translate.mjs"))) return sibling;
-  const root = path.join(os.homedir(), ".claude/plugins/cache/blockchainian/intel");
-  const ver = (v) => v.split(".").map(Number);
-  const newest = fs.readdirSync(root).filter((v) => /^\d+\.\d+\.\d+$/.test(v))
-    .sort((a, b) => { const x = ver(a), y = ver(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; }).pop();
-  return path.join(root, newest, "skills/translate/epub/scripts");
-}
-
-const { runCodex } = await import(pathToFileURL(path.join(translateSkillScripts(), "translate.mjs")).href);
+import { fileURLToPath } from "node:url";
+import { runCodex } from "../../epub/scripts/translate.mjs";
 
 const RULES = `You translate the text of English lecture slides into Simplified Chinese.
 
@@ -37,7 +24,7 @@ their Chinese translations: no prose, no code fence.
 - Translate technical terms the way Chinese computer science textbooks do; give an uncommon term once as
   中文（English）. Use full-width Chinese punctuation in Chinese text.`;
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const opt = { work: null, title: "", glossary: null, model: "gpt-6-luna", effort: "low", serviceTier: "priority",
     batch: 80, force: false };
   for (let i = 0; i < argv.length; i++) {
@@ -59,7 +46,7 @@ const tagsOf = (s) => (s.match(/<\/?[sc]\d+>|<br>/g) || []).join(" ") + " | " + 
 const codeOf = (s) => (s.match(/<c\d+>.*?<\/c\d+>/g) || []).join("\u0000");
 
 /** Why a translation is unusable, or null: inline tags, picture tokens and code runs must survive unchanged. */
-function problem(src, zh) {
+export function problem(src, zh) {
   if (typeof zh !== "string" || !zh.trim()) return "empty";
   if (tagsOf(src) !== tagsOf(zh)) return `tags differ: ${tagsOf(src)} vs ${tagsOf(zh)}`;
   if (codeOf(src) !== codeOf(zh)) return "code runs changed";
@@ -139,4 +126,6 @@ async function main() {
   process.exit(failed.length ? 1 : 0);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+if (process.argv[1] && fileURLToPath(import.meta.url) === fs.realpathSync(process.argv[1])) {
+  main().catch((e) => { console.error(e); process.exit(1); });
+}

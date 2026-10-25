@@ -32,8 +32,10 @@ node "$SKILL_DIR/scripts/cli.mjs" sync-imports <path>... --min-symbol-length 4
 
 Each command selects parseable `.js`/`.mjs` files and applies the ignore rules first.
 Selection checks parseability in the syntax worker pool, returning only a boolean and
-parse time. Git root and ignore rules are loaded once per run; chunk siblings are
-selected together with the same rules.
+parse time. The same pool reads and indexes repository fragment context in bounded
+windows, returning only per-file binding summaries. The main thread merges summaries
+in file order within `selection_plan`. Git root and ignore rules are loaded once per run;
+chunk siblings are selected together with the same rules.
 All commands accept `--ignore <file>` and `--chunks <file>`. Only `rename-bindings` accepts
 `--concurrency` and `--max-input-tokens`; `--min-symbol-length` belongs to
 `rename-bindings` and `sync-imports`. Other options fail with `invalid option`. A missing
@@ -64,6 +66,15 @@ API calls without index context retain numeric `void` in fragments.
 if rerunning syntax restoration or import merging would change any file, it lists every
 such file and requires `restore-syntax`. It only names bindings, resolves collisions,
 checks rewrites and writes results; it never restores syntax or follows imports.
+Successful prechecks are cached per file or chunk using source hashes, chunk order, ignored
+members, fragment flags, shadowed syntax globals and pipeline versions. Unchanged groups
+reuse that verdict on resume; failed checks are never cached.
+Chunks totaling at least 256 KiB run in separate worker threads. Each worker owns one chunk
+and exits after it finishes. The worker count is bounded by available cores, one worker per
+8 GiB of machine memory and a maximum of eight; each worker has a 3 GiB old-generation heap
+limit. Smaller groups share one main-thread consumer. All model requests use the same global
+request slots. Packed replies append their original batch records together and sync them
+before continuing, preserving journal IDs and durable resume.
 It asks for names of bindings shorter
 than `--min-symbol-length`, including default and namespace import locals but excluding
 named imports. It resolves naming conflicts, checks each completed file and writes it atomically. Naming
@@ -73,13 +84,23 @@ gets one more model request with the occupied names and binding context before n
 suffixes are used. These requests obey the input token budget and are journaled for resume.
 Top-level
 batches finish before function batches. Within each file and stage, pending batches are greedily
-packed in order within `--max-input-tokens` (default 100000), with no name-count cap.
+packed in order within `--max-input-tokens` (default 100000), with no planning name-count cap.
+Naming requests keep their planned names together. When a reply reaches its output
+limit, only complete JSON string pairs are accepted, and missing names are requested
+once with the same rendered context. Names still missing keep their original bindings.
+Combined replies are journaled under the original batch IDs; a batch with no accepted
+names stays unfinished for resume. Existing replies replay unchanged, and attempt
+telemetry retains the original batch IDs.
 Planning and packing count the actual instructions, prompt and rendered context using
 `js-tiktoken` 1.0.21 with `o200k_base`. Oversized contexts are shortened; an irreducible
 batch that still cannot fit fails before sending. Placeholders are unique across
 the request; original batch IDs stay stable across resume. Collision replies use
 stable binding-specific journal IDs.
 `sync-imports` follows imports without requesting model names or restoring syntax.
+Its import summaries, edits and file checks use the same syntax worker pool with bounded
+in-flight files. Workers release each file's Babel objects after extracting compact binding,
+reference and edit records. The main thread resolves proposals once per chunk, reuses
+unchanged file records during validation and releases completed chunk records before continuing.
 Run it after naming, including an interrupted naming run. It covers the current selection
 and discovers all completed ordinary and chunk journals in the target Git root, including files outside this batch.
 It verifies their current contents against the recorded results before following imports;

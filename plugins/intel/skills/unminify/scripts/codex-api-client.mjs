@@ -13,7 +13,7 @@ const quotaCodes = new Set(['usage_limit_reached', 'usage_not_included', 'insuff
   'organization_usage_limit_exceeded', 'workspace_member_usage_limit_reached']);
 const authError = () => Object.assign(new Error('Codex authentication failed; run codex login.'), { code: 'AUTH' });
 const quotaError = () => Object.assign(new Error('Codex usage limit reached.'), { code: 'USAGE_LIMIT' });
-const retryError = message => Object.assign(new Error(message), { retryable: true });
+const retryError = (message, details, cause) => Object.assign(new Error(message, { cause }), { retryable: true, details });
 const hasQuotaError = error => error && [error.type, error.code].some(code => quotaCodes.has(code));
 const number = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 
@@ -46,20 +46,42 @@ function refreshReason(auth) {
   return refreshed < Date.now() - 8 * 86_400_000 ? 'scheduled' : null;
 }
 
-async function consume(response, metrics) {
+async function consume(response, metrics, allowIncomplete) {
   let buffer = '', completed = false;
-  let output;
+  let output, incomplete, deltas = '';
   const items = new Map();
   const decoder = new TextDecoder();
+  const stream = metrics.stream = { bytes: 0, events: 0, output_text_chars: 0,
+    first_event_at: null, last_event_at: null, last_event: null };
   function event(block) {
     const data = block.split(/\r?\n/).filter(line => line.startsWith('data:'))
       .map(line => line.slice(5).replace(/^ /, '')).join('\n');
     if (!data || data === '[DONE]') return;
     let e;
     try { e = JSON.parse(data); } catch { throw retryError('Invalid Responses SSE.'); }
+    stream.events++;
+    stream.first_event_at ??= Date.now();
+    stream.last_event_at = Date.now();
+    stream.last_event = typeof e.type === 'string' ? e.type : null;
+    if (e.type === 'response.output_text.delta' && typeof e.delta === 'string') {
+      stream.output_text_chars += e.delta.length;
+      if (allowIncomplete) deltas += e.delta;
+    }
     if (e.response?.usage) metrics.usage = usageOf(e.response.usage);
-    if (hasQuotaError(e.error) || hasQuotaError(e.response?.error) || hasQuotaError(e)) throw quotaError();
-    if (['error', 'response.failed', 'response.incomplete'].includes(e.type)) throw retryError('Responses stream failed.');
+    if (['error', 'response.failed', 'response.incomplete'].includes(e.type)
+      || hasQuotaError(e.error) || hasQuotaError(e.response?.error) || hasQuotaError(e)) {
+      const error = e.response?.error ?? e.error ?? e;
+      const details = { source: 'sse', event_type: e.type, response_id: e.response?.id,
+        response_status: e.response?.status, code: error.code, type: error.type, message: error.message,
+        param: error.param, incomplete_reason: e.response?.incomplete_details?.reason };
+      if (hasQuotaError(error)) throw Object.assign(quotaError(), { details });
+      if (allowIncomplete && e.type === 'response.incomplete'
+        && details.incomplete_reason === 'max_output_tokens' && !e.response?.error) {
+        incomplete = details;
+        completed = true;
+        if (Array.isArray(e.response?.output)) output = e.response.output;
+      } else throw retryError('Responses stream failed.', details);
+    }
     if (e.type === 'response.output_item.done') items.set(e.output_index ?? e.item?.id ?? items.size, e.item);
     if (e.type === 'response.completed') {
       if (e.response?.status && e.response.status !== 'completed') throw retryError('Responses stream did not complete.');
@@ -68,6 +90,7 @@ async function consume(response, metrics) {
     }
   }
   for await (const chunk of response.body) {
+    stream.bytes += chunk.length;
     buffer += decoder.decode(chunk, { stream: true });
     let match;
     while ((match = /\r?\n\r?\n/.exec(buffer))) {
@@ -90,13 +113,18 @@ async function consume(response, metrics) {
       text += part.text;
     }
   }
-  if (!text) throw retryError('Missing Responses output.');
-  return text;
+  if (!text && incomplete) text = deltas;
+  if (!text) throw retryError('Missing Responses output.', incomplete);
+  return { text, incomplete };
 }
 
 /** A file-backed ChatGPT Responses client. Endpoint and timing overrides support local tests.
- * respond({ model, effort, instructions, input, schema?, validate? }) returns { output, usage }.
+ * respond({ model, effort, instructions, input, serviceTier?, schema?, validate?, recoverIncomplete? }) returns { output, usage }.
+ * input accepts native Responses input items, including image messages.
+ * reasoningContext, verbosity and responsesLite optionally select the CLI request format.
+ * Omit instructions when instructions are already carried by developer input messages.
  * With schema, output is parsed JSON; validate(output) may throw to request a retry.
+ * recoverIncomplete(text) may recover output-limit replies; validate also receives { incomplete }.
  * log receives timing, queue, session and safe response metadata for each HTTP attempt.
  * event receives shared rate-limit pause boundaries; telemetry identifies the calling batch.
  * close() drains accepted calls and prevents further calls.
@@ -146,6 +174,22 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     for (const value of [auth.OPENAI_API_KEY, ...Object.values(auth.tokens ?? {})])
       if (typeof value === 'string' && value) secrets.add(value);
   }
+  function safeText(value) {
+    if (typeof value !== 'string') return undefined;
+    for (const secret of [...secrets].sort((a, b) => b.length - a.length)) value = value.replaceAll(secret, '[REDACTED]');
+    return value.slice(0, 2048);
+  }
+
+  function failureOf(error) {
+    const cause = error.cause ?? error;
+    const details = error.details ?? { source: error.retryable ? 'protocol' : 'transport',
+      code: cause.code, message: cause.message, rst_code: cause.rstCode };
+    return Object.fromEntries(Object.entries(details).flatMap(([key, value]) => {
+      if (typeof value === 'string') return [[key, safeText(value)]];
+      if (typeof value === 'number' && Number.isFinite(value) || value === null) return [[key, value]];
+      return [];
+    }));
+  }
   async function readAuth() {
     try {
       const auth = JSON.parse(await readFile(authPath, 'utf8'));
@@ -165,9 +209,19 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
       phase: context.phase ?? 'auth', queued_at: context.queued_at ?? Date.now(), sent_at: null,
       headers_at: null, ended_at: null, attempt: context.attempt ?? 1,
       previous_failure: context.previous_failure ?? null, session_id: null, body_bytes: 0,
-      in_flight: 0, queued: 0, status: null, duration_ms: 0, usage: null, rate_headers: {} };
+      in_flight: 0, queued: 0, status: null, duration_ms: 0, usage: null, rate_headers: {},
+      failure: null, request_id: null, stream: null };
     try { return await operation(metrics); }
+    catch (error) {
+      metrics.failure = failureOf(error);
+      error.failure = metrics.failure;
+      const details = Object.entries(metrics.failure).filter(([key]) => key !== 'source')
+        .map(([key, value]) => `${key}=${value}`).join(', ');
+      error.message = safeText(error.message) + (details ? ` (${details})` : '');
+      throw error;
+    }
     finally {
+      if (metrics.stream) metrics.stream.last_event = safeText(metrics.stream.last_event) ?? null;
       metrics.ended_at = Date.now();
       metrics.duration_ms = metrics.sent_at === null ? 0 : metrics.ended_at - metrics.sent_at;
       if (metrics.sent_at !== null) inFlight--;
@@ -203,12 +257,13 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
       metrics.queued = queued() + queue.length + Math.max(0, active - inFlight);
       // Fails a request whose stream stays silent for timeoutMs, including during SSE consumption;
       // long outputs that keep streaming are allowed to finish.
-      stream.setTimeout(timeoutMs, () => stream.destroy(new Error('Request timed out.')));
+      stream.setTimeout(timeoutMs, () => stream.destroy(Object.assign(new Error('Request timed out.'), { code: 'REQUEST_TIMEOUT' })));
       stream.once('close', () => reject(new Error('Request closed.')));
-      stream.on('error', reject);
+      stream.on('error', error => { error.rstCode = stream.rstCode; reject(error); });
       stream.once('response', responseHeaders => {
         metrics.headers_at = Date.now();
         metrics.status = responseHeaders[':status'];
+        metrics.request_id = safeText(responseHeaders['x-request-id']) ?? null;
         metrics.rate_headers = rateHeaders(Object.entries(responseHeaders), secrets);
         if ([301, 302, 303, 307, 308].includes(responseHeaders[':status']) && responseHeaders.location !== undefined) {
           stream.close(constants.NGHTTP2_CANCEL);
@@ -342,10 +397,20 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
     finally { if (refreshes.get(authPath) === promise) refreshes.delete(authPath); }
   }
 
-  async function run({ model, effort, instructions, input, schema, validate, telemetry = {} }) {
-    const body = { model, reasoning: { effort }, instructions, input, tools: [], tool_choice: 'auto',
-      parallel_tool_calls: false, store: false, stream: true, include: [],
-      ...(schema === undefined ? {} : { text: { format: { type: 'json_schema', name: 'codex_output_schema', strict: true, schema } } }) };
+  async function run({ model, effort, instructions, input, serviceTier, reasoningContext, verbosity, responsesLite = false, schema, validate, recoverIncomplete, telemetry = {} }) {
+    if (!(typeof input === 'string'
+      || Array.isArray(input) && input.every(item => item !== null && typeof item === 'object' && !Array.isArray(item))))
+      throw new Error('Invalid Responses input.');
+    if (serviceTier !== undefined && (typeof serviceTier !== 'string' || !serviceTier.trim()))
+      throw new Error('Invalid service tier.');
+    const text = { ...(verbosity === undefined ? {} : { verbosity }),
+      ...(schema === undefined ? {} : { format: { type: 'json_schema', name: 'codex_output_schema', strict: true, schema } }) };
+    const body = { model, reasoning: { effort, ...(reasoningContext === undefined ? {} : { context: reasoningContext }) },
+      instructions, input, ...(responsesLite ? {} : { tools: [] }), tool_choice: 'auto',
+      parallel_tool_calls: false, store: false, stream: true,
+      include: responsesLite ? ['reasoning.encrypted_content'] : [],
+      ...(serviceTier === undefined ? {} : { service_tier: serviceTier }),
+      ...(Object.keys(text).length ? { text } : {}) };
     let recovered = false, httpAttempt = 0, previousFailure = null;
     let queuedAt = telemetry.queued_at ?? Date.now();
     const context = () => ({ file: telemetry.file, batch_id: telemetry.batch_id, batch_ids: telemetry.batch_ids,
@@ -365,29 +430,41 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
             try {
               response = await send(endpoint, body, metrics, { Authorization: `Bearer ${auth.tokens.access_token}`,
                 'ChatGPT-Account-ID': auth.tokens.account_id, originator: 'codex_cli_rs',
-                Accept: 'text/event-stream', 'User-Agent': 'codex-responses-client' });
+                Accept: 'text/event-stream', 'User-Agent': 'codex-responses-client',
+                ...(responsesLite ? { 'x-openai-internal-codex-responses-lite': 'true' } : {}) });
               if (response.status === 401) { response.body.close(constants.NGHTTP2_CANCEL); return { unauthorized: true }; }
               if (!response.ok) {
                 let error;
                 try { error = JSON.parse(await responseText(response)).error; } catch { /* Only structured codes classify quota errors. */ }
-                if (hasQuotaError(error)) throw quotaError();
-                if (response.status === 429) return { rateLimited: true };
-                if (response.status >= 500) throw retryError(`Responses HTTP ${response.status}.`);
-                throw new Error(`Responses HTTP ${response.status}.`);
+                const details = { source: 'http', code: error?.code, type: error?.type,
+                  message: error?.message, param: error?.param };
+                if (hasQuotaError(error)) throw Object.assign(quotaError(), { details });
+                if (response.status === 429) {
+                  metrics.failure = failureOf({ details });
+                  return { rateLimited: true };
+                }
+                if (response.status >= 500) throw retryError(`Responses HTTP ${response.status}.`, details);
+                throw Object.assign(new Error(`Responses HTTP ${response.status}.`), { details });
               }
-              const text = await consume(response, metrics);
+              const { text, incomplete } = await consume(response, metrics, Boolean(recoverIncomplete));
               let output = text;
-              if (schema !== undefined) {
+              if (incomplete) {
+                output = recoverIncomplete(text);
+                if (!output || !Object.keys(output).length) throw retryError('Responses stream failed.', incomplete);
+                metrics.failure = failureOf({ details: incomplete });
+              } else if (schema !== undefined) {
                 try { output = JSON.parse(text); } catch { throw retryError('Responses output is not JSON.'); }
               }
               if (validate) {
-                try { await validate(output); } catch { throw retryError('Responses output failed validation.'); }
+                try { await validate(output, { incomplete: Boolean(incomplete) }); } catch { throw retryError('Responses output failed validation.'); }
               }
               return { output, usage: metrics.usage };
             } catch (error) {
               if (error.code === 'USAGE_LIMIT') throw stop(error);
               if (error.retryable || /^Responses HTTP \d+\.$/.test(error.message)) throw error;
-              throw retryError('Responses network or stream failure.');
+              throw retryError('Responses network or stream failure.', error.details ?? {
+                source: 'transport', code: error.code, message: error.message, rst_code: error.rstCode,
+              }, error);
             } finally { if (response?.body) response.body.close(constants.NGHTTP2_CANCEL); }
           }, context());
           queuedAt = Date.now();
@@ -400,7 +477,7 @@ export function createCodexClient({ concurrency = 20, codexHome = process.env.CO
         }
       } catch (error) {
         if (['AUTH', 'USAGE_LIMIT'].includes(error.code)) throw stop(error);
-        if (!error.retryable || attempt === 3) throw new Error(error.message);
+        if (!error.retryable || attempt === 3) throw Object.assign(new Error(error.message), { failure: error.failure, retryable: error.retryable });
         previousFailure = error.code ?? error.message;
         queuedAt = Date.now();
         await delay(retryDelayMs * 2 ** attempt);
