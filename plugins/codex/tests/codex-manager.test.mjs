@@ -395,6 +395,7 @@ function daemonScript() {
       if (message.method === "review/start") reply({ turn: { id: "turn-review", status: "inProgress" }, reviewThreadId: message.params.threadId });
       if (message.method === "thread/unsubscribe") reply({ status: "unsubscribed" });
       if (message.method === "thread/archive") reply({});
+      if (message.method === "thread/unarchive") reply({ thread: { id: message.params.threadId } });
       if (message.method === "thread/resume") reply({ thread: { id: message.params.threadId } });
       if (message.method === "thread/turns/list") reply({ data: script.resumeTurns ?? [{ id: "turn-old", status: "completed", items: script.resumeItems ?? [{ type: "agentMessage", text: "done while you were away" }] }] });
       if (message.method === "thread/list") {
@@ -571,8 +572,13 @@ test("mcp adopts recorded threads on startup and backfills turns that finished m
     await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
     const listed = await mcp.call("list", {});
     assert.equal(listed.json.threads[0].lastStatus, "completed");
+    // A started thread resumes with its start settings, which a daemon that unloaded it lost.
     const resume = script.messages.find((message) => message.method === "thread/resume");
-    assert.deepEqual(resume.params, { threadId: "thread-B" });
+    assert.equal(resume.params.threadId, "thread-B");
+    assert.equal(resume.params.sandbox, "workspace-write");
+    assert.equal(resume.params.approvalPolicy, "on-request");
+    assert.equal(resume.params.config["sandbox_workspace_write.network_access"], true);
+    assert.deepEqual(resume.params.config["mcp_servers.claude-client"].args.slice(-1), ["mcp"]);
     // The turns a resume returns show a finished review as still running, so the latest turn is listed.
     const listing = script.messages.find((message) => message.method === "thread/turns/list");
     assert.deepEqual(listing.params, { threadId: "thread-B", limit: 1, sortDirection: "desc", itemsView: "full" });
@@ -620,10 +626,10 @@ test("mcp reports a daemon that is not running as a tool error, not a crash", { 
   }
 });
 
-async function startedThread(home, daemon, script) {
+async function startedThread(home, daemon, script, options = {}) {
   const mcp = new McpChild(home.home, daemon.socketPath);
   await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
-  await mcp.call("start", { cwd: ".", prompt: "work" });
+  await mcp.call("start", { cwd: ".", prompt: "work", ...options });
   await waitFor(() => script.sockets.size === 1);
   const [socket] = script.sockets;
   return { mcp, socket };
@@ -1573,7 +1579,7 @@ for (const name of ["模型和new挪位", undefined]) {
   });
 }
 
-test("detach archives a started thread, refuses a running one, and refuses later send or attach", { timeout: 20_000 }, async () => {
+test("detach archives a started thread and refuses a running one", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();
   const daemon = await fakeDaemon(script.handler);
@@ -1599,21 +1605,55 @@ test("detach archives a started thread, refuses a running one, and refuses later
     const unknown = await mcp.call("detach", { threadId: "nope" });
     assert.equal(unknown.isError, true);
     assert.match(unknown.text, /unknown thread/);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
 
-    const before = script.messages.length;
+test("send or attach unarchives a detached started thread and subscribes again", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const script = daemonScript();
+  const daemon = await fakeDaemon(script.handler);
+  const { mcp, socket } = await startedThread(home, daemon, script, { name: "worker" });
+  const complete = async (turnId) => {
+    send(socket, { method: "turn/completed", params: { threadId: "thread-A", turn: { id: turnId, status: "completed" } } });
+    await waitFor(() => JSON.parse(readFileSync(path.join(home.dir, "state.json"), "utf8")).threads[0].lastStatus === "completed");
+  };
+  const detach = async () => {
+    const detached = await mcp.call("detach", { threadId: "thread-A" });
+    assert.equal(detached.isError, false, detached.text);
+    assert.equal(script.messages.at(-1).method, "thread/archive");
+  };
+  try {
+    await complete("turn-1");
+    await detach();
     const sent = await mcp.call("send", { threadId: "thread-A", prompt: "one more thing" });
-    assert.equal(sent.isError, true);
-    assert.equal(sent.text, "thread thread-A was detached and archived; start a new thread");
-    assert.equal(script.messages.length, before);
+    assert.equal(sent.isError, false, sent.text);
+    assert.deepEqual(script.messages.slice(-4).map((message) => message.method), ["thread/unarchive", "thread/resume", "thread/turns/list", "turn/start"]);
+    assert.deepEqual(script.messages.at(-4).params, { threadId: "thread-A" });
+    const start = script.messages.find((message) => message.method === "thread/start").params;
+    const { threadId, ...resumed } = script.messages.at(-3).params;
+    assert.deepEqual(resumed, { approvalPolicy: start.approvalPolicy, approvalsReviewer: start.approvalsReviewer, sandbox: start.sandbox, config: start.config });
+    assert.equal((await mcp.call("list", {})).json.threads[0].detached, undefined);
 
-    script.threads = [{ id: "thread-A", name: null, cwd: "/repo", status: { type: "notLoaded" } }];
-    const reattached = await mcp.call("attach", { thread: "thread-A" });
-    assert.equal(reattached.isError, true);
-    assert.equal(reattached.text, sent.text);
-    assert.equal(script.messages.some((message) => message.method === "thread/resume"), false);
+    // The daemon lists no archived thread, so attach finds its own by the session's record alone.
+    script.threads = [];
+    for (const [thread, turnId] of [["worker", "turn-2"], ["thread-A", "turn-3"]]) {
+      await complete(turnId);
+      await detach();
+      const lists = script.messages.filter((message) => message.method === "thread/list").length;
+      const reattached = await mcp.call("attach", { thread });
+      assert.equal(reattached.isError, false, reattached.text);
+      assert.equal(reattached.json.threadId, "thread-A");
+      assert.equal(reattached.json.attached, false);
+      assert.deepEqual(script.messages.slice(-3).map((message) => message.method), ["thread/unarchive", "thread/resume", "thread/turns/list"]);
+      assert.equal(script.messages.filter((message) => message.method === "thread/list").length, lists);
+      assert.equal((await mcp.call("list", {})).json.threads[0].detached, undefined);
+    }
     const state = JSON.parse(await readFile(path.join(home.dir, "state.json"), "utf8"));
-    assert.equal(state.threads[0].detached, true);
-    assert.equal(state.threads[0].lastStatus, "completed");
+    assert.equal(state.threads[0].attached, undefined);
   } finally {
     await mcp.close();
     await daemon.close();
