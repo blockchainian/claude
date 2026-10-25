@@ -162,8 +162,18 @@ fn session_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     }
 }
 
+/// The width alone when it is the only field, else every field in a table.
 fn screenshot_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
-    other_fields(data, &[])
+    let width = data.input.get("maxWidth").filter(|width| !width.is_null());
+    match width {
+        Some(width) if other_fields(data, &["maxWidth"])?.is_empty() => {
+            Some(vec![Section::Prose {
+                text: width.to_string(),
+                markdown: false,
+            }])
+        }
+        _ => other_fields(data, &[]),
+    }
 }
 
 /// The saved screenshot itself in place of the sentence naming its file.
@@ -344,13 +354,7 @@ mod tests {
             output_text(&calls[9]),
             "Successfully tapped at coordinates (200, 85)."
         );
-        assert_eq!(
-            input(3),
-            vec![Section::Markdown {
-                label: "input".into(),
-                text: "| maxWidth |\n| --- |\n| 400 |".into(),
-            }]
-        );
+        assert_eq!(input(3), prose("400"));
         for (index, selector) in [(4, "Playlists"), (6, "label CONTAINS[c] 'classic'")] {
             assert_eq!(
                 input(index),
