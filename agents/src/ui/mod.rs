@@ -1,11 +1,13 @@
 //! Command center adapted from OpenAI Codex's TUI (Apache-2.0).
-mod activity_strip;
 pub(crate) mod commits;
+mod composer_images;
+use composer_images::{Composer, ComposerImages};
 mod draft_controls;
 #[cfg(test)]
 mod draft_flow_tests;
 mod drafts;
 use draft_controls::{Field, Selector};
+mod footer;
 mod formatting;
 pub(crate) use drafts::DraftSetup;
 mod centering;
@@ -16,16 +18,19 @@ mod event_agent;
 mod event_detail;
 mod event_list;
 #[cfg(test)]
+mod event_messages_tests;
+#[cfg(test)]
 #[path = "event_scroll_tests.rs"]
 mod event_scroll_tests;
 mod event_search;
 pub(crate) mod highlight;
 mod hints;
 mod hyperlink;
+mod inline_images;
 mod input;
-mod line_edit;
+mod key_name;
 mod line_truncation;
-mod links;
+pub(crate) mod links;
 mod markdown;
 mod navigation;
 mod paths;
@@ -35,10 +40,12 @@ mod question_view;
 mod render;
 mod reset_credit;
 mod rows;
+mod search_input;
+#[cfg(test)]
+mod search_input_tests;
 #[path = "section_scroll.rs"]
 mod section_scroll;
 mod selection_tabs;
-pub(crate) mod shell_commands;
 mod shortcut_help;
 mod structured_text;
 mod style;
@@ -49,6 +56,7 @@ pub use task_ui::PinnedRow;
 use task_ui::{EventRow, TaskUi};
 mod terminal_panel;
 pub(crate) mod text;
+mod text_images;
 mod text_selection;
 mod text_selection_layout;
 mod timeline;
@@ -64,12 +72,15 @@ pub use style::light_background;
 pub use style::set_light_background;
 pub(crate) use timeline::timeline_seconds;
 
+use crate::line_edit;
 use crate::model::{Action, Grouping, Session, SessionStatus};
 use crate::providers::{Capabilities, ProviderId, SessionKey};
+use crate::state::TaskPins;
 use chrono::{DateTime, Utc};
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+use links::LinkTarget;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Margin, Rect},
@@ -102,8 +113,9 @@ const TASK_FILTERS: &[(&str, &[SessionStatus])] = &[
     ("Inactive", &[SessionStatus::Inactive]),
 ];
 
-/// How long a copy confirmation or a notice stays on screen.
+/// How long footer feedback stays on screen, unless a key press clears it first.
 const MESSAGE_LIFETIME: Duration = Duration::from_secs(1);
+const ERROR_LIFETIME: Duration = Duration::from_secs(5);
 
 /// Longest gap between two clicks on one task that still opens it.
 const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(300);
@@ -138,6 +150,8 @@ struct Overlay {
 
 #[derive(Default)]
 struct Viewport {
+    area: Rect,
+    navigation_layout: Option<render::CenterLayout>,
     scroll: usize,
     task_selection: Option<SessionKey>,
     page_height: usize,
@@ -164,6 +178,7 @@ struct Viewport {
     /// The selected task's name on the task details panel's lower rule.
     task_details_title: Rect,
     confirm_options: Vec<(Rect, bool)>,
+    hint_targets: Vec<hints::HintTarget>,
     /// Where the last render drew the button that jumps back to the newest event row.
     event_jump: Rect,
     /// Space reserved for the New button or duration label.
@@ -179,6 +194,8 @@ struct Viewport {
     event_detail_footer_title: Option<(Line<'static>, event_detail::EventDetailColumns)>,
     /// The selected event's layout, cached until its content or size changes.
     event_detail_layout: Option<event_list::EventDetailLayout>,
+    /// Images the last render drew in the event detail, top down.
+    event_detail_images: Vec<event_detail::DrawnImage>,
     event_detail_columns: Option<event_detail::EventDetailColumns>,
     event_text: text_selection::TextRegion,
     task_details_text: text_selection::TextRegion,
@@ -216,7 +233,7 @@ struct SectionScroll {
 struct BackgroundReturn {
     event: Option<usize>,
     scroll: usize,
-    search: event_search::EventSearch,
+    search: event_search::EventMatches,
 }
 
 /// Confirmation before a destructive provider action.
@@ -254,6 +271,8 @@ pub struct View {
     /// Actions created by panel changes outside keyboard and mouse handlers.
     pending_actions: Vec<Action>,
     window_prefix: Option<KeyEvent>,
+    height_zoom: Option<Panel>,
+    width_zoom: Option<Panel>,
     /// The session whose program runs in the event detail panel, and its screen.
     terminal: Option<(SessionKey, crate::session_terminal::Screen)>,
     pub(crate) startup_cwd: PathBuf,
@@ -273,8 +292,9 @@ pub struct View {
     event_order: Vec<usize>,
     last_update: DateTime<Utc>,
     event_detail: task_ui::EventDetail,
+    kill_buffer: crate::line_edit::KillBuffer,
     input_box: prompt_box::PromptBox,
-    prompt_history: std::rc::Rc<RefCell<Vec<line_edit::LineEdit>>>,
+    prompt_history: std::rc::Rc<RefCell<Vec<Composer>>>,
     questions: question_flow::Questions,
     capabilities: HashMap<ProviderId, Capabilities>,
     rows: Vec<Session>,
@@ -288,29 +308,28 @@ pub struct View {
     attention_skips: HashMap<SessionKey, DateTime<Utc>>,
     grouping: Grouping,
     use_colors: bool,
-    pinned: Vec<SessionKey>,
-    hidden: HashSet<SessionKey>,
+    pinned: TaskPins<SessionKey>,
+    removing: HashSet<SessionKey>,
     /// Parent tasks whose subtree is folded away in each task list tab.
     collapsed: Vec<HashSet<SessionKey>>,
     status_filter: usize,
     /// The task each tab shows selected when it is entered, by tab index.
     tab_selections: Vec<Option<SessionKey>>,
-    search: line_edit::LineEdit,
-    searching: bool,
+    search: search_input::SearchInput,
     rename_target: Option<SessionKey>,
     name_target: Option<crate::model::DraftKey>,
     /// The prompt of the turn Esc is stopping, returned to its input once the stop lands.
     stopping_prompt: Option<(SessionKey, String)>,
-    rename: line_edit::LineEdit,
+    rename: line_edit::Editor,
     confirm_dialog: Option<ConfirmDialog>,
     reset_incidents: Vec<reset_credit::ResetIncident>,
     reset_pending: HashSet<ProviderId>,
     help: bool,
     loading: bool,
     has_more: bool,
-    /// A notice at the task list's bottom-left, shown until it expires.
-    notice: Option<(String, Instant)>,
     viewport: RefCell<Viewport>,
+    /// Inline images, present only while the terminal supports them.
+    inline_images: RefCell<Option<inline_images::InlineImages>>,
     /// Task row and time of the last left click in the list.
     last_click: Option<(usize, Instant)>,
     double_click_interval: Duration,
@@ -323,8 +342,8 @@ pub struct View {
     pressed_task: Option<SessionKey>,
     /// Text under the last left click on a copyable body, and when it happened.
     last_copy_click: Option<(String, Instant)>,
-    /// The confirmation of the last copy, shown at the footer's right end until it expires.
-    copied: Option<(String, Instant)>,
+    /// The footer's right-side feedback, shown until it expires or a key press clears it.
+    feedback: Option<(footer::Feedback, Instant)>,
     text_selection: RefCell<Option<text_selection::Selection>>,
     /// Accent slot of each task, handed out in the order tasks are first shown.
     title_slots: RefCell<HashMap<SessionKey, usize>>,
@@ -334,15 +353,11 @@ pub struct View {
     task_uis: HashMap<draft_controls::TaskKey, TaskUi>,
     /// The context percentage of the task the app read last.
     context_usage: Option<(SessionKey, u64)>,
-    /// The usage bins of the task the app read last.
-    usage: Option<(
-        SessionKey,
-        std::collections::BTreeMap<i64, crate::usage::Bin>,
-    )>,
+    /// Visible token bins of all participating tasks and of tasks outside the selected family.
+    usage: std::collections::BTreeMap<i64, crate::usage::Bin>,
+    other_usage: std::collections::BTreeMap<i64, crate::usage::Bin>,
     /// How many times taller than wide one terminal cell looks.
     cell_aspect: f64,
-    /// The timeline bins some task worked in.
-    activity: std::collections::BTreeSet<i64>,
 }
 
 /// Cell height over width assumed when the terminal reports no pixels.
@@ -384,6 +399,8 @@ impl ProjectGroup {
     }
 }
 
+type AttentionOrder<'a> = ((bool, DateTime<Utc>), &'a SessionKey);
+
 fn session_order(session: &Session) -> (std::cmp::Reverse<DateTime<Utc>>, &SessionKey) {
     (std::cmp::Reverse(session.updated_at), &session.id)
 }
@@ -395,6 +412,8 @@ impl View {
             task_entry_pending: false,
             pending_actions: Vec::new(),
             window_prefix: None,
+            height_zoom: None,
+            width_zoom: None,
             terminal: None,
             startup_cwd: std::env::current_dir().expect("dashboard startup directory is available"),
             event_panel: Vec::new(),
@@ -427,25 +446,25 @@ impl View {
             attention_skips: HashMap::new(),
             grouping,
             use_colors,
-            pinned: Vec::new(),
-            hidden: HashSet::new(),
+            pinned: TaskPins::default(),
+            removing: HashSet::new(),
             collapsed: vec![HashSet::new(); TASK_FILTERS.len()],
             status_filter: 0,
             tab_selections: vec![None; TASK_FILTERS.len()],
-            search: line_edit::LineEdit::default(),
-            searching: false,
+            search: search_input::SearchInput::default(),
+            kill_buffer: crate::line_edit::KillBuffer::default(),
             rename_target: None,
             name_target: None,
             stopping_prompt: None,
-            rename: line_edit::LineEdit::default(),
+            rename: line_edit::Editor::default(),
             confirm_dialog: None,
             reset_incidents: Vec::new(),
             reset_pending: HashSet::new(),
             help: false,
             loading: false,
             has_more: false,
-            notice: None,
             viewport: RefCell::new(Viewport::default()),
+            inline_images: RefCell::new(None),
             last_click: None,
             double_click_interval: DOUBLE_CLICK_INTERVAL,
             pending_click: None,
@@ -454,16 +473,33 @@ impl View {
             mouse_panel: None,
             pressed_task: None,
             last_copy_click: None,
-            copied: None,
+            feedback: None,
             text_selection: RefCell::new(None),
             title_slots: RefCell::new(HashMap::new()),
             panels_task: None,
             task_uis: HashMap::new(),
-            usage: None,
+            usage: Default::default(),
+            other_usage: Default::default(),
             context_usage: None,
             cell_aspect: DEFAULT_CELL_ASPECT,
-            activity: std::collections::BTreeSet::new(),
         }
+    }
+
+    pub(crate) fn set_inline_images(
+        &mut self,
+        supports_images: bool,
+        cell_pixels: Option<(u16, u16)>,
+    ) {
+        *self.inline_images.get_mut() =
+            supports_images.then(|| inline_images::InlineImages::new(cell_pixels));
+        self.viewport.get_mut().event_detail_layout = None;
+    }
+
+    pub(crate) fn take_image_commands(&self) -> Vec<u8> {
+        self.inline_images
+            .borrow_mut()
+            .as_mut()
+            .map_or_else(Vec::new, |images| images.take_commands())
     }
 
     /// Takes the terminal's cell height over width, or a common one when the terminal reports
@@ -479,6 +515,7 @@ impl View {
     pub(crate) fn pasting_prompt(&self) -> bool {
         self.confirm_dialog.is_none()
             && !self.help
+            && !self.frozen_draft()
             && self.prompt_focused()
             && !self.input_box.searching_history()
             && self.input_disabled().is_none()
@@ -495,7 +532,7 @@ impl View {
             {
                 image.preserve();
             }
-            self.input_box.editor.insert_image(image);
+            self.input_box.editor.insert_placeholder(image);
         }
     }
 
@@ -503,16 +540,17 @@ impl View {
         self.rename_target.is_some() || self.name_target.is_some()
     }
 
-    fn title_editor(&self) -> Option<&line_edit::LineEdit> {
+    fn title_editor(&self) -> Option<&line_edit::Editor> {
         (self.title_editing() && self.selector.is_none()).then_some(&self.rename)
     }
 
-    pub(crate) fn handle_paste(&mut self, text: &str) {
+    pub(crate) fn handle_paste(&mut self, text: &str) -> bool {
+        self.kill_buffer.begin_stroke();
         if self.frozen_draft() {
-            return;
+            return false;
         }
         if self.confirm_dialog.is_some() || self.help {
-            return;
+            return false;
         }
         let task_details_active = self.active_panel == Panel::TaskDetails;
         if let Some(editor) = self
@@ -522,34 +560,36 @@ impl View {
             .and_then(Selector::active_editor)
         {
             editor.insert(text);
-            return;
+            return true;
         }
         if self.selector.is_some() && task_details_active {
-            return;
+            return false;
         }
-        if !self.searching && !self.task_search_editing() && self.question_paste(text) {
-            return;
+        if !self.search_focused() && self.question_paste(text) {
+            return true;
         }
         if task_details_active && self.title_editor().is_some() {
             self.rename.insert(text);
         } else if self.prompt_focused() && self.input_disabled().is_none() {
             self.input_box.paste(text);
-        } else if self.active_panel == Panel::EventDetail && self.event_detail.search.editing {
-            self.event_detail.search.query.insert(text);
-            self.jump_event_detail_match();
-        } else if self.active_panel == Panel::EventList && self.event_list.search.editing {
-            self.event_list.search.query.insert(text);
-            self.rematch_event();
-            self.show_newest_event();
-        } else if self.searching {
-            self.search.insert(text);
-            let selected = self
-                .selectable_indices()
-                .first()
-                .copied()
-                .unwrap_or(usize::MAX);
-            self.select(selected);
+        } else if self.search_focused() {
+            self.edit_search(self.active_panel, |search| search.insert(text));
+        } else {
+            return false;
         }
+        true
+    }
+
+    pub(crate) fn prepare_paste_prompt(&mut self) -> bool {
+        if self.help
+            || self.confirm_dialog.is_some()
+            || self.frozen_draft()
+            || self.input_disabled().is_some()
+        {
+            return false;
+        }
+        self.prepare_prompt();
+        true
     }
 
     fn input_label(&self) -> String {
@@ -627,7 +667,7 @@ impl View {
                 self.set_active_panel(Panel::Prompt);
             }
             if let Err(error) = result {
-                self.set_notice(Some(error.to_string()));
+                self.show_error(error.to_string());
             }
             return;
         }
@@ -646,7 +686,7 @@ impl View {
             Err(error) => prompt_box::SendState::Failed(error.to_string()),
         };
         if let Some(error) = error {
-            self.set_notice(Some(error));
+            self.show_error(error);
         }
     }
 
@@ -666,7 +706,7 @@ impl View {
 
     pub(crate) fn input_failed(&mut self, reason: String) {
         self.input_box.state = prompt_box::SendState::Failed(reason.clone());
-        self.set_notice(Some(reason));
+        self.show_error(reason);
     }
 
     pub fn set_capabilities(&mut self, capabilities: HashMap<ProviderId, Capabilities>) {
@@ -700,7 +740,12 @@ impl View {
         let selected = self.selected_id().cloned();
         if self.attention_selection.is_some() && self.attention_selection != selected {
             if let Some(id) = self.attention_selection.take() {
-                self.attention_skips.insert(id, Utc::now());
+                let skipped_at = Utc::now();
+                self.attention_skips.insert(id.clone(), skipped_at);
+                self.pending_actions.push(Action::PersistSkip {
+                    id,
+                    skipped_at: Some(skipped_at),
+                });
             }
             self.interrupted_selection = None;
         }
@@ -766,7 +811,19 @@ impl View {
             .filter(|row| row.status == SessionStatus::NeedsInput)
             .map(|row| row.id.clone())
             .collect();
-        self.attention_skips.retain(|id, _| waiting.contains(id));
+        let answered: Vec<_> = self
+            .attention_skips
+            .keys()
+            .filter(|id| !waiting.contains(*id) && self.rows.iter().any(|row| &row.id == *id))
+            .cloned()
+            .collect();
+        for id in answered {
+            self.attention_skips.remove(&id);
+            self.pending_actions.push(Action::PersistSkip {
+                id,
+                skipped_at: None,
+            });
+        }
         if self
             .selected_draft()
             .is_some_and(|draft| draft.name.is_none())
@@ -785,16 +842,7 @@ impl View {
                 })
             })
             .collect();
-        queue.sort_by_key(|&index| {
-            let row = &self.rows[index];
-            let since = row.ask.as_ref().map_or(row.updated_at, |ask| ask.since);
-            (
-                self.attention_skips
-                    .get(&row.id)
-                    .map_or(since, |&skipped| since.max(skipped)),
-                row.id.clone(),
-            )
-        });
+        queue.sort_by_key(|&index| self.attention_order(&self.rows[index]));
         self.status_filter = tab;
         let starts_waiting = had_sessions
             && queue
@@ -848,22 +896,22 @@ impl View {
     pub fn set_loading(&mut self, loading: bool) {
         self.loading = loading;
     }
-    pub fn set_pinned(&mut self, ids: &[SessionKey]) {
-        self.pinned = ids.to_vec();
+    pub fn set_pinned(&mut self, pins: &TaskPins<SessionKey>) {
+        self.pinned = pins.clone();
         self.reconcile_selection();
     }
-    /// Lists a hidden task again, as when its deletion failed.
-    pub fn unhide(&mut self, id: &SessionKey) {
-        self.hidden.remove(id);
+    /// Finishes a pending archive or deletion so refreshed rows can be listed.
+    pub fn finish_removal(&mut self, id: &SessionKey) {
+        self.removing.remove(id);
     }
-    pub fn hide(&mut self, id: &SessionKey) {
+    pub fn begin_removal(&mut self, id: &SessionKey) {
         let visible = self.selectable_indices();
         let position = visible
             .iter()
             .position(|i| *i == self.selected)
             .unwrap_or(0);
         let selected = self.selected_id() == Some(id);
-        self.hidden.insert(id.to_owned());
+        self.removing.insert(id.to_owned());
         if selected {
             let visible = self.selectable_indices();
             let selected = visible
@@ -874,32 +922,39 @@ impl View {
         }
         self.reconcile_selection();
     }
-    /// Shows `notice` at the task list's bottom-left for `MESSAGE_LIFETIME`.
-    pub fn set_notice(&mut self, notice: Option<String>) {
-        self.set_notice_at(notice, Instant::now());
+    /// Shows `text` at the footer's right end for `MESSAGE_LIFETIME`.
+    pub fn show_info(&mut self, text: String) {
+        self.show_feedback_at(footer::Feedback::Info(text), Instant::now());
     }
 
-    fn set_notice_at(&mut self, notice: Option<String>, now: Instant) {
-        self.notice = notice.map(|text| (text, now + MESSAGE_LIFETIME));
+    /// Shows `text` in the error color at the footer's right end for `ERROR_LIFETIME`.
+    pub fn show_error(&mut self, text: String) {
+        self.show_feedback_at(footer::Feedback::Error(text), Instant::now());
     }
 
     /// Shows `label` at the footer's right end until `MESSAGE_LIFETIME` after `now`.
     pub fn show_copied(&mut self, label: String, now: Instant) {
-        self.copied = Some((label, now + MESSAGE_LIFETIME));
+        self.show_feedback_at(footer::Feedback::Info(label), now);
     }
 
-    /// Clears an expired copy confirmation and notice, and returns how long the first of the
-    /// shown ones has left.
+    fn show_feedback_at(&mut self, feedback: footer::Feedback, now: Instant) {
+        let lifetime = match feedback {
+            footer::Feedback::Info(_) => MESSAGE_LIFETIME,
+            footer::Feedback::Error(_) => ERROR_LIFETIME,
+        };
+        self.feedback = Some((feedback, now + lifetime));
+    }
+
+    /// Clears expired feedback and returns how long the shown feedback has left.
     pub fn expire_messages(&mut self, now: Instant) -> Option<Duration> {
-        let copied = expire(&mut self.copied, now);
-        let notice = expire(&mut self.notice, now);
-        copied.into_iter().chain(notice).min()
+        expire(&mut self.feedback, now)
     }
     /// Where the selected row starts, so the terminal cursor can rest on it.
     pub fn marker_pos(&self) -> Option<(u16, u16)> {
         self.viewport.borrow().marker
     }
 
+    #[cfg(test)]
     pub fn grouping(&self) -> Grouping {
         self.grouping
     }
@@ -968,17 +1023,36 @@ impl View {
         let root = self.ancestors(index).last().unwrap_or(index);
         self.rows[root].parent.is_none().then_some(root)
     }
+    fn can_pin(&self, index: usize) -> bool {
+        self.rows[index].status != SessionStatus::Inactive
+            || self
+                .group_index(index)
+                .is_some_and(|root| self.rows[root].status != SessionStatus::Inactive)
+    }
     fn is_pinned(&self, index: usize) -> bool {
-        self.group_index(index)
-            .is_some_and(|parent| self.pinned.contains(&self.rows[parent].id))
+        self.pinned
+            .for_tab(self.status_filter)
+            .contains(&self.rows[index].id)
+    }
+    fn in_pinned_group(&self, index: usize) -> bool {
+        self.is_pinned(index)
+            || self
+                .ancestors(index)
+                .any(|ancestor| self.is_pinned(ancestor))
+    }
+    fn tree_index(&self, index: usize) -> Option<usize> {
+        std::iter::once(index)
+            .chain(self.ancestors(index))
+            .find(|&index| self.is_pinned(index))
+            .or_else(|| self.group_index(index))
     }
     fn same_group(&self, grouping: Grouping, left: usize, right: usize) -> bool {
+        if self.in_pinned_group(left) || self.in_pinned_group(right) {
+            return self.in_pinned_group(left) && self.in_pinned_group(right);
+        }
         let (Some(left), Some(right)) = (self.group_index(left), self.group_index(right)) else {
             return false;
         };
-        if self.is_pinned(left) || self.is_pinned(right) {
-            return self.is_pinned(left) && self.is_pinned(right);
-        }
         match grouping {
             Grouping::Project => {
                 self.project_groups[left].key() == self.project_groups[right].key()
@@ -992,28 +1066,28 @@ impl View {
     }
     fn matches_search(&self, s: &Session) -> bool {
         let search = self.search.text().to_lowercase();
-        search.is_empty()
-            || format!(
-                "{} {} {} {}",
-                s.name.as_deref().unwrap_or(""),
-                s.title,
-                s.prompt,
-                s.cwd.display()
-            )
-            .to_lowercase()
-            .contains(&search)
+        search.is_empty() || s.display_title().to_lowercase().contains(&search)
     }
     fn visible_indices(&self) -> Vec<usize> {
         self.visible_indices_for_filter(self.status_filter)
     }
     fn visible_indices_for_filter(&self, tab: usize) -> Vec<usize> {
         let filter = TASK_FILTERS[tab].1;
+        let pins = self.pinned.for_tab(tab);
+        let is_pinned = |index: usize| pins.contains(&self.rows[index].id);
         let sessions: HashMap<_, _> = self.rows.iter().map(|s| (&s.id, s)).collect();
         let mut matching = HashSet::new();
-        for session in self.rows.iter().filter(|s| filter.contains(&s.status)) {
+        for (_, session) in self.rows.iter().enumerate().filter(|(index, session)| {
+            filter.contains(&session.status)
+                || (tab == 0 && is_pinned(*index) && self.can_pin(*index))
+        }) {
             let mut current = Some(session);
             while let Some(session) = current {
-                if self.hidden.contains(&session.id) || !matching.insert(&session.id) {
+                if self.removing.contains(&session.id) || !matching.insert(&session.id) {
+                    break;
+                }
+                // Pinned subtrees stand on their own, without adding ancestor headers.
+                if pins.contains(&session.id) {
                     break;
                 }
                 current = session
@@ -1025,43 +1099,49 @@ impl View {
         let mut children = std::collections::HashMap::<&SessionKey, Vec<usize>>::new();
         for (index, session) in self.rows.iter().enumerate() {
             if let Some(parent) = session.parent.as_ref()
-                && !self.hidden.contains(&session.id)
+                && !self.removing.contains(&session.id)
             {
                 children.entry(parent).or_default().push(index);
             }
         }
         for siblings in children.values_mut() {
-            siblings.sort_by_key(|&index| session_order(&self.rows[index]));
+            siblings.sort_by_key(|&index| {
+                let row = &self.rows[index];
+                (self.waiting_first(row), session_order(row))
+            });
         }
         let (mut pinned, mut visible): (Vec<_>, Vec<_>) = self
             .rows
             .iter()
             .enumerate()
-            .filter(|(_, session)| {
-                session.parent.is_none()
-                    && !self.hidden.contains(&session.id)
+            .filter(|(index, session)| {
+                (session.parent.is_none() || is_pinned(*index))
+                    && !self.removing.contains(&session.id)
                     && matching.contains(&session.id)
                     && self.matches_search(session)
             })
             .map(|(index, _)| index)
-            .partition(|index| self.is_pinned(*index));
-        pinned.sort_by_key(|index| {
-            self.pinned
-                .iter()
-                .position(|id| *id == self.rows[*index].id)
-        });
+            .partition(|index| is_pinned(*index));
+        pinned.sort_by_key(|index| pins.iter().position(|id| *id == self.rows[*index].id));
         match self.grouping {
             Grouping::Project => visible.sort_by_key(|index| {
+                let row = &self.rows[*index];
                 (
                     self.project_groups[*index].key(),
-                    session_order(&self.rows[*index]),
+                    self.waiting_first(row),
+                    session_order(row),
                 )
             }),
-            Grouping::Status => visible.sort_by_key(|index| self.rows[*index].status),
+            Grouping::Status => visible.sort_by_key(|index| {
+                let row = &self.rows[*index];
+                (row.status, self.waiting_first(row))
+            }),
             Grouping::Model => visible.sort_by_key(|index| {
+                let row = &self.rows[*index];
                 (
-                    self.session_model_text(&self.rows[*index]),
-                    session_order(&self.rows[*index]),
+                    self.session_model_text(row),
+                    self.waiting_first(row),
+                    session_order(row),
                 )
             }),
         }
@@ -1077,7 +1157,13 @@ impl View {
                 continue;
             }
             if let Some(siblings) = children.get(&self.rows[index].id) {
-                pending.extend(siblings.iter().rev().copied());
+                pending.extend(
+                    siblings
+                        .iter()
+                        .rev()
+                        .copied()
+                        .filter(|&child| !is_pinned(child)),
+                );
             }
         }
         rows
@@ -1109,24 +1195,10 @@ impl View {
             .saturating_sub(self.event_section_heights(visible).1)
     }
 
-    pub(crate) fn event_read_count(&self, visible: usize, has_older: bool) -> usize {
-        let loaded = self.event_panel.len().max(visible);
-        if has_older
-            && (self.event_page_pending()
-                || (self.event_scroll() == 0
-                    && !self.following_event()
-                    && !matches!(self.selected_event_row(), Some(EventRow::Pinned(_)))))
-        {
-            loaded.saturating_add(visible.max(self.event_list.pending_older).max(1))
-        } else {
-            loaded
-        }
-    }
-
     /// Selects the newest shown event and resumes following the event list.
     fn show_newest_event(&mut self) {
         self.select_event(None);
-        self.event_detail.search.clear();
+        self.edit_search(Panel::EventDetail, search_input::SearchInput::close);
         let max = self.event_max_scroll();
         self.event_list.scroll.set(max);
         self.event_detail.scroll.get_mut().offset = 0;
@@ -1168,11 +1240,10 @@ impl View {
             self.show_questions();
             return;
         }
+        self.exit_image_zoom();
         self.park_event_list();
         let task_list_focused = self.active_panel == Panel::TaskList;
-        let restores_task = selected
-            .as_ref()
-            .is_some_and(|id| self.task_uis.get(id).is_some_and(|ui| ui.focus.is_some()));
+        let restores_task = self.has_parked_focus(selected.as_ref());
         let focus = self
             .panels_task
             .as_ref()
@@ -1244,10 +1315,17 @@ impl View {
         self.panels_task = selected;
         self.questions.sync(&self.rows);
         self.task_entry_pending = task_list_focused && restores_task;
-        if task_list_focused {
+        if task_list_focused
+            || !self.restore_task_focus(shown.focus.unwrap_or_else(|| self.input_focus()))
+        {
             self.set_active_panel(Panel::TaskList);
-        } else if !self.restore_task_focus(shown.focus.unwrap_or_else(|| self.input_focus())) {
-            self.set_active_panel(Panel::TaskList);
+        }
+        for panel in [Panel::TaskList, Panel::EventList, Panel::EventDetail] {
+            if panel != self.active_panel {
+                self.panel_search_mut(panel)
+                    .expect("panel has search input")
+                    .blur();
+            }
         }
     }
 
@@ -1341,8 +1419,43 @@ impl View {
         selectable
             .into_iter()
             .filter(|&index| !prefer_active || self.rows[index].status != SessionStatus::Inactive)
-            .max_by_key(|&index| session_order(&self.rows[index]))
+            .max_by_key(|&index| {
+                let row = &self.rows[index];
+                (
+                    std::cmp::Reverse(self.queue_position(row, row.updated_at)),
+                    &row.id,
+                )
+            })
             .unwrap_or(usize::MAX)
+    }
+
+    /// Orders waiting tasks the way the attention queue visits them.
+    fn attention_order<'a>(&self, row: &'a Session) -> AttentionOrder<'a> {
+        let since = row.ask.as_ref().map_or(row.updated_at, |ask| ask.since);
+        (self.queue_position(row, since), &row.id)
+    }
+
+    /// Puts waiting tasks first among their neighbors, in attention queue order.
+    fn waiting_first<'a>(&self, row: &'a Session) -> (bool, Option<AttentionOrder<'a>>) {
+        let waiting = row.status == SessionStatus::NeedsInput;
+        (!waiting, waiting.then(|| self.attention_order(row)))
+    }
+
+    /// Orders a task the user left in the attention queue after every task it has not skipped, by
+    /// when it was left, until it starts waiting again.
+    fn queue_position(&self, row: &Session, since: DateTime<Utc>) -> (bool, DateTime<Utc>) {
+        match self.attention_skips.get(&row.id) {
+            Some(&skipped) if skipped >= since => (true, skipped),
+            _ => (false, since),
+        }
+    }
+
+    pub(crate) fn restore_attention_skips(&mut self, preferences: &crate::state::Preferences) {
+        self.attention_skips = preferences
+            .tasks
+            .keys()
+            .filter_map(|id| Some((id.clone(), preferences.task_skipped_at(id)?)))
+            .collect();
     }
     /// Gives a task the next accent the first time it is shown, so neighbors differ and the task
     /// keeps its color while the list changes.
@@ -1384,7 +1497,7 @@ mod tests;
 mod text_selection_tests;
 
 /// Clears `message` once `now` reaches its expiry, and returns how long it has left.
-fn expire(message: &mut Option<(String, Instant)>, now: Instant) -> Option<Duration> {
+fn expire<T>(message: &mut Option<(T, Instant)>, now: Instant) -> Option<Duration> {
     let (_, expires_at) = message.as_ref()?;
     let left = expires_at
         .checked_duration_since(now)
@@ -1411,3 +1524,11 @@ impl Viewport {
 
 #[cfg(test)]
 mod background_order_tests;
+
+#[cfg(test)]
+fn link_path(target: &LinkTarget) -> &std::path::Path {
+    match target {
+        LinkTarget::Path(path) => path,
+        LinkTarget::Image(_) => panic!("expected path link"),
+    }
+}

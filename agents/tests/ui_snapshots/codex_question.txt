@@ -1,9 +1,9 @@
   Active 1                                                                              Inactive 0
 ──────────────────────────────────────────────────┬───────────────── Needs input ─────────── 6d 9h╶─
-                [4:4m/[24m[4:4mw[24m[4:4mo[24m[4:4mr[24m[4:4mk[24m[4:4ms[24m[4:4mp[24m[4:4ma[24m[4:4mc[24m[4:4me[24m[4:4m/[24m[4:4mp[24m[4:4mr[24m[4:4mo[24m[4:4mj[24m[4:4me[24m[4:4mc[24m[4:4mt[24m                │                     Prompt
- ● Example thread 0        Needs input     6d ago │ Inspect the project
+                     project                      │                     Prompt
+ ● Example thread 0        Needs input     6d ago │               Inspect the project
                                                   │ …
-──────────────────────────────────────────────────┴╴[4:4mp[24m[4:4mr[24m[4:4mo[24m[4:4mj[24m[4:4me[24m[4:4mc[24m[4:4mt[24m ──────── Example thr… ─ example-branch╶─
+─╴gpt-6.1-sol ──────────────────────────── medium╶┴╴project ──────── Example thr… ─ example-branch╶─
   Color
 
  Pick a color?
@@ -13,7 +13,7 @@
    2. Blue
       Choose blue.
  ↑/↓ move · Enter to confirm · Esc to cancel
-───────────────────────────────────────────────────╴gpt-6.1-sol · medium ───────────────────────────
+────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
 
@@ -21,4 +21,4 @@
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
- ? help  esc previous  ↑/↓ move  enter open  n new
+ ? help

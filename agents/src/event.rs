@@ -2,6 +2,9 @@ pub(crate) mod agent;
 
 use chrono::{DateTime, Utc};
 
+/// A read count that asks for every event in the transcript.
+pub(crate) const ALL_EVENTS: usize = usize::MAX;
+
 fn participant_name(name: Option<&str>) -> Option<&str> {
     name.map(str::trim).filter(|name| !name.is_empty())
 }
@@ -31,6 +34,42 @@ pub enum Kind {
     QueuedUser,
     QueuedSystem,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EventFilter {
+    #[default]
+    All,
+    Message,
+    Tool,
+}
+
+impl EventFilter {
+    pub fn is_all(&self) -> bool {
+        *self == Self::All
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Message,
+            Self::Message => Self::Tool,
+            Self::Tool => Self::All,
+        }
+    }
+
+    pub fn includes(self, kind: &Kind) -> bool {
+        let category = match kind {
+            Kind::User | Kind::QueuedUser => Self::All,
+            Kind::Assistant
+            | Kind::Compaction
+            | Kind::QueuedSystem
+            | Kind::Agent
+            | Kind::Session => Self::Message,
+            Kind::Tool | Kind::Error | Kind::Denied => Self::Tool,
+        };
+        self == Self::All || self == category
+    }
+}
+
 /// Transcript turn containing a row, including whether its boundaries are known.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Turn {
@@ -62,8 +101,8 @@ pub struct Event {
     pub duration: Option<chrono::Duration>,
     /// The preceding event's end, including hidden turn starters for Assistant replies.
     pub previous_end: Option<DateTime<Utc>>,
-    /// Images attached to this prompt whose files still exist.
-    pub images: Vec<Image>,
+    /// Images attached to this prompt.
+    pub images: Vec<crate::images::Image>,
     /// The tool calls a Tool, Error or Denied row stands for, in the order they ran.
     pub calls: Vec<ToolCall>,
 }
@@ -89,7 +128,7 @@ pub struct FileLink {
 }
 
 /// A transcript line retained by its file position, decoded only when requested.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SourceRecord {
     pub path: std::path::PathBuf,
     pub offset: u64,
@@ -202,14 +241,13 @@ pub struct ToolCall {
     pub hide_output: bool,
     pub agent_thread_id: Option<String>,
     pub agent_path: Option<String>,
-    /// Left metadata and centered title, chosen by the provider.
-    pub event_detail_left: String,
-    pub event_detail_title: String,
+    /// Centered title selected from the tool rule.
+    pub title: String,
     /// Draw calls even for events whose kind normally shows only a message.
     pub show_event_detail: bool,
     /// The provider's stable call identifier.
     pub id: String,
-    pub title: String,
+    pub summary: String,
     /// The provider's tool identifier.
     pub name: String,
     pub input: Vec<Section>,
@@ -222,6 +260,20 @@ pub struct ToolCall {
     pub duration: Option<chrono::Duration>,
 }
 
+impl ToolCall {
+    /// Tool metadata beside the detail title, derived when rendered.
+    /// The tool name, unless a titled agent call or unlabeled rule omits it.
+    pub(crate) fn detail_left(&self) -> String {
+        if !self.title.trim().is_empty()
+            && (self.agent_message.is_some() || !crate::providers::tool::rule(&self.name).label)
+        {
+            String::new()
+        } else {
+            crate::providers::tool::display_tool_name(&self.name)
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelSettings {
     pub provider: crate::providers::ProviderId,
@@ -232,6 +284,13 @@ pub struct ModelSettings {
 /// One labelled part of a tool call's input or output, as the open event draws it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Section {
+    /// Ends the current block; the sections after it form their own centered group.
+    GroupBreak,
+    /// Background output read from its current file contents by the provider that wrote the call.
+    OutputFile {
+        provider: crate::providers::ProviderId,
+        path: std::path::PathBuf,
+    },
     /// Shell source; `prefix` bytes before the command remain part of copied text.
     Shell { text: String, prefix: usize },
     /// Free text using the shared reading column.
@@ -242,26 +301,24 @@ pub enum Section {
     Structured { label: String, text: String },
     /// An unsupported content block, displayed dimly without its payload.
     Placeholder(String),
+    /// An image block; drawn inline when the terminal supports images, else as its placeholder text.
+    Image(crate::images::Image),
     /// Code highlighted by `lang`, a syntax token or file extension such as "bash" or "rs".
     Code {
         label: String,
         lang: String,
         text: String,
     },
-    /// Unified diff hunks; the label is the changed file's path.
-    Diff { label: String, text: String },
+    /// Unified diff hunks highlighted by the changed file's language.
+    Diff {
+        label: String,
+        lang: String,
+        text: String,
+    },
     /// Prose rendered as Markdown.
     Markdown { label: String, text: String },
     /// Plain text wrapped at the panel width.
     Text { label: String, text: String },
-}
-
-/// An image attached to a prompt: its placeholder in the prompt text, such as
-/// `[Image #1]`, and the file it was attached from.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Image {
-    pub label: String,
-    pub path: std::path::PathBuf,
 }
 
 #[cfg(test)]

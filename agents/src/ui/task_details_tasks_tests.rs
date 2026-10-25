@@ -45,27 +45,29 @@ fn tasks_section_orders_filters_counts_and_reuses_status_styles() {
     assert!(find("Needs input") < find("Tasks"));
     assert!(!rows.iter().any(|row| row.trim() == "Project"));
     assert_eq!(rows[find("Tasks")].find("Tasks"), Some(17));
-    assert!(rows[find("Tasks")].ends_with("2/4"));
+    assert!(rows[find("Tasks")].trim_end().ends_with("2/4"));
     assert!(
         !rows
             .iter()
             .any(|row| row.contains("Finished") || row.contains("Removed"))
     );
     let first = find("Working first");
-    assert_eq!(rows[first].trim_end(), "● Working first");
-    assert_eq!(rows[first + 1].trim_end(), "● Working second");
-    assert_eq!(rows[first + 2].trim_end(), "○ Pending first");
-    assert_eq!(rows[first + 3].trim_end(), "○ Pending second");
+    assert_eq!(rows[first].trim_end(), "            ● Working first");
+    assert_eq!(rows[first + 1].trim_end(), "            ● Working second");
+    assert_eq!(rows[first + 2].trim_end(), "            ○ Pending first");
+    assert_eq!(rows[first + 3].trim_end(), "            ○ Pending second");
     for (y, status) in [
         (first, SessionStatus::Working),
         (first + 2, SessionStatus::Ready),
     ] {
         let reference = session("style", "Style", status, 0);
         let dot = View::status(&reference).1;
-        assert_eq!(buf[(0, y as u16)].symbol(), dot.content);
-        assert_eq!(buf[(0, y as u16)].fg, dot.style.fg.unwrap());
+        assert_eq!(buf[(12, y as u16)].symbol(), dot.content);
+        assert_eq!(buf[(12, y as u16)].fg, dot.style.fg.unwrap());
     }
-    assert!(rows[36].trim().is_empty());
+    // The tasks section sits on the panel's bottom row.
+    assert_eq!(first + 3, 39);
+    assert!(rows[find("Needs input") + 3].trim().is_empty());
 }
 
 #[test]

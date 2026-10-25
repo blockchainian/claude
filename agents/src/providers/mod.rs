@@ -1,7 +1,10 @@
 pub(crate) mod claude;
 pub(crate) mod codex;
+pub(crate) mod mcp;
 pub(crate) mod text;
 pub(crate) mod tool;
+
+pub(crate) const TOOL_RULES: &[&tool::ToolRules] = &[&claude::TOOL_RULES, &codex::TOOL_RULES];
 
 use crate::event;
 use crate::model::{Action, Session};
@@ -12,6 +15,14 @@ use std::{
     process::{Command, Output},
     str::FromStr,
 };
+
+/// Reads a background output file in its provider's format.
+pub(crate) fn read_output_file(provider: ProviderId, path: &Path) -> event::Section {
+    match provider {
+        ProviderId::Claude => claude::background_output::read(path),
+        ProviderId::Codex => tool::read_plain_output_file(path),
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ProviderId {
@@ -71,9 +82,31 @@ pub struct Capabilities {
     pub archive: bool,
 }
 
+/// A session of another provider that one of this provider's sessions supervises.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Supervision {
+    /// The supervising session, of the reporting provider.
+    pub supervisor: SessionKey,
+    /// The supervised session, of another provider.
+    pub session: SessionKey,
+    pub state: SupervisionState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SupervisionState {
+    /// The supervisor holds the session.
+    Active,
+    /// Questions awaiting the supervisor, in order of arrival.
+    Asking(Vec<String>),
+    /// The supervisor has detached the session; it still nests under it.
+    Detached,
+}
+
 pub struct Snapshot {
     pub sessions: Vec<Session>,
     pub has_more: bool,
+    /// Other providers' sessions that the sessions in `sessions` supervise.
+    pub supervisions: Vec<Supervision>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -213,7 +246,8 @@ pub struct ResetCreditRedemption {
 pub type AccountUsageJob = Box<dyn FnOnce() -> io::Result<AccountUsage> + Send>;
 pub type ResetCreditJob = Box<dyn FnOnce() -> io::Result<ResetCreditRedemption> + Send>;
 
-pub type Job = Box<dyn FnOnce() -> io::Result<()> + Send>;
+/// A slow session operation that the dashboard runs on a background thread.
+pub type SessionAction = Box<dyn FnOnce() -> io::Result<()> + Send>;
 pub type CreateJob = Box<dyn FnOnce() -> io::Result<Output> + Send>;
 
 /// The program that shows a session and the bytes that detach its client on close.
@@ -246,7 +280,8 @@ pub trait ScreenInput {
 pub trait Provider: Send {
     /// Creates a session reader with independent caches and the same provider configuration.
     fn session_source(&self) -> Box<dyn Provider>;
-    /// Discovers the history page while reusing unrelated session details.
+    /// Discovers the history page while reusing unrelated session details; the snapshot carries
+    /// this provider's sessions with their own-provider parents, and what they supervise.
     fn refresh_sessions(
         &mut self,
         pages: usize,
@@ -265,7 +300,7 @@ pub trait Provider: Send {
         Err("Terminal is not supported")
     }
     /// Prepares cleanup for a session woken by opening its terminal, run after detaching.
-    fn terminal_cleanup(&self, _session: &Session) -> io::Result<Option<Job>> {
+    fn terminal_cleanup(&self, _session: &Session) -> io::Result<Option<SessionAction>> {
         Ok(None)
     }
     /// Routes input through the open terminal; `None` keeps the normal provider path.
@@ -281,10 +316,14 @@ pub trait Provider: Send {
     /// Directories watched for changes; missing directories are skipped.
     fn watch_roots(&self) -> io::Result<Vec<PathBuf>>;
     fn capabilities(&self) -> Capabilities;
-    fn send(&self, _session: &Session, _input: SessionInput) -> Option<Job> {
+    fn send(&self, _session: &Session, _input: SessionInput) -> Option<SessionAction> {
         None
     }
-    fn create(&self, _request: &crate::tasks::NewTask) -> Option<io::Result<CreateJob>> {
+    fn create(
+        &self,
+        _request: &crate::tasks::NewTask,
+        _created: Box<dyn Fn(String) + Send>,
+    ) -> Option<io::Result<CreateJob>> {
         None
     }
     /// Builds a background request without performing network or credential I/O.
@@ -316,15 +355,24 @@ pub trait Provider: Send {
     }
     /// Returns this provider's sessions, including children with provider-qualified parents.
     fn refresh(&mut self, pages: usize) -> Snapshot;
-    /// Discovers live sessions and the requested recent history page.
+    /// Discovers live sessions and the requested recent history page, and what they supervise.
     fn discover(&mut self, pages: usize) -> Snapshot {
         self.refresh(pages)
     }
-    /// Discovers direct children of the supplied live-session tree frontier.
+    /// Discovers this provider's direct children of the supplied live-session tree frontier.
     fn children(&mut self, _parents: &[SessionKey]) -> Snapshot {
         Snapshot {
             sessions: vec![],
             has_more: false,
+            supervisions: vec![],
+        }
+    }
+    /// Reads this provider's sessions by id; ids it does not know are skipped.
+    fn load(&mut self, _sessions: &[SessionKey]) -> Snapshot {
+        Snapshot {
+            sessions: vec![],
+            has_more: false,
+            supervisions: vec![],
         }
     }
     /// Reads details for the selected sessions.
@@ -344,13 +392,18 @@ pub trait Provider: Send {
         Err(io::ErrorKind::Unsupported.into())
     }
     /// Returns the job that permanently deletes the session, to run off the UI thread.
-    fn delete(&self, session: &Session) -> io::Result<Job>;
+    fn delete(&self, session: &Session) -> io::Result<SessionAction>;
     /// Returns the archive job to run off the UI thread.
-    fn archive(&self, session: &Session) -> io::Result<Job>;
+    fn archive(&self, session: &Session) -> io::Result<SessionAction>;
+    /// Returns the job that ends a supervision this provider reported.
+    fn detach(&self, _supervision: &Supervision) -> io::Result<SessionAction> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
 }
 
 pub fn configured() -> io::Result<(crate::sessions::Hub, PathBuf)> {
-    let provider = claude::ClaudeProvider::from_config()?;
+    let provider = claude::ClaudeProvider::from_config()?
+        .with_codex_manager(claude::codex_manager::supervision::state_dir()?);
     let preferences_dir = provider.preferences_dir();
     let mut providers: Vec<Box<dyn Provider>> = vec![
         Box::new(provider),

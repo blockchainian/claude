@@ -22,10 +22,7 @@ fn recorded_view() -> (tempfile::TempDir, View) {
         )
         .unwrap();
     }
-    let mut provider = crate::providers::codex::CodexProvider::new(
-        directory.path().into(),
-        directory.path().join("manager"),
-    );
+    let mut provider = crate::providers::codex::CodexProvider::new(directory.path().into());
     let mut view = test_view(Grouping::Project, false);
     view.status_filter = 1;
     view.set_sessions(provider.refresh(100).sessions, false);
@@ -151,7 +148,7 @@ fn picker(kind: &str, check_underlines: bool) {
                 SelectorKind::Branch {
                     draft,
                     branches: vec!["main".into()],
-                    editor: super::super::line_edit::LineEdit::default(),
+                    editor: super::super::line_edit::Editor::default(),
                     editing: false,
                 }
             }
@@ -235,30 +232,6 @@ fn overlay_confirmation_covers_links_and_clicks() {
 }
 
 #[test]
-fn overlay_notice_covers_links_and_clicks() {
-    let (_directory, mut view) = recorded_view();
-    let area = Rect::new(0, 0, 120, 18);
-    let mut before = Buffer::empty(area);
-    draw(&view, &mut before);
-    let list = view.center_layout(area).list;
-    view.set_notice(Some("Notice".into()));
-    let mut after = Buffer::empty(area);
-    draw(&view, &mut after);
-    let cover = Rect::new(list.x, list.bottom() - 1, list.width, 1);
-    for x in cover.x..cover.right() {
-        assert!(!after[(x, cover.y)].symbol().contains("\x1b[4:4m"));
-        assert_eq!(
-            click_mouse(
-                &mut view,
-                mouse(MouseEventKind::Down(MouseButton::Left), x, cover.y)
-            ),
-            None
-        );
-        assert!(view.text_selection.borrow().is_none());
-    }
-}
-
-#[test]
 fn overlay_picker_blank_click_does_not_open_or_copy() {
     picker("model", false);
 }
@@ -285,7 +258,7 @@ fn overlay_confirmation_emits_left_border_after_wide_text() {
                         &mut before,
                         &[(
                             Rect::new(cover.x - 1, y, text.width() as u16, 1),
-                            _directory.path().into(),
+                            crate::ui::links::LinkTarget::Path(_directory.path().into()),
                         )],
                     );
                 }

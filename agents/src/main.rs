@@ -2,10 +2,11 @@ mod activity;
 mod app;
 mod ask;
 mod clipboard;
-mod codex_await_output;
+mod code_format;
 mod event;
 mod images;
 mod jsonl;
+mod line_edit;
 mod model;
 mod processes;
 mod providers;
@@ -14,12 +15,21 @@ mod refresh;
 mod repository;
 mod session_terminal;
 mod sessions;
+mod shell_commands;
 mod state;
 mod tasks;
-mod terminal_background;
+mod terminal;
 mod theme;
 mod ui;
 mod usage;
+
+/// A real project folder outside any repository, for tests whose task directory must exist.
+#[cfg(test)]
+fn test_project() -> std::path::PathBuf {
+    let project = std::env::temp_dir().join("agents-tests/project");
+    std::fs::create_dir_all(&project).unwrap();
+    project
+}
 
 fn main() {
     let result = providers::configured()

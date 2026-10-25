@@ -76,7 +76,6 @@ fn refresh_allows_first_frame_input_and_exit_while_sqlite_is_locked() {
     let mut app = App::new(
         Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
             home.path().into(),
-            home.path().join("manager"),
         ))]),
         home.path().into(),
     );
@@ -231,7 +230,6 @@ fn codex_filesystem_refresh_leaves_unrelated_rows_unchanged() {
     }
     let mut hub = Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
         home.path().into(),
-        home.path().join("manager"),
     ))]);
     let before = hub.refresh();
     let target = before.sessions[0].clone();
@@ -277,5 +275,81 @@ fn filesystem_input_keeps_paths_through_the_debounce() {
     assert_eq!(
         schedule.take_due(now + Duration::from_millis(100)),
         Some(crate::sessions::RefreshRequest::paths(vec![path]))
+    );
+}
+
+#[test]
+fn output_file_notifications_do_not_schedule_session_refresh() {
+    use std::io::Write;
+    let home = claude_home();
+    let mut app = App::new(claude_hub(home.path()), home.path().into());
+    let output = home.path().join("task.output");
+    std::fs::write(&output, "").unwrap();
+    let sender = app.sender.clone();
+    let mut output_watcher = crate::sessions::OutputWatcher::new(move |event| {
+        let _ = sender.send(Input::EventOutput(event));
+    })
+    .unwrap();
+    output_watcher.set_path(Some(output.clone())).unwrap();
+    writeln!(
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(output)
+            .unwrap(),
+        "background output"
+    )
+    .unwrap();
+    let input = app.receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(matches!(input, Input::EventOutput(Ok(_))));
+    let now = Instant::now();
+    let mut schedule = RefreshSchedule::new(now, FALLBACK_INTERVAL);
+    app.handle_inputs(input, &mut None, &mut schedule).unwrap();
+    assert_eq!(schedule.take_due(now + Duration::from_millis(100)), None);
+}
+
+#[test]
+fn hidden_event_list_still_loads_the_detail() {
+    let home = claude_home();
+    for index in 1..=2 {
+        std::fs::write(
+            home.path().join(format!(
+                "projects/project/00000000-0000-0000-0000-{index:012}.jsonl"
+            )),
+            include_bytes!("../tests/fixtures/claude-raw-detail.jsonl"),
+        )
+        .unwrap();
+    }
+    let mut app = App::new(claude_hub(home.path()), home.path().into());
+    app.refresh();
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::BackTab,
+        KeyModifiers::NONE,
+    )));
+    assert!(app.view.selected_id().is_some());
+    assert!(app.transcript.is_none());
+    let area = ratatui::layout::Rect::new(0, 0, 200, 40);
+    app.view
+        .render(area, &mut ratatui::buffer::Buffer::empty(area));
+    for (code, modifiers) in [
+        (KeyCode::Char('w'), KeyModifiers::CONTROL),
+        (KeyCode::Char('_'), KeyModifiers::NONE),
+    ] {
+        app.handle_event(Event::Key(KeyEvent::new(code, modifiers)));
+    }
+    let mut terminal = Terminal::new(TestBackend::new(200, 40)).unwrap();
+    app.draw(&mut terminal).unwrap();
+    super::event_search_tests::finish_search(&mut app);
+    app.draw(&mut terminal).unwrap();
+    assert_eq!(app.view.event_panel.len(), 1);
+    let buffer = terminal.backend().buffer();
+    let text = buffer
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains("Bash"), "details header missing: {text}");
+    assert!(
+        text.contains(".local/bin/cctail"),
+        "details body missing: {text}"
     );
 }

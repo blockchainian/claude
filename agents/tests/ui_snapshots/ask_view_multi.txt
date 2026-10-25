@@ -12,3 +12,13 @@ Probe multiple choices?
 
 
 ←/→ switch · ↑/↓ move · Enter to confirm · Esc to cancel
+
+Footer spans:
+"←/→": bold=true, dim=false
+" switch · ": bold=false, dim=true
+"↑/↓": bold=true, dim=false
+" move · ": bold=false, dim=true
+"Enter": bold=true, dim=false
+" to confirm · ": bold=false, dim=true
+"Esc": bold=true, dim=false
+" to cancel": bold=false, dim=true

@@ -1,21 +1,29 @@
 //! Clickable paths and image placeholders: where they sit in a text, and where they were drawn.
 use super::text_selection::DrawnRow;
+use crate::images::ImageSource;
 use ratatui::{buffer::Buffer, layout::Rect};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+
+/// What a clicked link opens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum LinkTarget {
+    Path(PathBuf),
+    Image(ImageSource),
+}
 
 /// A link inside a text: the bytes it covers and the file, directory or URL it opens.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Link {
     pub range: Range<usize>,
-    pub target: PathBuf,
+    pub target: LinkTarget,
 }
 
 /// A link on screen: the cells it covers and what it opens.
-pub(super) type DrawnLink = (Rect, PathBuf);
+pub(super) type DrawnLink = (Rect, LinkTarget);
 
 /// The existing paths in `text`, and the label of each of `images`.
-pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::event::Image]) -> Vec<Link> {
+pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::images::Image]) -> Vec<Link> {
     let mut links = markdown_links(text, cwd);
     for link in path_links(text, &super::paths::text_paths(text, cwd), cwd) {
         if !links
@@ -28,7 +36,7 @@ pub(super) fn text_links(text: &str, cwd: &Path, images: &[crate::event::Image])
     for image in images {
         links.extend(text.match_indices(&image.label).map(|(at, label)| Link {
             range: at..at + label.len(),
-            target: image.path.clone(),
+            target: LinkTarget::Image(image.source.clone()),
         }));
     }
     links.sort_by_key(|link| link.range.start);
@@ -51,7 +59,7 @@ fn markdown_links(text: &str, cwd: &Path) -> Vec<Link> {
                 {
                     links.push(Link {
                         range: label,
-                        target,
+                        target: LinkTarget::Path(target),
                     });
                 }
             }
@@ -79,12 +87,12 @@ pub(super) fn path_links(text: &str, paths: &[Range<usize>], cwd: &Path) -> Vec<
             {
                 return Some(Link {
                     range: range.start..range.end + len,
-                    target: link.into(),
+                    target: LinkTarget::Path(link.into()),
                 });
             }
             Some(Link {
                 range: range.clone(),
-                target,
+                target: LinkTarget::Path(target),
             })
         })
         .collect();
@@ -102,7 +110,10 @@ pub(super) fn add_commits(text: &str, cwd: &Path, links: &mut Vec<Link>) {
             continue;
         }
         if let Some(target) = super::commits::target(cwd, &text[range.clone()]) {
-            links.push(Link { range, target });
+            links.push(Link {
+                range,
+                target: LinkTarget::Path(target),
+            });
         }
     }
     links.sort_by_key(|link| link.range.start);
@@ -121,6 +132,11 @@ pub(super) fn resolve(path: &str, cwd: &Path) -> Option<PathBuf> {
     } else {
         cwd.join(path)
     };
+    existing(target)
+}
+
+/// `target` while it is on disk: every local path is linked through here, since a deleted one opens nothing.
+pub(super) fn existing(target: PathBuf) -> Option<PathBuf> {
     target.exists().then_some(target)
 }
 
@@ -153,12 +169,13 @@ pub(super) fn drawn_links(rows: &[DrawnRow], links: &[Link]) -> Vec<DrawnLink> {
 pub(super) fn row_links(
     cells: &[(Range<u16>, Range<usize>)],
     links: &[Link],
-) -> Vec<(Range<u16>, PathBuf)> {
+) -> Vec<(Range<u16>, LinkTarget)> {
     let row = DrawnRow {
         segment: 0,
         x: 0,
         y: 0,
         cells: cells.to_vec(),
+        ..Default::default()
     };
     drawn_links(std::slice::from_ref(&row), links)
         .into_iter()
@@ -203,7 +220,7 @@ mod tests {
             text_links(text, Path::new("/"), &[]),
             [Link {
                 range: 5..13,
-                target: "https://example.com/a".into(),
+                target: LinkTarget::Path("https://example.com/a".into()),
             }]
         );
     }
@@ -214,7 +231,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
         buf.set_string(0, 0, "a界b c", ratatui::style::Style::default());
         let before = buf.clone();
-        let links = [(Rect::new(0, 0, 4, 1), PathBuf::from("/a"))];
+        let links = [(Rect::new(0, 0, 4, 1), LinkTarget::Path(PathBuf::from("/a")))];
         underline(&mut buf, &links);
         let symbols: Vec<_> = (0..5).map(|x| buf[(x, 0)].symbol().to_owned()).collect();
         assert_eq!(
@@ -246,7 +263,9 @@ mod tests {
             text_links(&text, dir.path(), &[]),
             [Link {
                 range: 0..text.len(),
-                target: format!("{}:10", super::super::vscode::open_target(&file).unwrap()).into(),
+                target: LinkTarget::Path(
+                    format!("{}:10", super::super::vscode::open_target(&file).unwrap()).into()
+                ),
             }]
         );
     }
@@ -303,9 +322,11 @@ mod tests {
             "see `src/ui/log.rs`, and/or ~/., {} and https://x.io/a/b [Image #1]",
             absolute.display()
         );
-        let images = [crate::event::Image {
+        let image = dir.path().join("1.png");
+        std::fs::write(&image, "").unwrap();
+        let images = [crate::images::Image {
             label: "[Image #1]".into(),
-            path: "/tmp/1.png".into(),
+            source: file_source(image.clone()),
         }];
         let links = text_links(&text, dir.path(), &images);
         let targets: Vec<_> = links
@@ -315,12 +336,66 @@ mod tests {
         assert_eq!(
             targets,
             [
-                ("src/ui/log.rs", dir.path().join("src/ui/log.rs")),
-                ("~/", home),
-                (absolute.to_str().unwrap(), absolute.clone()),
-                ("[Image #1]", PathBuf::from("/tmp/1.png")),
+                (
+                    "src/ui/log.rs",
+                    LinkTarget::Path(dir.path().join("src/ui/log.rs"))
+                ),
+                ("~/", LinkTarget::Path(home)),
+                (
+                    absolute.to_str().unwrap(),
+                    LinkTarget::Path(absolute.clone())
+                ),
+                ("[Image #1]", LinkTarget::Image(images[0].source.clone())),
             ]
         );
+    }
+
+    #[test]
+    fn deleted_images_keep_their_label_links() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("1.png");
+        std::fs::write(&path, crate::images::fixture_png()).unwrap();
+        let images = [crate::images::Image {
+            label: "[Image #1]".into(),
+            source: file_source(path.clone()),
+        }];
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(
+            text_links("see [Image #1]", Path::new("/"), &images).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn transcript_image_labels_link_without_materializing_the_image() {
+        let image = crate::images::Image {
+            label: "[Image #1]".into(),
+            source: crate::images::ImageSource::Record {
+                record: crate::event::SourceRecord {
+                    path: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                        .join("tests/fixtures/codex-images/wrapped.jsonl"),
+                    offset: 0,
+                },
+                pointer: "/payload/content/1/image_url".into(),
+            },
+        };
+        let links = text_links(
+            "see [Image #1]",
+            Path::new("/"),
+            std::slice::from_ref(&image),
+        );
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].range, 4..14);
+        assert_eq!(links[0].target, LinkTarget::Image(image.source));
+    }
+
+    fn file_source(path: PathBuf) -> crate::images::ImageSource {
+        let metadata = std::fs::metadata(&path).unwrap();
+        crate::images::ImageSource::File {
+            path,
+            len: metadata.len(),
+            modified: metadata.modified().unwrap(),
+        }
     }
 
     #[test]

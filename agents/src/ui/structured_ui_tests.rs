@@ -151,7 +151,7 @@ fn structured_xml_body_remaps_provider_path_ranges() {
             .borrow()
             .event_links
             .iter()
-            .any(|(_, target)| target == &path),
+            .any(|(_, target)| target == &LinkTarget::Path(path.clone())),
         "formatted XML lost the provider path: {rendered}"
     );
 }

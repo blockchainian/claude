@@ -41,10 +41,10 @@ CASES = [
     [('cat agents/AGENTS.md AGENTS.md', 'md')],
     [('nl -ba agents/Cargo.toml', 'toml')],
     [('sed -n 1,5p agents/src/main.rs', 'rs'), ('sed -n 6,10p agents/src/main.rs', 'rs')],
-    [('sed -n 1,5p agents/src/main.rs', 'rs'), ('head -n 5 agents/themes/build.py', 'py')],
+    [('sed -n 1,5p agents/src/main.rs', 'rs'), ('head -n 5 agents/scripts/test_shell_output_corpus.py', 'py')],
     [('echo boundary', None), ('head -n 5 agents/src/main.rs', 'rs')],
     [('head -n 5 agents/src/main.rs', 'rs'), ('echo boundary', None)],
-    [('head -n 5 agents/src/main.rs', 'rs'), ('echo boundary', None), ('head -n 5 agents/themes/build.py', 'py')],
+    [('head -n 5 agents/src/main.rs', 'rs'), ('echo boundary', None), ('head -n 5 agents/scripts/test_shell_output_corpus.py', 'py')],
     [('echo', None), ('head -n 5 agents/src/main.rs', 'rs'), ('echo', None)],
     [('head -n 5 agents/src/main.rs', 'rs'), ('wc -l agents/Cargo.toml', None)],
     [('head -n 5 agents/src/main.rs', 'rs'), ('grep -n package agents/Cargo.toml', None)],
@@ -87,7 +87,7 @@ BOUNDARY_CASES = [
     [('head -n 5 agents/src/main.rs', 'rs'),
      ('rg -n package agents/not-a-file.rs agents/Cargo.toml | head -25', None)],
     [('cat agents/not-a-file.py | head -25', None),
-     ('head -n 5 agents/themes/build.py', 'py')],
+     ('head -n 5 agents/scripts/test_shell_output_corpus.py', 'py')],
 ]
 
 
@@ -127,7 +127,7 @@ KNOWN_OUTPUT_CASES = [
     [('sed -n 1,10000p agents/src/main.rs', 'rs'),
      ('echo ----', None),
      ('sed -n 1,10000p agents/src/main.rs', 'rs')],
-    [('sed -n 1,10000p agents/themes/build.py', 'py'),
+    [('sed -n 1,10000p agents/scripts/test_shell_output_corpus.py', 'py'),
      ("printf 'python-end\\nrust-start\\n'", None),
      ('sed -n 1,10000p agents/src/main.rs', 'rs')],
 ]

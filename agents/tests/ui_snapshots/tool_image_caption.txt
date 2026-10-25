@@ -1,0 +1,50 @@
+  Active 1                                                                                                                                          Inactive 0
+────────────────────────────────────────┬─────────────── Working ────────────────┬──────────────────────────────────────────────────────────────────────────────
+                project                 │                 Prompt                 │                            Please inspect the task                 11:58:00
+ ● Task log example         Working     │            Task log example            │                            I will check the files                       10s
+                                        │                                        │                       Read src/main.rs， Read src/app.rs                 15s
+                                        │                                        │                                 failed check                            15s
+                                        │                                        │                            Also inspect the tests                  11:59:00
+                                        │                                        │                             run a background job                         5s
+                                        │                                        │ A long response whose whitespace collapses and whose body must b…  11:59:20
+                                        │                                        │                                   run tests                              5s
+                                        │                                        │ Read /workspace/agents/scratchpad/inline-images/fixture/slide.png  10:44:57
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+                                        │                                        │
+────────────────────────────────────────┴╴project ── Task log example ───────────┴──────────────────────────────────────────────────────────────────────────────
+ Task log example ❮ /bg
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Read                                             /workspace/agents/scratchpad/inline-images/fixture/slide.png                                        10:44:57
+
+                                                                                ↓
+                                                                        [image image/png]
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ? help

@@ -1,7 +1,7 @@
   Active 1                                                                                                                                          Inactive 0
 ────────────────────────────────────────┬─────────────── Working ────────────────┬──────────────────────────────────────────────────────────────────────────────
-              /tmp/project              │                 Prompt                 │                                   type · 1                                  │
- ● Task log example         Working     │ Task log example                       │      Apply patch ~/Documents/case-studies/khaby-lame/drafts/06.md      17ms │
+                project                 │                 Prompt                 │                                   type · 1                                  │
+ ● Task log example         Working     │            Task log example            │      Apply patch ~/Documents/case-studies/khaby-lame/drafts/06.md      17ms │
                                         │                                        │                               claude ask claude                         28s │
                                         │                                        │                                   Extension                              1s │
                                         │                                        │                                   ImageView                                 │
@@ -14,12 +14,12 @@
 ────────────────────────────────────────┴╴project ── Task log example ───────────┴──────────────────────────────────────────────────────────────────────────────
  Task log example ❯
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-                                                                            ImageView                                                                          ▕
+ ImageView                                                                                                                                                     ▕
                                                                                                                                                                ▕
                                                      {                                                                                                         ▕
+                                                       "type": "ImageView",                                                                                    ▕
                                                        "id": "exec-c4bea048-8537-4b20-9429-9fc6872f9a04",                                                      ▕
-                                                       "path": "file:///tmp/affiliates-page-1791341607.png",                                                   ▕
-                                                       "type": "ImageView"                                                                                     ▕
+                                                       "path": "file:///tmp/affiliates-page-1791341607.png"                                                    ▕
                                                      }…
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- ? help  esc previous  ↑/↓ move  enter open  n new
+ ? help

@@ -6,9 +6,13 @@ fn prompt(view: &mut View, text: &str, width: u16) -> (Rect, u16) {
     view.input_box.editor.set_text(text);
     screen(view, width, 40);
     let area = view.viewport.borrow().prompt.inner(Margin::new(1, 0));
-    view.input_box.editor.home();
+    view.input_box
+        .editor
+        .move_caret(crate::line_edit::Motion::TextStart);
     let x = view.input_box.cursor(area, &view.input_label()).unwrap().0;
-    view.input_box.editor.end();
+    view.input_box
+        .editor
+        .move_caret(crate::line_edit::Motion::TextEnd);
     screen(view, width, 40);
     (area, x)
 }
@@ -41,7 +45,9 @@ fn prompt_mouse_click_places_caret_on_wide_multiline_and_wrapped_cells() {
     let (area, x) = prompt(&mut view, text, 60);
     // Scroll to the beginning before checking a soft-wrapped row, which starts at the
     // box's left edge.
-    view.input_box.editor.home();
+    view.input_box
+        .editor
+        .move_caret(crate::line_edit::Motion::TextStart);
     screen(&view, 60, 40);
     click_mouse(
         &mut view,
@@ -79,7 +85,7 @@ fn prompt_mouse_drag_highlights_copies_and_replaces_selection() {
                     .modifier
                     .contains(ratatui::style::Modifier::REVERSED),
                 "column {column}; selection {:?}",
-                view.input_box.editor.selection_range()
+                view.input_box.editor.selection()
             );
         }
         assert!(
@@ -121,7 +127,7 @@ fn prompt_mouse_reverse_multiline_selection_survives_release_and_paste_replaces_
     );
     view.handle_paste("查");
     assert_eq!(view.input_box.editor.text(), "写查reply needed.");
-    assert!(view.input_box.editor.selection_range().is_none());
+    assert!(view.input_box.editor.selection().is_none());
 }
 
 #[test]

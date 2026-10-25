@@ -3,8 +3,6 @@ use super::*;
 
 /// Rows one wheel report scrolls the event list and details panels, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
 const WHEEL_ROWS: usize = 3;
-/// Wheel reports a scrollable event list entry's title holds before the wheel moves past it.
-const TITLE_HOLD_WHEELS: usize = 2;
 
 #[derive(PartialEq, Eq)]
 pub(super) enum ClickTarget {
@@ -23,7 +21,7 @@ pub(super) enum ClickTarget {
         label: &'static str,
     },
     Background(crate::model::BackgroundTask),
-    Link(PathBuf),
+    Link(LinkTarget),
     Heading(PathBuf),
     Title(SessionKey),
 }
@@ -40,15 +38,23 @@ enum PasteTarget {
     Prompt(Rect),
     Title(Rect),
     Branch(Rect),
-    Search(Rect),
-    EventSearch(Rect),
-    EventDetailSearch(Rect),
+    Search(Panel),
     Question(Rect),
 }
 
 impl View {
     pub(crate) fn set_event_sort(&mut self, sorting: EventSort) {
-        self.event_list.sort_initialized = true;
+        self.change_event_list(false, |list| {
+            list.settings_initialized = true;
+            list.sort = sorting;
+        });
+    }
+
+    fn change_event_list(
+        &mut self,
+        keep_selection: bool,
+        change: impl FnOnce(&mut task_ui::EventList),
+    ) {
         let following = self.following_event();
         let full = self
             .event_list
@@ -61,9 +67,14 @@ impl View {
             .and_then(|saved| saved.event)
             .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
         self.event_list.pinned_following = false;
-        self.event_list.sort = sorting;
+        change(&mut self.event_list);
         self.prepare_event_search();
-        self.event_list.cursor = full.and_then(|full| self.shown_row_position(full));
+        if keep_selection {
+            self.rematch_event_at(full);
+            self.cancel_list_selection(text_selection::Panel::EventList);
+        } else {
+            self.event_list.cursor = full.and_then(|full| self.shown_row_position(full));
+        }
         let background_event = background_full.and_then(|full| self.shown_row_position(full));
         if let Some(saved) = &mut self.event_list.background_return {
             saved.event = background_event;
@@ -72,7 +83,7 @@ impl View {
         self.event_list.unseen.set(0);
         if matches!(full, Some(EventRow::Pinned(_))) {
             self.reveal_event_selection();
-        } else if self.event_list.background_return.is_none() {
+        } else if self.event_list.background_return.is_none() && (!keep_selection || following) {
             self.show_newest_event();
         } else if following {
             self.event_list.scroll.set(self.event_max_scroll());
@@ -102,16 +113,18 @@ impl View {
         let click = self.pending_click.take().expect("click is due");
         match click.target {
             ClickTarget::Event { .. } | ClickTarget::ListBorder { .. } => None,
-            ClickTarget::Link(path) => Some(Action::OpenPath(path)),
-            ClickTarget::Heading(path) => click.open_heading.then_some(Action::OpenPath(path)),
+            ClickTarget::Link(target) => Some(Action::Open(target)),
+            ClickTarget::Heading(path) => click
+                .open_heading
+                .then_some(Action::Open(LinkTarget::Path(path))),
             ClickTarget::TaskDetails { .. }
             | ClickTarget::Background(_)
             | ClickTarget::Title(_) => None,
         }
     }
 
-    /// Double click on a task details body: select the event it came from, or copy a body no
-    /// event backs, such as a queued prompt or the task list.
+    /// Click on a task details body: select the event it came from, or, on a double click, copy
+    /// a body no event backs, such as a queued prompt or the task list.
     fn activate_task_details(&mut self, target: ClickTarget) -> Option<Action> {
         let ClickTarget::TaskDetails {
             session,
@@ -182,10 +195,8 @@ impl View {
             self.help = false;
             return;
         }
-        if self.searching {
-            self.searching = false;
-            self.search.clear();
-            self.reconcile_selection();
+        if self.search_focused() {
+            self.edit_search(self.active_panel, search_input::SearchInput::blur);
             return;
         }
         if self.selected_draft.is_some() {
@@ -195,17 +206,10 @@ impl View {
         if self.prompt_focused() {
             return;
         }
-        if self.active_panel == Panel::EventDetail && self.event_detail.search.editing {
-            self.event_detail.search.editing = false;
-            return;
-        }
-        if self.active_panel == Panel::EventList && self.event_list.search.editing {
-            self.event_list.search.editing = false;
-            return;
-        }
-        if let Some(previous) = self.event_list.background_return.take() {
+        if let Some(mut previous) = self.event_list.background_return.take() {
             self.select_event(previous.event);
 
+            previous.search.input.blur();
             self.event_detail.search = previous.search;
             self.event_detail.scroll.borrow_mut().offset = previous.scroll;
         } else {
@@ -213,16 +217,22 @@ impl View {
         }
     }
 
+    fn cycle_event_filter(&mut self) -> Option<Action> {
+        self.change_event_list(true, |list| {
+            list.filter = list.filter.next();
+            list.settings_initialized = true;
+        });
+        self.selected_id()
+            .cloned()
+            .map(|id| Action::PersistFiltering {
+                id,
+                filter: self.event_list.filter,
+            })
+    }
+
     fn open_background(&mut self, task: crate::model::BackgroundTask) {
         let Some(output) = task.output.as_deref() else {
             return;
-        };
-        let body = match std::fs::read_to_string(output) {
-            Ok(body) => body,
-            Err(error) => {
-                self.set_notice(Some(format!("Cannot read background events: {error}")));
-                return;
-            }
         };
         if self.event_list.background_return.is_none() {
             self.event_list.background_return = Some(BackgroundReturn {
@@ -255,14 +265,16 @@ impl View {
                 model_settings: None,
                 agent_thread_id: None,
                 agent_path: None,
-                event_detail_left: String::new(),
-                event_detail_title: task.description.clone(),
+                title: task.description.clone(),
                 show_event_detail: false,
                 id: String::new(),
-                title: task.description,
+                summary: task.description,
                 name: "background".into(),
                 input: Vec::new(),
-                output: Some(vec![crate::codex_await_output::section(body)]),
+                output: Some(vec![crate::event::Section::OutputFile {
+                    provider: crate::providers::ProviderId::Claude,
+                    path: output.into(),
+                }]),
                 exit_code: None,
                 is_error: false,
                 duration: None,
@@ -291,12 +303,181 @@ impl View {
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
+        if self.image_zoom_mouse(mouse) {
+            return None;
+        }
+        if let Some(action) = self.hint_mouse(mouse) {
+            return action;
+        }
         let focus = self.task_focus();
         let action = self.handle_panel_mouse(mouse);
         if self.task_focus() != focus {
             self.set_active_panel(self.active_panel);
         }
         self.finish_panel_action(action)
+    }
+
+    fn image_zoom_mouse(&mut self, mouse: MouseEvent) -> bool {
+        if self.event_detail.scroll.borrow().image_pressed {
+            match mouse.kind {
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.event_detail.scroll.borrow_mut().image_pressed = false;
+                    return true;
+                }
+                MouseEventKind::Drag(MouseButton::Left) => return true,
+                _ => {}
+            }
+        }
+        if !mouse.modifiers.is_empty() {
+            return false;
+        }
+        let image = self
+            .viewport
+            .borrow()
+            .event_detail_images
+            .iter()
+            .find(|image| image.area.contains((mouse.column, mouse.row).into()))
+            .map(|image| image.index);
+        let Some(index) = image else {
+            return false;
+        };
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            self.set_active_panel(Panel::EventDetail);
+            let was_active = self.event_detail.scroll.borrow().zoom_image == Some(index);
+            self.exit_image_zoom();
+            let mut detail = self.event_detail.scroll.borrow_mut();
+            if !was_active {
+                detail.zoom_image = Some(index);
+            }
+            detail.image_pressed = true;
+            self.mouse_press = None;
+            self.mouse_panel = None;
+            self.pending_click = None;
+            self.last_copy_click = None;
+            self.last_event_detail_click = None;
+            self.text_selection.borrow_mut().take();
+            return true;
+        }
+        if matches!(
+            mouse.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        ) && self.event_detail.scroll.borrow().zoom_image == Some(index)
+        {
+            self.zoom_event_image(mouse);
+            return true;
+        }
+        false
+    }
+
+    fn zoom_event_image(&mut self, mouse: MouseEvent) {
+        use super::inline_images::Zoom;
+
+        let mut detail = self.event_detail.scroll.borrow_mut();
+        if detail.zoomed_this_frame {
+            return;
+        }
+        let mut viewport = self.viewport.borrow_mut();
+        let Some(drawn) = viewport
+            .event_detail_images
+            .iter()
+            .find(|image| image.area.contains((mouse.column, mouse.row).into()))
+        else {
+            return;
+        };
+        let index = drawn.index;
+        let zoom = detail.zooms.get(&index).copied().unwrap_or_default();
+        let mut next = Zoom {
+            level: if mouse.kind == MouseEventKind::ScrollUp {
+                zoom.level.saturating_add(1)
+            } else {
+                zoom.level.saturating_sub(1)
+            },
+            left: zoom.left,
+        };
+        if next.level == zoom.level {
+            return;
+        }
+        let sizes = viewport.event_detail_columns.and_then(|columns| {
+            let mut images = self.inline_images.borrow_mut();
+            let images = images.as_mut()?;
+            let before = images.size(&drawn.image, columns.text.width, zoom)?;
+            let after = images.size(&drawn.image, columns.text.width, next)?;
+            (before.0 > 0 && before.1 > 0 && after.0 > 0 && after.1 > 0).then_some((
+                columns.text.width,
+                before,
+                after,
+            ))
+        });
+        if let Some((width, before, after)) = sizes {
+            let x = f32::from(mouse.column - drawn.area.x);
+            let fraction = zoom.left + x / f32::from(before.0);
+            let max_left = f32::from(after.0.saturating_sub(width)) / f32::from(after.0);
+            next.left = (fraction - x / f32::from(after.0)).clamp(0.0, max_left);
+            let row = usize::from(drawn.first_row) + usize::from(mouse.row - drawn.area.y);
+            let next_row = (row as f64 * f64::from(after.1) / f64::from(before.1)).round() as usize;
+            detail.offset = if next_row >= row {
+                detail.offset.saturating_add(next_row - row)
+            } else {
+                detail.offset.saturating_sub(row - next_row)
+            };
+        } else {
+            return;
+        }
+        detail.zooms.insert(index, next);
+        detail.zoomed_this_frame = true;
+        viewport.event_detail_layout = None;
+    }
+
+    /// Executes the action of a completed click on a rendered hint.
+    fn hint_mouse(&mut self, mouse: MouseEvent) -> Option<Option<Action>> {
+        let at = |x, y| {
+            self.viewport
+                .borrow()
+                .hint_targets
+                .iter()
+                .find(|target| target.area.contains((x, y).into()))
+                .copied()
+        };
+        let target = at(mouse.column, mouse.row);
+        let pressed = self.mouse_press.and_then(|(button, x, y, dragged)| {
+            (button == MouseButton::Left)
+                .then(|| at(x, y).map(|target| (target, dragged)))
+                .flatten()
+        });
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) if target.is_some() => {
+                self.mouse_press = Some((MouseButton::Left, mouse.column, mouse.row, false));
+                self.mouse_panel = None;
+                Some(None)
+            }
+            MouseEventKind::Drag(MouseButton::Left) if pressed.is_some() => {
+                if let Some((_, _, _, dragged)) = self.mouse_press.as_mut() {
+                    *dragged = true;
+                }
+                Some(None)
+            }
+            MouseEventKind::Up(MouseButton::Left) if pressed.is_some() || target.is_some() => {
+                self.mouse_press = None;
+                if let (Some((start, false)), Some(end)) = (pressed, target)
+                    && start.area == end.area
+                    && start.action == end.action
+                {
+                    return Some(match end.action {
+                        hints::HintAction::Help => {
+                            self.help = true;
+                            None
+                        }
+                        hints::HintAction::CloseHelp => {
+                            self.help = false;
+                            None
+                        }
+                        hints::HintAction::Question(action) => self.question_footer_action(action),
+                    });
+                }
+                Some(None)
+            }
+            _ => None,
+        }
     }
 
     fn handle_panel_mouse(&mut self, mouse: MouseEvent) -> Option<Action> {
@@ -324,6 +505,17 @@ impl View {
             _ => self.mouse_panel_at(position),
         };
         if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            for panel in [Panel::TaskList, Panel::EventList, Panel::EventDetail] {
+                let rect = self.search_rect(panel);
+                if rect.contains(position) {
+                    self.set_active_panel(panel);
+                    self.edit_search(panel, |search| search.click(rect, mouse.column));
+                    return None;
+                }
+            }
+            if self.search_focused() {
+                self.edit_search(self.active_panel, search_input::SearchInput::blur);
+            }
             let viewport = self.viewport.borrow();
             self.pressed_task = viewport
                 .list_rows
@@ -342,8 +534,11 @@ impl View {
                 });
         }
         if let Some(panel) = panel {
-            if panel != Panel::TaskList || !self.browsing_task_list(mouse) {
-                self.set_active_panel(panel);
+            let leaves_task = panel == Panel::TaskList && self.active_panel != Panel::TaskList;
+            self.set_active_panel(panel);
+            // The task the user left keeps its parked focus one Enter away.
+            if leaves_task {
+                self.task_entry_pending = self.has_parked_focus(self.panels_task.as_ref());
             }
         }
         if let Some(action) = self.overlay_mouse(mouse) {
@@ -376,23 +571,6 @@ impl View {
         match (previous, next) {
             (Some(first), Some(second)) => Some(Action::Batch(vec![first, second])),
             (action, None) | (None, action) => action,
-        }
-    }
-
-    fn browsing_task_list(&self, mouse: MouseEvent) -> bool {
-        match mouse.kind {
-            MouseEventKind::ScrollUp
-            | MouseEventKind::ScrollDown
-            | MouseEventKind::ScrollLeft
-            | MouseEventKind::ScrollRight => self
-                .viewport
-                .borrow()
-                .list
-                .contains((mouse.column, mouse.row).into()),
-            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
-                self.pressed_task.is_some()
-            }
-            _ => false,
         }
     }
 
@@ -484,49 +662,36 @@ impl View {
             }
             return Some(PasteTarget::Prompt(area));
         }
-        if self.searching && v.search.contains(at) {
-            return Some(PasteTarget::Search(v.search));
-        }
-        let row = super::event_list::search_input_rect(v.event_panel);
-        if self.event_list.search.editing && row.contains(at) {
-            return Some(PasteTarget::EventSearch(row));
-        }
-        let row = super::event_list::search_input_rect(v.event_detail);
-        if self.event_detail.search.editing && row.contains(at) {
-            return Some(PasteTarget::EventDetailSearch(row));
+        let panel = self.active_panel;
+        if self.search_focused() && self.search_rect(panel).contains(at) {
+            return Some(PasteTarget::Search(panel));
         }
         None
     }
 
     fn position_paste(&mut self, target: PasteTarget, mouse: MouseEvent) {
-        let search = format!("Search {PROMPT_MARKER} ");
         match target {
             PasteTarget::Terminal => unreachable!("terminal mouse handles paste"),
             PasteTarget::Prompt(area) => {
                 self.prepare_prompt();
                 self.input_box.paste_mouse(area, &self.input_label(), mouse);
             }
-            PasteTarget::Title(area) => self.rename.click_row_after(area, "", mouse.column),
+            PasteTarget::Title(area) => {
+                render::click_input_row(&mut self.rename, area, "", mouse.column)
+            }
             PasteTarget::Branch(area) => {
                 let selector = self.selector.as_mut().expect("branch selector");
                 selector.selected = selector.len() - 1;
-                selector
-                    .active_editor()
-                    .expect("branch editor")
-                    .click_row_after(area, &format!("New branch {PROMPT_MARKER} "), mouse.column);
+                render::click_input_row(
+                    selector.active_editor().expect("branch editor"),
+                    area,
+                    &format!("New branch {PROMPT_MARKER} "),
+                    mouse.column,
+                );
             }
-            PasteTarget::Search(area) => self.search.click_row_after(area, &search, mouse.column),
-            PasteTarget::EventSearch(area) => {
-                self.event_list
-                    .search
-                    .query
-                    .click_row_after(area, &search, mouse.column)
-            }
-            PasteTarget::EventDetailSearch(area) => {
-                self.event_detail
-                    .search
-                    .query
-                    .click_row_after(area, &search, mouse.column)
+            PasteTarget::Search(panel) => {
+                let rect = self.search_rect(panel);
+                self.edit_search(panel, |search| search.click(rect, mouse.column));
             }
             PasteTarget::Question(area) => {
                 self.position_question_paste(area, mouse.column, mouse.row);
@@ -779,9 +944,12 @@ impl View {
                 .is_some_and(|(button, _, _, dragged)| button == MouseButton::Right && !dragged)
             {
                 self.last_event_detail_click = None;
-                if self.selected_draft.is_some() {
+                if self.search_focused() || self.selected_draft.is_some() {
                     self.right_click();
                     return None;
+                }
+                if self.viewport.borrow().event_panel.contains(position) {
+                    return self.cycle_event_filter();
                 }
                 if self.viewport.borrow().event_detail.contains(position) {
                     return if self.terminal.is_some() {
@@ -800,11 +968,7 @@ impl View {
             }
             return None;
         }
-        if (self.active_panel == Panel::TaskDetails
-            && self.rename_target.is_some()
-            && !self.browsing_task_list(mouse))
-            || self.searching
-        {
+        if self.active_panel == Panel::TaskDetails && self.rename_target.is_some() {
             self.mouse_press = None;
             self.text_selection.borrow_mut().take();
             return None;
@@ -1025,9 +1189,8 @@ impl View {
                     .flatten()
             };
             if let Some(task) = background {
-                if self.defer_click(ClickTarget::Background(task.clone())) {
-                    self.open_background(task);
-                }
+                self.pending_click = None;
+                self.open_background(task);
                 return None;
             }
             if let Some(target) = self.link_at(position) {
@@ -1066,7 +1229,7 @@ impl View {
                     }
                     return None;
                 }
-                return Some(Action::OpenPath(target));
+                return Some(Action::Open(target));
             }
         }
         let fold_toggle = self
@@ -1120,10 +1283,7 @@ impl View {
                 } else if let Some(entry) = entry {
                     let entries = self.center_rows(&self.selectable_indices(), self.grouping);
                     let task = if let Some(id) = self.pressed_task.take() {
-                        let Some(index) = self.rows.iter().position(|row| row.id == id) else {
-                            return None;
-                        };
-                        index
+                        self.rows.iter().position(|row| row.id == id)?
                     } else {
                         match entries.get(entry) {
                             Some(super::navigation::CenterRow::Task(index)) => *index,
@@ -1139,9 +1299,6 @@ impl View {
                         last == task && now.duration_since(at) < self.double_click_interval
                     });
                     self.select(task);
-                    if self.task_entry_pending {
-                        self.enter_task();
-                    }
                     if let Some(id) = fold_toggle.filter(|id| *id == self.rows[task].id) {
                         if !self.collapsed[self.status_filter].remove(&id) {
                             self.collapsed[self.status_filter].insert(id);
@@ -1157,6 +1314,16 @@ impl View {
                 } else if let Some(target @ ClickTarget::TaskDetails { .. }) =
                     self.click_target_at(position)
                 {
+                    if matches!(
+                        target,
+                        ClickTarget::TaskDetails {
+                            source: Some(_),
+                            ..
+                        }
+                    ) {
+                        self.pending_click = None;
+                        return self.activate_task_details(target);
+                    }
                     if self.defer_click(target) {
                         return self
                             .task_details_target(position)
@@ -1219,7 +1386,7 @@ impl View {
     }
 
     /// What the link drawn at `position` opens, if one is there.
-    fn link_at(&self, position: ratatui::layout::Position) -> Option<PathBuf> {
+    fn link_at(&self, position: ratatui::layout::Position) -> Option<LinkTarget> {
         let viewport = self.viewport.borrow();
         [
             &viewport.list_links,
@@ -1238,7 +1405,7 @@ impl View {
         self.scroll_content_rows(forward, over_event, row, 1, false)
     }
 
-    /// With `wheel`, a scrollable event list entry's title holds reports in the direction of travel.
+    /// With `wheel`, an entry reached past the boundary starts at the end it was entered from.
     fn scroll_content_rows(
         &mut self,
         forward: bool,
@@ -1257,19 +1424,8 @@ impl View {
         let mut viewport = self.viewport.borrow_mut();
         if over_event && over_event_detail {
             let mut detail = self.event_detail.scroll.borrow_mut();
-            let title_hold = detail.title_hold.take();
-            if let Some((direction, left)) = title_hold
-                && wheel
-                && direction == forward
-                && viewport.event_detail_max > 0
-            {
-                detail.title_hold = (left > 1).then_some((direction, left - 1));
-                true
-            } else if detail.state.scroll_rows(forward, row, rows) {
+            if detail.state.scroll_rows(forward, row, rows) {
                 detail.offset = detail.state.position();
-                if wheel && !forward && detail.offset == 0 {
-                    detail.title_hold = Some((false, TITLE_HOLD_WHEELS));
-                }
                 true
             } else {
                 drop(viewport);
@@ -1277,9 +1433,7 @@ impl View {
                 let selected = self.event_list.cursor;
                 self.move_event_selection(forward);
                 if wheel && self.event_list.cursor != selected {
-                    let mut detail = self.event_detail.scroll.borrow_mut();
-                    detail.entry = Some(forward);
-                    detail.title_hold = forward.then_some((true, TITLE_HOLD_WHEELS));
+                    self.event_detail.scroll.borrow_mut().entry = Some(forward);
                 }
                 false
             }
@@ -1328,6 +1482,7 @@ impl View {
         }
     }
 
+    /// Up, down and page keys in the event detail change events at its boundaries like the wheel.
     fn navigate_event_detail(&mut self, panel: Panel, code: KeyCode) {
         if panel == Panel::EventDetail {
             if self.shown_terminal().is_some() {
@@ -1335,32 +1490,39 @@ impl View {
             }
             self.prepare_event_detail_scroll();
         }
-        let viewport = &mut *self.viewport.borrow_mut();
-        let mut detail = self.event_detail.scroll.borrow_mut();
-        let page = if panel == Panel::TaskDetails {
-            viewport.task_details.height
-        } else {
-            viewport.event_text.area.height
-        };
-        let state = if panel == Panel::TaskDetails {
-            &mut viewport.task_details_scroll
-        } else {
-            &mut detail.state
-        };
         let forward = matches!(code, KeyCode::Down | KeyCode::PageDown | KeyCode::End);
-        let row = state.content_top;
-        if matches!(code, KeyCode::Home | KeyCode::End) {
-            while state.scroll_window(forward, row) {}
-        } else {
+        let edge = matches!(code, KeyCode::Home | KeyCode::End);
+        let (row, rows) = {
+            let viewport = &mut *self.viewport.borrow_mut();
+            let mut detail = self.event_detail.scroll.borrow_mut();
+            let page = if panel == Panel::TaskDetails {
+                viewport.task_details.height
+            } else {
+                viewport.event_text.area.height
+            };
+            let state = if panel == Panel::TaskDetails {
+                &mut viewport.task_details_scroll
+            } else {
+                &mut detail.state
+            };
+            let row = state.content_top;
             let rows = if matches!(code, KeyCode::PageUp | KeyCode::PageDown) {
                 usize::from(page.max(1))
             } else {
                 1
             };
-            state.scroll_rows(forward, row, rows);
-        }
-        if panel == Panel::EventDetail {
-            detail.offset = detail.state.position();
+            if edge {
+                while state.scroll_window(forward, row) {}
+            } else if panel == Panel::TaskDetails {
+                state.scroll_rows(forward, row, rows);
+            }
+            if panel == Panel::EventDetail {
+                detail.offset = detail.state.position();
+            }
+            (row, rows)
+        };
+        if panel == Panel::EventDetail && !edge {
+            self.scroll_content_rows(forward, true, row, rows, true);
         }
     }
 
@@ -1438,8 +1600,7 @@ impl View {
         self.rename_target = Some(id);
         self.set_active_panel(Panel::TaskDetails);
         self.name_target = None;
-        self.search.clear();
-        self.searching = false;
+        self.edit_search(Panel::TaskList, search_input::SearchInput::close);
         None
     }
 
@@ -1451,14 +1612,9 @@ impl View {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
+        self.kill_buffer.begin_stroke();
         let focus = self.task_focus();
-        let action = match (
-            self.handle_key_event(key),
-            line_edit::take_clipboard_action(),
-        ) {
-            (Some(action), Some(clipboard)) => Some(Action::Batch(vec![action, clipboard])),
-            (action, None) | (None, action) => action,
-        };
+        let action = self.handle_key_event(key);
         if self.task_focus() != focus {
             self.set_active_panel(self.active_panel);
         }
@@ -1466,8 +1622,11 @@ impl View {
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) -> Option<Action> {
-        let key = line_edit::normalize_key(key);
+        let key = line_edit::keymap::normalize_control_code(key);
         if key.kind == KeyEventKind::Release {
+            return None;
+        }
+        if key.code == KeyCode::Esc && self.exit_image_zoom() {
             return None;
         }
         if let Some(prefix) = self.window_prefix.take() {
@@ -1477,6 +1636,29 @@ impl View {
                 self.move_panel(direction);
                 return None;
             }
+            if (key.modifiers - KeyModifiers::SHIFT).is_empty()
+                && let KeyCode::Char(command @ ('_' | '|' | '=')) = key.code
+            {
+                match command {
+                    '=' => self.clear_panel_zoom(),
+                    '|' if self.active_panel != Panel::Prompt => {
+                        self.height_zoom = Some(self.active_panel);
+                    }
+                    '_' if self.active_panel != Panel::Prompt
+                        && !(super::render::ScreenLayout::for_width(
+                            self.viewport.borrow().area.width,
+                        ) == super::render::ScreenLayout::Small
+                            && matches!(
+                                self.active_panel,
+                                Panel::TaskList | Panel::TaskDetails
+                            )) =>
+                    {
+                        self.width_zoom = Some(self.active_panel);
+                    }
+                    _ => {}
+                }
+                return None;
+            }
             let first = self.handle_panel_key(prefix);
             let second = self.handle_panel_key(key);
             return match (first, second) {
@@ -1484,14 +1666,58 @@ impl View {
                 (action, None) | (None, action) => action,
             };
         }
-        if key.code == KeyCode::Char('w') && key.modifiers == KeyModifiers::CONTROL {
+        if key.code == KeyCode::Char('w')
+            && key.modifiers == KeyModifiers::CONTROL
+            && !self.focused_editor_has_text()
+        {
             self.window_prefix = Some(key);
             return None;
         }
         self.handle_panel_key(key)
     }
 
+    fn focused_editor_has_text(&self) -> bool {
+        if self.help || self.confirm_dialog.is_some() || self.frozen_draft() {
+            return false;
+        }
+        if self.active_panel == Panel::TaskDetails
+            && let Some(editor) = self.selector.as_ref().and_then(Selector::branch_editor)
+        {
+            return !editor.is_empty();
+        }
+        if self.active_panel == Panel::TaskDetails
+            && let Some(editor) = self.title_editor()
+        {
+            return !editor.is_empty();
+        }
+        if self.search_focused() {
+            return self
+                .panel_search(self.active_panel)
+                .is_some_and(|search| !search.text().is_empty());
+        }
+        if self.active_panel == Panel::Prompt
+            && let Some(question) = self.active_question()
+            && let Some(editor) = question.focused_editor()
+        {
+            return !editor.is_empty();
+        }
+        self.prompt_focused()
+            && self.input_disabled().is_none()
+            && !self.input_box.editor.is_empty()
+    }
+
     fn handle_panel_key(&mut self, key: KeyEvent) -> Option<Action> {
+        let plain = !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
+        if self.help {
+            if key.code == KeyCode::Esc
+                || (plain && key.code == KeyCode::Char('?') && key.kind == KeyEventKind::Press)
+            {
+                self.help = false;
+            }
+            return None;
+        }
         if self.active_panel == Panel::TaskList
             && key.code == KeyCode::Char('l')
             && key.modifiers == KeyModifiers::CONTROL
@@ -1546,7 +1772,7 @@ impl View {
                     };
                 }
                 _ => {
-                    self.rename.handle(key);
+                    self.rename.handle_key(key, &mut self.kill_buffer);
                 }
             }
             return None;
@@ -1561,16 +1787,11 @@ impl View {
             )
             && !self.prompt_focused()
             && self.title_editor().is_none()
-            && !self.searching
-            && !self.task_search_editing()
+            && !self.search_focused()
         {
             return None;
         }
-        if self.prompt_focused()
-            && self.input_disabled().is_none()
-            && !self.searching
-            && !self.task_search_editing()
-        {
+        if self.prompt_focused() && self.input_disabled().is_none() && !self.search_focused() {
             if key.code == KeyCode::Esc && self.selected_draft.is_some() {
                 self.confirm_draft_delete();
                 return None;
@@ -1588,9 +1809,8 @@ impl View {
                 return None;
             }
             self.input_box.history = self.prompt_history.clone();
-            return match self.input_box.handle_key(key) {
+            return match self.input_box.handle_key(key, &mut self.kill_buffer) {
                 Some(prompt_box::PromptAction::Quit) => Some(Action::Quit),
-                Some(prompt_box::PromptAction::PasteImage) => Some(Action::PasteImage),
                 Some(prompt_box::PromptAction::Stop) => self.stop_from_input(),
                 Some(prompt_box::PromptAction::Submit(text)) => {
                     let images = self.input_box.editor.image_paths();
@@ -1608,21 +1828,17 @@ impl View {
                 None => None,
             };
         }
-        let plain = !key
-            .modifiers
-            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
         if self.active_panel == Panel::TaskList
             && self.confirm_dialog.is_none()
             && !self.help
-            && !self.task_search_editing()
-            && !self.searching
+            && !self.search_focused()
             && self
                 .selected_row()
                 .is_some_and(|session| !session.can_resume())
             && plain
             && matches!(
                 key.code,
-                KeyCode::Backspace | KeyCode::Char('f' | 'r' | 'x' | 'a' | 'h' | 'p')
+                KeyCode::Backspace | KeyCode::Char('f' | 'r' | 'x' | 'a')
             )
         {
             return self
@@ -1635,13 +1851,11 @@ impl View {
                         KeyCode::Char('x') => "Stop",
                         KeyCode::Char('a') => "Archive",
                         KeyCode::Backspace => "Delete",
-                        KeyCode::Char('h') => "Hide",
-                        KeyCode::Char('p') => "Pin",
                         _ => unreachable!("subagent session key is gated above"),
                     })
                 });
         }
-        self.notice = None;
+        self.feedback = None;
         if let Some(dialog) = &mut self.confirm_dialog {
             if plain {
                 match key.code {
@@ -1681,87 +1895,30 @@ impl View {
             }
             return None;
         }
-        if self.help {
-            if key.code == KeyCode::Esc
-                || (plain && key.code == KeyCode::Char('?') && key.kind == KeyEventKind::Press)
-            {
-                self.help = false;
-            }
-            return None;
-        }
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return Some(Action::Quit);
         }
-        if self.active_panel == Panel::EventDetail && self.event_detail.search.editing {
-            match key.code {
-                KeyCode::Esc => self.event_detail.search.clear(),
-                KeyCode::Enter => self.event_detail.search.editing = false,
-                _ => {
-                    self.event_detail.search.query.handle(key);
-                }
-            }
-            self.jump_event_detail_match();
-            return None;
-        }
-        if self.active_panel == Panel::EventList && self.event_list.search.editing {
-            let selected_full = self
-                .event_list
-                .cursor
-                .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
-            match key.code {
-                KeyCode::Esc => {
-                    self.event_list.search.clear();
-                }
-                KeyCode::Enter => self.event_list.search.editing = false,
-                _ => {
-                    let before = self.event_list.search.query.text().to_owned();
-                    if self.event_list.search.query.handle(key) {
-                        if self.event_list.search.query.text() != before {
-                            self.rematch_event_at(selected_full);
-                        }
-                        return None;
-                    }
-                }
-            }
-            if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
-                self.rematch_event_at(selected_full);
+        let active = self.active_panel;
+        if self.search_focused() {
+            let mut kills = std::mem::take(&mut self.kill_buffer);
+            let handled = self.edit_search(active, |search| search.handle_key(key, &mut kills));
+            self.kill_buffer = kills;
+            if handled {
                 return None;
             }
         }
-        if self.searching {
-            let before = self.search.text().to_owned();
-            if self.search.handle(key) {
-                if self.search.text() != before {
-                    if (plain && matches!(key.code, KeyCode::Char(_)))
-                        || key.code == KeyCode::Backspace
-                    {
-                        let selectable = self.selectable_indices();
-                        let selected = selectable
-                            .iter()
-                            .copied()
-                            .find(|&i| self.rows.get(i).is_some_and(|s| self.matches_search(s)))
-                            .or_else(|| selectable.first().copied())
-                            .unwrap_or(usize::MAX);
-                        self.select(selected);
-                    } else {
-                        self.reconcile_selection();
-                    }
-                    self.viewport.borrow_mut().scroll = 0;
-                }
+        if self.panel_search(active).is_some() {
+            if plain && key.code == KeyCode::Char('/') {
+                self.edit_search(active, search_input::SearchInput::focus);
                 return None;
             }
-            match key.code {
-                KeyCode::Esc => {
-                    self.search.clear();
-                    self.searching = false;
-                    self.reconcile_selection();
-                    return None;
-                }
-                KeyCode::F(3) => {
-                    self.searching = false;
-                    return None;
-                }
-                _ => {}
+            if key.code == KeyCode::Esc
+                && self
+                    .panel_search(active)
+                    .is_some_and(search_input::SearchInput::applied)
+            {
+                self.edit_search(active, search_input::SearchInput::close);
+                return None;
             }
         }
         if plain && key.code == KeyCode::Char('?') && key.kind == KeyEventKind::Press {
@@ -1770,22 +1927,6 @@ impl View {
         }
         if plain && matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
             self.set_filter(1 - self.status_filter);
-            return None;
-        }
-        if plain && key.code == KeyCode::Char('/') {
-            match self.active_panel {
-                Panel::TaskList => self.searching = true,
-                Panel::EventList => {
-                    self.event_list.search.editing = true;
-
-                    self.prepare_event_search();
-                }
-                Panel::EventDetail => {
-                    self.event_detail.search.editing = true;
-                    self.jump_event_detail_match();
-                }
-                _ => {}
-            }
             return None;
         }
         if plain
@@ -1805,7 +1946,7 @@ impl View {
                 }
             };
             self.cancel_event_detail_selection();
-            self.event_detail.search.clear();
+            self.edit_search(Panel::EventDetail, search_input::SearchInput::close);
             self.event_detail.scroll.borrow_mut().offset = 0;
             self.viewport.borrow_mut().event_detail_layout = None;
             self.refresh_transcript();
@@ -1815,7 +1956,11 @@ impl View {
             self.jump_event_agent();
             return None;
         }
-        if plain && key.code == KeyCode::Char('p') && self.active_panel == Panel::EventList {
+        if plain
+            && key.code == KeyCode::Char('p')
+            && (self.active_panel == Panel::EventList
+                || self.active_panel == Panel::EventDetail && !self.terminal_requested())
+        {
             return self.toggle_event_pin();
         }
         if let Some(code) = super::navigation::list_navigation(key) {
@@ -1853,15 +1998,14 @@ impl View {
         if !plain {
             return None;
         }
-        if self.selected_draft.is_some()
-            && matches!(key.code, KeyCode::Char('f' | 'a' | 'x' | 'r' | 'h'))
+        if self.selected_draft.is_some() && matches!(key.code, KeyCode::Char('f' | 'a' | 'x' | 'r'))
         {
             return Some(Action::Unsupported(match key.code {
                 KeyCode::Char('f') => "Fork",
                 KeyCode::Char('a') => "Archive",
                 KeyCode::Char('x') => "Stop",
                 KeyCode::Char('r') => "Rename",
-                _ => "Hide",
+                _ => unreachable!("draft session key is gated above"),
             }));
         }
         if key.code == KeyCode::Esc && self.selected_draft.is_some() {
@@ -1869,7 +2013,7 @@ impl View {
             return None;
         }
         match key.code {
-            KeyCode::Enter | KeyCode::Right => return self.activate(),
+            KeyCode::Enter => return self.activate(),
             KeyCode::Esc => self.select_previous_task(),
             KeyCode::Char('g') => {
                 self.grouping = self.grouping.next();
@@ -1933,20 +2077,17 @@ impl View {
                     Action::Unsupported("Stop")
                 });
             }
-            KeyCode::Char('h') => {
-                let id = self.selected_id()?.to_owned();
-                self.hide(&id);
-                return Some(Action::Hide(id));
-            }
             KeyCode::Char('p') => {
-                self.selected_id()?;
-                let group = self.group_index(self.selected)?;
-                if self.rows[group].status == SessionStatus::Inactive {
+                let id = self.selected_id()?.clone();
+                if self.status_filter == 0 && !self.can_pin(self.selected) {
                     return Some(Action::Unsupported("Pin"));
                 }
-                let id = self.rows[group].id.clone();
                 let pinned = !self.is_pinned(self.selected);
-                return Some(Action::TogglePin { id, pinned });
+                return Some(Action::TogglePin {
+                    id,
+                    pinned,
+                    tab: self.status_filter,
+                });
             }
             _ => {}
         }

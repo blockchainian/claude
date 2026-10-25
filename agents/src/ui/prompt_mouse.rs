@@ -13,9 +13,11 @@ impl PromptBox {
         let layout = self.layout(area.width, label);
         let start = self.mouse_scroll_start(&layout, usize::from(area.height));
         let (width, inset) = self.text_width.get();
-        self.editor.click_after(
-            width,
-            inset,
+        self.editor.place_caret(
+            line_edit::Wrap {
+                width,
+                first_row_inset: inset,
+            },
             usize::from(mouse.column.saturating_sub(area.x)),
             start + usize::from(mouse.row.saturating_sub(area.y)),
         );
@@ -38,16 +40,19 @@ impl PromptBox {
         let layout = self.layout(area.width, label);
         let start = self.mouse_scroll_start(&layout, usize::from(area.height));
         let (width, inset) = self.text_width.get();
-        let positions = self.editor.visual_positions(width, inset);
+        let positions = self.editor.caret_stops(line_edit::Wrap {
+            width,
+            first_row_inset: inset,
+        });
         let row = (start + usize::from(mouse.row.saturating_sub(area.y)))
-            .min(positions.last().expect("end caret").2);
+            .min(positions.last().expect("end caret").row);
         let column = usize::from(mouse.column.saturating_sub(area.x));
         let offset = positions
             .iter()
-            .rfind(|p| p.2 == row && p.1 <= column)
-            .or_else(|| positions.iter().find(|p| p.2 == row))
+            .rfind(|p| p.row == row && p.column <= column)
+            .or_else(|| positions.iter().find(|p| p.row == row))
             .expect("visual row has caret")
-            .0;
+            .byte;
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.editor.set_cursor(offset);
@@ -76,11 +81,14 @@ impl PromptBox {
 
     pub(super) fn highlight_mouse_selection(&self, area: Rect, buf: &mut Buffer, start: usize) {
         use unicode_segmentation::UnicodeSegmentation;
-        let Some(range) = self.editor.selection_range() else {
+        let Some(range) = self.editor.selection() else {
             return;
         };
         let (width, inset) = self.text_width.get();
-        for (byte, column, row) in self.editor.visual_positions(width, inset) {
+        for line_edit::CaretStop { byte, column, row } in self.editor.caret_stops(line_edit::Wrap {
+            width,
+            first_row_inset: inset,
+        }) {
             if !range.contains(&byte) || row < start || row >= start + usize::from(area.height) {
                 continue;
             }

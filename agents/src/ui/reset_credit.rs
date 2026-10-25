@@ -114,7 +114,7 @@ impl View {
             || self.help
             || self.rename_target.is_some()
             || self.name_target.is_some()
-            || self.searching
+            || self.search_focused()
             || self.selector.is_some()
         {
             return;

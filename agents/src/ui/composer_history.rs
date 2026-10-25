@@ -2,17 +2,17 @@ use super::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub(super) type History = Rc<RefCell<Vec<LineEdit>>>;
+pub(super) type History = Rc<RefCell<Vec<Composer>>>;
 
 #[derive(Default)]
 pub(super) struct Recall {
     position: Option<usize>,
-    draft: Option<LineEdit>,
+    draft: Option<Composer>,
 }
 
 pub(super) struct Search {
-    original: LineEdit,
-    pub(super) query: LineEdit,
+    original: Composer,
+    pub(super) query: Editor,
     position: Option<usize>,
 }
 
@@ -20,7 +20,7 @@ impl PromptBox {
     pub(super) fn record_submission(&mut self) {
         let mut entry = self.editor.clone();
         entry.clear_selection();
-        entry.end();
+        entry.move_caret(crate::line_edit::Motion::TextEnd);
         self.history.borrow_mut().push(entry);
         self.recall = Recall::default();
         self.search = None;
@@ -90,13 +90,17 @@ impl PromptBox {
         self.search_history(false, true);
     }
 
-    pub(super) fn history_key(&mut self, key: KeyEvent) -> bool {
+    pub(super) fn history_key(
+        &mut self,
+        key: KeyEvent,
+        kills: &mut crate::line_edit::KillBuffer,
+    ) -> bool {
         let control = key.modifiers == KeyModifiers::CONTROL;
         if self.search.is_none() {
             if control && key.code == KeyCode::Char('r') {
                 self.search = Some(Search {
                     original: self.editor.clone(),
-                    query: LineEdit::default(),
+                    query: Editor::default(),
                     position: None,
                 });
                 return true;
@@ -122,7 +126,7 @@ impl PromptBox {
             }
             _ => {
                 let search = self.search.as_mut().expect("history search");
-                if search.query.handle(key) {
+                if search.query.handle_key(key, kills) {
                     self.search_history(false, true);
                 }
             }

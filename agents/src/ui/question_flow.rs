@@ -151,8 +151,7 @@ impl View {
         if self.active_panel != Panel::Prompt
             || self.help
             || self.confirm_dialog.is_some()
-            || self.searching
-            || self.task_search_editing()
+            || self.search_focused()
         {
             return None;
         }
@@ -163,9 +162,26 @@ impl View {
         }
         let view = self.questions.views.get_mut(&id).expect("visible question");
         let before = view.stored();
-        let outcome = view.key(key);
+        let outcome = view.key(key, &mut self.kill_buffer);
         self.questions.changed(&id, before);
         Some(self.question_outcome(id, outcome))
+    }
+
+    pub(super) fn question_footer_action(
+        &mut self,
+        action: question_view::FooterAction,
+    ) -> Option<Action> {
+        let id = self.selected_id()?.clone();
+        self.questions.visible(&id)?;
+        if self.questions.sending.contains(&id) {
+            return None;
+        }
+        self.set_active_panel(Panel::Prompt);
+        let view = self.questions.views.get_mut(&id).expect("visible question");
+        let before = view.stored();
+        let outcome = view.footer_action(action);
+        self.questions.changed(&id, before);
+        self.question_outcome(id, outcome)
     }
 
     fn question_outcome(&mut self, id: SessionKey, outcome: Option<Outcome>) -> Option<Action> {
@@ -269,7 +285,7 @@ mod tests {
                 id: id.into(),
             },
             parent: None,
-            cwd: "/tmp/project".into(),
+            cwd: crate::test_project(),
             name: None,
             title: title.into(),
             prompt: title.into(),
@@ -373,6 +389,31 @@ mod tests {
         view.set_sessions(vec![row], false);
         view.set_active_panel(Panel::Prompt);
         view
+    }
+
+    #[test]
+    fn panel_zoom_preserves_question_height() {
+        for width in [120, 200] {
+            let mut view = fixture();
+            let area = Rect::new(0, 0, width, 45);
+            assert!(view.active_question().is_some());
+            screen(&view, width, 45);
+            let before = view.center_layout(area).prompt.height;
+            for panel in [
+                Panel::TaskList,
+                Panel::TaskDetails,
+                Panel::EventList,
+                Panel::EventDetail,
+            ] {
+                view.set_active_panel(panel);
+                for c in ['_', '|', '='] {
+                    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+                    view.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT));
+                    assert_eq!(view.center_layout(area).prompt.height, before);
+                    screen(&view, width, 45);
+                }
+            }
+        }
     }
 
     #[test]
@@ -589,8 +630,8 @@ mod tests {
             } else {
                 &view.event_detail.search
             };
-            assert!(search.editing);
-            assert_eq!(search.query.text(), "a");
+            assert!(!search.input.focused());
+            assert_eq!(search.input.text(), "a");
         }
     }
 
@@ -606,11 +647,7 @@ mod tests {
         view.render(area, &mut buffer);
         let input = view.viewport.borrow().title_input;
         assert_eq!(view.cursor_pos(area), Some((input.x + 4, input.y)));
-        assert!(
-            view.center_footer_hints()
-                .to_string()
-                .contains("enter rename")
-        );
+        assert_eq!(view.center_footer_hints().to_string(), "? help");
     }
 
     #[test]
@@ -770,7 +807,7 @@ mod tests {
                 "Claude AskUserQuestion disconnected",
             )),
         );
-        view.expire_messages(Instant::now() + Duration::from_secs(2));
+        view.expire_messages(Instant::now() + Duration::from_secs(6));
         assert!(screen(&view, 100, 40).contains("Claude AskUserQuestion disconnected"));
         assert!(matches!(
             view.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
@@ -822,6 +859,80 @@ mod tests {
             .lines()
             .position(|line| line.contains(text))
             .unwrap_or_else(|| panic!("{text} missing: {screen}")) as u16
+    }
+
+    #[test]
+    fn ask_footer_clicks_match_enter_and_escape() {
+        use unicode_width::UnicodeWidthStr;
+        for review in [false, true] {
+            for code in [KeyCode::Enter, KeyCode::Esc] {
+                let key = if code == KeyCode::Enter {
+                    "Enter"
+                } else {
+                    "Esc"
+                };
+                for offset in 0..key.len() as u16 {
+                    let mut keyboard = if review { multi_fixture() } else { fixture() };
+                    keyboard.handle_key(KeyCode::Down.into());
+                    if review {
+                        keyboard.handle_key(KeyCode::Enter.into());
+                        keyboard.handle_key(KeyCode::Right.into());
+                    }
+                    let mut mouse = if review { multi_fixture() } else { fixture() };
+                    mouse.handle_key(KeyCode::Down.into());
+                    if review {
+                        mouse.handle_key(KeyCode::Enter.into());
+                        mouse.handle_key(KeyCode::Right.into());
+                    }
+                    let text = screen(&mouse, 100, 40);
+                    let row = row_of(&text, "Enter to confirm");
+                    let line = text.lines().nth(usize::from(row)).unwrap();
+                    let column = line[..line.find(key).unwrap()].width() as u16;
+                    let Some(Action::AnswerQuestions {
+                        answer: clicked, ..
+                    }) = click(&mut mouse, column + offset, row)
+                    else {
+                        panic!("{key} offset {offset}, review {review} did not submit");
+                    };
+                    let Some(Action::AnswerQuestions {
+                        answer: pressed, ..
+                    }) = keyboard.handle_key(code.into())
+                    else {
+                        panic!("keyboard did not submit");
+                    };
+                    assert_eq!(clicked, pressed);
+                    assert_eq!(
+                        mouse.active_question().unwrap().stored(),
+                        keyboard.active_question().unwrap().stored()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ask_footer_confirms_or_cancels_while_editing_other() {
+        use unicode_width::UnicodeWidthStr;
+        for key in ["Enter", "Esc"] {
+            let mut view = fixture();
+            let other = row_of(&screen(&view, 100, 40), "Type something.");
+            click(&mut view, 10, other);
+            view.handle_paste("typed answer");
+            let before = view.active_question().unwrap().stored();
+            let text = screen(&view, 100, 40);
+            let row = row_of(&text, "Enter to confirm");
+            let line = text.lines().nth(usize::from(row)).unwrap();
+            let column = line[..line.find(key).unwrap()].width() as u16;
+            let Some(Action::AnswerQuestions { answer, .. }) = click(&mut view, column, row) else {
+                panic!("{key} did not submit while editing");
+            };
+            assert_eq!(answer.rejected, key == "Esc");
+            assert_eq!(
+                answer.answers["Probe single choice?"].other.as_deref(),
+                Some("typed answer")
+            );
+            assert_eq!(view.active_question().unwrap().stored(), before);
+        }
     }
 
     #[test]
@@ -949,10 +1060,9 @@ mod tests {
     }
 
     #[test]
-    fn ask_flow_uses_question_footer_instead_of_open_hint() {
+    fn ask_flow_keeps_help_in_main_footer() {
         let view = fixture();
         let text = view.center_footer_hints().to_string();
-        assert!(!text.contains("open"), "{text}");
-        assert!(text.contains("confirm"), "{text}");
+        assert_eq!(text, "? help");
     }
 }

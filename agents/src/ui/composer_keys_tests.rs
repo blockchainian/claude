@@ -7,7 +7,11 @@ fn focused(text: &str, width: u16) -> PromptBox {
     prompt
 }
 fn press(prompt: &mut PromptBox, code: KeyCode, modifiers: KeyModifiers) -> Option<PromptAction> {
-    prompt.handle_key(KeyEvent::new(code, modifiers))
+    let mut kills = crate::line_edit::KillBuffer::default();
+    {
+        kills.begin_stroke();
+        prompt.handle_key(KeyEvent::new(code, modifiers), &mut kills)
+    }
 }
 #[test]
 fn vertical_keys_keep_column_across_short_and_wide_lines() {
@@ -34,6 +38,7 @@ fn vertical_keys_follow_wrapped_rows_and_graphemes() {
 }
 #[test]
 fn newline_keys_preserve_editor_and_release_is_ignored() {
+    let mut kills = crate::line_edit::KillBuffer::default();
     for (code, modifiers) in [
         (KeyCode::Enter, KeyModifiers::SHIFT),
         (KeyCode::Enter, KeyModifiers::ALT),
@@ -45,7 +50,10 @@ fn newline_keys_preserve_editor_and_release_is_ignored() {
         assert_eq!(prompt.editor.text(), "hello\n");
         let mut release = KeyEvent::new(code, modifiers);
         release.kind = KeyEventKind::Release;
-        prompt.handle_key(release);
+        {
+            kills.begin_stroke();
+            prompt.handle_key(release, &mut kills)
+        };
         assert_eq!(prompt.editor.text(), "hello\n");
     }
 }
@@ -192,7 +200,7 @@ fn history_search_receives_slash_before_panel_search_routing() {
         .name = Some("History".into());
     view.close_selector();
     view.set_active_panel(Panel::Prompt);
-    let mut entry = LineEdit::default();
+    let mut entry = Editor::default();
     entry.set_text("path/to/file");
     view.prompt_history.borrow_mut().push(entry);
     view.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));

@@ -42,7 +42,7 @@ fn registry_app(kind: &str) -> (tempfile::TempDir, App, PathBuf, serde_json::Val
     );
     app.refresh();
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     super::event_search_tests::finish_search(&mut app);
     (directory, app, path, registry)
 }
@@ -57,6 +57,16 @@ fn screen(app: &mut App) -> String {
         .iter()
         .map(|cell| cell.symbol())
         .collect()
+}
+
+fn assert_rejected_paste_is_error(app: &mut App) {
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(240, 40)).unwrap();
+    app.draw(&mut terminal).unwrap();
+    let column = 240 - "Cannot paste here".len() as u16;
+    let actual = terminal.backend().buffer()[(column, 39)].fg;
+    app.view.show_error("Cannot paste here".into());
+    app.draw(&mut terminal).unwrap();
+    assert_eq!(actual, terminal.backend().buffer()[(column, 39)].fg);
 }
 
 fn complete_input(app: &mut App, expected: &str) {
@@ -210,28 +220,32 @@ fn batch_dispatches_in_order_and_stops_when_action_exits() {
     let id = app.view.selected_id().unwrap().clone();
     assert!(!app.handle_action(Some(Action::Batch(vec![
         Action::TogglePin {
+            tab: 0,
             id: id.clone(),
             pinned: true
         },
         Action::TogglePin {
+            tab: 0,
             id: id.clone(),
             pinned: false
         },
     ]))));
-    assert!(Preferences::load(directory.path()).pinned.is_empty());
+    assert!(Preferences::load(directory.path()).pinned.active.is_empty());
     assert!(app.handle_action(Some(Action::Batch(vec![
         Action::TogglePin {
+            tab: 0,
             id: id.clone(),
             pinned: true
         },
         Action::Quit,
         Action::TogglePin {
+            tab: 0,
             id: id.clone(),
             pinned: false
         },
     ]))));
     let preferences = Preferences::load(directory.path());
-    assert_eq!(preferences.pinned, vec![id]);
+    assert_eq!(preferences.pinned.active, vec![id]);
 }
 
 #[test]
@@ -243,19 +257,20 @@ fn pinning_puts_the_session_first() {
         ..first.clone()
     };
     let pin = |id: &SessionKey, pinned| Action::TogglePin {
+        tab: 0,
         id: id.clone(),
         pinned,
     };
     app.handle_action(Some(pin(&first, true)));
     app.handle_action(Some(pin(&second, true)));
     assert_eq!(
-        Preferences::load(directory.path()).pinned,
+        Preferences::load(directory.path()).pinned.active,
         vec![second.clone(), first.clone()]
     );
     app.handle_action(Some(pin(&first, false)));
     app.handle_action(Some(pin(&first, true)));
     assert_eq!(
-        Preferences::load(directory.path()).pinned,
+        Preferences::load(directory.path()).pinned.active,
         vec![first, second]
     );
 }
@@ -265,6 +280,7 @@ fn inactive_sessions_lose_their_pin() {
     let (directory, mut app, registry, _) = registry_app("bg");
     let id = app.view.selected_id().unwrap().clone();
     app.handle_action(Some(Action::TogglePin {
+        tab: 0,
         id: id.clone(),
         pinned: true,
     }));
@@ -275,7 +291,7 @@ fn inactive_sessions_lose_their_pin() {
         app.session(&id).unwrap().status,
         crate::model::SessionStatus::Inactive
     );
-    assert!(Preferences::load(directory.path()).pinned.is_empty());
+    assert!(Preferences::load(directory.path()).pinned.active.is_empty());
     assert!(!screen(&mut app).contains("Pinned"));
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
@@ -283,7 +299,11 @@ fn inactive_sessions_lose_their_pin() {
     assert_eq!(
         app.view
             .handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
-        Some(Action::Unsupported("Pin"))
+        Some(Action::TogglePin {
+            tab: 1,
+            id,
+            pinned: true
+        })
     );
 }
 
@@ -294,10 +314,7 @@ fn codex_stop_refreshes_after_failure_and_reports_in_footer() {
     let db = rusqlite::Connection::open(&database).unwrap();
     db.execute_batch(include_str!("../tests/fixtures/codex-state.sql"))
         .unwrap();
-    let provider = crate::providers::codex::CodexProvider::new(
-        directory.path().to_owned(),
-        directory.path().join("manager"),
-    );
+    let provider = crate::providers::codex::CodexProvider::new(directory.path().to_owned());
     let mut app = App::new(
         Hub::new(vec![Box::new(provider)]),
         directory.path().to_owned(),
@@ -481,7 +498,11 @@ fn app_creates_worktree_with_the_task_request() {
 
 #[test]
 fn registry_background_title_needs_and_delete_warning_reach_the_screen() {
+    let Some(clipboard) = paste_clipboard_directory() else {
+        return;
+    };
     let (directory, mut app, _path, _registry) = registry_app("bg");
+    fs::write(clipboard.join("text"), "original clipboard").unwrap();
     let state_path = directory.path().join("jobs/e772d00b/state.json");
     let mut state: serde_json::Value =
         serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
@@ -529,7 +550,13 @@ fn registry_background_title_needs_and_delete_warning_reach_the_screen() {
         "{rendered}"
     );
     app.handle_event(Event::Paste("blocked-paste-proof".into()));
-    assert!(!screen(&mut app).contains("blocked-paste-proof"));
+    let rendered = screen(&mut app);
+    assert!(!rendered.contains("blocked-paste-proof"));
+    assert!(rendered.contains("Cannot paste here"), "{rendered}");
+    assert_eq!(
+        fs::read_to_string(clipboard.join("text")).unwrap(),
+        "original clipboard"
+    );
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
     assert!(app.sessions[0].transcript.as_ref().unwrap().is_file());
 }
@@ -544,7 +571,6 @@ fn codex_setting_actions_report_daemon_connection_failures() {
     let mut app = App::new(
         Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
             directory.path().into(),
-            directory.path().join("manager"),
         ))]),
         directory.path().into(),
     );
@@ -599,4 +625,268 @@ fn duplicate_inputs_keep_the_screen_and_do_not_start_another_job() {
     }
     complete_input(&mut app, "Claude background session identity changed");
     assert!(app.receiver.try_recv().is_err());
+}
+
+#[test]
+fn child_pin_persists_independently_and_survives_inactive_parent() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let mut parent = app
+        .session(app.view.selected_id().unwrap())
+        .unwrap()
+        .clone();
+    let mut child = parent.clone();
+    child.id.id = "child".into();
+    child.parent = Some(parent.id.clone());
+    app.view
+        .set_sessions(vec![parent.clone(), child.clone()], false);
+    app.handle_action(Some(Action::TogglePin {
+        tab: 0,
+        id: parent.id.clone(),
+        pinned: true,
+    }));
+    app.handle_action(Some(Action::TogglePin {
+        tab: 0,
+        id: child.id.clone(),
+        pinned: true,
+    }));
+    assert_eq!(
+        Preferences::load(directory.path()).pinned.active,
+        vec![child.id.clone(), parent.id.clone()]
+    );
+    app.handle_action(Some(Action::TogglePin {
+        tab: 0,
+        id: child.id.clone(),
+        pinned: false,
+    }));
+    assert_eq!(
+        Preferences::load(directory.path()).pinned.active,
+        vec![parent.id.clone()]
+    );
+    app.handle_action(Some(Action::TogglePin {
+        tab: 0,
+        id: child.id.clone(),
+        pinned: true,
+    }));
+    parent.status = crate::model::SessionStatus::Inactive;
+    app.forget_inactive_state(&[parent.clone(), child.clone()]);
+    assert_eq!(
+        Preferences::load(directory.path()).pinned.active,
+        vec![child.id.clone()]
+    );
+    child.status = crate::model::SessionStatus::Inactive;
+    app.forget_inactive_state(&[parent, child]);
+    assert!(Preferences::load(directory.path()).pinned.active.is_empty());
+}
+
+#[test]
+fn inactive_child_pin_survives_until_its_root_is_inactive() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let mut root = app
+        .session(app.view.selected_id().unwrap())
+        .unwrap()
+        .clone();
+    let mut parent = root.clone();
+    parent.id.id = "parent".into();
+    parent.parent = Some(root.id.clone());
+    parent.status = crate::model::SessionStatus::Inactive;
+    let mut child = parent.clone();
+    child.id.id = "child".into();
+    child.parent = Some(parent.id.clone());
+    app.sessions = vec![child.clone(), parent.clone(), root.clone()];
+    app.view.set_sessions(app.sessions.clone(), false);
+    app.handle_action(Some(Action::TogglePin {
+        tab: 0,
+        id: child.id.clone(),
+        pinned: true,
+    }));
+    app.forget_inactive_state(&[child.clone(), parent.clone(), root.clone()]);
+    assert_eq!(
+        Preferences::load(directory.path()).pinned.active,
+        vec![child.id.clone()]
+    );
+    assert!(screen(&mut app).contains("Pinned"));
+    root.status = crate::model::SessionStatus::Inactive;
+    parent.status = crate::model::SessionStatus::Working;
+    app.forget_inactive_state(&[child, parent, root]);
+    assert!(Preferences::load(directory.path()).pinned.active.is_empty());
+    assert!(!screen(&mut app).contains("Pinned"));
+}
+
+#[test]
+fn tab_pins_persist_independently_and_only_active_pins_expire() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let mut session = app
+        .session(app.view.selected_id().unwrap())
+        .unwrap()
+        .clone();
+    let id = session.id.clone();
+    let second = SessionKey {
+        id: "second".into(),
+        ..id.clone()
+    };
+    let pin = |id: &SessionKey, tab, pinned| {
+        Some(Action::TogglePin {
+            id: id.clone(),
+            tab,
+            pinned,
+        })
+    };
+    for tab in [0, 1] {
+        app.handle_action(pin(&id, tab, true));
+        app.handle_action(pin(&second, tab, true));
+    }
+    app.handle_action(pin(&id, 0, false));
+    let pins = Preferences::load(directory.path()).pinned;
+    assert_eq!(pins.active, std::slice::from_ref(&second));
+    assert_eq!(pins.inactive, [second.clone(), id.clone()]);
+    app.handle_action(pin(&id, 0, true));
+    session.status = crate::model::SessionStatus::Inactive;
+    app.forget_inactive_state(&[session]);
+    let pins = Preferences::load(directory.path()).pinned;
+    assert_eq!(pins.active, std::slice::from_ref(&second));
+    assert_eq!(pins.inactive, [second.clone(), id.clone()]);
+    app.handle_action(pin(&id, 1, false));
+    let pins = Preferences::load(directory.path()).pinned;
+    assert_eq!(pins.active, std::slice::from_ref(&second));
+    assert_eq!(pins.inactive, [second]);
+}
+
+// Isolate the clipboard environment from tests running in other threads.
+pub(super) fn paste_clipboard_directory() -> Option<PathBuf> {
+    let thread = std::thread::current();
+    let name = thread.name().unwrap();
+    if std::env::var("AGENTS_PASTE_TEST").as_deref() == Ok(name) {
+        return Some(std::env::var_os("AGENTS_CLIPBOARD_DIR").unwrap().into());
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", name, "--nocapture"])
+        .env("AGENTS_PASTE_TEST", name)
+        .env("AGENTS_CLIPBOARD_DIR", directory.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    None
+}
+
+#[test]
+fn stray_paste_from_task_and_event_lists_focuses_prompt() {
+    for event_list in [false, true] {
+        let (_directory, mut app, _, _) = registry_app("bg");
+        if event_list {
+            let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(240, 40)).unwrap();
+            app.draw(&mut terminal).unwrap();
+            let buffer = terminal.backend().buffer();
+            let (column, row) = (0..40)
+                .find_map(|y| {
+                    (120..235).find_map(|x| {
+                        let text: String = (x..240).map(|x| buffer[(x, y)].symbol()).collect();
+                        text.starts_with("Stop hook").then_some((x, y))
+                    })
+                })
+                .expect("event list fixture row");
+            for kind in [
+                MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Up(MouseButton::Left),
+            ] {
+                app.handle_event(Event::Mouse(MouseEvent {
+                    kind,
+                    column,
+                    row,
+                    modifiers: KeyModifiers::NONE,
+                }));
+            }
+        }
+        app.handle_event(Event::Paste("dictation paste".into()));
+        assert!(app.view.pasting_prompt(), "paste must focus the prompt");
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('!'),
+            KeyModifiers::NONE,
+        )));
+        assert!(screen(&mut app).contains("dictation paste!"));
+    }
+}
+
+#[test]
+fn stray_paste_under_help_preserves_clipboard_without_entering_help() {
+    let Some(clipboard) = paste_clipboard_directory() else {
+        return;
+    };
+    fs::write(clipboard.join("text"), "original clipboard").unwrap();
+    let (_directory, mut app, _, _) = registry_app("bg");
+    app.handle_event(Event::Key(KeyEvent::new(
+        KeyCode::Char('?'),
+        KeyModifiers::NONE,
+    )));
+    app.handle_event(Event::Paste("must-not-enter-help".into()));
+    assert_eq!(
+        fs::read_to_string(clipboard.join("text")).unwrap(),
+        "original clipboard"
+    );
+    assert!(!screen(&mut app).contains("must-not-enter-help"));
+    assert!(screen(&mut app).contains("Cannot paste here"));
+    assert_rejected_paste_is_error(&mut app);
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+    assert!(!screen(&mut app).contains("must-not-enter-help"));
+}
+
+#[test]
+fn stray_paste_to_disabled_task_preserves_clipboard() {
+    let Some(clipboard) = paste_clipboard_directory() else {
+        return;
+    };
+    fs::write(clipboard.join("text"), "original clipboard").unwrap();
+    let (_directory, mut app, _, _) = registry_app("interactive");
+    app.handle_event(Event::Paste("disabled dictation".into()));
+    assert_eq!(
+        fs::read_to_string(clipboard.join("text")).unwrap(),
+        "original clipboard"
+    );
+    assert!(!app.view.pasting_prompt());
+    assert!(!screen(&mut app).contains("disabled dictation"));
+    assert!(screen(&mut app).contains("Cannot paste here"));
+    assert_rejected_paste_is_error(&mut app);
+}
+
+#[test]
+fn stray_paste_image_path_becomes_an_attachment() {
+    let (directory, mut app, _, _) = registry_app("bg");
+    let image = directory.path().join("paste image (test).png");
+    fs::write(&image, crate::images::fixture_png()).unwrap();
+    app.handle_event(Event::Paste(format!("\"{}\"", image.display())));
+    assert!(app.view.pasting_prompt());
+    let rendered = screen(&mut app);
+    assert!(rendered.contains("[Image #1]"), "{rendered}");
+    assert!(!rendered.contains("paste image (test).png"));
+}
+
+#[test]
+fn stray_paste_to_frozen_draft_preserves_clipboard() {
+    let Some(clipboard) = paste_clipboard_directory() else {
+        return;
+    };
+    fs::write(clipboard.join("text"), "original clipboard").unwrap();
+    let (directory, mut app, _, _) = registry_app("bg");
+    let draft = app.view.add_draft(crate::ui::DraftSetup {
+        provider: ProviderId::Claude,
+        cwd: directory.path().to_owned(),
+        model: None,
+        effort: None,
+        branch: String::new(),
+    });
+    app.view
+        .draft_job_created(draft, "pending-draft-job".into());
+    app.handle_event(Event::Paste("frozen dictation".into()));
+    assert_eq!(
+        fs::read_to_string(clipboard.join("text")).unwrap(),
+        "original clipboard"
+    );
+    let rendered = screen(&mut app);
+    assert!(rendered.contains("Cannot paste here"), "{rendered}");
+    assert!(!rendered.contains("frozen dictation"));
 }

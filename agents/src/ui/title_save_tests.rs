@@ -15,14 +15,6 @@ fn editing_title(width: u16) -> (tempfile::TempDir, View, SessionKey, String) {
     (directory, view, id, original)
 }
 
-fn leave_title_with_keyboard(view: &mut View) -> Option<Action> {
-    assert_eq!(
-        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
-        None
-    );
-    view.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE))
-}
-
 fn leave_title_with_mouse(view: &mut View) -> Option<Action> {
     let prompt = view.viewport.borrow().prompt;
     assert!(!prompt.is_empty());
@@ -35,13 +27,14 @@ fn leave_title_with_mouse(view: &mut View) -> Option<Action> {
 }
 
 #[test]
-fn changed_title_keyboard_blur_parks_editor() {
+fn changed_title_mouse_blur_parks_editor() {
     for width in [100, 200] {
         let (_directory, mut view, _id, _original) = editing_title(width);
-        view.rename.set_text("  Saved by keyboard  ");
-        assert_eq!(leave_title_with_keyboard(&mut view), None);
-        assert_eq!(view.active_panel, Panel::TaskList);
+        view.rename.set_text("  Saved by mouse  ");
+        assert_eq!(leave_title_with_mouse(&mut view), None);
+        assert_eq!(view.active_panel, Panel::Prompt);
         assert!(view.rename_target.is_some());
+        assert_eq!(view.rename.text(), "  Saved by mouse  ");
         assert_eq!(view.take_pending_action(), None);
     }
 }
@@ -102,11 +95,10 @@ fn unchanged_title_enter_closes_without_provider_request() {
 #[test]
 fn unchanged_title_blur_parks_without_provider_request() {
     for width in [100, 200] {
-        for route in ["keyboard", "mouse", "automatic"] {
+        for route in ["mouse", "automatic"] {
             let (_directory, mut view, _id, original) = editing_title(width);
             view.rename.set_text(&format!("  {}  ", original.trim()));
             let action = match route {
-                "keyboard" => leave_title_with_keyboard(&mut view),
                 "mouse" => leave_title_with_mouse(&mut view),
                 "automatic" => {
                     view.set_active_panel(Panel::EventDetail);
@@ -137,9 +129,11 @@ fn activating_task_details_again_keeps_title_editing() {
 fn task_title_and_focus_park_across_task_switches() {
     let (_directory, mut view, id, _) = editing_title(200);
     view.rename.set_text("Half title");
+    let mut kills = crate::line_edit::KillBuffer::default();
+    kills.begin_stroke();
     view.rename
-        .handle(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-    let caret = view.rename.window(80).1;
+        .handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), &mut kills);
+    let caret = view.rename.window(80).caret_column;
     view.set_active_panel(Panel::TaskList);
     assert_eq!(view.take_pending_action(), None);
     let other = view.rows.iter().position(|row| row.id != id).unwrap();
@@ -150,7 +144,7 @@ fn task_title_and_focus_park_across_task_switches() {
     view.select(original);
     assert_eq!(view.active_panel, Panel::TaskDetails);
     assert_eq!(view.rename.text(), "Half title");
-    assert_eq!(view.rename.window(80).1, caret);
+    assert_eq!(view.rename.window(80).caret_column, caret);
     assert!(view.title_editor().is_some());
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
@@ -211,7 +205,7 @@ fn attention_returns_to_parked_title_without_submitting() {
         if from_list {
             view.set_active_panel(Panel::TaskList);
             view.handle_key(KeyCode::Char('/').into());
-            assert!(view.searching);
+            assert!(view.search.focused());
         }
         let mut rows = view.rows.clone();
         let second = rows.iter_mut().find(|row| row.id != first).unwrap();
@@ -220,7 +214,7 @@ fn attention_returns_to_parked_title_without_submitting() {
         view.set_sessions(rows, false);
         assert_eq!(view.selected_id(), Some(&second_key));
         assert_eq!(view.active_panel, Panel::Prompt);
-        assert!(!view.searching);
+        assert!(!view.search.focused());
         let mut rows = view.rows.clone();
         rows.iter_mut()
             .find(|row| row.id == second_key)
@@ -278,7 +272,7 @@ fn task_return_routes_restore_parked_title_and_caret() {
         for _ in 0..4 {
             key(&mut view, KeyCode::Left);
         }
-        let caret = view.rename.window(80).1;
+        let caret = view.rename.window(80).caret_column;
         let second = view
             .rows
             .iter()
@@ -290,6 +284,8 @@ fn task_return_routes_restore_parked_title_and_caret() {
         view.select(view.rows.iter().position(|row| row.id == second).unwrap());
         if route == "mouse" {
             click_task_row(&mut view, &first);
+            assert_eq!(view.active_panel, Panel::TaskList);
+            assert_eq!(key(&mut view, KeyCode::Enter), None);
         } else if route == "previous" {
             assert_eq!(key(&mut view, KeyCode::Esc), None);
         } else {
@@ -354,7 +350,7 @@ fn task_return_routes_restore_parked_title_and_caret() {
         };
         assert_eq!(view.active_panel, expected_panel, "{route}");
         assert_eq!(view.rename.text(), "AlphaBeta", "{route}");
-        assert_eq!(view.rename.window(80).1, caret, "{route}");
+        assert_eq!(view.rename.window(80).caret_column, caret, "{route}");
         view.set_active_panel(Panel::TaskDetails);
         assert_eq!(key(&mut view, KeyCode::Char('X')), None);
         assert_eq!(view.rename.text(), "AlphaXBeta", "{route}");
@@ -402,19 +398,14 @@ fn revisited_task_o_restores_prompt() {
 }
 
 #[test]
-fn revisited_task_right_restores_prompt() {
-    assert_revisited_task_restores_prompt(KeyCode::Right);
-}
-
-#[test]
-fn revisited_task_row_click_restores_prompt_without_delete() {
+fn revisited_task_row_click_keeps_delete() {
     let (_directory, mut view, id) = revisited_prompt_task(200);
     click_task_row(&mut view, &id);
     assert_eq!(view.selected_id(), Some(&id));
-    assert_eq!(view.active_panel, Panel::Prompt);
-    assert!(!view.task_entry_pending);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(view.task_entry_pending);
     assert_eq!(key(&mut view, KeyCode::Backspace), None);
-    assert!(view.confirm_dialog.is_none());
+    assert!(view.confirm_dialog.is_some());
 }
 
 #[test]

@@ -5,6 +5,22 @@ use super::tool_detail::Part;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 
+/// The pane's full background area and its inset content area.
+#[derive(Clone, Copy)]
+pub(super) struct EventDetailArea {
+    pub panel: Rect,
+    pub content: Rect,
+}
+
+impl From<Rect> for EventDetailArea {
+    fn from(area: Rect) -> Self {
+        Self {
+            panel: area,
+            content: area,
+        }
+    }
+}
+
 /// The detail panel's columns, computed from the panel alone exactly like an event list row's:
 /// a time column at the panel's right edge after a two-cell gap, and the text area left of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -15,18 +31,21 @@ pub(super) struct EventDetailColumns {
     /// their left and center segments here; body rows use it as the content column.
     pub text: Rect,
     pub time: Rect,
-    /// The wrap width of free text: the event list's message column width.
-    pub reading_width: u16,
 }
 
-/// Columns for a detail `panel` whose event list occupies `list`.
-pub(super) fn event_detail_columns(panel: Rect, list: Rect) -> EventDetailColumns {
-    let (text, time) = super::event_list::event_row_areas(panel);
-    EventDetailColumns {
-        panel,
-        text,
-        time,
-        reading_width: super::event_list::event_row_areas(list).0.width,
+/// The widest line free text wraps to, so prose stays readable in a wide pane.
+const READING_MEASURE: u16 = 85;
+
+impl EventDetailColumns {
+    /// Columns for a detail `panel`, computed from the panel alone.
+    pub(super) fn new(panel: Rect) -> Self {
+        let (text, time) = super::event_list::event_row_areas(panel);
+        Self { panel, text, time }
+    }
+
+    /// The wrap width of free text: the text column, capped at the reading measure.
+    pub(super) fn reading_width(&self) -> u16 {
+        self.text.width.min(READING_MEASURE)
     }
 }
 
@@ -70,12 +89,85 @@ pub(super) struct EventDetailScroll {
     pub event: Option<super::task_ui::EventId>,
     /// The wheel direction that selected the entry, until its layout starts it at that end.
     pub entry: Option<bool>,
-    /// The wheel direction the selected entry's title holds reports against, and how many remain.
-    pub title_hold: Option<(bool, usize)>,
+    /// An output refresh reached while the detail was at its bottom.
+    pub follow_output: bool,
     pub saved: std::collections::HashMap<u64, super::SectionScroll>,
+    /// The zoom of each image in the selected event, by its order among the event's images.
+    pub zooms: std::collections::HashMap<usize, super::inline_images::Zoom>,
+    /// The image whose unmodified wheel reports change its zoom.
+    pub(super) zoom_image: Option<usize>,
+    /// Swallows the release and drag after a click on an image.
+    pub(super) image_pressed: bool,
+    zoom_key: Option<u64>,
+    pub(super) zoomed_this_frame: bool,
+}
+
+impl EventDetailScroll {
+    /// Reset image interaction when the selected event changes.
+    pub(super) fn switch_zooms(&mut self, key: u64) {
+        if self.zoom_key != Some(key) {
+            self.zoom_key = Some(key);
+            self.zoom_image = None;
+            self.zooms.clear();
+        }
+    }
+}
+
+/// An image the last render drew in the event detail.
+pub(super) struct DrawnImage {
+    /// Its order among the event's images.
+    pub index: usize,
+    pub image: crate::images::ImageSource,
+    /// The screen cells it covers.
+    pub area: ratatui::layout::Rect,
+    /// The image row drawn at the top of `area`.
+    pub first_row: u16,
 }
 
 impl super::View {
+    /// Leave image zoom mode and invalidate the fitted image layout.
+    pub(super) fn exit_image_zoom(&self) -> bool {
+        let mut detail = self.event_detail.scroll.borrow_mut();
+        if detail.zoom_image.take().is_none() {
+            return false;
+        }
+        detail.zooms.clear();
+        self.viewport.borrow_mut().event_detail_layout = None;
+        true
+    }
+
+    /// Allows one image zoom step in the next batch of input before a draw.
+    pub(crate) fn begin_image_frame(&self) {
+        self.event_detail.scroll.borrow_mut().zoomed_this_frame = false;
+    }
+
+    pub(crate) fn event_output_path(&self) -> Option<std::path::PathBuf> {
+        if self.terminal_requested()
+            || self.event_detail.mode == super::task_ui::EventDetailMode::Transcript
+            || self.event_session.as_ref() != self.selected_id()
+        {
+            return None;
+        }
+        self.visible_event()?.calls.iter().find_map(|call| {
+            call.output
+                .as_ref()?
+                .iter()
+                .find_map(|section| match section {
+                    crate::event::Section::OutputFile { path, .. } => Some(path.clone()),
+                    _ => None,
+                })
+        })
+    }
+
+    pub(crate) fn refresh_event_output(&mut self) {
+        let mut detail = self.event_detail.scroll.borrow_mut();
+        let state = &detail.state;
+        detail.follow_output = state
+            .fallback_max
+            .map_or_else(|| state.reveal == state.hidden, |max| state.offset >= max);
+        self.viewport.borrow_mut().event_detail_layout = None;
+    }
+
     pub(super) fn restore_event_detail(&self) {
         let mut scroll = self.event_detail.scroll.borrow_mut();
         if !scroll.restoring {
@@ -94,3 +186,7 @@ impl super::View {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "event_detail_tests.rs"]
+mod tests;

@@ -77,6 +77,7 @@ fn trunk_ref(root: &Path) -> io::Result<String> {
         "Repository has no origin/HEAD, main or master trunk",
     ))
 }
+#[cfg(test)]
 pub fn repository_if_present(directory: &Path) -> io::Result<Option<Repository>> {
     let directory = fs::canonicalize(directory)?;
     let output = std::process::Command::new("git")

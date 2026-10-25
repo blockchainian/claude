@@ -5,15 +5,18 @@ mod watcher;
 pub use refresh::{Refresh, RefreshRequest};
 mod weekly_usage;
 
-use crate::model::SessionStatus;
-use crate::providers::{Capabilities, Provider, ProviderId, SessionKey, Snapshot};
+use crate::model::{Session, SessionStatus};
+use crate::providers::{
+    Capabilities, Provider, ProviderId, SessionAction, SessionKey, Snapshot, Supervision,
+    SupervisionState,
+};
 use std::collections::{HashMap, HashSet};
 use std::{
     io,
     path::{Path, PathBuf},
 };
 
-pub use watcher::watch;
+pub use watcher::{OutputWatcher, watch};
 
 pub struct Hub {
     providers: Vec<Box<dyn Provider>>,
@@ -36,6 +39,26 @@ impl Hub {
             .find(|provider| provider.id() == id)
             .expect("Session provider is not registered")
             .as_ref()
+    }
+
+    /// Detaches a held session through its supervisor, otherwise archives it through its provider.
+    pub fn archive(
+        &self,
+        session: &Session,
+        supervision: Option<&Supervision>,
+    ) -> io::Result<SessionAction> {
+        match supervision {
+            Some(supervision)
+                if matches!(
+                    supervision.state,
+                    SupervisionState::Active | SupervisionState::Asking(_)
+                ) =>
+            {
+                self.provider(supervision.supervisor.provider)
+                    .detach(supervision)
+            }
+            _ => self.provider(session.id.provider).archive(session),
+        }
     }
 
     pub fn display_names(&self) -> Vec<(ProviderId, &'static str)> {
@@ -188,13 +211,15 @@ impl Hub {
             }
             let mut next = Vec::new();
             for (provider, snapshot) in self.providers.iter_mut().zip(&mut snapshots) {
-                for child in provider.children(&frontier).sessions {
+                let children = provider.children(&frontier);
+                snapshot.supervisions.extend(children.supervisions);
+                for child in children.sessions {
                     next.push(child.id.clone());
                     if selected.insert(child.id.clone()) {
                         snapshot.sessions.push(child);
                     }
                 }
-                // Claude discovers its own subagents together with their transcript.
+                // Providers may discover children together with their parents.
                 next.extend(
                     snapshot
                         .sessions
@@ -203,8 +228,36 @@ impl Hub {
                         .map(|s| s.id.clone()),
                 );
             }
+            let mut loads: HashMap<_, HashSet<_>> = HashMap::new();
+            for supervision in snapshots.iter().flat_map(|snapshot| &snapshot.supervisions) {
+                if frontier.contains(&supervision.supervisor)
+                    && !selected.contains(&supervision.session)
+                {
+                    loads
+                        .entry(supervision.session.provider)
+                        .or_default()
+                        .insert(supervision.session.clone());
+                }
+            }
+            for (provider, snapshot) in self.providers.iter_mut().zip(&mut snapshots) {
+                let Some(ids) = loads.remove(&provider.id()) else {
+                    continue;
+                };
+                let loaded = provider.load(&ids.into_iter().collect::<Vec<_>>());
+                snapshot.supervisions.extend(loaded.supervisions);
+                for session in loaded.sessions {
+                    next.push(session.id.clone());
+                    if selected.insert(session.id.clone()) {
+                        snapshot.sessions.push(session);
+                    }
+                }
+            }
             frontier = next;
         }
+        let supervisions: Vec<_> = snapshots
+            .iter()
+            .flat_map(|snapshot| snapshot.supervisions.iter().cloned())
+            .collect();
         merge(
             self.providers
                 .iter_mut()
@@ -230,20 +283,49 @@ impl Hub {
                     let mut updated = provider.enrich(Snapshot {
                         sessions: details,
                         has_more: snapshot.has_more,
+                        supervisions: snapshot.supervisions,
                     });
                     updated.sessions.extend(cached);
                     updated
+                })
+                .map(|mut snapshot| {
+                    apply_supervisions(&mut snapshot, &supervisions);
+                    snapshot
                 }),
         )
+    }
+}
+
+fn apply_supervisions(snapshot: &mut Snapshot, supervisions: &[Supervision]) {
+    for supervision in supervisions {
+        let Some(session) = snapshot
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == supervision.session)
+        else {
+            continue;
+        };
+        if session.parent.is_none()
+            && let Some(name) = &session.name
+        {
+            session.title.clone_from(name);
+        }
+        session.parent = Some(supervision.supervisor.clone());
+        if let SupervisionState::Asking(questions) = &supervision.state {
+            session.status = SessionStatus::NeedsInput;
+            session.pending_questions.clone_from(questions);
+        }
     }
 }
 
 fn merge(snapshots: impl Iterator<Item = Snapshot>) -> Snapshot {
     let mut sessions = Vec::new();
     let mut has_more = false;
+    let mut supervisions = Vec::new();
     for snapshot in snapshots {
         sessions.extend(snapshot.sessions);
         has_more |= snapshot.has_more;
+        supervisions.extend(snapshot.supervisions);
     }
     let ids: HashSet<_> = sessions.iter().map(|s| s.id.clone()).collect();
     for session in &mut sessions {
@@ -275,9 +357,13 @@ fn merge(snapshots: impl Iterator<Item = Snapshot>) -> Snapshot {
     Snapshot {
         sessions: parents,
         has_more,
+        supervisions,
     }
 }
 
 #[cfg(test)]
 #[path = "../providers/claude/hub_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod supervision_tests;

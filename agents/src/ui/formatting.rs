@@ -55,6 +55,31 @@ impl View {
     }
 }
 
+/// A name such as `permission-mode`, `custom_tool_call` or `QueuedUser` as capitalized words.
+pub(super) fn title_words(name: &str) -> String {
+    let mut words: Vec<String> = Vec::new();
+    let mut previous_lower = false;
+    for ch in name.chars() {
+        if ch == '-' || ch == '_' {
+            previous_lower = false;
+            words.push(String::new());
+            continue;
+        }
+        if words.is_empty() || (ch.is_uppercase() && previous_lower) {
+            words.push(String::new());
+        }
+        let word = words.last_mut().expect("word started");
+        if word.is_empty() {
+            word.extend(ch.to_uppercase());
+        } else {
+            word.push(ch);
+        }
+        previous_lower = ch.is_lowercase();
+    }
+    words.retain(|word| !word.is_empty());
+    words.join(" ")
+}
+
 pub(super) fn clock_text(at: DateTime<Utc>) -> String {
     at.with_timezone(&chrono::Local)
         .format(super::event_list::CLOCK_FORMAT)

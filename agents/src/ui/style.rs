@@ -31,8 +31,15 @@ fn terminal_style(style_for: fn(bool, bool, bool) -> Style) -> Style {
     }
 }
 
-#[cfg(not(test))]
+pub(super) fn rule_label_style() -> Style {
+    Style::new().dim()
+}
+
 pub(super) fn selection_style() -> Style {
+    #[cfg(test)]
+    if let Some(style) = SELECTION_STYLE.get() {
+        return style;
+    }
     terminal_style(selection_style_for)
 }
 
@@ -51,25 +58,19 @@ pub(super) fn attention_title_style_for(no_color: bool, colors: bool, light: boo
 
 #[cfg(test)]
 thread_local! {
-    static SELECTION_STYLE: std::cell::Cell<Style> =
-        std::cell::Cell::new(selection_style_for(false, true, false));
-}
-
-#[cfg(test)]
-pub(super) fn selection_style() -> Style {
-    SELECTION_STYLE.get()
+    static SELECTION_STYLE: std::cell::Cell<Option<Style>> = const { std::cell::Cell::new(None) };
 }
 
 /// Supplies a terminal style for one test without changing the process environment.
 #[cfg(test)]
 pub(super) fn with_selection_style<T>(style: Style, run: impl FnOnce() -> T) -> T {
-    struct Restore(Style);
+    struct Restore(Option<Style>);
     impl Drop for Restore {
         fn drop(&mut self) {
             SELECTION_STYLE.set(self.0);
         }
     }
-    let _restore = Restore(SELECTION_STYLE.replace(style));
+    let _restore = Restore(SELECTION_STYLE.replace(Some(style)));
     run()
 }
 
@@ -77,16 +78,11 @@ pub(super) fn selection_style_for(no_color: bool, colors: bool, light: bool) -> 
     if no_color || !colors {
         return Style::default().bold().reversed();
     }
-    if light {
-        Style::default()
+    Style {
+        bg: highlight::selection_background(),
+        ..Style::default()
             .bold()
-            .fg(crate::theme::text_accent_for(true))
-            .bg(Color::Indexed(111))
-    } else {
-        Style::default()
-            .bold()
-            .fg(crate::theme::text_accent_for(false))
-            .bg(Color::Indexed(233))
+            .fg(crate::theme::text_accent_for(light))
     }
 }
 pub(super) fn active_tab_style() -> Style {
@@ -106,8 +102,8 @@ pub(super) fn inactive_tab_style() -> Style {
         ..Style::default().bold()
     }
 }
-pub(super) fn accent_color() -> Color {
-    Color::Cyan
+pub(super) fn accent_color() -> Option<Color> {
+    highlight::accent_color()
 }
 pub(super) fn thread_color(slot: usize) -> Color {
     crate::theme::accent(slot)
@@ -117,12 +113,35 @@ pub(super) fn thread_color(slot: usize) -> Color {
 pub(super) fn event_styles(kind: &crate::event::Kind) -> (Style, Style) {
     use crate::event::Kind;
     let body = match kind {
-        Kind::User | Kind::Compaction | Kind::QueuedUser => Style::default(),
-        Kind::Assistant | Kind::Agent | Kind::Session => Style::default().fg(Color::Yellow),
-        Kind::Tool | Kind::QueuedSystem => Style::default().fg(crate::theme::text_accent_color()),
+        Kind::User | Kind::Compaction => Style::default(),
+        Kind::QueuedUser => queued_style(),
+        Kind::Assistant | Kind::Agent | Kind::Session => assistant_style(),
+        Kind::Tool => Style::default().fg(crate::theme::text_accent_color()),
+        Kind::QueuedSystem => queued_style().fg(crate::theme::text_accent_color()),
         Kind::Error | Kind::Denied => error_style(),
     };
     (body.bold(), body)
+}
+
+/// A prompt still waiting in the provider's queue, bold in every panel until it is delivered.
+pub(super) fn queued_style() -> Style {
+    Style::default().bold()
+}
+
+/// The assistant event body and token dots for the selected task and its descendants.
+pub(super) fn assistant_style() -> Style {
+    Style::default().fg(Color::Yellow)
+}
+
+/// A search match: bold, in the tool color on assistant text and the assistant color elsewhere.
+pub(super) fn search_match_style(style: Style) -> Style {
+    let assistant = assistant_style().fg;
+    let fg = if style.fg == assistant {
+        Some(crate::theme::text_accent_color())
+    } else {
+        assistant
+    };
+    Style { fg, ..style }.bold()
 }
 
 /// Numeric command status has its own error span; the summary keeps its tool color.
@@ -136,14 +155,14 @@ pub(super) fn event_body_style(kind: &crate::event::Kind, exit_code: Option<i64>
 }
 
 pub(super) fn error_style() -> Style {
-    Style::default().fg(Color::Red)
+    highlight::scope_style("message.error")
 }
 
 pub(super) fn time_style() -> Style {
     Style::default().dim()
 }
 
-/// The braille dots in the usage chart and activity strip.
+/// The other active tasks' braille dots in the usage chart.
 pub(super) fn timeline_style(use_colors: bool) -> Style {
     if use_colors {
         Style::default().fg(crate::theme::inline_code_color())
@@ -169,6 +188,12 @@ pub(super) fn event_jump_style() -> Style {
 pub(super) fn exit_code_line(text: String, code: Option<i64>, style: Style) -> Line<'static> {
     if let Some(code) = code.filter(|code| *code != 0) {
         let digits = code.to_string();
+        if text == digits {
+            return Line::from(Span::styled(
+                digits,
+                event_styles(&crate::event::Kind::Error).1.not_dim(),
+            ));
+        }
         if let Some(prefix) = text.strip_suffix(&format!(" · {digits}")) {
             return Line::from(vec![
                 Span::styled(format!("{prefix} · "), style),

@@ -152,7 +152,9 @@ fn project_heading_defers_single_open_and_double_creates_in_actual_directory() {
     assert_eq!(click(&mut view, x, y), None);
     assert_eq!(
         view.flush_pending_click(Instant::now() + Duration::from_secs(1)),
-        Some(Action::OpenPath(directory.path().into()))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            directory.path().into()
+        )))
     );
     assert_eq!(click(&mut view, x, y), None);
     assert_eq!(
@@ -253,7 +255,7 @@ fn rendered_draft_model_click_opens_and_single_click_applies_provider_choice() {
 }
 
 #[test]
-fn event_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layouts() {
+fn event_border_keeps_model_and_effort_picker_controls_in_large_and_medium_layouts() {
     let (_directory, mut view) = fixture();
     view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
         id: "e772d00b".into(),
@@ -293,28 +295,12 @@ fn event_border_keeps_model_and_effort_picker_controls_in_wide_and_narrow_layout
                 .map(|x| buffer[(x, y)].symbol())
                 .collect::<String>()
         };
-        let event_panel = view.viewport.borrow().event_panel;
         assert_eq!(text(model.x, model.y, model.width), model_name);
-        // The narrow layout starts them at the midline, under the task's folder.
-        let gap = view.center_layout(area).gap;
-        assert_eq!(
-            model.x,
-            if width >= 150 {
-                event_panel.x
-            } else {
-                gap.x + 3
-            }
-        );
-        assert_eq!(
-            model.y,
-            if width >= 150 {
-                event_panel.bottom()
-            } else {
-                event_panel.y - 1
-            }
-        );
+        let layout = view.center_layout(area);
+        assert_eq!(model.x, 2);
+        assert_eq!(model.y, layout.list.bottom());
         assert_eq!(effort.y, model.y);
-        assert_eq!(effort.x, model.right() + 3);
+        assert_eq!(effort.right(), layout.gap.x);
         assert!(model.right() < effort.x);
         assert!(
             buffer[(effort.x, model.y)]
@@ -373,33 +359,22 @@ fn event_model_targets_cover_only_visible_border_value_cells() {
             let frame = Rect::new(0, 0, width, 60);
             let mut buffer = Buffer::empty(frame);
             view.render_at(frame, &mut buffer, Utc::now());
-            let area = view.viewport.borrow().event_panel;
-            let gap = view.center_layout(frame).gap;
-            let rule_left = if width >= 150 {
-                area.x - 2
-            } else if gap.is_empty() {
-                0
-            } else {
-                gap.x + 1
-            };
+            let small = crate::ui::render::ScreenLayout::for_width(width)
+                == crate::ui::render::ScreenLayout::Small;
+            let layout = view.center_layout(frame);
+            let area = layout.list;
             let rule = Rect::new(
-                rule_left,
-                if width >= 150 {
-                    area.bottom()
+                0,
+                if small {
+                    layout.header.y + 1
                 } else {
-                    area.y - 1
+                    layout.list.bottom()
                 },
-                width - rule_left,
+                if small { width } else { layout.gap.x + 2 },
                 1,
             );
-            let total = rule.width.saturating_sub(4);
-            // A missing effort is not drawn, so the model gets the whole rule.
             let effort_width = effort.map_or(0, str::len) as u16;
-            let available = if effort.is_some() {
-                total.saturating_sub(effort_width.min(total / 2) + 3)
-            } else {
-                total
-            };
+            let available = (rule.width / 2).saturating_sub(4);
             let show_effort = effort.is_some() && available > 0;
             // The catalog's name for `claude-opus-5-5`.
             let name = "Opus 5.5";
@@ -418,11 +393,8 @@ fn event_model_targets_cover_only_visible_border_value_cells() {
             assert_eq!(drawn, expected_name, "width={width}");
             let targets = view.viewport.borrow().field_targets.clone();
             let y = rule.y;
-            let effort_start = start + name_width + 3;
-            let effort_width = rule
-                .right()
-                .saturating_sub(2 + effort_start)
-                .min(effort_width);
+            let effort_width = effort_width.min(available);
+            let effort_start = rule.right() - 2 - effort_width;
             for x in area.x..area.right() {
                 let expected = if name_width > 0 && (start..start + name_width).contains(&x) {
                     Some(Field::Model)
@@ -1739,10 +1711,7 @@ fn resumable_session_settings_dispatch_only_a_changed_value() {
                     include_str!("../../tests/fixtures/codex-models-cache.json"),
                 )
                 .unwrap();
-                let provider = crate::providers::codex::CodexProvider::new(
-                    directory.path().into(),
-                    directory.path().join("manager"),
-                );
+                let provider = crate::providers::codex::CodexProvider::new(directory.path().into());
                 view.input_choices
                     .insert(ProviderId::Codex, provider.input_choices());
                 "gpt-6.1-sol"
@@ -1936,8 +1905,9 @@ fn branch_editor_parks_when_task_details_loses_focus_without_advancing() {
                     click(&mut view, prompt.x + 2, prompt.y);
                 }
                 1 => {
-                    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
-                    key(&mut view, KeyCode::Char('j'));
+                    let rows = view.viewport.borrow().list_rows;
+                    assert!(!rows.is_empty());
+                    click(&mut view, rows.x + 1, rows.y);
                 }
                 _ => view.set_active_panel(Panel::EventDetail),
             }
@@ -1955,10 +1925,10 @@ fn branch_editor_parks_when_task_details_loses_focus_without_advancing() {
             assert!(!view.selected_draft().unwrap().working);
             assert_eq!(
                 view.active_panel,
-                if exit == 2 {
-                    Panel::EventDetail
-                } else {
-                    Panel::Prompt
+                match exit {
+                    0 => Panel::Prompt,
+                    1 => Panel::TaskList,
+                    _ => Panel::EventDetail,
                 }
             );
         }

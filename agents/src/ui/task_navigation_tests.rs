@@ -26,10 +26,21 @@ fn tasks() -> View {
 }
 
 #[test]
+fn task_list_right_arrow_does_not_open() {
+    let mut view = tasks();
+    view.set_active_panel(Panel::TaskList);
+    let selected = view.selected_id().cloned();
+    assert_eq!(key(&mut view, KeyCode::Right), None);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert_eq!(view.selected_id(), selected.as_ref());
+    assert!(!view.task_entry_pending);
+    assert!(view.shown_terminal().is_none());
+}
+
+#[test]
 fn opening_keys_focus_prompt_and_control_l_is_inert() {
     for (code, modifiers) in [
         (KeyCode::Enter, KeyModifiers::NONE),
-        (KeyCode::Right, KeyModifiers::NONE),
         (KeyCode::Char('l'), KeyModifiers::CONTROL),
         (KeyCode::Char('o'), KeyModifiers::NONE),
     ] {
@@ -86,11 +97,11 @@ fn escape_search_and_other_panels_do_not_consume_task_history() {
         let second = view.selected_id().cloned();
         view.active_panel = panel;
         if panel == Panel::TaskList {
-            view.searching = true;
+            view.search.focus();
             view.search.set_text("Task");
         }
         assert_eq!(key(&mut view, KeyCode::Esc), None);
-        assert!(!view.searching);
+        assert!(!view.search.focused());
         assert_eq!(view.selected_id(), second.as_ref());
         view.active_panel = Panel::TaskList;
         assert_eq!(key(&mut view, KeyCode::Esc), None);
@@ -99,16 +110,13 @@ fn escape_search_and_other_panels_do_not_consume_task_history() {
 }
 
 #[test]
-fn escape_skips_removed_and_hidden_tasks() {
+fn escape_skips_removed_tasks() {
     let mut view = tasks();
     view.set_selected(view.selectable_indices()[0]);
     let first = view.selected_id().cloned();
     key(&mut view, KeyCode::Down);
     let removed = view.selected_id().cloned();
     key(&mut view, KeyCode::Down);
-    let hidden = view.selected_id().unwrap().clone();
-    key(&mut view, KeyCode::Down);
-    view.hidden.insert(hidden);
     view.set_sessions(
         view.rows
             .clone()
@@ -144,7 +152,6 @@ fn escape_returns_across_tabs() {
 fn opening_show_more_still_loads_a_page() {
     for (code, modifiers) in [
         (KeyCode::Enter, KeyModifiers::NONE),
-        (KeyCode::Right, KeyModifiers::NONE),
         (KeyCode::Char('l'), KeyModifiers::CONTROL),
         (KeyCode::Char('o'), KeyModifiers::NONE),
     ] {
@@ -173,19 +180,11 @@ fn open_and_history_hints_match_keys() {
         .map(|line| line.to_string())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(help.contains("→") && help.contains("Open"));
+    assert!(!help.contains("→"));
+    assert!(help.contains("Enter") && help.contains("Open"));
     assert!(!help.contains("⌃l"));
-    assert!(help.contains("Previous"));
-    assert!(
-        view.center_footer_hints()
-            .to_string()
-            .contains("enter open")
-    );
-    assert!(
-        view.center_footer_hints()
-            .to_string()
-            .contains("esc previous")
-    );
+    assert!(help.contains("Back"));
+    assert_eq!(view.center_footer_hints().to_string(), "? help");
 }
 
 #[test]
@@ -210,18 +209,20 @@ fn escape_closes_overlays_without_consuming_history() {
             }
             3 => {
                 view.set_active_panel(Panel::EventList);
-                view.event_list.search.editing = true;
+                view.event_list.search.input.focus();
             }
             4 => {
                 view.set_active_panel(Panel::EventDetail);
-                view.event_detail.search.editing = true;
+                view.event_detail.search.input.focus();
             }
             _ => unreachable!(),
         }
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert_eq!(view.selected_id(), second.as_ref());
         assert!(!view.help && view.rename_target.is_none() && view.confirm_dialog.is_none());
-        assert!(!view.event_list.search.editing && !view.event_detail.search.editing);
+        assert!(
+            !view.event_list.search.input.focused() && !view.event_detail.search.input.focused()
+        );
         view.set_active_panel(Panel::TaskList);
         assert_eq!(key(&mut view, KeyCode::Esc), None);
         assert_eq!(view.selected_id(), first.as_ref());
@@ -264,5 +265,39 @@ fn task_list_wheel_stops_at_both_ends() {
         view.handle_mouse(mouse(kind, list.x, list.y));
         assert_eq!(view.selected, selected, "{kind:?} at boundary");
         assert_eq!(view.viewport.borrow().scroll, scroll);
+    }
+}
+
+#[test]
+fn unknown_task_list_keys_do_nothing() {
+    for code in [KeyCode::Char('h'), KeyCode::Char('z')] {
+        for kind in 0..3 {
+            let mut view = tasks();
+            match kind {
+                0 => {}
+                1 => {
+                    view.rows[view.selected].parent = Some(session_key("parent"));
+                }
+                2 => {
+                    view.add_draft(DraftSetup {
+                        provider: ProviderId::Claude,
+                        cwd: crate::test_project(),
+                        model: None,
+                        effort: None,
+                        branch: "main".into(),
+                    });
+                    view.name_target = None;
+                }
+                _ => unreachable!(),
+            }
+            view.set_active_panel(Panel::TaskList);
+            let selected = view.selected_id().cloned();
+            let draft = view.selected_draft;
+            let before = screen(&view, 120, 40);
+            assert_eq!(key(&mut view, code), None, "{code:?}, kind {kind}");
+            assert_eq!(view.selected_id(), selected.as_ref());
+            assert_eq!(view.selected_draft, draft);
+            assert_eq!(screen(&view, 120, 40), before);
+        }
     }
 }

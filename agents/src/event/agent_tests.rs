@@ -12,8 +12,8 @@ fn claude_agent_exchange_uses_perspective_titles() {
         .flat_map(|e| &e.calls)
         .find(|c| c.name == "Agent")
         .unwrap();
-    assert_eq!(spawn.title, "Spawn agent reviewer");
-    assert_eq!(spawn.event_detail_left, "Spawn agent");
+    assert_eq!(spawn.summary, "Spawn agent reviewer");
+    assert_eq!(spawn.detail_left(), "");
 }
 
 #[test]
@@ -30,9 +30,9 @@ fn claude_peer_exchange_preserves_text_and_known_fields() {
         assert_eq!(message.recipient, None);
         assert_eq!(message.content.text(), event.body);
         assert_eq!(message.direction, super::agent::Direction::Incoming);
-        assert_eq!(call.event_detail_left, "Message");
+        assert_eq!(call.detail_left(), "");
         assert_eq!(
-            call.event_detail_title,
+            call.title,
             format!("{} →", event.sender.as_deref().unwrap())
         );
         assert!(event.summary().ends_with(" → message"));
@@ -93,11 +93,8 @@ fn claude_outgoing_exchange_has_no_invented_sender_or_recipient() {
         let input = &record["message"]["content"][0]["input"];
         assert_eq!(message.recipient.as_deref(), input["to"].as_str());
         assert_eq!(message.content.text(), input["message"].as_str().unwrap());
-        assert_eq!(call.event_detail_left, "Message");
-        assert_eq!(
-            call.event_detail_title,
-            format!("← {}", input["to"].as_str().unwrap())
-        );
+        assert_eq!(call.detail_left(), "");
+        assert_eq!(call.title, format!("← {}", input["to"].as_str().unwrap()));
         assert_eq!(
             events[0].summary(),
             format!("{} ← message", input["to"].as_str().unwrap())

@@ -1,7 +1,7 @@
   Active 4                                                                              Inactive 0
 ──────────────────────────────────────────────────┬──────────────────── Ready ──────────────────────
                      Unknown                      │                     Prompt
- ○ Legacy task             Ready           1s ago │ Legacy task
+ ○ Legacy task             Ready           1s ago │                   Legacy task
                                                   │
                      model-a                      │
  ○ Recent task             Ready           2s ago │
@@ -21,4 +21,4 @@
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
- ? help  esc previous  ↑/↓ move  enter open  n new
+ ? help

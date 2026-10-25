@@ -4,20 +4,18 @@ use nucleo_matcher::{
     pattern::{Atom, AtomKind, CaseMatching, Normalization, Pattern},
 };
 
-pub(crate) struct EventSearch {
-    pub(super) query: line_edit::LineEdit,
-    pub editing: bool,
+pub(crate) struct EventMatches {
+    pub(crate) input: search_input::SearchInput,
     matches: Vec<usize>,
     bodies: Vec<Utf32String>,
     pinned_matches: Vec<usize>,
     matcher: RefCell<Matcher>,
 }
 
-impl Default for EventSearch {
+impl Default for EventMatches {
     fn default() -> Self {
         Self {
-            query: line_edit::LineEdit::default(),
-            editing: false,
+            input: search_input::SearchInput::default(),
             matches: Vec::new(),
             bodies: Vec::new(),
             pinned_matches: Vec::new(),
@@ -26,22 +24,11 @@ impl Default for EventSearch {
     }
 }
 
-impl EventSearch {
-    pub fn active(&self) -> bool {
-        self.editing || !self.query.is_empty()
-    }
-
-    pub fn clear(&mut self) {
-        self.query.clear();
-        self.editing = false;
-        self.matches.clear();
-        self.pinned_matches.clear();
-    }
-
+impl EventMatches {
     fn pattern(&self) -> Pattern {
         let mut pattern = Pattern::default();
         pattern.atoms = self
-            .query
+            .input
             .text()
             .split_whitespace()
             .map(|word| {
@@ -59,7 +46,7 @@ impl EventSearch {
 
     pub(super) fn indices(&self, text: &str) -> Vec<u32> {
         let mut indices = Vec::new();
-        if !self.query.is_empty() {
+        if !self.input.text().is_empty() {
             let mut buffer = Vec::new();
             self.pattern().indices(
                 Utf32Str::new(text, &mut buffer),
@@ -75,7 +62,7 @@ impl EventSearch {
 
 impl View {
     pub(crate) fn transcript_fully_loaded(&self) -> bool {
-        self.event_list.search.active() || self.event_list.sort == EventSort::Duration
+        self.event_list.search.input.applied() || self.event_list.sort == EventSort::Duration
     }
 
     pub(crate) fn prepare_event_search(&mut self) {
@@ -116,7 +103,6 @@ impl View {
     }
 
     pub(super) fn rematch_event_at(&mut self, selected_full: Option<super::task_ui::EventRow>) {
-        self.cancel_event_detail_selection();
         let pattern = self.event_list.search.pattern();
         let mut matcher = self.event_list.search.matcher.borrow_mut();
         self.event_list.search.matches = self
@@ -163,6 +149,7 @@ impl View {
             .cursor
             .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full));
         if selected != selected_full {
+            self.cancel_event_detail_selection();
             let mut viewport = self.viewport.borrow_mut();
             viewport.event_detail_layout = None;
         }
@@ -174,7 +161,7 @@ impl View {
     }
 
     pub(super) fn pinned_event_matches(&self, index: usize) -> bool {
-        !self.event_list.search.active()
+        !self.event_list.search.input.applied()
             || self
                 .event_list
                 .search
@@ -184,7 +171,7 @@ impl View {
     }
 
     pub(super) fn event_matches(&self, index: usize) -> bool {
-        !self.event_list.search.active()
+        !self.event_list.search.input.applied()
             || self.event_list.search.matches.binary_search(&index).is_ok()
     }
 }

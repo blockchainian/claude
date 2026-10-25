@@ -21,4 +21,4 @@
 
 
 
- ? help  esc previous  ↑/↓ move  enter open  n new
+ ? help

@@ -1,7 +1,104 @@
-use super::{Action, Panel, View, task_ui::Focus};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use super::{
+    Action, Panel, View,
+    search_input::SearchInput,
+    task_ui::{EventRow, Focus},
+};
+use ratatui::layout::Rect;
 
 impl View {
+    pub(super) fn panel_search(&self, panel: Panel) -> Option<&SearchInput> {
+        match panel {
+            Panel::TaskList => Some(&self.search),
+            Panel::EventList => Some(&self.event_list.search.input),
+            Panel::EventDetail => Some(&self.event_detail.search.input),
+            _ => None,
+        }
+    }
+
+    pub(super) fn panel_search_mut(&mut self, panel: Panel) -> Option<&mut SearchInput> {
+        match panel {
+            Panel::TaskList => Some(&mut self.search),
+            Panel::EventList => Some(&mut self.event_list.search.input),
+            Panel::EventDetail => Some(&mut self.event_detail.search.input),
+            _ => None,
+        }
+    }
+
+    /// Whether the active panel's search holds the keyboard.
+    pub(super) fn search_focused(&self) -> bool {
+        self.panel_search(self.active_panel)
+            .is_some_and(SearchInput::focused)
+    }
+
+    /// Hit region from the preceding frame, empty unless the search is applied.
+    pub(super) fn search_rect(&self, panel: Panel) -> Rect {
+        if !self.panel_search(panel).is_some_and(SearchInput::applied) {
+            return Rect::default();
+        }
+        let viewport = self.viewport.borrow();
+        match panel {
+            Panel::TaskList => viewport.search,
+            Panel::EventList => super::search_input::search_row(viewport.event_panel),
+            Panel::EventDetail => super::search_input::search_row(viewport.event_detail),
+            _ => Rect::default(),
+        }
+    }
+
+    /// Edits search input and rematches only when its query changes.
+    pub(super) fn edit_search<R>(
+        &mut self,
+        panel: Panel,
+        edit: impl FnOnce(&mut SearchInput) -> R,
+    ) -> R {
+        let anchor = if panel == Panel::EventList {
+            self.event_list
+                .cursor
+                .and_then(|index| self.shown_event_rows().nth(index).map(|(full, _)| full))
+        } else {
+            None
+        };
+        let search = self
+            .panel_search_mut(panel)
+            .expect("panel has search input");
+        let before = search.text().to_owned();
+        let applied = search.applied();
+        let result = edit(search);
+        let changed = search.text() != before;
+        let opened = !applied && search.applied();
+        if opened {
+            match panel {
+                Panel::EventList => self.prepare_event_search(),
+                Panel::EventDetail => self.jump_event_detail_match(),
+                _ => {}
+            }
+        }
+        if changed {
+            self.rematch_panel(panel, anchor);
+        }
+        result
+    }
+
+    fn rematch_panel(&mut self, panel: Panel, anchor: Option<EventRow>) {
+        match panel {
+            Panel::TaskList => {
+                if self.search.applied() {
+                    let selected = self
+                        .selectable_indices()
+                        .first()
+                        .copied()
+                        .unwrap_or(usize::MAX);
+                    self.select(selected);
+                } else {
+                    self.reconcile_selection();
+                }
+                self.viewport.borrow_mut().scroll = 0;
+            }
+            Panel::EventList => self.rematch_event_at(anchor),
+            Panel::EventDetail => self.jump_event_detail_match(),
+            _ => unreachable!("panel has search input"),
+        }
+    }
+
     pub(super) fn selected_task_key(&self) -> Option<super::draft_controls::TaskKey> {
         self.selected_draft
             .map(super::draft_controls::TaskKey::Draft)
@@ -29,11 +126,28 @@ impl View {
             Panel::TaskDetails if self.selector.is_some() => Focus::Selector,
             Panel::TaskDetails if self.title_editing() => Focus::Title,
             Panel::TaskDetails => Focus::TaskDetails,
-            Panel::EventList if self.event_list.search.editing => Focus::EventSearch,
+            Panel::EventList
+                if self
+                    .panel_search(Panel::EventList)
+                    .is_some_and(SearchInput::focused) =>
+            {
+                Focus::EventSearch
+            }
             Panel::EventList => Focus::EventList,
-            Panel::EventDetail if self.event_detail.search.editing => Focus::EventDetailSearch,
+            Panel::EventDetail
+                if self
+                    .panel_search(Panel::EventDetail)
+                    .is_some_and(SearchInput::focused) =>
+            {
+                Focus::EventDetailSearch
+            }
             Panel::EventDetail => Focus::EventDetail,
         }
+    }
+
+    pub(super) fn has_parked_focus(&self, task: Option<&super::draft_controls::TaskKey>) -> bool {
+        task.and_then(|key| self.task_uis.get(key))
+            .is_some_and(|ui| ui.focus.is_some())
     }
 
     /// Enters a task selected by list browsing without replacing its parked focus.
@@ -77,23 +191,30 @@ impl View {
         true
     }
 
-    pub(super) fn task_search_editing(&self) -> bool {
-        match self.active_panel {
-            Panel::EventList => self.event_list.search.editing,
-            Panel::EventDetail => self.event_detail.search.editing,
-            _ => false,
-        }
-    }
-
     /// Panel interactions, editors and attention requests share this activation entry point.
     pub(super) fn set_active_panel(&mut self, panel: Panel) {
-        if panel != self.active_panel
-            && self.searching
-            && let Some(action) = self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
-        {
-            self.pending_actions.push(action);
+        if panel != Panel::EventDetail {
+            self.exit_image_zoom();
         }
-        // Cleanup may activate another panel; the requested destination takes precedence.
+        if panel != self.active_panel
+            && let Some(search) = self.panel_search_mut(self.active_panel)
+        {
+            search.blur();
+        }
+        if self.height_zoom.is_some() || self.width_zoom.is_some() {
+            let area = self.viewport.borrow().area;
+            let layout = self.center_layout(area);
+            let visible = match panel {
+                Panel::TaskList => layout.list,
+                Panel::TaskDetails => layout.task_details,
+                Panel::EventList => layout.event_panel,
+                Panel::EventDetail => layout.event_detail,
+                Panel::Prompt => layout.prompt,
+            };
+            if visible.is_empty() {
+                self.clear_panel_zoom();
+            }
+        }
         self.active_panel = panel;
         if panel != Panel::TaskList {
             self.task_entry_pending = false;
@@ -144,6 +265,71 @@ impl View {
         self.take_pending_action()
     }
 
+    pub(super) fn clear_panel_zoom(&mut self) {
+        self.height_zoom = None;
+        self.width_zoom = None;
+    }
+
+    pub(crate) fn resize(&mut self, width: u16, height: u16) {
+        let area = ratatui::layout::Rect::new(0, 0, width, height);
+        self.viewport.borrow_mut().area = area;
+        self.recover_visible_focus();
+    }
+
+    /// Rehomes a panel hidden by layout changes without restoring it on later growth.
+    fn recover_visible_focus(&mut self) {
+        let area = self.viewport.borrow().area;
+        let layout = self.center_layout(area);
+        let active = match self.active_panel {
+            Panel::TaskList => layout.list,
+            Panel::TaskDetails => layout.task_details,
+            Panel::EventList => layout.event_panel,
+            Panel::Prompt => layout.prompt,
+            Panel::EventDetail => layout.event_detail,
+        };
+        if !active.is_empty() {
+            return;
+        }
+        // A hidden zoom target must not hide the recovered focus when the window grows.
+        self.clear_panel_zoom();
+        let layout = self.center_layout(area);
+        let panels = [
+            (Panel::TaskList, layout.list),
+            (Panel::TaskDetails, layout.task_details),
+            (Panel::EventList, layout.event_panel),
+            (Panel::Prompt, layout.prompt),
+            (Panel::EventDetail, layout.event_detail),
+        ];
+        let visible = |panel| {
+            panels
+                .iter()
+                .any(|(candidate, area)| *candidate == panel && !area.is_empty())
+        };
+        // Both event panels border the input; disabled input falls back to the task list.
+        let nearest = if matches!(self.active_panel, Panel::EventList | Panel::EventDetail)
+            && self.task_focus_available(self.input_focus())
+        {
+            Panel::Prompt
+        } else {
+            Panel::TaskList
+        };
+        if let Some(panel) = [
+            nearest,
+            Panel::TaskList,
+            Panel::TaskDetails,
+            Panel::EventList,
+            Panel::EventDetail,
+            Panel::Prompt,
+        ]
+        .into_iter()
+        .find(|panel| {
+            visible(*panel)
+                && (*panel != Panel::Prompt || self.task_focus_available(self.input_focus()))
+        }) {
+            self.set_active_panel(panel);
+        }
+    }
+
     pub(super) fn move_panel(&mut self, direction: char) {
         let v = self.viewport.borrow();
         let bottom = if self.shown_terminal().is_some() {
@@ -151,24 +337,56 @@ impl View {
         } else {
             (Panel::EventDetail, v.event_detail)
         };
-        let panels = [
+        let mut panels = [
             (Panel::TaskList, v.list),
             (Panel::TaskDetails, v.task_details),
             (Panel::EventList, v.event_panel),
             (Panel::Prompt, v.prompt),
             bottom,
         ];
+        if (self.height_zoom.is_some() || self.width_zoom.is_some())
+            && let Some(layout) = v.navigation_layout
+        {
+            panels = [
+                (Panel::TaskList, layout.list),
+                (Panel::TaskDetails, layout.task_details),
+                (Panel::EventList, layout.event_panel),
+                (Panel::Prompt, layout.prompt),
+                (Panel::EventDetail, layout.event_detail),
+            ];
+        }
         let source = self.active_panel;
         let Some((_, from)) = panels
             .iter()
             .find(|(panel, area)| *panel == source && !area.is_empty())
         else {
+            drop(v);
+            self.recover_visible_focus();
             return;
         };
-        // The full-width prompt sits under several panels; moving up always lands on the task list.
-        if source == Panel::Prompt && direction == 'k' && !v.list.is_empty() {
+        // Small keeps the task list destination even after a width zoom in another layout.
+        // Other layouts prefer the sole width-expanded top panel.
+        if source == Panel::Prompt && direction == 'k' && !panels[0].1.is_empty() {
+            let target = self
+                .width_zoom
+                .filter(|_| {
+                    super::render::ScreenLayout::for_width(v.area.width)
+                        != super::render::ScreenLayout::Small
+                })
+                .filter(|panel| {
+                    [
+                        (Panel::TaskList, v.list),
+                        (Panel::TaskDetails, v.task_details),
+                        (Panel::EventList, v.event_panel),
+                    ]
+                    .iter()
+                    .any(|(candidate, rect)| {
+                        candidate == panel && !rect.is_empty() && rect.bottom() <= v.prompt.y
+                    })
+                })
+                .unwrap_or(Panel::TaskList);
             drop(v);
-            self.set_active_panel(Panel::TaskList);
+            self.set_active_panel(target);
             return;
         }
         let horizontal = matches!(direction, 'h' | 'l');

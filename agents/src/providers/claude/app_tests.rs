@@ -28,7 +28,7 @@ pub(super) fn fixture() -> (tempfile::TempDir, App) {
     app.sessions[0].cwd = dir.path().to_owned();
     app.sessions[0].status = SessionStatus::Ready;
     app.view.set_sessions(app.sessions.clone(), false);
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     super::event_search_tests::finish_search(&mut app);
     (dir, app)
 }
@@ -46,7 +46,7 @@ pub(super) fn key(app: &mut App, code: KeyCode) -> bool {
     if code == KeyCode::Enter {
         return quit;
     }
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     if app.pending_transcript.is_some()
         && !app.view.transcript_fully_loaded()
         && !app.view.restoring_event_position()
@@ -104,15 +104,15 @@ fn task_event_cache_rereads_when_event_count_changes() {
     let (_dir, mut app) = fixture();
     key(&mut app, KeyCode::BackTab);
     app.refresh();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     super::event_search_tests::finish_search(&mut app);
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
     for (height, count) in [(24, 6), (40, 11), (60, 18), (18, 18), (24, 18)] {
-        app.refresh_event(
+        app.refresh_event_for_list_rows(
             app.view
-                .event_count(ratatui::layout::Rect::new(0, 0, 120, height)),
+                .event_read_count(ratatui::layout::Rect::new(0, 0, 120, height)),
         );
         assert_eq!(app.view.event_panel.len(), count);
     }
@@ -225,7 +225,7 @@ fn queued_wheel_events_apply_before_the_next_draw() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     let area = ratatui::layout::Rect::new(0, 0, 120, 23);
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
@@ -259,11 +259,11 @@ fn task_event_scroll_reloads_requested_events_and_keeps_cache() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     for _ in 0..7 {
         scroll_event(&mut app, ScrollUp);
     }
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.view.event_scroll(), 8);
     assert_eq!(app.transcript_stamp.as_ref().unwrap().count, 16);
     assert_eq!(app.view.event_panel.len(), 16);
@@ -281,13 +281,13 @@ fn task_event_scroll_reloads_requested_events_and_keeps_cache() {
         .unwrap()
         .set_modified(modified)
         .unwrap();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.view.event_panel, cached);
     for _ in 0..7 {
         scroll_event(&mut app, ScrollDown);
     }
-    app.refresh_event(8);
-    assert_eq!(app.view.event_scroll(), 8);
+    app.refresh_event_for_list_rows(8);
+    assert_eq!(app.view.event_scroll(), 11);
     assert_eq!(app.transcript_stamp.as_ref().unwrap().count, 16);
     assert_eq!(app.view.event_panel.len(), 16);
     assert_eq!(app.view.event_panel, cached);
@@ -324,7 +324,7 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
     let area = ratatui::layout::Rect::new(0, 0, 150, 19);
     let column = area.x + area.width * 2 / 3 + 1;
     let row = area.y + 2;
-    let visible = app.view.event_count(area);
+    let visible = app.view.event_read_count(area);
     let wheel = |app: &mut App, kind| {
         app.handle_event(Event::Mouse(MouseEvent {
             kind,
@@ -332,11 +332,11 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
             row,
             modifiers: KeyModifiers::NONE,
         }));
-        app.refresh_event(visible);
+        app.refresh_event_for_list_rows(visible);
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
     };
-    app.refresh_event(visible);
+    app.refresh_event_for_list_rows(visible);
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
     for _ in 0..45 {
@@ -360,7 +360,7 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
         // Clicking the selected top row gives keyboard navigation to the event list.
         for _ in 0..6 {
             app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-            app.refresh_event(visible);
+            app.refresh_event_for_list_rows(visible);
             app.view
                 .render(area, &mut ratatui::buffer::Buffer::empty(area));
         }
@@ -382,7 +382,7 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
                 KeyCode::Char('k')
             };
             app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-            app.refresh_event(visible);
+            app.refresh_event_for_list_rows(visible);
             app.view
                 .render(area, &mut ratatui::buffer::Buffer::empty(area));
         } else {
@@ -398,12 +398,14 @@ fn home_loads_first_event_of_whole_event() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 200, 0));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.view.event_panel.len(), 8);
     click_event(&mut app);
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
     let area = ratatui::layout::Rect::new(0, 0, 120, 23);
-    app.refresh_event(app.view.event_count(area));
+    app.refresh_event_for_list_rows(app.view.event_read_count(area));
+    assert!(app.pending_transcript.is_some());
+    super::event_search_tests::finish_search(&mut app);
     let detail = event_detail_at(&app, area);
     assert!(detail.contains("Transcript copy 0"), "{detail}");
 }
@@ -415,10 +417,10 @@ fn top_border_loads_first_event_of_whole_event() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 200, 0));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.view.event_panel.len(), 8);
     let area = ratatui::layout::Rect::new(0, 0, 200, 45);
-    let visible = app.view.event_count(area);
+    let visible = app.view.event_read_count(area);
     let scroll = |app: &mut App, kind| {
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
@@ -444,37 +446,23 @@ fn top_border_loads_first_event_of_whole_event() {
     };
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
-    let bottom = (0..45)
-        .find(|&y| {
-            (100..200)
-                .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
-                .collect::<String>()
-                .contains("claude-opus")
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "{}",
-                (0..45)
-                    .map(|y| (0..200)
-                        .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
-                        .collect::<String>())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            )
-        });
+    let bottom = (2..45)
+        .find(|&y| (100..200).any(|x| buffer[(x, y)].symbol() == "┴"))
+        .expect("event list bottom rule joins its visible column separator");
     for latest in [false, true] {
         click(&mut app, 1);
         click(&mut app, 1);
-        app.refresh_event(visible);
+        app.refresh_event_for_list_rows(visible);
+        super::event_search_tests::finish_search(&mut app);
         let detail = event_detail_at(&app, area);
         assert!(detail.contains("Transcript copy 0"), "{detail}");
         scroll(&mut app, MouseEventKind::ScrollDown);
         scroll(&mut app, MouseEventKind::ScrollDown);
-        app.refresh_event(visible);
+        app.refresh_event_for_list_rows(visible);
         assert!(event_detail_at(&app, area).contains("Transcript copy 1"));
         scroll(&mut app, MouseEventKind::ScrollUp);
         scroll(&mut app, MouseEventKind::ScrollUp);
-        app.refresh_event(visible);
+        app.refresh_event_for_list_rows(visible);
         assert!(event_detail_at(&app, area).contains("Transcript copy 0"));
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
@@ -489,7 +477,7 @@ fn top_border_loads_first_event_of_whole_event() {
                 .unwrap()
                 .write_all(transcript_copies(&payload, 1, 200).as_bytes())
                 .unwrap();
-            app.refresh_event(visible);
+            app.refresh_event_for_list_rows(visible);
             let mut buffer = ratatui::buffer::Buffer::empty(area);
             app.view.render(area, &mut buffer);
             let row = (0..45)
@@ -497,7 +485,7 @@ fn top_border_loads_first_event_of_whole_event() {
                     (130..200)
                         .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
                         .collect::<String>()
-                        .contains(" New ")
+                        .contains(" New╶")
                 })
                 .unwrap();
             let line = (0..200)
@@ -516,7 +504,7 @@ fn top_border_loads_first_event_of_whole_event() {
                 }));
             }
         }
-        app.refresh_event(visible);
+        app.refresh_event_for_list_rows(visible);
         assert!(event_detail_at(&app, area).contains("Transcript copy 200"));
         assert_eq!(app.view.event_scroll(), app.view.event_max_scroll());
         app.view
@@ -531,14 +519,14 @@ fn task_event_growth_keeps_older_selection_and_viewport() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_event(
+    app.refresh_event_for_list_rows(
         app.view
-            .event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+            .event_read_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
     );
     scroll_event(&mut app, ScrollUp);
-    app.refresh_event(
+    app.refresh_event_for_list_rows(
         app.view
-            .event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+            .event_read_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
     );
     let before = app.view.event_panel.clone();
     let selected = event_detail(&app);
@@ -546,12 +534,12 @@ fn task_event_growth_keeps_older_selection_and_viewport() {
     std::fs::write(
         &path,
         transcript_copies(&payload, 20, 0)
-            + &transcript_copies(&payload.replace("Codex", "CODEX"), 1, 20),
+            + transcript_copies(&payload.replace("Codex", "CODEX"), 1, 20).as_str(),
     )
     .unwrap();
-    app.refresh_event(
+    app.refresh_event_for_list_rows(
         app.view
-            .event_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
+            .event_read_count(ratatui::layout::Rect::new(0, 0, 120, 23)),
     );
     assert_eq!(app.view.event_scroll(), scroll);
     assert_eq!(event_detail(&app), selected);
@@ -569,20 +557,20 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
     replace_transcript(&path, transcript_copies(&payload, 20, 0));
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     click_event(&mut app);
     key(&mut app, KeyCode::Char('/'));
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     for c in "Codex".chars() {
         key(&mut app, KeyCode::Char(c));
     }
     super::event_search_tests::finish_search(&mut app);
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(app.view.matching_event_count(), 20);
     for _ in 0..30 {
         scroll_event(&mut app, crossterm::event::MouseEventKind::ScrollUp);
     }
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(app.view.event_scroll(), 0);
     let detail = event_detail(&app);
     assert!(detail.contains("Transcript copy 0"), "{detail}");
@@ -601,7 +589,7 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
         .set_modified(modified)
         .unwrap();
     key(&mut app, KeyCode::Backspace);
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(
         app.view.event_panel, cached,
         "query changes reuse cached transcript"
@@ -612,11 +600,11 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
         .open(&path)
         .unwrap();
     writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T17:00:00Z", "content":"Codex timeout"})).unwrap();
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(app.view.matching_event_count(), 21);
     assert_eq!(app.view.event_panel.last().unwrap().body, "Codex timeout");
     key(&mut app, KeyCode::Esc);
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(app.view.event_panel.len(), 41);
 }
 
@@ -625,20 +613,20 @@ fn task_event_scroll_clamps_at_transcript_start() {
     use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
     let (_dir, mut app) = fixture();
     assert_eq!(app.view.event_panel.len(), 2);
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     for _ in 0..5 {
         scroll_event(&mut app, ScrollUp);
     }
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(app.view.event_panel.len(), 2);
     scroll_event(&mut app, ScrollDown);
-    app.refresh_event(1);
+    app.refresh_event_for_list_rows(1);
     assert_eq!(app.transcript_stamp.as_ref().unwrap().count, 2);
     assert_eq!(app.view.event_panel.len(), 2);
     // A transcript shorter than the visible window clamps all the way to zero.
     scroll_event(&mut app, ScrollUp);
-    app.refresh_event(8);
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.transcript_stamp.as_ref().unwrap().count, 8);
 }
 
@@ -648,7 +636,7 @@ fn task_event_cache_uses_selection_length_and_mtime() {
     let (_dir, mut app) = fixture();
     key(&mut app, KeyCode::BackTab);
     app.refresh();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     super::event_search_tests::finish_search(&mut app);
     assert_eq!(app.view.event_panel.len(), 2);
     let path = app.sessions[0].transcript.clone().unwrap();
@@ -660,11 +648,11 @@ fn task_event_cache_uses_selection_length_and_mtime() {
     let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
     file.set_modified(modified).unwrap();
     let cached = app.view.event_panel.clone();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.view.event_panel, cached);
     file.set_modified(modified + Duration::from_secs(1))
         .unwrap();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_ne!(app.view.event_panel, cached);
     let mut file = std::fs::OpenOptions::new()
         .append(true)
@@ -674,7 +662,7 @@ fn task_event_cache_uses_selection_length_and_mtime() {
     file.set_modified(modified + Duration::from_secs(1))
         .unwrap();
     app.refresh();
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(app.sessions.len(), 1);
     assert!(
         app.view.selected_id().is_some(),
@@ -698,7 +686,7 @@ fn task_event_reloads_on_keyboard_selection_and_clears_without_transcript() {
     third.transcript = None;
     app.sessions.extend([second, third]);
     app.view.set_sessions(app.sessions.clone(), false);
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     key(&mut app, KeyCode::Down);
     assert_eq!(
         app.view.event_session.as_ref(),
@@ -740,7 +728,7 @@ fn subagent_selection_loads_own_transcript_and_restores_parent_event() {
     );
     click_event(&mut app);
     key(&mut app, KeyCode::Char('/'));
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert_eq!(
         app.full_transcript_stamp.as_ref().unwrap().session,
         child.id
@@ -882,7 +870,8 @@ fn assert_subagent_action_blocked(make_action: impl FnOnce(&SessionKey) -> Actio
                 .collect::<String>()
                 .contains(&format!("{operation} is not supported"))
         );
-        app.view.set_notice(None);
+        app.view
+            .expire_messages(std::time::Instant::now() + std::time::Duration::from_secs(60));
         after = ratatui::buffer::Buffer::empty(area);
         app.view.render_at(area, &mut after, child.updated_at);
     }
@@ -927,12 +916,22 @@ fn subagent_delete_is_ignored() {
 }
 
 #[test]
-fn subagent_pin_is_ignored() {
-    for pinned in [false, true] {
-        assert_subagent_action_blocked(|id| Action::TogglePin {
-            id: id.clone(),
+fn subagent_pin_persists_and_unpins() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let (dir, mut app, child) = subagent_fixture();
+    for pinned in [true, false] {
+        assert!(!app.handle_action(Some(Action::TogglePin {
+            tab: 0,
+            id: child.id.clone(),
             pinned,
-        });
+        })));
+        let expected = if pinned {
+            vec![child.id.clone()]
+        } else {
+            vec![]
+        };
+        assert_eq!(app.preferences.pinned.active, expected);
+        assert_eq!(Preferences::load(dir.path()).pinned.active, expected);
     }
 }
 
@@ -1011,7 +1010,7 @@ fn child_resume_actions_reach_the_provider_or_show_the_notice() {
             .unwrap()
             .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
             .unwrap();
-        let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        let mut provider = CodexProvider::new(dir.path().into());
         let mut child = provider
             .refresh(2)
             .sessions
@@ -1050,14 +1049,10 @@ fn child_resume_actions_reach_the_provider_or_show_the_notice() {
             for action in [
                 Action::Fork(child.id.clone()),
                 Action::Delete(child.id.clone()),
-                Action::TogglePin {
-                    id: child.id.clone(),
-                    pinned: true,
-                },
             ] {
                 assert!(!app.handle_action(Some(action)));
                 assert!(app.launch.is_none());
-                assert!(app.preferences.pinned.is_empty());
+                assert!(app.preferences.pinned.active.is_empty());
             }
         }
         let mut claude_child = app.sessions[0].clone();
@@ -1086,7 +1081,7 @@ fn child_rename_only_reaches_provider_for_manager_threads() {
             .unwrap()
             .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
             .unwrap();
-        let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+        let mut provider = CodexProvider::new(dir.path().into());
         let mut child = provider
             .refresh(2)
             .sessions
@@ -1122,14 +1117,10 @@ fn child_rename_only_reaches_provider_for_manager_threads() {
                 Action::Delete(child.id.clone()),
                 Action::Archive(child.id.clone()),
                 Action::Stop(child.id.clone()),
-                Action::TogglePin {
-                    id: child.id.clone(),
-                    pinned: true,
-                },
             ] {
                 assert!(!app.handle_action(Some(action)));
                 assert!(app.launch.is_none());
-                assert!(app.preferences.pinned.is_empty());
+                assert!(app.preferences.pinned.active.is_empty());
             }
         }
     }
@@ -1143,7 +1134,7 @@ fn manager_thread_fork_reaches_app_launch() {
         .unwrap()
         .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
         .unwrap();
-    let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut provider = CodexProvider::new(dir.path().into());
     let mut child = provider
         .refresh(2)
         .sessions
@@ -1164,7 +1155,7 @@ fn manager_thread_fork_reaches_app_launch() {
 
 #[test]
 fn manager_thread_mutations_reach_app_provider_paths() {
-    use crate::providers::{Provider, codex::CodexProvider};
+    use crate::providers::codex::CodexProvider;
     use ratatui::{buffer::Buffer, layout::Rect};
     for operation in ["archive", "delete"] {
         let (dir, mut app) = fixture();
@@ -1172,27 +1163,44 @@ fn manager_thread_mutations_reach_app_provider_paths() {
             .unwrap()
             .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
             .unwrap();
+        let parent = app.sessions[0].id.id.clone();
         let manager = dir.path().join("manager");
         std::fs::create_dir_all(manager.join("threads")).unwrap();
-        std::fs::create_dir_all(manager.join("claude-parent")).unwrap();
+        std::fs::create_dir_all(manager.join(&parent)).unwrap();
+        let mut supervisor: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../../../tests/fixtures/codex-manager/attached-supervisor.json"
+        ))
+        .unwrap();
+        supervisor["sessionId"] = parent.clone().into();
         std::fs::write(
             manager.join("threads/thread-12.json"),
-            include_bytes!("../../../tests/fixtures/codex-manager/attached-supervisor.json"),
+            serde_json::to_vec(&supervisor).unwrap(),
         )
         .unwrap();
-        let state = manager.join("claude-parent/state.json");
+        let state = manager.join(&parent).join("state.json");
         let bytes = include_bytes!("../../../tests/fixtures/codex-manager/attached-state.json");
         std::fs::write(&state, bytes).unwrap();
-        let mut provider = CodexProvider::new(dir.path().into(), manager);
-        let child = provider
-            .refresh(2)
+        app.hub = Hub::new(vec![
+            Box::new(CodexProvider::new(dir.path().into())),
+            Box::new(
+                crate::providers::claude::ClaudeProvider::new(dir.path().into())
+                    .with_codex_manager(manager),
+            ),
+        ]);
+        // The initial lookup reads two pages; action refreshes keep their one-page budget.
+        let snapshot = app
+            .hub
+            .session_source()
+            .run(2, crate::sessions::RefreshRequest::Full);
+        let child = snapshot
             .sessions
-            .into_iter()
+            .iter()
             .find(|session| session.id.id == "thread-12")
+            .cloned()
             .unwrap();
         assert!(child.parent.is_some() && child.can_resume());
-        app.hub = Hub::new(vec![Box::new(provider)]);
         app.session_refresh = SessionRefresh::new(app.hub.session_source());
+        app.supervisions = snapshot.supervisions;
         app.sessions.push(child.clone());
         let action = match operation {
             "archive" => Action::Archive(child.id),
@@ -1258,7 +1266,7 @@ fn new_key_adds_a_claude_draft_whatever_is_selected() {
         .unwrap()
         .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
         .unwrap();
-    let mut codex = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut codex = CodexProvider::new(dir.path().into());
     let mut thread = codex.refresh(1).sessions.remove(0);
     thread.cwd = dir.path().into();
     app.hub = Hub::new(vec![

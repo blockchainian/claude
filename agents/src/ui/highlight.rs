@@ -3,7 +3,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Highlighter, Theme, ThemeSet};
 use syntect::parsing::{Scope, SyntaxReference, SyntaxSet};
@@ -22,10 +22,20 @@ thread_local! {
 
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 /// The theme for the current terminal background; `None` until a background is applied.
+#[cfg(not(test))]
 static THEME: Mutex<HighlightTheme> = Mutex::new(HighlightTheme {
     theme: None,
     generation: 0,
 });
+
+// Render tests change themes independently, including between frames of the same view.
+#[cfg(test)]
+thread_local! {
+    static THEME: Mutex<HighlightTheme> = const { Mutex::new(HighlightTheme {
+        theme: None,
+        generation: 0,
+    }) };
+}
 
 struct HighlightTheme {
     theme: Option<Theme>,
@@ -36,7 +46,7 @@ fn syntax_set() -> &'static SyntaxSet {
     SYNTAX_SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
-/// The `light` and `dark` themes in `themes/`, built from GitHub's themes by `themes/build.py`.
+/// The bundled themes derive from GitHub's VS Code themes, with colors adjusted to match Nvim.
 fn bundled_theme(light_background: bool) -> Theme {
     let source: &[u8] = if light_background {
         include_bytes!("../../themes/light.tmTheme")
@@ -51,15 +61,16 @@ fn bundled_theme(light_background: bool) -> Theme {
 /// background; returns the reason when the file cannot be used, keeping the bundled theme.
 pub fn use_theme(light_background: bool, path: Option<&Path>) -> Result<(), String> {
     let (theme, result) = theme_for(light_background, path);
-    let mut current = locked_theme();
-    current.theme = Some(theme);
-    current.generation += 1;
+    with_current_theme(|current| {
+        current.theme = Some(theme);
+        current.generation += 1;
+    });
     result
 }
 
 /// Identifies the highlight theme used by cached styled lines.
 pub(super) fn theme_generation() -> u64 {
-    locked_theme().generation
+    with_current_theme(|current| current.generation)
 }
 
 fn theme_for(light_background: bool, path: Option<&Path>) -> (Theme, Result<(), String>) {
@@ -73,16 +84,21 @@ fn theme_for(light_background: bool, path: Option<&Path>) -> (Theme, Result<(), 
     }
 }
 
-fn locked_theme() -> MutexGuard<'static, HighlightTheme> {
-    THEME
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+fn with_current_theme<T>(f: impl FnOnce(&mut HighlightTheme) -> T) -> T {
+    let apply = |theme: &Mutex<HighlightTheme>| {
+        f(&mut theme
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()))
+    };
+    #[cfg(test)]
+    return THEME.with(apply);
+    #[cfg(not(test))]
+    apply(&THEME)
 }
 
 /// Runs `f` with the current theme, the dark bundled theme before any background is applied.
 fn with_theme<T>(f: impl FnOnce(&Theme) -> T) -> T {
-    let mut theme = locked_theme();
-    f(theme.theme.get_or_insert_with(|| bundled_theme(false)))
+    with_current_theme(|current| f(current.theme.get_or_insert_with(|| bundled_theme(false))))
 }
 
 /// Token kinds emitted by the JSON pretty-printer, in the order returned by `json_styles`.
@@ -152,6 +168,25 @@ fn json_styles_for(theme: &Theme) -> [Style; 7] {
     })
 }
 
+/// A scope's foreground, resolved by syntect just like syntax-highlighted code.
+pub(super) fn scope_style(scope: &str) -> Style {
+    with_theme(|theme| {
+        let scope = Scope::new(scope).expect("UI theme scope is valid");
+        Style {
+            fg: terminal_color(Highlighter::new(theme).style_for_stack(&[scope]).foreground),
+            ..Style::default()
+        }
+    })
+}
+
+pub(super) fn selection_background() -> Option<Color> {
+    with_theme(|theme| theme.settings.selection.and_then(terminal_color))
+}
+
+pub(super) fn accent_color() -> Option<Color> {
+    with_theme(|theme| theme.settings.accent.and_then(terminal_color))
+}
+
 /// The bundled JSON grammar scopes object keys as quoted strings inside mapping keys.
 #[cfg(test)]
 pub(super) fn json_key_foreground() -> Color {
@@ -164,7 +199,25 @@ pub(super) fn json_key_foreground() -> Color {
 /// terminal's default foreground (`None`), and any other alpha is RGB.
 fn terminal_color(color: syntect::highlighting::Color) -> Option<Color> {
     match color.a {
-        0 => Some(Color::Indexed(color.r)),
+        0 => Some(match color.r {
+            0 => Color::Black,
+            1 => Color::Red,
+            2 => Color::Green,
+            3 => Color::Yellow,
+            4 => Color::Blue,
+            5 => Color::Magenta,
+            6 => Color::Cyan,
+            7 => Color::Gray,
+            8 => Color::DarkGray,
+            9 => Color::LightRed,
+            10 => Color::LightGreen,
+            11 => Color::LightYellow,
+            12 => Color::LightBlue,
+            13 => Color::LightMagenta,
+            14 => Color::LightCyan,
+            15 => Color::White,
+            index => Color::Indexed(index),
+        }),
         1 => None,
         _ => Some(Color::Rgb(color.r, color.g, color.b)),
     }
@@ -246,13 +299,26 @@ pub(super) fn code_lines(text: &str, lang: &str) -> Vec<Line<'static>> {
     if find_syntax(lang).map(|syntax| syntax.scope)
         == find_syntax("bash").map(|syntax| syntax.scope)
     {
-        for script in super::shell_commands::scripts(text) {
+        let scripts = crate::shell_commands::scripts(text);
+        // Shells with multiple heredocs in one command keep their shell highlighting.
+        if crate::shell_commands::split(text).is_some_and(|commands| {
+            commands.iter().any(|command| {
+                scripts
+                    .iter()
+                    .filter(|script| command.range.contains(&script.range.start))
+                    .count()
+                    > 1
+            })
+        }) {
+            return lines;
+        }
+        for script in scripts {
             let syntax = match script.syntax {
-                super::shell_commands::SyntaxSource::Interpreter(interpreter) => {
+                crate::shell_commands::SyntaxSource::Interpreter(interpreter) => {
                     let shebang = format!("#!/usr/bin/env {interpreter}");
                     syntax_set().find_syntax_by_first_line(&shebang)
                 }
-                super::shell_commands::SyntaxSource::Extension(extension) => find_syntax(extension),
+                crate::shell_commands::SyntaxSource::Extension(extension) => find_syntax(extension),
             };
             if let Some(syntax) = syntax
                 && let Some(embedded) = highlighted(&text[script.range.clone()], &syntax.name)
@@ -360,20 +426,111 @@ pub(super) fn plain_lines(text: &str) -> Vec<Line<'static>> {
         .collect()
 }
 
-/// Unified diff hunks: removed lines red, added lines green, hunk headers dim.
-pub(super) fn diff_lines(text: &str) -> Vec<Line<'static>> {
-    text.lines()
-        .map(|line| {
-            let style = if line.starts_with("@@") {
-                Style::default().add_modifier(Modifier::DIM)
-            } else if line.starts_with('-') {
-                Style::default().fg(Color::Red)
-            } else if line.starts_with('+') {
-                Style::default().fg(Color::Green)
-            } else {
-                Style::default()
+/// Unified diff hunks with separate syntax state for the before and after code.
+/// Changed rows carry a background for the panel renderer; layout centers and clips the text.
+pub(super) fn diff_lines(text: &str, lang: &str, width: usize) -> Vec<Line<'static>> {
+    let diff_style = |name| {
+        let mut style = scope_style(name);
+        style.bg = with_theme(|theme| {
+            Highlighter::new(theme)
+                .style_mod_for_stack(&[Scope::new(name).expect("diff scope is valid")])
+                .background
+                .and_then(terminal_color)
+        });
+        style
+    };
+    let deleted = diff_style("markup.deleted");
+    let inserted = diff_style("markup.inserted");
+    let foreground = with_theme(|theme| theme.settings.foreground.and_then(terminal_color));
+    let header = scope_style("meta.diff.header");
+    let syntax = !exceeds_limits(text) && find_syntax(lang).is_some();
+    // A file header runs from a `diff` line, or a leading `---` line, up to the first hunk, so
+    // its `---` and `+++` lines are not changed code.
+    let mut in_header = text.starts_with("--- ");
+    let rows: Vec<_> = text
+        .lines()
+        .map(|row| {
+            if row.starts_with("diff ") {
+                in_header = true;
+            } else if row.starts_with("@@") {
+                in_header = false;
+            }
+            (row, in_header)
+        })
+        .collect();
+    let width = rows
+        .iter()
+        .map(|(row, _)| Line::from(*row).width())
+        .max()
+        .unwrap_or(0)
+        .min(width);
+    rows.split_inclusive(|(line, _)| line.starts_with("@@"))
+        .flat_map(|hunk| {
+            let code = |skip| {
+                let source: String = hunk
+                    .iter()
+                    .filter(|(line, in_header)| {
+                        !in_header
+                            && matches!(line.as_bytes().first(), Some(b'+' | b'-' | b' '))
+                            && !line.starts_with(skip)
+                    })
+                    .map(|(line, _)| format!("{}\n", &line[1..]))
+                    .collect();
+                code_lines(&source, lang).into_iter()
             };
-            Line::from(Span::styled(line.to_owned(), style))
+            let mut before = syntax.then(|| code('+'));
+            let mut after = syntax.then(|| code('-'));
+            hunk.iter()
+                .map(|&(source, in_header)| {
+                    if in_header {
+                        return Line::from(Span::styled(source.to_owned(), header));
+                    }
+                    let marker = source.as_bytes().first().copied();
+                    let style = match marker {
+                        Some(b'-') => deleted,
+                        Some(b'+') => inserted,
+                        _ => Style::default(),
+                    };
+                    if !matches!(marker, Some(b'+' | b'-' | b' ')) {
+                        return Line::from(Span::styled(
+                            source.to_owned(),
+                            if source.starts_with("@@") {
+                                Style::new().dim()
+                            } else {
+                                Style::default()
+                            },
+                        ));
+                    }
+                    let old = (marker != Some(b'+'))
+                        .then(|| before.as_mut().and_then(Iterator::next))
+                        .flatten();
+                    let new = (marker != Some(b'-'))
+                        .then(|| after.as_mut().and_then(Iterator::next))
+                        .flatten();
+                    let content = if marker == Some(b'-') { old } else { new };
+                    let mut spans = vec![Span::styled(source[..1].to_owned(), style)];
+                    if let Some(content) = content {
+                        spans.extend(content.spans.into_iter().map(|mut span| {
+                            if matches!(marker, Some(b'+' | b'-'))
+                                && (span.style.fg.is_none() || span.style.fg == foreground)
+                            {
+                                span.style.fg = style.fg;
+                            }
+                            span.style.bg = style.bg;
+                            span
+                        }));
+                    } else {
+                        spans.push(Span::styled(source[1..].to_owned(), style));
+                    }
+                    let mut line = Line::from(spans);
+                    line.style.bg = style.bg;
+                    if style.bg.is_some() && line.width() < width {
+                        line.spans
+                            .push(Span::styled(" ".repeat(width - line.width()), style));
+                    }
+                    line
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
 }
@@ -381,6 +538,133 @@ pub(super) fn diff_lines(text: &str) -> Vec<Line<'static>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_colors_follow_theme_changes() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                use_theme(false, None).unwrap();
+            }
+        }
+        let _restore = Restore;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("custom.tmTheme");
+        // Start with the real bundled theme, preserving its scope selectors.
+        let source = std::str::from_utf8(include_bytes!("../../themes/dark.tmTheme")).unwrap();
+        for (error, quote, selection, accent) in [
+            ("#123456", "#234567", "#345678", "#456789"),
+            ("#abcdef", "#bcdef0", "#cdef01", "#def012"),
+        ] {
+            let source = source
+                .replace("#a0635d", error)
+                .replace("#4a8b4f", quote)
+                .replace("#3f8f7f", "#789abc")
+                .replace("#220a0a", "#456789")
+                .replace("#001408", "#56789a")
+                .replace("#e9000000", selection)
+                .replacen("#06000000", accent, 1)
+                .replace("#06000000", "#56789a");
+            std::fs::write(&path, source).unwrap();
+            let generation = theme_generation();
+            use_theme(false, Some(&path)).unwrap();
+            assert!(theme_generation() > generation);
+            let rgb = |hex: &str| {
+                Some(Color::Rgb(
+                    u8::from_str_radix(&hex[1..3], 16).unwrap(),
+                    u8::from_str_radix(&hex[3..5], 16).unwrap(),
+                    u8::from_str_radix(&hex[5..7], 16).unwrap(),
+                ))
+            };
+            with_theme(|theme| {
+                assert_eq!(
+                    theme.settings.selection.and_then(terminal_color),
+                    rgb(selection)
+                );
+                assert_eq!(theme.settings.accent.and_then(terminal_color), rgb(accent));
+            });
+            let diff = diff_lines("-removed\n+added", "", 0);
+            let quote_lines = super::super::markdown::render("> quote", 80);
+            let code = super::super::markdown::render("```\ncode\n```", 80);
+            assert_eq!(
+                [
+                    super::super::style::error_style().fg,
+                    super::super::style::selection_style().bg,
+                    super::super::style::accent_color(),
+                    quote_lines[0].spans[0].style.fg,
+                    code[0].spans[0].style.fg,
+                    diff[0].spans[0].style.fg,
+                    diff[1].spans[0].style.fg,
+                ],
+                [
+                    rgb(error),
+                    rgb(selection),
+                    rgb(accent),
+                    rgb(quote),
+                    Some(Color::Rgb(0x56, 0x78, 0x9a)),
+                    rgb("#789abc"),
+                    rgb("#789abc")
+                ]
+            );
+            assert_eq!(diff[0].spans[0].style.bg, rgb("#456789"));
+            assert_eq!(diff[1].spans[0].style.bg, rgb("#56789a"));
+        }
+        for (light, error, quote, selection) in [
+            (true, Color::Rgb(130, 7, 30), Color::Rgb(17, 99, 41), 111),
+            (false, Color::Rgb(160, 99, 93), Color::Rgb(74, 139, 79), 233),
+        ] {
+            use_theme(light, None).unwrap();
+            assert_eq!(super::super::style::error_style().fg, Some(error));
+            assert_eq!(
+                super::super::style::selection_style().bg,
+                Some(Color::Indexed(selection))
+            );
+            assert_eq!(super::super::style::accent_color(), Some(Color::Cyan));
+            assert_eq!(scope_style("markup.quote").fg, Some(quote));
+            assert_eq!(scope_style("markup.raw.block").fg, Some(Color::Cyan));
+            let diff = diff_lines("-removed\n+added", "", 0);
+            let markup = if light {
+                Color::Rgb(0, 0, 0)
+            } else {
+                Color::Rgb(63, 143, 127)
+            };
+            assert_eq!(diff[0].spans[0].style.fg, Some(markup));
+            assert_eq!(diff[1].spans[0].style.fg, Some(markup));
+        }
+        // An external theme may omit every UI setting and scope.
+        let mut minimal = plist::Value::from_reader_xml(std::io::Cursor::new(source)).unwrap();
+        let settings = minimal
+            .as_dictionary_mut()
+            .unwrap()
+            .get_mut("settings")
+            .unwrap()
+            .as_array_mut()
+            .unwrap();
+        settings.truncate(1);
+        let globals = settings[0]
+            .as_dictionary_mut()
+            .unwrap()
+            .get_mut("settings")
+            .unwrap()
+            .as_dictionary_mut()
+            .unwrap();
+        globals.remove("selection");
+        globals.remove("accent");
+        minimal.to_file_xml(&path).unwrap();
+        use_theme(false, Some(&path)).unwrap();
+        assert_eq!(super::super::style::selection_style().bg, None);
+        assert_eq!(super::super::style::accent_color(), None);
+        for scope in [
+            "markup.quote",
+            "markup.raw.block",
+            "message.error",
+            "markup.deleted",
+            "markup.inserted",
+        ] {
+            assert_eq!(scope_style(scope).fg, Some(Color::Indexed(23)));
+        }
+    }
 
     fn text(lines: &[Line<'_>]) -> Vec<String> {
         lines.iter().map(ToString::to_string).collect()
@@ -579,6 +863,11 @@ mod tests {
             ),
             ("cat <<EOF > a.rs\nlet x = 42;\nEOF", "let x = 42;\n", "rs"),
             (
+                "cat >> a.test.mjs <<'EOF'\nconst x = 42;\nEOF",
+                "const x = 42;\n",
+                "mjs",
+            ),
+            (
                 "cat > 'some file.py' <<EOF\nimport json\nEOF",
                 "import json\n",
                 "py",
@@ -596,7 +885,6 @@ mod tests {
             "python3 script.py -c 'import json'",
             "python3 script.py <<EOF\nimport json\nEOF",
             "cat <<EOF\nimport json\nEOF",
-            "cat >> foo.py <<EOF\nimport json\nEOF",
             "cat > foo.unknownext <<EOF\nimport json\nEOF",
             "tee foo.py <<EOF\nimport json\nEOF",
             "cat > $file.py <<EOF\nimport json\nEOF",
@@ -670,18 +958,311 @@ mod tests {
     fn theme_colors_decode_terminal_palette_alphas() {
         use syntect::highlighting::Color as ThemeColor;
         let color = |r, a| ThemeColor { r, g: 2, b: 3, a };
-        assert_eq!(terminal_color(color(4, 0)), Some(Color::Indexed(4)));
+        for (index, expected) in [
+            Color::Black,
+            Color::Red,
+            Color::Green,
+            Color::Yellow,
+            Color::Blue,
+            Color::Magenta,
+            Color::Cyan,
+            Color::Gray,
+            Color::DarkGray,
+            Color::LightRed,
+            Color::LightGreen,
+            Color::LightYellow,
+            Color::LightBlue,
+            Color::LightMagenta,
+            Color::LightCyan,
+            Color::White,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(terminal_color(color(index as u8, 0)), Some(expected));
+        }
+        assert_eq!(terminal_color(color(111, 0)), Some(Color::Indexed(111)));
         assert_eq!(terminal_color(color(4, 1)), None);
         assert_eq!(terminal_color(color(4, 0xff)), Some(Color::Rgb(4, 2, 3)));
     }
 
     #[test]
+    fn diff_backgrounds_fill_block_width_in_both_themes() {
+        for (light, removed, added) in [
+            (false, Color::Rgb(34, 10, 10), Color::Rgb(0, 20, 8)),
+            (true, Color::Rgb(208, 185, 185), Color::Rgb(125, 212, 183)),
+        ] {
+            use_theme(light, None).unwrap();
+            let lines = diff_lines("@@ -1 +1 @@\n-旧\n+新\n same", "", 20);
+            for (line, background) in lines[1..3].iter().zip([removed, added]) {
+                assert_eq!(line.width(), 11);
+                assert!(
+                    line.spans
+                        .iter()
+                        .all(|span| span.style.bg == Some(background))
+                );
+            }
+            for line in [&lines[0], &lines[3]] {
+                assert!(line.spans.iter().all(|span| span.style.bg.is_none()));
+            }
+        }
+    }
+
+    #[test]
+    fn diff_file_headers_use_the_header_color_without_background() {
+        for light in [false, true] {
+            use_theme(light, None).unwrap();
+            let header = scope_style("meta.diff.header").fg;
+            let source = "diff --git a/x.rs b/x.rs\nindex 1..2 100644\n--- a/x.rs\n+++ b/x.rs\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/y.rs b/y.rs\n--- a/y.rs\n+++ b/y.rs\n@@ -1 +1 @@\n-c\n+d";
+            let lines = diff_lines(source, "rs", 30);
+            for index in [0, 1, 2, 3, 7, 8, 9] {
+                assert_eq!(
+                    lines[index].width(),
+                    Line::from(source.lines().nth(index).unwrap()).width()
+                );
+                assert!(
+                    lines[index]
+                        .spans
+                        .iter()
+                        .all(|span| span.style.bg.is_none() && span.style.fg == header),
+                    "{index}"
+                );
+            }
+            for index in [5, 6, 11, 12] {
+                assert!(
+                    lines[index]
+                        .spans
+                        .iter()
+                        .all(|span| span.style.bg.is_some())
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn diff_block_width_includes_context_and_wide_characters() {
+        for light in [false, true] {
+            use_theme(light, None).unwrap();
+            for (source, expected) in [
+                ("@@\n-旧\n+新\n 中文日本語", 11),
+                ("@@\n-中文日本語\n+新\n same", 11),
+                ("@@ -1 +1 @@\n-旧\n+新\n same", 11),
+            ] {
+                for width in [0, 4, 20] {
+                    let lines = diff_lines(source, "", width);
+                    for (line, original) in lines.iter().zip(source.lines()) {
+                        let original_width = Line::from(original).width();
+                        if original.starts_with(['+', '-']) {
+                            assert_eq!(line.width(), original_width.max(expected.min(width)));
+                            assert!(line.spans.iter().all(|span| span.style.bg.is_some()));
+                        } else {
+                            assert_eq!(line.width(), original_width);
+                            assert!(line.spans.iter().all(|span| span.style.bg.is_none()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn diff_plain_text_uses_markup_foregrounds_and_preserves_syntax_colors() {
+        let payload: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
+                .lines()
+                .nth(5)
+                .unwrap(),
+        )
+        .unwrap();
+        let code = payload["toolUseResult"]["structuredPatch"][0]["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .find(|line| line.starts_with("+        let word = "))
+            .unwrap()
+            .strip_prefix('+')
+            .unwrap();
+        for light in [false, true] {
+            for terminal_default in [false, true] {
+                let mut theme = bundled_theme(light);
+                if terminal_default {
+                    theme.settings.foreground = Some(syntect::highlighting::Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 1,
+                    });
+                }
+                let default = theme.settings.foreground.and_then(terminal_color);
+                with_current_theme(|current| current.theme = Some(theme));
+                let expected = byte_styles(&code_lines(code, "rs"));
+                assert!(expected[0].iter().any(|style| style.fg == default));
+                assert!(expected[0].iter().any(|style| style.fg != default));
+                let lines = diff_lines(&format!("@@ -1 +1 @@\n-{code}\n+{code}\n {code}"), "rs", 0);
+                assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::DIM));
+                let actual = byte_styles(&lines);
+                for (row, scope) in [(1, "markup.deleted"), (2, "markup.inserted")] {
+                    let markup = scope_style(scope).fg;
+                    assert_ne!(default, markup);
+                    assert_eq!(actual[row][0].fg, markup);
+                    for (actual, expected) in actual[row][1..].iter().zip(&expected[0]) {
+                        let foreground = if expected.fg.is_none() || expected.fg == default {
+                            markup
+                        } else {
+                            expected.fg
+                        };
+                        assert_eq!(
+                            actual.fg, foreground,
+                            "light={light}, terminal_default={terminal_default}"
+                        );
+                        assert_eq!(actual.add_modifier, expected.add_modifier);
+                    }
+                }
+                for (actual, expected) in actual[3][1..].iter().zip(&expected[0]) {
+                    assert_eq!(actual, expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn diff_code_matches_rust_highlighting() {
+        use_theme(false, None).unwrap();
+        let code = "fn main() { let value = 42; }";
+        let lines = diff_lines(&format!("-{code}\n+{code}"), "rs", 40);
+        let expected = byte_styles(&code_lines(code, "rs"));
+        let foreground = with_theme(|theme| theme.settings.foreground.and_then(terminal_color));
+        for (line, scope) in lines.iter().zip(["markup.deleted", "markup.inserted"]) {
+            assert_eq!(line.spans[0].content.len(), 1);
+            assert_eq!(line.spans[0].style.fg, scope_style(scope).fg);
+            assert!(
+                line.spans
+                    .iter()
+                    .all(|span| span.style.bg == line.spans[0].style.bg)
+            );
+            assert!(line.spans[0].style.bg.is_some());
+            assert!(
+                line.spans
+                    .iter()
+                    .any(|span| span.style.fg != line.spans[0].style.fg)
+            );
+            let actual = byte_styles(std::slice::from_ref(line));
+            for (actual, expected) in actual[0][1..].iter().zip(&expected[0]) {
+                let expected = if expected.fg.is_none() || expected.fg == foreground {
+                    scope_style(scope).fg
+                } else {
+                    expected.fg
+                };
+                assert_eq!(actual.fg, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn diff_unknown_and_oversized_code_keeps_markup_foregrounds() {
+        use_theme(false, None).unwrap();
+        for (lang, code) in [
+            ("unknown-language", "fn main() {}".to_owned()),
+            ("rs", "x".repeat(MAX_LINE_BYTES + 1)),
+            ("rs", "x\n".repeat(MAX_LINES + 1)),
+            (
+                "rs",
+                format!("{}\n", "x".repeat(256)).repeat(MAX_BYTES / 256 + 1),
+            ),
+        ] {
+            let source = format!("-{code}\n+{code}");
+            let lines = diff_lines(&source, lang, 20);
+            for line in lines.iter().filter(|line| {
+                line.spans
+                    .first()
+                    .is_some_and(|span| matches!(span.content.as_ref(), "-" | "+"))
+            }) {
+                let scope = if line.spans[0].content == "-" {
+                    "markup.deleted"
+                } else {
+                    "markup.inserted"
+                };
+                assert!(
+                    line.spans
+                        .iter()
+                        .all(|span| span.style.fg == scope_style(scope).fg)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn diff_uses_only_explicit_scope_backgrounds() {
+        let mut theme = bundled_theme(false);
+        for item in &mut theme.scopes {
+            item.style.background = None;
+        }
+        with_current_theme(|current| current.theme = Some(theme));
+        let lines = diff_lines("-fn main() {}\n+fn main() {}", "rs", 80);
+        assert!(
+            lines
+                .iter()
+                .flat_map(|line| &line.spans)
+                .all(|span| span.style.bg.is_none())
+        );
+        assert_eq!(lines[0].width(), 13);
+    }
+
+    #[test]
+    fn diff_keeps_before_and_after_multiline_syntax_separate() {
+        use_theme(false, None).unwrap();
+        let source = "@@ -1,3 +1,3 @@\n /* start\n-old comment\n+new comment\n */\n@@ -9 +9 @@\n-fn before() {}\n+fn after() {}";
+        let lines = diff_lines(source, "rs", 0);
+        let before = byte_styles(&code_lines("/* start\nold comment\n*/", "rs"));
+        let after = byte_styles(&code_lines("/* start\nnew comment\n*/", "rs"));
+        let styles = byte_styles(&lines);
+        for (row, expected) in [
+            (1, &after[0]),
+            (2, &before[1]),
+            (3, &after[1]),
+            (4, &after[2]),
+        ] {
+            for (actual, expected) in styles[row][1..].iter().zip(expected) {
+                assert_eq!(actual.fg, expected.fg);
+            }
+        }
+        for (row, code) in [(6, "fn before() {}"), (7, "fn after() {}")] {
+            let expected = byte_styles(&code_lines(code, "rs"));
+            let foreground = with_theme(|theme| theme.settings.foreground.and_then(terminal_color));
+            for (actual, expected) in styles[row][1..].iter().zip(&expected[0]) {
+                let expected = if expected.fg.is_none() || expected.fg == foreground {
+                    styles[row][0].fg
+                } else {
+                    expected.fg
+                };
+                assert_eq!(actual.fg, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn diff_keeps_wide_rows_unwrapped() {
+        let source = "+中文代码很长";
+        let lines = diff_lines(source, "rs", 4);
+        assert_eq!(text(&lines), [source]);
+        assert!(lines[0].width() > 4);
+        assert_eq!(diff_lines("+", "rs", 0)[0].width(), 1);
+    }
+
+    #[test]
     fn diff_lines_colour_by_marker() {
-        let lines = diff_lines("@@ -1 +1 @@\n-old\n+new\n same");
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        use_theme(false, None).unwrap();
+        let lines = diff_lines("@@ -1 +1 @@\n-old\n+new\n same", "", 0);
         assert_eq!(text(&lines), ["@@ -1 +1 @@", "-old", "+new", " same"]);
         assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::DIM));
-        assert_eq!(lines[1].spans[0].style.fg, Some(Color::Red));
-        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Green));
+        assert_eq!(lines[1].spans[0].style.fg, Some(Color::Rgb(63, 143, 127)));
+        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Rgb(63, 143, 127)));
         assert_eq!(lines[3].spans[0].style.fg, None);
     }
 }
+
+#[cfg(test)]
+#[path = "highlight_scope_tests.rs"]
+mod scope_tests;

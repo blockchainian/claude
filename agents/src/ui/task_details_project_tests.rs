@@ -74,9 +74,30 @@ fn prompt_cache_countdown_precedes_wall_time_and_expiry_follows_status() {
 }
 
 #[test]
+fn claude_subagent_prompt_cache_countdown_shows_only_in_its_last_minute() {
+    let now = DateTime::UNIX_EPOCH + Duration::days(20_000);
+    for (seconds, shown) in [(59, true), (60, false), (180, false)] {
+        let mut view = fixture();
+        let selected = &mut view.rows[view.selected];
+        selected.parent = Some(session_key("43"));
+        selected.started_at = Some(now - Duration::hours(2));
+        selected.cache_expires_at = Some(now + Duration::seconds(seconds));
+        let mut buf = Buffer::empty(Rect::new(0, 0, 220, 50));
+        view.render_at(buf.area, &mut buf, now);
+        let shows = (0..buf.area.height).any(|y| {
+            (0..buf.area.width)
+                .map(|x| visible(&buf[(x, y)]))
+                .collect::<String>()
+                .contains(" · 2h 0m")
+        });
+        assert_eq!(shows, shown, "{seconds}");
+    }
+}
+
+#[test]
 fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
     for pr in [false, true] {
-        for width in [80, 149, 150, 220] {
+        for width in [100, 149, 150, 220] {
             let mut view = fixture();
             let selected = &mut view.rows[view.selected];
             selected.title = "T".into();
@@ -92,7 +113,7 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
             let links = view.viewport.borrow().task_details_links.clone();
             let (folder, _) = links
                 .iter()
-                .find(|(_, target)| target == std::path::Path::new("/tmp/project"))
+                .find(|(_, target)| crate::ui::link_path(target) == crate::test_project())
                 .unwrap();
             let row = (task_details.x..task_details.right())
                 .map(|x| visible(&buf[(x, folder.y)]))
@@ -117,7 +138,14 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
             if pr {
                 let (rect, _) = &links[1];
                 assert_eq!(rect.y, folder.y);
-                assert_eq!(rect.right(), task_details.right() - u16::from(width < 150));
+                assert_eq!(
+                    rect.right(),
+                    task_details.right()
+                        - u16::from(
+                            crate::ui::render::ScreenLayout::for_width(width)
+                                != crate::ui::render::ScreenLayout::Large
+                        )
+                );
                 assert_eq!(
                     (rect.x..rect.right())
                         .map(|x| visible(&buf[(x, rect.y)]))
@@ -142,7 +170,7 @@ fn status_rule_flanks_status_with_folder_and_optional_pr_links() {
                             &mut view,
                             mouse(MouseEventKind::Down(MouseButton::Left), x, rect.y)
                         ),
-                        Some(Action::OpenPath(target.clone()))
+                        Some(Action::Open(target.clone()))
                     );
                 }
             }
@@ -192,12 +220,38 @@ fn status_rule_names_a_worktree_task_by_its_repository_and_opens_the_worktree() 
         let mut buf = Buffer::empty(Rect::new(0, 0, 150, 50));
         view.render(buf.area, &mut buf);
         let (folder, target) = view.viewport.borrow().task_details_links[0].clone();
-        assert_eq!(&target, cwd);
+        assert_eq!(crate::ui::link_path(&target), cwd);
         assert_eq!(
             (folder.x..folder.right())
                 .map(|x| visible(&buf[(x, folder.y)]))
                 .collect::<String>(),
             "repository"
         );
+        let mut task = session("tree", "T", SessionStatus::Ready, 0);
+        task.cwd = cwd.clone();
+        let mut list = test_view(Grouping::Project, false);
+        list.set_sessions(vec![task], false);
+        assert_eq!(list.group_heading(0, 80), "repository");
     }
+}
+
+#[test]
+fn status_rule_names_a_missing_directory_without_a_link() {
+    let mut view = fixture();
+    let selected = &mut view.rows[view.selected];
+    selected.cwd = "/nonexistent/build".into();
+    view.project_groups = view.rows.iter().map(ProjectGroup::for_session).collect();
+    let mut buf = Buffer::empty(Rect::new(0, 0, 150, 50));
+    view.render(buf.area, &mut buf);
+    let viewport = view.viewport.borrow();
+    let rule = (0..buf.area.width)
+        .map(|x| visible(&buf[(x, viewport.task_details.bottom())]))
+        .collect::<String>();
+    assert!(rule.contains("build"), "{rule}");
+    assert!(
+        viewport
+            .task_details_links
+            .iter()
+            .all(|(_, target)| crate::ui::link_path(target) != Path::new("/nonexistent/build"))
+    );
 }

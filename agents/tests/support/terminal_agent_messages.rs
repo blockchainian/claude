@@ -109,13 +109,9 @@ fn terminal_codex_agent_message_bodies() {
         let capture = tmux.capture_when(|capture| {
             capture.lines().any(|line| {
                 line.contains(&event_detail_title)
-                    && line.contains(if subject == "demo_sub" {
-                        "Spawn agent"
-                    } else if subject == "ux_probe" {
-                        "Followup task"
-                    } else {
-                        "Message"
-                    })
+                    && !["Spawn agent", "Followup task", "Message"]
+                        .iter()
+                        .any(|label| line.contains(label))
             }) && capture.contains("(encrypted)")
         });
         let record: serde_json::Value = serde_json::from_str(fixture).unwrap();
@@ -240,7 +236,10 @@ fn terminal_codex_collaboration_navigation() {
     let (column, row) = find(&capture, "Spawn agent demo_sub");
     tmux.mouse(0, column, row, true);
     let spawn = tmux.capture_when(|capture| {
-        capture.contains("Spawn agent") && capture.contains("demo_sub · GPT-6.1-Sol · low")
+        capture.contains("Spawn agent demo_sub")
+            && capture.lines().any(|line| {
+                line.contains("demo_sub · GPT-6.1-Sol · low") && !line.contains("Spawn agent")
+            })
     });
     let event_surface = spawn
         .lines()
@@ -255,7 +254,11 @@ fn terminal_codex_collaboration_navigation() {
     });
     let (column, row) = find(&jumped, "root → new task");
     tmux.mouse(0, column, row, true);
-    let jumped = tmux.capture_when(|capture| capture.contains("New task"));
+    let jumped = tmux.capture_when(|capture| {
+        capture
+            .lines()
+            .any(|line| line.contains("root → demo_sub") && !line.contains("New task"))
+    });
     assert!(jumped.contains("root → demo_sub"), "{jumped}");
     let (column, row) = find(&jumped, "Collaboration parent");
     tmux.mouse(0, column, row, true);
@@ -323,8 +326,8 @@ fn terminal_claude_agent_exchange() {
                     || capture
                         .lines()
                         .filter(|line| {
-                            line.trim_start().starts_with("Message")
-                                && line.contains("translate-pdf →")
+                            !line.contains("Message")
+                                && line.trim_start().starts_with("translate-pdf →")
                         })
                         .count()
                         == 2)
@@ -332,8 +335,8 @@ fn terminal_claude_agent_exchange() {
         if label == "hide-idle-teammates ← message" {
             assert!(
                 detail.lines().any(|line| {
-                    line.trim_start().starts_with("Message")
-                        && line.contains("← hide-idle-teammates")
+                    !line.contains("Message")
+                        && line.trim_start().starts_with("← hide-idle-teammates")
                 }),
                 "{detail}"
             );

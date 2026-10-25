@@ -58,7 +58,7 @@ pub(super) enum SelectorKind {
     Branch {
         draft: DraftKey,
         branches: Vec<String>,
-        editor: line_edit::LineEdit,
+        editor: line_edit::Editor,
         editing: bool,
     },
     Model {
@@ -106,7 +106,7 @@ impl Selector {
         }
     }
 
-    pub(super) fn branch_editor(&self) -> Option<&line_edit::LineEdit> {
+    pub(super) fn branch_editor(&self) -> Option<&line_edit::Editor> {
         match &self.kind {
             SelectorKind::Branch {
                 editor,
@@ -117,7 +117,7 @@ impl Selector {
         }
     }
 
-    pub(super) fn active_editor(&mut self) -> Option<&mut line_edit::LineEdit> {
+    pub(super) fn active_editor(&mut self) -> Option<&mut line_edit::Editor> {
         match &mut self.kind {
             SelectorKind::Branch {
                 editor,
@@ -162,11 +162,10 @@ impl Selector {
             )
         };
         match &self.kind {
-            SelectorKind::Repository { dir, entries, .. } => {
-                let mut rows = vec![ListRow::Text(Line::from(
-                    super::formatting::format_directory_display(dir, None).dim(),
-                ))];
-                rows.extend(entries.iter().enumerate().map(|(index, entry)| {
+            SelectorKind::Repository { entries, .. } => entries
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| {
                     let text = match entry {
                         BrowseEntry::Parent(_) => Line::from("..".dim()),
                         BrowseEntry::Folder(path) => {
@@ -175,9 +174,8 @@ impl Selector {
                         BrowseEntry::Repository(path) => Line::from(name(path)),
                     };
                     ListRow::Choice(index, text)
-                }));
-                rows
-            }
+                })
+                .collect(),
             SelectorKind::Branch { branches, .. } => branches
                 .iter()
                 .enumerate()
@@ -308,7 +306,7 @@ impl View {
         let branches = match crate::tasks::local_branches(&draft.setup.cwd) {
             Ok(branches) => branches,
             Err(error) => {
-                self.set_notice(Some(format!("Cannot read branches: {error}")));
+                self.show_error(format!("Cannot read branches: {error}"));
                 return false;
             }
         };
@@ -320,7 +318,7 @@ impl View {
             .iter()
             .position(|branch| select_current && branch == current)
             .unwrap_or(branches.len());
-        let mut editor = line_edit::LineEdit::default();
+        let mut editor = line_edit::Editor::default();
         if let Some(name) = &draft.pending_branch {
             editor.set_text(name);
         } else if let DraftBranch::New(name) = &draft.branch {
@@ -774,7 +772,7 @@ impl View {
             return Some(self.apply_choice(selected));
         }
         if let Some(editor) = selector.active_editor() {
-            editor.handle(key);
+            editor.handle_key(key, &mut self.kill_buffer);
             return Some(None);
         }
         let code = super::navigation::list_navigation(key)?;
@@ -799,7 +797,20 @@ impl View {
             0
         };
         let height = usize::from(area.height - reserved).min(choices.len()) as u16;
-        let list = render::row(area, area.height - reserved - height, height);
+        let top_aligned = matches!(
+            selector.kind,
+            SelectorKind::Model { .. } | SelectorKind::Effort { .. }
+        ) && self
+            .viewport
+            .borrow()
+            .navigation_layout
+            .is_some_and(|layout| layout.kind == render::ScreenLayout::Small);
+        let offset = if top_aligned {
+            0
+        } else {
+            area.height - reserved - height
+        };
+        let list = render::row(area, offset, height);
         let mut rows = super::navigation::render_list(
             &choices,
             selector.selected,
@@ -808,7 +819,7 @@ impl View {
             buf,
         );
         if let Some(index) = create {
-            let row = super::event_list::search_input_rect(area);
+            let row = render::row(area, area.height.saturating_sub(1), 1);
             if let Some(editor) = selector.branch_editor() {
                 render::render_input_row(&format!("New branch {PROMPT_MARKER} "), editor, row, buf);
                 self.viewport.borrow_mut().task_details_input = row;
@@ -1037,7 +1048,7 @@ mod tests {
         view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
         let selector = view.selector.as_ref().unwrap();
         let selected = selector.selected;
-        let caret = selector.branch_editor().unwrap().window(80).1;
+        let caret = selector.branch_editor().unwrap().window(80).caret_column;
         let branch = view.selected_draft().unwrap().branch.clone();
         view.set_active_panel(Panel::Prompt);
         assert_eq!(view.selected_draft().unwrap().branch, branch);
@@ -1055,7 +1066,10 @@ mod tests {
         let selector = view.selector.as_ref().unwrap();
         assert_eq!(selector.selected, selected);
         assert_eq!(selector.branch_editor().unwrap().text(), "feature/half");
-        assert_eq!(selector.branch_editor().unwrap().window(80).1, caret);
+        assert_eq!(
+            selector.branch_editor().unwrap().window(80).caret_column,
+            caret
+        );
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(
             view.selected_draft().unwrap().branch,
@@ -1257,6 +1271,12 @@ mod tests {
         view.draft_created(
             view.selected_draft.unwrap(),
             Err(std::io::Error::other("Creation was interrupted")),
+        );
+        assert_eq!(
+            view.selection_failure(),
+            Some(super::footer::Feedback::Error(
+                "Creation was interrupted".into()
+            ))
         );
         states.push(panel_rows(&view, area).join("\n"));
         view.set_active_panel(Panel::Prompt);

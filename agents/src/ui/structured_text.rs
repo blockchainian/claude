@@ -19,8 +19,8 @@ pub(super) trait Document {
     fn is_empty(&self) -> bool {
         false
     }
-    fn lines(&self, _width: usize) -> Vec<Line<'static>> {
-        self.highlighted()
+    fn lines(&self, width: usize) -> Vec<Line<'static>> {
+        super::content::hard_wrap(self.highlighted(), width)
     }
     fn highlighted(&self) -> Vec<Line<'static>> {
         highlight::code_lines(&self.text(), self.syntax())

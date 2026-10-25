@@ -1,5 +1,5 @@
 use super::{
-    content::{Block, Kind},
+    content::{Block, Kind, Table},
     highlight,
 };
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
@@ -7,6 +7,42 @@ use ratatui::{
     style::Style,
     text::{Line, Span},
 };
+use std::{
+    collections::HashMap,
+    io::Write,
+    process::{Command, Stdio},
+    sync::{LazyLock, Mutex},
+};
+
+fn mermaid(text: &str) -> Option<String> {
+    static CACHE: LazyLock<Mutex<HashMap<String, Option<String>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+    CACHE
+        .lock()
+        .expect("mermaid cache lock")
+        .entry(text.to_owned())
+        .or_insert_with(|| {
+            let mut child = Command::new("mermaid-ascii")
+                .args(["-f", "-"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok()?;
+            let written = child
+                .stdin
+                .take()
+                .expect("mermaid stdin")
+                .write_all(text.as_bytes());
+            let output = child.wait_with_output().ok()?;
+            written.ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            String::from_utf8(output.stdout).ok()
+        })
+        .clone()
+}
 
 /// Recognize supported Markdown structure without treating ordinary line breaks as prose.
 pub(super) fn has_markers(text: &str) -> bool {
@@ -48,7 +84,6 @@ pub(super) fn blocks(text: &str) -> Vec<Block> {
                 match tag {
                     Tag::Table(_) => {
                         writer.separate();
-                        writer.kind = Kind::Preformatted;
                         writer.table = Some(Vec::new());
                     }
                     Tag::TableHead => {
@@ -77,7 +112,9 @@ pub(super) fn blocks(text: &str) -> Vec<Block> {
                     Tag::Link { .. } => writer.styles.push(style),
                     Tag::BlockQuote => {
                         writer.separate();
-                        writer.styles.push(style.green());
+                        writer
+                            .styles
+                            .push(style.patch(highlight::scope_style("markup.quote")));
                     }
                     Tag::CodeBlock(kind) => {
                         writer.separate();
@@ -89,7 +126,9 @@ pub(super) fn blocks(text: &str) -> Vec<Block> {
                             CodeBlockKind::Indented => None,
                         };
                         writer.kind = Kind::Preformatted;
-                        writer.styles.push(style.cyan());
+                        writer
+                            .styles
+                            .push(style.patch(highlight::scope_style("markup.raw.block")));
                     }
                     Tag::List(start) => {
                         writer.flush();
@@ -212,51 +251,26 @@ impl Writer {
         self.current.spans.push(Span::styled(text, style));
     }
 
-    /// Align each column to its widest cell, divide columns with rules and underline the header.
     fn table_lines(&mut self, rows: Vec<Vec<Line<'static>>>) {
-        let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
-        let widths: Vec<usize> = (0..columns)
-            .map(|column| {
-                rows.iter()
-                    .filter_map(|row| row.get(column))
-                    .map(Line::width)
-                    .max()
-                    .unwrap_or(0)
-            })
-            .collect();
-        let style = self.style();
-        for (index, row) in rows.into_iter().enumerate() {
-            let mut cells = row.into_iter();
-            for (column, width) in widths.iter().enumerate() {
-                if column > 0 {
-                    self.current.spans.push(Span::styled(" │ ", style));
-                }
-                let cell = cells.next().unwrap_or_default();
-                let padding = width - cell.width();
-                self.current.spans.extend(cell.spans);
-                if column + 1 < columns && padding > 0 {
-                    self.current.spans.push(Span::raw(" ".repeat(padding)));
-                }
-            }
-            self.flush_code();
-            if index == 0 {
-                let rule = widths
-                    .iter()
-                    .enumerate()
-                    .map(|(column, width)| {
-                        let gaps = usize::from(column > 0) + usize::from(column + 1 < columns);
-                        "─".repeat(width + gaps)
-                    })
-                    .collect::<Vec<_>>()
-                    .join("┼");
-                self.current.spans.push(Span::styled(rule, style));
-                self.flush_code();
-            }
-        }
+        self.lines.push(Block {
+            lines: Vec::new(),
+            indent: self.indent,
+            kind: Kind::Table(Table::new(rows, self.style())),
+        });
     }
 
     fn code_lines(&mut self) {
-        let text = std::mem::take(&mut self.code_text)
+        let text = std::mem::take(&mut self.code_text);
+        let lang = self.code_lang.take();
+        let diagram = lang.as_deref() == Some("mermaid");
+        if diagram && let Some(output) = mermaid(&text) {
+            for part in output.lines() {
+                self.push(part, Style::default());
+                self.flush_code();
+            }
+            return;
+        }
+        let text = text
             .chars()
             .map(|ch| {
                 if ch.is_control() && ch != '\n' {
@@ -266,7 +280,6 @@ impl Writer {
                 }
             })
             .collect::<String>();
-        let lang = self.code_lang.take();
         let mut highlighted = lang
             .filter(|lang| highlight::find_syntax(lang).is_some())
             .map(|lang| highlight::code_lines(&text, &lang).into_iter());
@@ -287,6 +300,13 @@ impl Writer {
             }
         }
         self.flush();
+        if diagram {
+            self.push(
+                "Install mermaid-ascii to render this diagram.",
+                super::style::time_style(),
+            );
+            self.flush_code();
+        }
     }
 
     fn flush(&mut self) {
@@ -299,17 +319,16 @@ impl Writer {
         self.lines.push(Block {
             lines: vec![std::mem::take(&mut self.current)],
             indent: self.indent,
-            kind: self.kind,
+            kind: self.kind.clone(),
         });
     }
 
     fn separate(&mut self) {
         self.flush();
-        if self
-            .lines
-            .last()
-            .is_some_and(|block| block.lines.iter().any(|line| !line.spans.is_empty()))
-        {
+        if self.lines.last().is_some_and(|block| {
+            matches!(block.kind, Kind::Table(_))
+                || block.lines.iter().any(|line| !line.spans.is_empty())
+        }) {
             self.lines.push(Block {
                 lines: vec![Line::default()],
                 indent: 0,
@@ -326,6 +345,190 @@ mod tests {
 
     fn plain(lines: &[Line<'_>]) -> Vec<String> {
         lines.iter().map(ToString::to_string).collect()
+    }
+
+    fn mermaid_process(name: &str, installed: bool) -> bool {
+        if std::env::var_os("AGENTS_MERMAID_TEST").is_some() {
+            return true;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        if installed {
+            let binary = std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
+                .join("go/bin/mermaid-ascii");
+            assert!(
+                binary.is_file(),
+                "install mermaid-ascii in ~/go/bin for this test"
+            );
+            std::os::unix::fs::symlink(binary, directory.path().join("mermaid-ascii")).unwrap();
+        }
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!("ui::markdown::tests::{name}"),
+                "--nocapture",
+            ])
+            .env("AGENTS_MERMAID_TEST", "1")
+            .env("PATH", directory.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        false
+    }
+
+    #[test]
+    fn bold_next_to_cjk_punctuation() {
+        for (source, bold) in [
+            ("**适用范围太窄。**这条规则开头是…", "适用范围太窄。"),
+            ("**放错了位置。**“发给…", "放错了位置。"),
+            (
+                "**改 CLAUDE.md 的适用范围。**把",
+                "改 CLAUDE.md 的适用范围。",
+            ),
+            ("中文**「粗体」**后文", "「粗体」"),
+            ("中文**(bold)**后文", "(bold)"),
+            ("a**「bold」**b", "「bold」"),
+            ("한**(bold)**글", "(bold)"),
+            ("ｶ**(bold)**ﾅ", "(bold)"),
+            ("字\u{e0100}**(bold)**后", "(bold)"),
+            ("字\u{fe00}**(bold)**后", "(bold)"),
+            ("a**「\u{fe00}bold」\u{fe00}**b", "「\u{fe00}bold」\u{fe00}"),
+        ] {
+            let lines = render(source, 100);
+            assert_eq!(plain(&lines).join(""), source.replace("**", ""), "{source}");
+            let styled: String = lines
+                .iter()
+                .flat_map(|line| &line.spans)
+                .filter(|span| span.style.add_modifier.contains(Modifier::BOLD))
+                .map(|span| span.content.as_ref())
+                .collect();
+            assert_eq!(styled, bold, "{source}");
+            assert!(has_markers(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn cjk_flanking_preserves_other_delimiter_rules() {
+        let lines = render("a**bold!\u{fe00}**b", 100);
+        assert_eq!(plain(&lines), ["abold!\u{fe00}b"]);
+        assert!(lines[0].spans.iter().any(|span| {
+            span.content == "bold!\u{fe00}" && span.style.add_modifier.contains(Modifier::BOLD)
+        }));
+        for source in [
+            "a**(bold)**b",
+            "a\u{fe00}**(bold)**b",
+            "a**😀bold😀**b",
+            "字** bold**后",
+            "字**bold **后",
+            "字__bold__后",
+            "a__「bold」__b",
+            "`**适用范围太窄。**这`",
+        ] {
+            let lines = render(source, 100);
+            assert!(
+                lines
+                    .iter()
+                    .flat_map(|line| &line.spans)
+                    .all(|span| { !span.style.add_modifier.contains(Modifier::BOLD) }),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn mermaid_renders_box_drawing_and_caches_across_widths() {
+        if !mermaid_process("mermaid_renders_box_drawing_and_caches_across_widths", true) {
+            return;
+        }
+        let source = "```mermaid\ngraph LR\n A[Start] --> B[Finish]\n```";
+        let lines = render(source, 80);
+        assert!(plain(&lines).join("\n").contains('┌'));
+        assert!(plain(&lines).join("\n").contains("Start"));
+        assert!(
+            lines
+                .iter()
+                .flat_map(|line| &line.spans)
+                .all(|span| span.style == Style::default())
+        );
+        std::fs::remove_file(
+            std::path::PathBuf::from(std::env::var_os("PATH").unwrap()).join("mermaid-ascii"),
+        )
+        .unwrap();
+        assert_eq!(render(source, 10), lines);
+    }
+
+    #[test]
+    fn mermaid_missing_program_preserves_source_and_caches_failure() {
+        if !mermaid_process(
+            "mermaid_missing_program_preserves_source_and_caches_failure",
+            false,
+        ) {
+            return;
+        }
+        let source = "```mermaid\ngraph TD\n A[Missing] --> B[Program]\n```";
+        let lines = render(source, 100);
+        assert_eq!(
+            plain(&lines),
+            [
+                "graph TD",
+                " A[Missing] --> B[Program]",
+                "Install mermaid-ascii to render this diagram."
+            ]
+        );
+        assert_eq!(lines[0].spans[0].style.fg, Some(Color::Cyan));
+        assert_eq!(lines[2].spans[0].style, super::super::style::time_style());
+        let binary = std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
+            .join("go/bin/mermaid-ascii");
+        std::os::unix::fs::symlink(
+            binary,
+            std::path::PathBuf::from(std::env::var_os("PATH").unwrap()).join("mermaid-ascii"),
+        )
+        .unwrap();
+        assert_eq!(render(source, 80), lines);
+    }
+
+    #[test]
+    fn mermaid_failed_program_preserves_source_and_hint() {
+        if !mermaid_process("mermaid_failed_program_preserves_source_and_hint", true) {
+            return;
+        }
+        assert_eq!(
+            plain(&render("```mermaid\ninvalid diagram\n```", 100)),
+            [
+                "invalid diagram",
+                "Install mermaid-ascii to render this diagram."
+            ]
+        );
+    }
+
+    #[test]
+    fn mermaid_wide_diagram_is_clipped_without_wrapping() {
+        if !mermaid_process("mermaid_wide_diagram_is_clipped_without_wrapping", true) {
+            return;
+        }
+        let source = "```mermaid\ngraph LR\n A[Wide start] --> B[Wide finish]\n```";
+        let lines = render(source, 10);
+        assert!(lines.iter().any(|line| line.width() > 10));
+        assert!(plain(&lines).join("\n").contains('─'));
+        let area = ratatui::layout::Rect::new(0, 0, 10, lines.len() as u16);
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        ratatui::widgets::Widget::render(
+            ratatui::widgets::Paragraph::new(lines.clone()),
+            area,
+            &mut buffer,
+        );
+        for (row, line) in lines.iter().enumerate() {
+            let visible: String = (0..10)
+                .map(|column| buffer[(column, row as u16)].symbol())
+                .collect();
+            assert_eq!(
+                visible.trim_end(),
+                line.to_string()
+                    .chars()
+                    .take(10)
+                    .collect::<String>()
+                    .trim_end()
+            );
+        }
     }
 
     #[test]
@@ -348,6 +551,306 @@ mod tests {
         assert_eq!(maps[0][0].1, name..name + 1);
         assert!(maps[1].is_empty());
         assert_eq!(maps[2].last().unwrap().1, two + 2..two + 3);
+    }
+
+    const WIDE_TABLE: &str = "| Item | Status | Note |\n| --- | --- | --- |\n| F1 | done | The code is done and its first two tests went from failing to passing. |\n| F2 | wait | Committed as 9c4b6ab4; 118 targeted tests pass. |";
+
+    #[test]
+    fn wide_tables_wrap_cells_to_the_reading_width() {
+        let lines = render(WIDE_TABLE, 50);
+        assert_eq!(
+            plain(&lines),
+            [
+                "Item │ Status │ Note",
+                "─────┼────────┼───────────────────────────────────",
+                "F1   │ done   │ The code is done and its first two",
+                "     │        │ tests went from failing to",
+                "     │        │ passing.",
+                "─────┼────────┼───────────────────────────────────",
+                "F2   │ wait   │ Committed as 9c4b6ab4; 118",
+                "     │        │ targeted tests pass.",
+            ]
+        );
+        for line in &lines {
+            assert!(line.width() <= 50);
+            if line.to_string().contains('│') {
+                let text = line.to_string();
+                let columns: Vec<_> = text
+                    .char_indices()
+                    .filter(|(_, ch)| *ch == '│')
+                    .map(|(i, _)| unicode_width::UnicodeWidthStr::width(&text[..i]))
+                    .collect();
+                assert_eq!(columns, [5, 14]);
+            }
+        }
+    }
+
+    #[test]
+    fn wrapped_table_selection_copies_cells_without_generated_rules() {
+        use super::super::{
+            Grouping, View,
+            text_selection::{DrawnRow, Source, TextRegion},
+        };
+        use ratatui::layout::Rect;
+        let (lines, breaks): (Vec<_>, Vec<_>) = blocks(WIDE_TABLE)
+            .into_iter()
+            .map(|block| block.layout_with_breaks(textwrap::Options::new(50)))
+            .fold(
+                (Vec::new(), Vec::new()),
+                |(mut lines, mut breaks), (next, joins)| {
+                    lines.extend(next);
+                    breaks.extend(joins);
+                    (lines, breaks)
+                },
+            );
+        assert!(breaks.iter().any(Option::is_some));
+        let maps = super::super::text_selection_layout::map_lines(WIDE_TABLE, &lines, true);
+        let mut view = View::new(Grouping::Project, false);
+        view.viewport.borrow_mut().event_text = TextRegion {
+            area: Rect::new(0, 0, 50, lines.len() as u16),
+            sources: vec![Source {
+                id: 0,
+                text: WIDE_TABLE.into(),
+                label: "table".into(),
+            }],
+            rows: lines
+                .iter()
+                .zip(maps)
+                .zip(breaks)
+                .enumerate()
+                .map(|(index, ((line, cells), continuation))| DrawnRow {
+                    segment: 0,
+                    index,
+                    x: 0,
+                    y: index as u16,
+                    cells,
+                    continuation,
+                    text: line.to_string(),
+                })
+                .collect(),
+        };
+        // Select the Note cell from its first character through its last continuation.
+        view.begin_text_selection(16, 2);
+        view.extend_text_selection(24, 4);
+        let Some(super::super::Action::Copy { text, .. }) = view.finish_text_selection(24, 4)
+        else {
+            panic!("copy action")
+        };
+        assert_eq!(
+            text,
+            "The code is done and its first two tests went from failing to passing."
+        );
+        assert!(maps_for_rules_are_empty(WIDE_TABLE, &lines));
+    }
+
+    fn maps_for_rules_are_empty(source: &str, lines: &[Line<'_>]) -> bool {
+        super::super::text_selection_layout::map_lines(source, lines, true)
+            .iter()
+            .zip(lines)
+            .filter(|(_, line)| line.to_string().contains('┼'))
+            .all(|(map, _)| map.is_empty())
+    }
+
+    /// The recorded appium session call whose capabilities cell is a JSON string.
+    fn capabilities_table() -> (serde_json::Value, String) {
+        let capabilities = serde_json::json!({
+            "appium:udid": "00000000-0000000000000000",
+            "appium:usePreinstalledWDA": true,
+            "appium:prebuiltWDAPath": "/Users/user/.cache/appium-mcp/wda-real/16.12.4/signed/23ed55a4-b472-45e1-b469-ee696e1e150c/Payload-resigned.ipa",
+            "appium:wdaLaunchTimeout": 30000,
+            "appium:shouldTerminateApp": false,
+            "appium:newCommandTimeout": 600
+        });
+        let row = serde_json::json!({"platform": "ios", "capabilities": capabilities.to_string()});
+        let source = crate::providers::tool::markdown_table(&row, "input").unwrap();
+        (capabilities, source)
+    }
+
+    #[test]
+    fn structured_table_cells_draw_like_structured_sections() {
+        let (capabilities, source) = capabilities_table();
+        let lines = render(&source, 60);
+        let text = plain(&lines);
+        assert_eq!(text[0], "platform │ capabilities");
+        assert_eq!(text[2], "ios      │ {");
+        assert_eq!(
+            text[3],
+            "         │   \"appium:udid\": \"00000000-0000000000000000\","
+        );
+        assert_eq!(text.last().unwrap(), "         │ }");
+        let document = super::super::structured_text::parse(&capabilities.to_string()).unwrap();
+        let expected: Vec<String> = document.lines(49).iter().map(ToString::to_string).collect();
+        let cells: Vec<String> = text[2..]
+            .iter()
+            .map(|line| line.chars().skip(11).collect())
+            .collect();
+        assert_eq!(cells, expected);
+        assert!(expected.len() > 8, "the long path wraps inside the column");
+        for line in &lines {
+            assert!(line.width() <= 60);
+        }
+        assert!(
+            lines[3]
+                .spans
+                .iter()
+                .any(|span| span.style.fg.is_some() && span.content.contains("appium:udid"))
+        );
+    }
+
+    #[test]
+    fn structured_table_cell_selection_copies_the_displayed_text() {
+        use super::super::{
+            Grouping, View,
+            text_selection::{DrawnRow, Source, TextRegion},
+        };
+        use ratatui::layout::Rect;
+        let (capabilities, source) = capabilities_table();
+        let (lines, breaks): (Vec<_>, Vec<_>) = blocks(&source)
+            .into_iter()
+            .map(|block| block.layout_with_breaks(textwrap::Options::new(60)))
+            .fold(
+                (Vec::new(), Vec::new()),
+                |(mut lines, mut breaks), (next, joins)| {
+                    lines.extend(next);
+                    breaks.extend(joins);
+                    (lines, breaks)
+                },
+            );
+        let maps = super::super::text_selection_layout::map_lines(&source, &lines, true);
+        let mut view = View::new(Grouping::Project, false);
+        view.viewport.borrow_mut().event_text = TextRegion {
+            area: Rect::new(0, 0, 60, lines.len() as u16),
+            sources: vec![Source {
+                id: 0,
+                text: source.clone().into(),
+                label: "table".into(),
+            }],
+            rows: lines
+                .iter()
+                .zip(maps)
+                .zip(breaks)
+                .enumerate()
+                .map(|(index, ((line, cells), continuation))| DrawnRow {
+                    segment: 0,
+                    index,
+                    x: 0,
+                    y: index as u16,
+                    cells,
+                    continuation,
+                    text: line.to_string(),
+                })
+                .collect(),
+        };
+        let last = lines.len() as u16 - 1;
+        view.begin_text_selection(11, 2);
+        view.extend_text_selection(12, last);
+        let Some(super::super::Action::Copy { text, .. }) = view.finish_text_selection(12, last)
+        else {
+            panic!("copy action")
+        };
+        let document = super::super::structured_text::parse(&capabilities.to_string()).unwrap();
+        assert_eq!(text, document.text());
+        assert!(maps_for_rules_are_empty(&source, &lines));
+    }
+
+    #[test]
+    fn tables_wrap_cjk_styles_headers_and_indentation() {
+        let source = "| **标题中文** | Note |\n| --- | --- |\n| 中文中文中文 | abcdefghijklmnopqrstuvwxyz |\n| 中文 | short |";
+        let lines = render(source, 17);
+        assert!(lines.iter().all(|line| line.width() <= 17));
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line.to_string().contains('┼'))
+                .count(),
+            2
+        );
+        for line in &lines {
+            for span in &line.spans {
+                if span.content.contains('标') || span.content.contains('题') {
+                    assert!(span.style.add_modifier.contains(Modifier::BOLD));
+                }
+            }
+        }
+        let maps = super::super::text_selection_layout::map_lines(source, &lines, true);
+        let mapped: Vec<_> = maps
+            .iter()
+            .flatten()
+            .map(|(_, bytes)| bytes.clone())
+            .collect();
+        for (event, range) in Parser::new_ext(source, Options::ENABLE_TABLES).into_offset_iter() {
+            if let Event::Text(text) = event {
+                for (offset, ch) in text.char_indices() {
+                    assert!(
+                        mapped.contains(
+                            &(range.start + offset..range.start + offset + ch.len_utf8())
+                        )
+                    );
+                }
+            }
+        }
+        let mut table = blocks(source).pop().unwrap();
+        table.indent = 4;
+        let indented = table.layout(textwrap::Options::new(21));
+        assert_eq!(
+            plain(&indented),
+            plain(&lines)
+                .iter()
+                .map(|line| format!("    {line}"))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(render(source, 0), Vec::<Line<'static>>::new());
+    }
+
+    #[test]
+    fn table_width_allocation_preserves_short_columns_and_redistributes() {
+        let source = format!(
+            "| A | B | C |\n|---|---|---|\n| {} | {} | {} |",
+            "a".repeat(6),
+            "b".repeat(35),
+            "c".repeat(100)
+        );
+        let lines = render(&source, 108);
+        assert_eq!(
+            lines[1].to_string(),
+            format!("{}┼{}┼{}", "─".repeat(7), "─".repeat(37), "─".repeat(62))
+        );
+        assert!(lines.iter().all(|line| line.width() <= 108));
+        let equal = render("| A | B |\n|---|---|\n| abcdefgh | ijklmnop |", 16);
+        assert!(equal.iter().all(|line| line.width() <= 16));
+        let narrow = render("| A | B |\n|---|---|\n| abcdefghijkl | mnopqrstuvwx |", 10);
+        assert!(narrow.iter().all(|line| line.width() <= 10));
+        assert_eq!(narrow[2].to_string(), "abcd │ mno");
+        assert_eq!(narrow[3].to_string(), "efgh │ pqr");
+    }
+
+    #[test]
+    fn wrapped_table_maps_each_column_with_prose_options() {
+        let source = "before\n\n| Path | Note |\n|---|---|\n| /one/two/three/four/five/six/seven/eight/nine | **a &amp; b** |\n| /another/very/long/path/to/a/file.rs | tail |\n\nafter";
+        let lines = render_with_options(
+            source,
+            super::super::line_truncation::prose_wrap_options(30),
+        );
+        let maps = super::super::text_selection_layout::map_lines(source, &lines, true);
+        let ranges: Vec<_> = maps
+            .iter()
+            .flatten()
+            .map(|(_, bytes)| bytes.clone())
+            .collect();
+        for label in [
+            "/one/two/three/four/five/six/seven/eight/nine",
+            "/another/very/long/path/to/a/file.rs",
+            "tail",
+            "after",
+        ] {
+            let start = source.find(label).unwrap();
+            for offset in 0..label.len() {
+                assert!(
+                    ranges.contains(&(start + offset..start + offset + 1)),
+                    "{label}: {offset}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -485,6 +988,8 @@ mod tests {
 
     #[test]
     fn headings_quotes_and_code() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        highlight::use_theme(false, None).unwrap();
         for (source, modifier) in [
             ("# title", Modifier::BOLD),
             ("## title", Modifier::BOLD),
@@ -499,7 +1004,7 @@ mod tests {
         }
         assert_eq!(
             render("> quote", 40)[0].spans[0].style.fg,
-            Some(Color::Green)
+            Some(Color::Rgb(74, 139, 79))
         );
         for source in ["```rust\n  code\nnext\n```", "      code\n    next"] {
             assert_eq!(plain(&render(source, 40)), ["  code", "next"]);

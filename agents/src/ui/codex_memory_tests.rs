@@ -19,7 +19,7 @@ fn provider_view() -> (tempfile::TempDir, View, chrono::DateTime<Utc>) {
         [transcript.to_str().unwrap()],
     )
     .unwrap();
-    let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut provider = CodexProvider::new(dir.path().into());
     let mut sessions = provider.refresh(1).sessions;
     assert_eq!(sessions.len(), 1);
     let now = "2026-10-12T02:13:00Z".parse().unwrap();
@@ -129,7 +129,7 @@ fn codex_memory_note_link_opens_the_recorded_file_line() {
         .borrow()
         .event_links
         .iter()
-        .find(|(_, path)| *path == target)
+        .find(|(_, path)| *path == crate::ui::links::LinkTarget::Path(target.clone()))
         .cloned()
         .expect("memory file link");
     assert_eq!(rect.width, "MEMORY.md:136".len() as u16);
@@ -152,6 +152,6 @@ fn codex_memory_note_link_opens_the_recorded_file_line() {
     );
     assert_eq!(
         view.flush_pending_click(Instant::now() + std::time::Duration::from_secs(1)),
-        Some(Action::OpenPath(target))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(target)))
     );
 }

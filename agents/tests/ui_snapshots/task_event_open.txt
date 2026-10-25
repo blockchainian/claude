@@ -1,7 +1,7 @@
   Active 1                                                                              Inactive 0
 ──────────────────────────────────────────────────┬─────────────────── Working ─────────────────────
-                   /tmp/project                   │                     Prompt
- ● Task log example        Working            now │ Task log example
+                     project                      │                     Prompt
+ ● Task log example        Working            now │                Task log example
                                                   │
                                                   │
                                                   │
@@ -32,14 +32,14 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────
                                               Assistant                                   11:59:20
 
- A long response with bold words whose body must be cut before the right edge of the log
+     A long response with bold words whose body must be cut before the right edge of the
+     log
 
- A second paragraph
-
-
-
+     A second paragraph
 
 
 
-────────────────────────────────────────────────────────────────────────────────────────────────────
- ? help  esc previous  ↑/↓ move  enter open  n new
+
+
+──────────────────────────────────────────── run tests ─────────────────────────────────────────────
+ ? help

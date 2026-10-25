@@ -317,7 +317,7 @@ fn event_pin_running_tool_keeps_snapshot_until_repinned() {
 }
 
 #[test]
-fn event_pin_rejects_missing_identity_queued_and_inactive() {
+fn event_pin_rejects_missing_identity_and_queued_but_allows_inactive() {
     let (_dir, mut view, events, _, _) = fixture();
     for row in &mut view.rows {
         row.status = SessionStatus::Ready;
@@ -340,13 +340,17 @@ fn event_pin_rejects_missing_identity_queued_and_inactive() {
             Some(Action::Unsupported("Pin"))
         ));
     }
+    assert!(view.event_list.pinned.is_empty());
+    view.event_panel = events;
+    view.prepare_event_search();
     view.rows[view.selected].status = SessionStatus::Inactive;
     view.status_filter = 1;
+    view.select_event(view.shown_position(1));
     assert!(matches!(
         view.toggle_event_pin(),
-        Some(Action::Unsupported("Pin"))
+        Some(Action::ToggleEventPin { .. })
     ));
-    assert!(view.event_list.pinned.is_empty());
+    assert_eq!(view.event_list.pinned.len(), 1);
 }
 
 #[test]
@@ -373,7 +377,7 @@ fn event_pin_snapshot_survives_update_and_clear_parked() {
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
     show(&mut view, &second, events.clone());
     assert!(view.has_pinned_events(&first));
-    view.clear_pinned_events(&first);
+    view.set_pinned_events(&first, Vec::new());
     show(&mut view, &first, events);
     assert!(!view.has_pinned_events(&first));
 }
@@ -418,10 +422,8 @@ fn event_pin_navigation_and_mouse_use_distinct_rows() {
         modifiers: KeyModifiers::NONE,
     });
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
-    assert_eq!(
-        view.event_read_count(4, true),
-        view.event_panel.len().max(4)
-    );
+    view.event_list.has_older = true;
+    assert_eq!(view.event_list_read_count(4), view.event_panel.len().max(4));
 }
 
 #[test]

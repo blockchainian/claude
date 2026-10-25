@@ -21,6 +21,11 @@ pub(super) struct Part {
 enum Body {
     /// A section label, in the given style.
     Label(Style),
+    /// A transcript image, with placeholder text as its copy source.
+    Image {
+        image: crate::images::Image,
+        caption: bool,
+    },
     /// An input/output arrow without selectable source bytes.
     Arrow,
     /// The dim animation that a call has no output yet.
@@ -28,10 +33,10 @@ enum Body {
     /// Code highlighted as the given language.
     Code(String),
     /// Shell command ranges retain original bytes while separators are display-only.
-    Shell(Vec<super::shell_commands::Command>),
+    Shell(Vec<crate::shell_commands::Command>),
     /// Parsed structured content with its format-owned rendering.
     Structured(Box<dyn Document>),
-    Diff,
+    Diff(String),
     Markdown,
     /// A message or free-text input, with a shared reading column.
     Prose(bool),
@@ -45,12 +50,13 @@ impl Body {
         match self {
             Self::Markdown | Self::Prose(_) => ContentKind::Prose,
             Self::Label(_)
+            | Self::Image { .. }
             | Self::Arrow
             | Self::Running
             | Self::Code(_)
             | Self::Shell(_)
             | Self::Structured(_)
-            | Self::Diff
+            | Self::Diff(_)
             | Self::Note
             | Self::Text => ContentKind::Preformatted,
         }
@@ -63,6 +69,17 @@ impl Part {
             source: source.into(),
             body,
             file_links: Vec::new(),
+        }
+    }
+
+    pub fn image(image: crate::images::Image, caption: bool) -> Self {
+        Self::new(image.label.clone(), Body::Image { image, caption })
+    }
+
+    pub fn shown_image(&self) -> Option<&crate::images::Image> {
+        match &self.body {
+            Body::Image { image, .. } => Some(image),
+            _ => None,
         }
     }
 
@@ -168,6 +185,10 @@ impl Part {
         matches!(self.body, Body::Running)
     }
 
+    pub fn arrow(&self) -> bool {
+        matches!(self.body, Body::Arrow)
+    }
+
     /// Generated rules and title padding have no source bytes to select.
     #[cfg(test)]
     pub fn maps(&self, lines: &[Line<'_>]) -> Vec<Vec<super::text_selection_layout::CellMap>> {
@@ -237,10 +258,19 @@ impl Part {
         now: chrono::DateTime<chrono::Utc>,
         cwd: &std::path::Path,
     ) -> Vec<Line<'static>> {
+        self.layout_in(width, body_style, now, cwd).0
+    }
+
+    pub fn layout_in(
+        &self,
+        width: usize,
+        body_style: Style,
+        now: chrono::DateTime<chrono::Utc>,
+        cwd: &std::path::Path,
+    ) -> (Vec<Line<'static>>, Vec<Option<bool>>) {
         let text = crate::providers::text::printable(&self.source);
         let paths = super::paths::text_paths(&text, cwd);
-        let display =
-            super::line_truncation::abbreviate_paths_in_text(&text, &paths, usize::MAX, cwd);
+        let display = super::line_truncation::fit_paths_in_row(&text, &paths, usize::MAX, cwd);
         let numbered = matches!(&self.body, Body::Code(lang) if lang.starts_with("numbered:"));
         let drawn = if numbered {
             display
@@ -258,6 +288,7 @@ impl Part {
                 kind,
             }],
         };
+        let mut breaks = Vec::new();
         let lines: Vec<_> = blocks
             .into_iter()
             .flat_map(|mut block| {
@@ -265,7 +296,7 @@ impl Part {
                     for line in &mut block.lines {
                         for span in &mut line.spans {
                             let paths = super::paths::text_paths(&span.content, cwd);
-                            span.content = super::line_truncation::abbreviate_paths_for_wrap(
+                            span.content = super::line_truncation::fit_paths_to_wrap_width(
                                 &span.content,
                                 &paths,
                                 width,
@@ -275,13 +306,15 @@ impl Part {
                         }
                     }
                 }
-                block.layout(options.clone())
+                let (lines, joins) = block.layout_with_breaks(options.clone());
+                breaks.extend(joins);
+                lines
             })
             .collect();
         if matches!(self.body, Body::Arrow) {
-            return lines;
+            return (lines, breaks);
         }
-        lines
+        let lines = lines
             .into_iter()
             .map(|mut line| {
                 for span in &mut line.spans {
@@ -289,7 +322,8 @@ impl Part {
                 }
                 line
             })
-            .collect()
+            .collect();
+        (lines, breaks)
     }
 
     fn render_lines(
@@ -299,6 +333,11 @@ impl Part {
         now: chrono::DateTime<chrono::Utc>,
     ) -> Vec<Line<'static>> {
         match &self.body {
+            Body::Image { caption: false, .. } => Vec::new(),
+            Body::Image { caption: true, .. } => vec![Line::from(Span::styled(
+                source.to_owned(),
+                Style::new().dim(),
+            ))],
             Body::Label(style) => vec![Line::from(Span::styled(source.to_owned(), *style))],
             Body::Arrow => {
                 let row = if width > 0 { "↓" } else { "" };
@@ -321,7 +360,7 @@ impl Part {
             }
             Body::Shell(commands) => shell_lines(&self.source, commands),
             Body::Structured(document) => document.lines(width),
-            Body::Diff => highlight::diff_lines(source),
+            Body::Diff(lang) => highlight::diff_lines(source, lang, width),
             Body::Markdown | Body::Prose(true) => unreachable!("Markdown renders semantic blocks"),
             Body::Note => source
                 .split('\n')
@@ -337,7 +376,7 @@ impl Part {
 
 /// Use original source offsets for selection, including separators between selected rows.
 fn shell_part(source: String, prefix: usize) -> Part {
-    let Some(mut commands) = super::shell_commands::split(&source[prefix..]) else {
+    let Some(mut commands) = crate::shell_commands::split(&source[prefix..]) else {
         return Part::new(source, Body::Code("bash".into()));
     };
     for command in &mut commands {
@@ -363,7 +402,7 @@ pub(super) fn bracket_style() -> Style {
 }
 
 /// Shell chains carry display-only brackets; unchained rows reserve the same two cells.
-fn shell_lines(source: &str, commands: &[super::shell_commands::Command]) -> Vec<Line<'static>> {
+fn shell_lines(source: &str, commands: &[crate::shell_commands::Command]) -> Vec<Line<'static>> {
     let prefixed = commands.iter().any(|command| command.and_next);
     let mut lines = Vec::new();
     let mut first = 0;
@@ -401,7 +440,7 @@ fn shell_lines(source: &str, commands: &[super::shell_commands::Command]) -> Vec
 
 fn shell_maps(
     source: &str,
-    commands: &[super::shell_commands::Command],
+    commands: &[crate::shell_commands::Command],
     lines: &[Line<'_>],
 ) -> Vec<Vec<super::text_selection_layout::CellMap>> {
     let mut displayed = String::new();
@@ -442,10 +481,12 @@ fn shell_maps(
     maps
 }
 
-/// Each raw record uses the shared document renderer under its own title.
+/// Each raw record uses the shared document renderer under its own title,
+/// styled like the event's title, with its timestamp in the time column.
 pub(super) fn transcript_content(
     raw: &Result<String, String>,
     provider: crate::providers::ProviderId,
+    kind: &Kind,
 ) -> EventDetailContent {
     let message = |text: String| EventDetailContent {
         sections: vec![EventDetailSection {
@@ -473,26 +514,50 @@ pub(super) fn transcript_content(
         .map(|text| {
             let record: serde_json::Value =
                 serde_json::from_str(text).expect("raw_text validates JSON");
-            let mut title = record["type"].as_str().unwrap_or_default().to_owned();
-            if provider == crate::providers::ProviderId::Codex
-                && let Some(kind) = record["payload"]["type"].as_str()
-            {
-                if !title.is_empty() {
-                    title.push_str(" / ");
+            let content_types = |content: &serde_json::Value| {
+                content
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|block| block["type"].as_str())
+                    .map(super::formatting::title_words)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            // The record's most specific type when it has any, else its role.
+            let types = match provider {
+                crate::providers::ProviderId::Codex => {
+                    let payload = &record["payload"];
+                    payload["item"]["type"]
+                        .as_str()
+                        .map(super::formatting::title_words)
+                        .or_else(|| {
+                            Some(content_types(&payload["content"]))
+                                .filter(|types| !types.is_empty())
+                        })
+                        .or_else(|| payload["type"].as_str().map(super::formatting::title_words))
+                        .unwrap_or_default()
                 }
-                title.push_str(kind);
-            }
+                crate::providers::ProviderId::Claude => {
+                    content_types(&record["message"]["content"])
+                }
+            };
+            let title = if types.is_empty() {
+                super::formatting::title_words(record["type"].as_str().unwrap_or_default())
+            } else {
+                types
+            };
             let time = record["timestamp"]
                 .as_str()
                 .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
                 .map(|time| super::formatting::clock_text(time.with_timezone(&chrono::Utc)));
             EventDetailSection {
                 title: TitleRow {
-                    left: time,
+                    left: None,
                     exit_code: None,
                     title,
-                    title_style: Style::default(),
-                    time: None,
+                    title_style: super::style::event_styles(kind).0,
+                    time,
                     meta_style: Style::new().dim(),
                 },
                 groups: vec![Group {
@@ -554,7 +619,7 @@ pub(super) fn event_detail_content(
                 title: if event.kind == Kind::Tool {
                     event.body.clone()
                 } else {
-                    super::event_list::kind_label(&event.kind).into()
+                    super::event_list::kind_label(&event.kind)
                 },
                 title_style: super::style::event_styles(&event.kind).0,
                 time: Some(time),
@@ -566,19 +631,96 @@ pub(super) fn event_detail_content(
     EventDetailContent { sections }
 }
 
+impl EventDetailContent {
+    /// Adds each text's images as independent alignment groups.
+    pub fn with_images(mut self, event: &Event, cwd: &std::path::Path) -> Self {
+        let mut attached = event.images.clone();
+        for image in attached.iter_mut().chain(
+            self.sections
+                .iter_mut()
+                .flat_map(|section| &mut section.groups)
+                .flat_map(|group| &mut group.parts)
+                .filter_map(|part| match &mut part.body {
+                    Body::Image { image, .. } => Some(image),
+                    _ => None,
+                }),
+        ) {
+            if let crate::images::ImageSource::File { path, .. } = &mut image.source
+                && let Ok(canonical) = path.canonicalize()
+            {
+                *path = canonical;
+            }
+        }
+        let mut seen = self
+            .sections
+            .iter()
+            .flat_map(|section| &section.groups)
+            .flat_map(|group| &group.parts)
+            .filter_map(Part::shown_image)
+            .map(|image| image.source.clone())
+            .collect::<std::collections::HashSet<_>>();
+        let mut existing = std::collections::HashSet::new();
+        for section in &mut self.sections {
+            section.groups.retain_mut(|group| {
+                let empty = group.parts.is_empty();
+                group.parts.retain(|part| {
+                    part.shown_image()
+                        .is_none_or(|image| existing.insert(image.source.clone()))
+                });
+                empty || !group.parts.is_empty()
+            });
+            for group in std::mem::take(&mut section.groups) {
+                if group.parts.is_empty() {
+                    section.groups.push(group);
+                    continue;
+                }
+                let mut parts = Vec::new();
+                for part in group.parts {
+                    let images = if part.shown_image().is_none() {
+                        super::text_images::text_images(&part.source, cwd, &attached, &mut seen)
+                    } else {
+                        Vec::new()
+                    };
+                    parts.push(part);
+                    if !images.is_empty() {
+                        section.groups.push(Group {
+                            parts: std::mem::take(&mut parts),
+                        });
+                        section.groups.extend(images.into_iter().map(|image| Group {
+                            parts: vec![Part::image(image, false)],
+                        }));
+                    }
+                }
+                if !parts.is_empty() {
+                    section.groups.push(Group { parts });
+                }
+            }
+        }
+        if let Some(section) = self.sections.last_mut() {
+            section.groups.extend(
+                attached
+                    .iter()
+                    .filter(|image| seen.insert(image.source.clone()))
+                    .map(|image| Group {
+                        parts: vec![Part::image(image.clone(), true)],
+                    }),
+            );
+        }
+        self
+    }
+}
+
 /// Choose the tool section's metadata and centered title together.
-fn call_title(call: &crate::event::ToolCall) -> (Option<String>, String) {
-    let mut left = call.event_detail_left.clone();
+pub(super) fn call_title(call: &crate::event::ToolCall) -> (Option<String>, String) {
+    let mut left = call.detail_left();
     if let Some(code) = call.exit_code.filter(|code| *code != 0) {
         if left.is_empty() {
-            left = call.name.clone();
+            left = code.to_string();
+        } else {
+            left.push_str(&format!(" · {code}"));
         }
-        left.push_str(&format!(" · {code}"));
     }
-    (
-        (!left.is_empty()).then_some(left),
-        call.event_detail_title.clone(),
-    )
+    ((!left.is_empty()).then_some(left), call.title.clone())
 }
 
 /// One section per call; arrows are independent alignment groups.
@@ -608,6 +750,15 @@ fn parts(event: &Event) -> Vec<EventDetailSection> {
             let mut input = Vec::new();
             for section in &call.input {
                 match section {
+                    Section::GroupBreak if !input.is_empty() => {
+                        sections
+                            .last_mut()
+                            .expect("call has a section")
+                            .groups
+                            .push(Group {
+                                parts: std::mem::take(&mut input),
+                            });
+                    }
                     Section::Label(label) if input.is_empty() && sections.len() == 1 => {
                         sections[0].title.title = label.clone();
                     }
@@ -657,14 +808,30 @@ fn parts(event: &Event) -> Vec<EventDetailSection> {
                         label_style
                     };
                     for section in output {
+                        if matches!(section, Section::GroupBreak) {
+                            if !output_parts.is_empty() {
+                                groups.push(Group {
+                                    parts: std::mem::take(&mut output_parts),
+                                });
+                            }
+                            continue;
+                        }
                         push_section(&mut output_parts, section, style, true);
+                        // Headings share the following content block's alignment.
+                        if !matches!(section, Section::Label(_)) {
+                            groups.push(Group {
+                                parts: std::mem::take(&mut output_parts),
+                            });
+                        }
                     }
                 }
                 None => output_parts.push(Part::new("", Body::Running)),
             }
-            groups.push(Group {
-                parts: output_parts,
-            });
+            if !output_parts.is_empty() {
+                groups.push(Group {
+                    parts: output_parts,
+                });
+            }
             sections
                 .last_mut()
                 .expect("call has a section")
@@ -677,6 +844,16 @@ fn parts(event: &Event) -> Vec<EventDetailSection> {
 
 fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, text_output: bool) {
     let (label, body) = match section {
+        Section::GroupBreak => return,
+        Section::OutputFile { provider, path } => {
+            push_section(
+                parts,
+                &crate::providers::read_output_file(*provider, path),
+                label_style,
+                text_output,
+            );
+            return;
+        }
         Section::Shell { text, prefix } => {
             parts.push(shell_part(text.clone(), *prefix));
             return;
@@ -703,10 +880,16 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
             parts.push(Part::new(text.clone(), Body::Label(Style::new().dim())));
             return;
         }
+        Section::Image(image) => {
+            parts.push(Part::image(image.clone(), true));
+            return;
+        }
         Section::Code { label, lang, text } => {
             (label, Part::new(cells(text), Body::Code(lang.clone())))
         }
-        Section::Diff { label, text } => (label, Part::new(cells(text), Body::Diff)),
+        Section::Diff { label, lang, text } => {
+            (label, Part::new(cells(text), Body::Diff(lang.clone())))
+        }
         Section::Markdown { text, .. } => {
             parts.extend(if text_output {
                 Part::text_parts(cells(text), true)
@@ -810,10 +993,7 @@ mod tests {
     fn codex_fixture_events(fixture: &str) -> Vec<Event> {
         use crate::providers::Provider;
         let directory = tempfile::tempdir().unwrap();
-        let provider = crate::providers::codex::CodexProvider::new(
-            directory.path().into(),
-            directory.path().join("manager"),
-        );
+        let provider = crate::providers::codex::CodexProvider::new(directory.path().into());
         let database = rusqlite::Connection::open(directory.path().join("state_5.sqlite")).unwrap();
         database
             .execute_batch(include_str!("../../tests/fixtures/codex-state.sql"))
@@ -925,13 +1105,113 @@ mod tests {
     }
 
     #[test]
+    fn chrome_output_blocks_have_independent_alignment_groups() {
+        let events = crate::providers::claude::event_reader::tail(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/claude-chrome-javascript.jsonl"),
+            usize::MAX,
+        )
+        .unwrap();
+        let event = events.iter().find(|event| !event.calls.is_empty()).unwrap();
+        let output = event.calls[0].output.as_ref().unwrap();
+        assert_eq!(output.len(), 2);
+        let detail = parts(event);
+        let groups = &detail[0].groups;
+        let arrow = groups
+            .iter()
+            .position(|group| matches!(group.parts[0].body, Body::Arrow))
+            .unwrap();
+        assert_eq!(groups.len() - arrow - 1, output.len());
+        let result: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-chrome-javascript.jsonl")
+                .lines()
+                .nth(1)
+                .unwrap(),
+        )
+        .unwrap();
+        let blocks = result["message"]["content"][0]["content"]
+            .as_array()
+            .unwrap();
+        for (group, block) in groups[arrow + 1..].iter().zip(blocks) {
+            assert_eq!(group.parts.len(), 1);
+            assert_eq!(
+                group.parts[0].source,
+                block["text"].as_str().unwrap().trim_end()
+            );
+        }
+    }
+
+    #[test]
+    fn captured_stderr_heading_stays_with_its_output_group() {
+        let events = crate::providers::claude::event_reader::tail(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/claude-tool-calls.jsonl"),
+            usize::MAX,
+        )
+        .unwrap();
+        let event = events
+            .iter()
+            .find(|event| {
+                event.calls.iter().any(|call| {
+                    call.output.as_ref().is_some_and(|output| {
+                        output.iter().any(
+                            |section| matches!(section, Section::Label(label) if label == "stderr"),
+                        )
+                    })
+                })
+            })
+            .unwrap();
+        let detail = parts(event);
+        let groups = detail.iter().flat_map(|section| &section.groups);
+        let stderr = groups
+            .clone()
+            .find(|group| group.parts.iter().any(|part| part.source == "stderr"))
+            .unwrap();
+        assert!(matches!(stderr.parts[0].body, Body::Label(_)));
+        assert_eq!(stderr.parts[0].source, "stderr");
+        assert!(stderr.parts[1].source.contains("Shell cwd was reset"));
+        assert!(
+            !stderr
+                .parts
+                .iter()
+                .any(|part| part.source.contains("decks.txt"))
+        );
+        assert!(groups.into_iter().any(|group| {
+            group
+                .parts
+                .iter()
+                .any(|part| part.source.contains("decks.txt"))
+        }));
+    }
+
+    #[test]
+    fn claude_advisor_detail_shows_encrypted_output() {
+        let events = crate::providers::claude::event_reader::tail_session(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/claude-advisor.jsonl"),
+            20,
+            true,
+        )
+        .unwrap();
+        assert_eq!(events.len(), 1);
+        let parts = flattened_parts(&events[0]);
+        let output: Vec<_> = parts
+            .iter()
+            .skip_while(|part| !matches!(part.body, Body::Arrow))
+            .skip(1)
+            .map(|part| part.source.as_str())
+            .collect();
+        assert_eq!(output, ["(encrypted)"]);
+    }
+
+    #[test]
     fn codex_agent_message_has_a_named_title_and_no_output_arrow() {
         let events = codex_fixture_events("tests/fixtures/codex-agent-messages/new-task.jsonl");
         let event = events.first().unwrap();
         let detail = event_detail_content(event, "09:55:00".into(), Style::new().dim());
         assert_eq!(detail.sections.len(), 1);
         let section = &detail.sections[0];
-        assert_eq!(section.title.left.as_deref(), Some("New task"));
+        assert_eq!(section.title.left.as_deref(), None);
         assert_eq!(section.title.title, "root → demo_sub");
         assert_eq!(section.title.time.as_deref(), Some("09:55:00"));
         let parts: Vec<_> = section
@@ -953,7 +1233,7 @@ mod tests {
         assert_eq!(detail.sections.len(), 4);
         let expected_times = ["21:22:10", "21:22:35", "21:22:53", "21:22:53"];
         for (section, expected) in detail.sections.iter().zip(expected_times) {
-            assert_eq!(section.title.left.as_deref(), Some("Message"));
+            assert_eq!(section.title.left.as_deref(), None);
             assert_eq!(section.title.title, "tests_audit → root");
             assert_eq!(section.title.time.as_deref(), Some(expected));
             let body: Vec<_> = section
@@ -1017,11 +1297,10 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Bash".into(),
-            event_detail_title: "Check the workspace".into(),
+            title: "Check the workspace".into(),
             show_event_detail: false,
             id: "description-fixture".into(),
-            title: "Bash".into(),
+            summary: "Bash".into(),
             name: "Bash".into(),
             input: vec![],
             output: None,
@@ -1050,11 +1329,10 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "general-purpose".into(),
-            event_detail_title: "Inspect source".into(),
+            title: "Inspect source".into(),
             show_event_detail: false,
             id: "call-id".into(),
-            title: "Agent".into(),
+            summary: "Agent".into(),
             name: "Agent".into(),
             input: vec![Section::Prose {
                 text: "Find the entry".into(),
@@ -1074,7 +1352,7 @@ mod tests {
             assert_eq!(detail.sections.len(), count);
             for section in &detail.sections {
                 let title = &section.title;
-                assert_eq!(title.left.as_deref(), Some("general-purpose · 1"));
+                assert_eq!(title.left.as_deref(), Some("Agent · 1"));
                 assert_eq!(title.title, "Inspect source");
                 assert_eq!(
                     title.time.as_deref(),
@@ -1092,14 +1370,24 @@ mod tests {
                 assert!(section.groups[2].parts[0].running());
             }
         }
-        call.event_detail_title = "source-reader".into();
+        call.title = "source-reader".into();
         assert_eq!(call_title(&call).1, "source-reader");
-        call.event_detail_title = "Agent".into();
+        call.title = "Agent".into();
         assert_eq!(call_title(&call).1, "Agent");
-        call.event_detail_left = "Task call-id".into();
+        call.name = "Task call-id".into();
         assert_eq!(call_title(&call).0.as_deref(), Some("Task call-id · 1"));
-        call.event_detail_left = "Read".into();
+        call.name = "Read".into();
         assert_eq!(call_title(&call).0.as_deref(), Some("Read · 1"));
+        call.name = "Bash".into();
+        assert_eq!(call_title(&call).0.as_deref(), Some("Bash · 1"));
+        call.title.clear();
+        assert_eq!(call_title(&call), (Some("Bash · 1".into()), String::new()));
+        call.exit_code = None;
+        call.title = "Inspect source".into();
+        for name in ["advisor", "background"] {
+            call.name = name.into();
+            assert_eq!(call_title(&call), (None, "Inspect source".into()));
+        }
     }
 
     #[test]
@@ -1128,7 +1416,7 @@ mod tests {
             assert_eq!(
                 title.title,
                 if kind == Kind::Tool {
-                    event.body.as_str()
+                    event.body.clone()
                 } else {
                     super::super::event_list::kind_label(&kind)
                 }
@@ -1200,11 +1488,10 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Bash".into(),
-            event_detail_title: "Bash".into(),
+            title: "Bash".into(),
             show_event_detail: false,
             id: "running-copy".into(),
-            title: "Bash".into(),
+            summary: "Bash".into(),
             name: "Bash".into(),
             input: vec![],
             output: None,
@@ -1781,6 +2068,207 @@ mod tests {
         }
     }
 
+    fn manager_reply_event() -> Event {
+        let timestamps: Vec<serde_json::Value> =
+            include_str!("../../tests/fixtures/claude-chrome-javascript.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        // The reply capture omits timestamps; use a recorded tool exchange's times.
+        let records = include_str!("../../tests/fixtures/claude-manager-reply.jsonl")
+            .lines()
+            .enumerate()
+            .map(|(index, line)| {
+                let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+                record["timestamp"] = timestamps[index]["timestamp"].clone();
+                record.to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let transcript = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(transcript.path(), records).unwrap();
+        crate::providers::claude::event_reader::tail(transcript.path(), usize::MAX)
+            .unwrap()
+            .remove(0)
+    }
+
+    #[test]
+    fn markdown_after_other_output_has_no_added_blank_line() {
+        let event = manager_reply_event();
+        let output = event.calls[0].output.as_ref().unwrap();
+        let mut parts = Vec::new();
+        for section in output {
+            push_section(&mut parts, section, Style::default(), true);
+        }
+        assert!(parts.iter().all(|part| !part.source.is_empty()));
+    }
+
+    #[test]
+    fn group_break_centers_text_and_markdown_as_separate_groups() {
+        use crate::providers::{Provider, claude::ClaudeProvider};
+        use ratatui::{buffer::Buffer, layout::Rect};
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("projects/project");
+        std::fs::create_dir_all(&project).unwrap();
+        let transcript = project.join("00000000-0000-0000-0000-000000000001.jsonl");
+        std::fs::write(
+            &transcript,
+            include_str!("../../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+        let mut provider = ClaudeProvider::new(directory.path().into());
+        let session = provider.refresh(1).sessions.remove(0);
+        let captured = manager_reply_event();
+        let table = captured.calls[0]
+            .output
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|section| matches!(section, Section::Markdown { .. }))
+            .unwrap()
+            .clone();
+        let text = Section::Text {
+            label: String::new(),
+            text: captured.calls[0].id.clone(),
+        };
+        for input in [true, false] {
+            let mut event = captured.clone();
+            let call = &mut event.calls[0];
+            let sections = vec![
+                Section::GroupBreak,
+                text.clone(),
+                Section::GroupBreak,
+                Section::GroupBreak,
+                table.clone(),
+                Section::GroupBreak,
+            ];
+            call.hide_output = input;
+            call.input = if input { sections.clone() } else { Vec::new() };
+            call.output = if input { None } else { Some(sections) };
+            let detail = parts(&event);
+            let groups = &detail[0].groups;
+            let content = if input { &groups[..] } else { &groups[1..] };
+            assert_eq!(content.len(), 2, "input={input}");
+            assert_eq!(content[0].parts.len(), 1);
+            assert_eq!(content[1].parts.len(), 1);
+            let copied = super::super::event_list::open_text(&event);
+            assert!(!copied.contains("GroupBreak"));
+            assert!(!copied.contains("\n\n"));
+            for width in [100, 160, 220] {
+                let mut view = super::super::View::new(crate::model::Grouping::Project, false);
+                view.status_filter = 1;
+                view.set_sessions(vec![session.clone()], false);
+                view.event_session = view.selected_id().cloned();
+                view.set_event(vec![event.clone()]);
+                let area = Rect::new(0, 0, width, 80);
+                let mut buffer = Buffer::empty(area);
+                view.viewport.borrow_mut().event_panel = area;
+                view.render_event_detail(area, &mut buffer, chrono::DateTime::UNIX_EPOCH);
+                let columns = view.viewport.borrow().event_detail_columns.unwrap();
+                let panel = columns.panel;
+                for group in content {
+                    let lines: Vec<_> = group
+                        .parts
+                        .iter()
+                        .flat_map(|part| {
+                            part.lines(
+                                usize::from(if part.reading_column() {
+                                    columns.reading_width()
+                                } else {
+                                    columns.text.width
+                                }),
+                                Style::default(),
+                                chrono::DateTime::UNIX_EPOCH,
+                            )
+                        })
+                        .map(|line| line.to_string())
+                        .collect();
+                    let widest = lines
+                        .iter()
+                        .map(|line| line.width())
+                        .max()
+                        .unwrap()
+                        .min(usize::from(columns.text.width));
+                    let needle = lines
+                        .iter()
+                        .find(|line| !line.trim().is_empty())
+                        .unwrap()
+                        .split_whitespace()
+                        .next()
+                        .unwrap();
+                    let row = (panel.y..panel.bottom())
+                        .map(|y| {
+                            (panel.x..panel.right())
+                                .map(|x| buffer[(x, y)].symbol())
+                                .collect::<String>()
+                        })
+                        .find(|row| row.contains(needle))
+                        .unwrap_or_else(|| {
+                            panic!("missing {needle:?}, input={input}, width={width}")
+                        });
+                    assert_eq!(
+                        row[..row.find(needle).unwrap()].width(),
+                        usize::from(
+                            super::super::centering::centered_x(
+                                columns.panel,
+                                columns.text,
+                                widest as u16
+                            ) - panel.x
+                        ),
+                        "input={input}, width={width}, row={row:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn blocks_are_separated_by_a_blank_line_and_the_arrow_joins_its_neighbors() {
+        use crate::providers::{Provider, claude::ClaudeProvider};
+        use ratatui::{buffer::Buffer, layout::Rect};
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path().join("projects/project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("00000000-0000-0000-0000-000000000001.jsonl"),
+            include_str!("../../tests/fixtures/transcript.jsonl"),
+        )
+        .unwrap();
+        let session = ClaudeProvider::new(directory.path().into())
+            .refresh(1)
+            .sessions
+            .remove(0);
+        let mut view = super::super::View::new(crate::model::Grouping::Project, false);
+        view.status_filter = 1;
+        view.set_sessions(vec![session], false);
+        view.event_session = view.selected_id().cloned();
+        view.set_event(vec![manager_reply_event()]);
+        let area = Rect::new(0, 0, 160, 80);
+        let mut buffer = Buffer::empty(area);
+        view.viewport.borrow_mut().event_panel = area;
+        view.render_event_detail(area, &mut buffer, chrono::DateTime::UNIX_EPOCH);
+        let panel = view.viewport.borrow().event_detail_columns.unwrap().panel;
+        let rows: Vec<String> = (panel.y..panel.bottom())
+            .map(|y| {
+                (panel.x..panel.right())
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+                    .trim()
+                    .to_owned()
+            })
+            .collect();
+        let arrow = rows.iter().position(|row| row == "↓").unwrap();
+        assert!(!rows[arrow - 1].is_empty(), "{rows:#?}");
+        assert!(!rows[arrow + 1].is_empty(), "{rows:#?}");
+        let table = rows
+            .iter()
+            .position(|row| row.starts_with("Attention"))
+            .unwrap();
+        assert!(rows[table - 1].is_empty(), "{rows:#?}");
+        assert!(!rows[table - 2].is_empty(), "{rows:#?}");
+    }
+
     #[test]
     fn review_tab_copy_source_keeps_tabs() {
         let mut parts = Vec::new();
@@ -1807,11 +2295,10 @@ mod tests {
                 model_settings: None,
                 agent_thread_id: None,
                 agent_path: None,
-                event_detail_left: "Bash".into(),
-                event_detail_title: "Bash".into(),
+                title: "Bash".into(),
                 show_event_detail: false,
                 id: "Bash-fixture".into(),
-                title: "Bash".into(),
+                summary: "Bash".into(),
                 name: "Bash".into(),
                 input: vec![Section::Shell {
                     prefix: 0,
@@ -1832,11 +2319,10 @@ mod tests {
                 model_settings: None,
                 agent_thread_id: None,
                 agent_path: None,
-                event_detail_left: "Read".into(),
-                event_detail_title: "Read".into(),
+                title: "Read".into(),
                 show_event_detail: false,
                 id: "Read-fixture".into(),
-                title: "Read".into(),
+                summary: "Read".into(),
                 name: "Read".into(),
                 input: vec![Section::Text {
                     label: "path".into(),
@@ -1899,11 +2385,10 @@ mod tests {
                     model_settings: None,
                     agent_thread_id: None,
                     agent_path: None,
-                    event_detail_left: "Bash".into(),
-                    event_detail_title: "Run checks".into(),
+                    title: "Run checks".into(),
                     show_event_detail: false,
                     id: "arrow-fixture".into(),
-                    title: "Run checks".into(),
+                    summary: "Run checks".into(),
                     name: "Bash".into(),
                     input: vec![],
                     output: Some(vec![]),
@@ -1936,13 +2421,13 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Edit".into(),
-            event_detail_title: "Edit".into(),
+            title: "Edit".into(),
             show_event_detail: false,
             id: "Edit-fixture".into(),
-            title: "Edit".into(),
+            summary: "Edit".into(),
             name: "Edit".into(),
             input: vec![Section::Diff {
+                lang: "rs".into(),
                 label: "a.rs".into(),
                 text: "+中文字符串很长\n-short".into(),
             }],
@@ -1960,7 +2445,7 @@ mod tests {
             [
                 "a.rs",
                 "+中文字符串很长",
-                "-short",
+                "-short   ",
                 "↓",
                 "let value = \"abcdefghij\";"
             ]
@@ -1983,10 +2468,7 @@ mod tests {
         .unwrap();
         let mut claude = crate::providers::claude::ClaudeProvider::new(dir.path().into());
         let mut session = claude.refresh(1).sessions.remove(0);
-        let codex = crate::providers::codex::CodexProvider::new(
-            dir.path().into(),
-            dir.path().join("manager"),
-        );
+        let codex = crate::providers::codex::CodexProvider::new(dir.path().into());
         for fixture in ["codex-mcp-errors.jsonl", "codex-command-failed.jsonl"] {
             session.transcript = Some(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2042,11 +2524,10 @@ mod tests {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Bash".into(),
-            event_detail_title: "Bash".into(),
+            title: "Bash".into(),
             show_event_detail: false,
             id: "Bash-fixture".into(),
-            title: "Bash".into(),
+            summary: "Bash".into(),
             name: "Bash".into(),
             input: vec![],
             output: Some(vec![
@@ -2081,15 +2562,15 @@ mod tests {
             rows,
             [
                 "{",
-                "  \"log\": \"line one",
-                "  line two\",",
                 "  \"prompt\": \"Plan",
                 "  • ship it\",",
+                "  \"log\": \"line one",
+                "  line two\",",
                 "  \"title\": \"**inline**\"",
                 "}",
             ]
         );
-        let bold = lines[4]
+        let bold = lines[2]
             .spans
             .iter()
             .find(|span| span.content == "ship")
@@ -2105,3 +2586,11 @@ mod tests {
 #[cfg(test)]
 #[path = "structured_text_tests.rs"]
 mod structured_text_tests;
+
+#[cfg(test)]
+#[path = "tool_detail_output_tests.rs"]
+mod output_tests;
+
+#[cfg(test)]
+#[path = "tool_detail_image_tests.rs"]
+mod image_tests;

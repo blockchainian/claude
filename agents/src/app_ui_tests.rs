@@ -405,7 +405,7 @@ fn event_selection_switching_tasks_restores_selection_through_app() {
 }
 
 #[test]
-fn selected_real_transcript_draws_event_and_prompt_at_narrow_and_wide_sizes() {
+fn selected_real_transcript_draws_event_and_prompt_at_medium_and_large_sizes() {
     let (_directory, mut app) = fixture();
     assert!(app.view.selected_id().is_none());
     key(&mut app, KeyCode::Tab);
@@ -434,7 +434,7 @@ fn selected_real_transcript_draws_event_and_prompt_at_narrow_and_wide_sizes() {
 }
 
 #[test]
-fn draft_without_transcript_draws_and_accepts_paste_in_wide_layout() {
+fn draft_without_transcript_draws_and_accepts_paste_in_large_layout() {
     let (directory, mut app) = fixture();
     for width in [150, 200] {
         app.handle_action(Some(Action::NewDraft {
@@ -636,7 +636,7 @@ fn event_detail_content(buffer: &ratatui::buffer::Buffer) -> String {
 }
 
 #[test]
-fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
+fn medium_and_large_preview_follows_real_appends_and_clicked_event_stays_open() {
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
         let (_directory, mut app) = fixture_with_double_click_ms(20);
         let path = app.sessions[0].transcript.clone().unwrap();
@@ -698,7 +698,7 @@ fn narrow_and_wide_preview_follows_real_appends_and_clicked_event_stays_open() {
 }
 
 #[test]
-fn narrow_and_wide_event_double_click_focuses_list_and_keeps_preview_following() {
+fn medium_and_large_event_double_click_focuses_list_and_keeps_preview_following() {
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
         let (_directory, mut app) = fixture();
         let path = app.sessions[0].transcript.clone().unwrap();
@@ -732,14 +732,18 @@ fn narrow_and_wide_event_double_click_focuses_list_and_keeps_preview_following()
 }
 
 #[test]
-fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview() {
+fn medium_and_large_list_and_detail_search_route_paste_without_changing_preview() {
+    let Some(clipboard) = super::input_tests::paste_clipboard_directory() else {
+        return;
+    };
+    std::fs::write(clipboard.join("text"), "original clipboard").unwrap();
     for (width, height) in [(120, 60), (100, 45), (180, 40)] {
         let (_directory, mut app) = fixture_with_double_click_ms(20);
         select_archive(&mut app);
-        let original = event_detail_content(&draw_size(&mut app, width, height));
         let initial = draw_size(&mut app, width, height);
         let (column, row) = event_position(&initial, "Stop hook");
         click(&mut app, column, row);
+        let original = event_detail_content(&draw_size(&mut app, width, height));
         key(&mut app, KeyCode::Char('/'));
         app.handle_event(Event::Paste("Stop hook".into()));
         let buffer = draw_size(&mut app, width, height);
@@ -747,7 +751,7 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
         assert_eq!(
             event_detail_content(&buffer),
             original,
-            "filtering the list must preserve newest preview"
+            "filtering the list must preserve selected preview"
         );
         key(&mut app, KeyCode::Esc);
         let buffer = draw_size(&mut app, width, height);
@@ -776,12 +780,17 @@ fn narrow_and_wide_list_and_detail_search_route_paste_without_changing_preview()
         let rendered = lines(&buffer).join("\n");
         assert!(rendered.contains("Permanently delete"), "{rendered}");
         assert!(!rendered.contains("must-not-enter-confirmation"));
+        assert!(rendered.contains("Cannot paste here"), "{rendered}");
+        assert_eq!(
+            std::fs::read_to_string(clipboard.join("text")).unwrap(),
+            "original clipboard"
+        );
         key(&mut app, KeyCode::Esc);
     }
 }
 
 #[test]
-fn narrow_real_transcript_keeps_three_panels_and_click_opens_event_detail() {
+fn medium_real_transcript_keeps_three_panels_and_click_opens_event_detail() {
     for (width, height, expected) in [(120, 60, [18, 18, 17]), (100, 45, [13, 13, 12])] {
         let (_directory, mut app) = fixture_with_double_click_ms(20);
         select_archive(&mut app);
@@ -821,8 +830,8 @@ fn narrow_real_transcript_keeps_three_panels_and_click_opens_event_detail() {
 }
 
 #[test]
-fn narrow_and_wide_event_panels_scroll_and_copy_independently() {
-    // The wide detail must stay one row short of its event so that the wheel has room to scroll.
+fn medium_and_large_event_panels_scroll_and_copy_independently() {
+    // The large layout detail must stay one row short of its event so that the wheel has room to scroll.
     for (width, height) in [(120, 30), (100, 30), (180, 23)] {
         let (_directory, mut app) = border_fixture();
         app.view.set_double_click_ms(20);
@@ -970,7 +979,7 @@ fn segment(buffer: &ratatui::buffer::Buffer, x: std::ops::Range<u16>, y: u16) ->
 }
 
 #[test]
-fn wide_border_labels_stay_in_their_columns() {
+fn large_border_labels_stay_in_their_columns() {
     let (_directory, mut app) = border_fixture();
     let now = app.sessions[0].started_at.unwrap() + chrono::Duration::seconds(120);
     for width in [150, 200] {
@@ -986,10 +995,8 @@ fn wide_border_labels_stay_in_their_columns() {
         let task_details = separators[0] + 2..separators[1] - 1;
         let event_panel = separators[1] + 2..width - 1;
         assert!(
-            segment(&buffer, tasks.clone(), middle)
-                .chars()
-                .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c)),
-            "activity missing on middle border:\n{}",
+            segment(&buffer, tasks.clone(), middle).contains("Opus 5.5"),
+            "model belongs to the task list's borrowed bottom edge:\n{}",
             rendered.join("\n")
         );
         let bottom = segment(&buffer, task_details.clone(), middle);
@@ -1048,7 +1055,7 @@ fn wide_border_labels_stay_in_their_columns() {
 }
 
 #[test]
-fn narrow_render_survives_wide_resize_unchanged() {
+fn medium_render_survives_large_resize_unchanged() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let (_directory, mut app) = fixture();
     select_archive(&mut app);
@@ -1058,7 +1065,7 @@ fn narrow_render_survives_wide_resize_unchanged() {
         app.draw_at(&mut terminal, now).unwrap();
         terminal.backend().buffer().clone()
     };
-    for width in [80, 120, 149] {
+    for width in [100, 120, 149] {
         let before = draw(width);
         draw(200);
         let after = draw(width);
@@ -1266,7 +1273,7 @@ fn task_tabs_ignore_saved_removed_filter() {
         std::fs::write(
             directory.path().join("agents.json"),
             serde_json::to_vec(&serde_json::json!({
-                "grouping": "project", "pinned": [], "status_filter": filter,
+                "grouping": "project", "pinned": {"active": [], "inactive": []}, "status_filter": filter,
             }))
             .unwrap(),
         )
@@ -1383,7 +1390,7 @@ fn terminal_repaint_never_shows_the_hardware_cursor_over_painted_cells() {
     assert!(!hardware.screen().hide_cursor());
     let cursor = hardware.screen().cursor_position();
 
-    app.view.set_notice(Some("repaint".into()));
+    app.view.show_info("repaint".into());
     app.draw_at(&mut terminal, now).unwrap();
     let repainted = std::fs::read(output.path()).unwrap();
     for byte in &repainted[first.len()..] {
@@ -1443,10 +1450,7 @@ fn archive_codex_fixture() -> (tempfile::TempDir, App) {
             [transcript.to_str().unwrap()],
         )
         .unwrap();
-    let provider = crate::providers::codex::CodexProvider::new(
-        directory.path().into(),
-        directory.path().join("manager"),
-    );
+    let provider = crate::providers::codex::CodexProvider::new(directory.path().into());
     let mut app = App::new(Hub::new(vec![Box::new(provider)]), directory.path().into());
     app.refresh();
     (directory, app)

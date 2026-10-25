@@ -13,7 +13,7 @@ fn fixture() -> (tempfile::TempDir, App) {
     app.sessions[0].id.provider = ProviderId::Codex;
     app.sessions[0].transcript = Some(path);
     app.view.set_sessions(app.sessions.clone(), false);
-    app.refresh_event(2);
+    app.refresh_event_for_list_rows(2);
     super::event_search_tests::finish_search(&mut app);
     assert_eq!(app.view.event_panel.len(), 2);
     assert!(
@@ -34,7 +34,7 @@ fn codex_navigation_reveals_older_events_already_decoded() {
         app.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
     }
     assert!(app.view.event_page_pending());
-    app.refresh_event(2);
+    app.refresh_event_for_list_rows(2);
     super::event_search_tests::finish_search(&mut app);
     assert!(
         app.view.event_panel.len() > 2,
@@ -58,7 +58,7 @@ fn codex_search_includes_older_events_already_decoded() {
         KeyCode::Char('/'),
         KeyModifiers::NONE,
     )));
-    app.refresh_event(2);
+    app.refresh_event_for_list_rows(2);
     super::event_search_tests::finish_search(&mut app);
     for c in "model-service".chars() {
         app.handle_event(Event::Key(KeyEvent::new(
@@ -123,7 +123,7 @@ fn c2_pins_do_not_block_loading_older_timeline_events() {
         "timeline navigation must request unloaded history"
     );
     assert_eq!(app.view.event_list.cursor, Some(0));
-    app.refresh_event(2);
+    app.refresh_event_for_list_rows(2);
     super::event_search_tests::finish_search(&mut app);
     assert!(!app.transcript_has_older);
     app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));

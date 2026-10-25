@@ -87,9 +87,9 @@ fn list_search_keeps_selected_full_index() {
         view.active_panel = Panel::EventList;
         view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
     };
-    assert!(view.event_list.search.editing);
+    assert!(view.event_list.search.input.focused());
     assert_eq!(view.event_list.cursor, Some(0));
-    view.event_list.search.query.set_text("Background command");
+    view.event_list.search.input.set_text("等 tab 线程");
     view.rematch_event();
     assert_eq!(view.event_list.cursor, Some(0));
 }

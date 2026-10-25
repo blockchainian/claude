@@ -48,6 +48,46 @@ impl View {
 }
 
 #[test]
+fn event_border_labels_align_with_clock_in_three_layouts() {
+    let mut failures = Vec::new();
+    for width in [160, 120, 90] {
+        for sort in [EventSort::Duration, EventSort::Time] {
+            let (_dir, mut view, events) = fixture();
+            view.set_event(events);
+            view.select_event(Some(3));
+            view.event_list.sort = sort;
+            view.event_list.unseen.set(21);
+            let area = Rect::new(0, 0, width, 50);
+            let mut buf = Buffer::empty(area);
+            view.render(area, &mut buf);
+            let viewport = view.viewport.borrow();
+            let (_, clock) = super::event_list::event_row_areas(viewport.event_panel);
+            let right = clock.right() - 1;
+            assert_eq!(right, width - 3);
+            let label = viewport.event_label;
+            let expected = if sort == EventSort::Duration {
+                "duration"
+            } else {
+                "↓ 21 New"
+            };
+            let text: String = (label.x..area.right())
+                .map(|x| buf[(x, label.y)].symbol())
+                .collect();
+            let end = (label.x..label.right())
+                .rev()
+                .find(|&x| buf[(x, label.y)].symbol() != " ")
+                .unwrap();
+            if end != right || !text.ends_with(&format!("{expected}╶─")) {
+                failures.push(format!(
+                    "{width} {sort:?}: last={end}, clock={right}, {text:?}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
 fn duration_toggle_follows_slowest_before_and_after_history_load() {
     for following in [false, true] {
         let (_dir, mut view, mut events) = fixture();
@@ -369,7 +409,7 @@ fn chronological_jump_only_shows_and_accepts_clicks_for_new_events() {
     let label: String = (jump.x..jump.right())
         .map(|x| buf[(x, jump.y)].symbol())
         .collect();
-    assert_eq!(label, " ↓ 2 New ");
+    assert_eq!(label, " ↓ 2 New");
     view.pending_click = None;
     click(&mut view, jump);
     assert_eq!(view.event_list.cursor, Some(9));
@@ -496,8 +536,9 @@ fn chronological_history_request_covers_queued_steps_beyond_a_page() {
     for _ in 0..12 {
         view.navigate_event(KeyCode::Up);
     }
-    assert!(view.event_read_count(4, true) >= 22);
-    assert_eq!(view.event_read_count(4, false), 10);
+    assert!(view.event_list_read_count(4) >= 22);
+    view.event_list.has_older = false;
+    assert_eq!(view.event_list_read_count(4), 10);
     view.apply_event_update(crate::event::Update {
         events: events[..22].to_vec(),
         prepended: 12,
@@ -530,14 +571,14 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
             let jump = viewport.event_jump;
             let top = viewport.event_borders[0];
             let bottom = viewport.event_borders[1];
-            let label = format!(" ↓ {unseen} New ");
+            let label = format!(" ↓ {unseen} New");
             assert_eq!(
                 jump.right() - 1,
-                viewport.event_panel.right(),
+                viewport.event_panel.right() - 2,
                 "width {width}"
             );
             assert_eq!(jump.width, label.width() as u16);
-            assert_eq!(jump.y, if width >= 150 { bottom.y } else { top.y });
+            assert_eq!(jump.y, bottom.y);
             let drawn: String = (jump.x..jump.right())
                 .map(|x| buf[(x, jump.y)].symbol())
                 .collect();
@@ -554,7 +595,7 @@ fn chronological_new_border_aligns_with_time_and_preserves_model_targets() {
                     "{field:?} overlaps New at width {width}"
                 );
             }
-            assert_eq!(top.intersects(jump), width < 150);
+            assert!(!top.intersects(jump));
             let border_click = (top.x, top.y);
             drop(viewport);
             // The plain top border selects oldest; the labeled button still selects latest.
@@ -772,6 +813,10 @@ fn duration_columns_and_detail_titles_follow_sort_values() {
                 view.last_update = now - chrono::Duration::seconds(3);
                 let expected = if sort == EventSort::Time {
                     match kind {
+                        Kind::Assistant if state == "recorded" => "8s".into(),
+                        Kind::Assistant if state == "clock" => {
+                            super::formatting::clock_text(event.ended_at.unwrap())
+                        }
                         Kind::Tool | Kind::Error | Kind::Denied => match state {
                             "recorded" => "8s".into(),
                             "clock" => super::formatting::clock_text(event.ended_at.unwrap()),
@@ -784,7 +829,9 @@ fn duration_columns_and_detail_titles_follow_sort_values() {
                 } else {
                     match kind {
                         _ if state == "missing" => String::new(),
-                        Kind::User | Kind::Assistant if state == "recorded" => String::new(),
+                        Kind::User if state == "recorded" => String::new(),
+                        Kind::Assistant if state == "recorded" => "8s".into(),
+                        Kind::Assistant if state == "clock" => String::new(),
                         Kind::User | Kind::Assistant => "7s".into(),
                         Kind::Tool | Kind::Error | Kind::Denied => match state {
                             "recorded" => "8s".into(),
@@ -852,4 +899,44 @@ fn duration_running_rows_redraw_only_while_visible_and_keep_update_order() {
     view.select_event(Some(0));
     view.render_event(area, &mut buf, now);
     assert_eq!(view.event_redraw_in(now), None);
+}
+
+#[test]
+fn event_jump_follows_event_panel_visibility_and_width() {
+    for width in [90, 120, 160] {
+        for panel in [
+            Panel::TaskList,
+            Panel::TaskDetails,
+            Panel::EventList,
+            Panel::EventDetail,
+        ] {
+            for commands in ["", "|", "_", "|_"] {
+                let (_dir, mut view, events) = fixture();
+                view.set_event(events);
+                view.select_event(Some(3));
+                view.event_list.unseen.set(3);
+                view.active_panel = panel;
+                let area = Rect::new(0, 0, width, 50);
+                view.render(area, &mut Buffer::empty(area));
+                for key in commands.chars() {
+                    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+                    view.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::SHIFT));
+                }
+                view.render(area, &mut Buffer::empty(area));
+                let viewport = view.viewport.borrow();
+                if viewport.event_panel.is_empty() {
+                    assert!(
+                        viewport.event_jump.is_empty(),
+                        "{width} {panel:?} {commands}"
+                    );
+                } else {
+                    assert_eq!(viewport.event_jump.y, viewport.event_borders[1].y);
+                    assert_eq!(
+                        viewport.event_jump.right(),
+                        viewport.event_panel.right() - 1
+                    );
+                }
+            }
+        }
+    }
 }

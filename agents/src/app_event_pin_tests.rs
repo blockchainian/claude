@@ -1,9 +1,14 @@
 use super::*;
 
 #[test]
-fn inactive_snapshot_forgets_all_task_state_once() {
+fn inactive_snapshot_forgets_task_state_except_event_pins_once() {
     let (dir, mut app) = super::tests::fixture();
     let id = app.sessions[0].id.clone();
+    let event_pins = vec![pin(&app.view.event_panel[0])];
+    app.handle_action(Some(Action::ToggleEventPin {
+        task: id.clone(),
+        pinned: event_pins.clone(),
+    }));
     app.preferences
         .save_task_sort(dir.path(), &id, crate::model::EventSort::Duration)
         .unwrap();
@@ -19,6 +24,7 @@ fn inactive_snapshot_forgets_all_task_state_once() {
         )
         .unwrap();
     app.handle_action(Some(Action::TogglePin {
+        tab: 0,
         id: id.clone(),
         pinned: true,
     }));
@@ -27,10 +33,13 @@ fn inactive_snapshot_forgets_all_task_state_once() {
     app.apply_sessions(Snapshot {
         sessions: sessions.clone(),
         has_more: false,
+        supervisions: vec![],
     });
     let saved = Preferences::load(dir.path());
-    assert!(!saved.tasks.contains_key(&id));
-    assert!(saved.pinned.is_empty());
+    assert_eq!(saved.task_sort(&id), crate::model::EventSort::Time);
+    assert!(saved.task_ask(&id).is_none());
+    assert_eq!(saved.task_pinned_events(&id), event_pins);
+    assert!(saved.pinned.active.is_empty());
     let store = dir.path().join("agents.json");
     let modified = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(60);
     std::fs::File::options()
@@ -42,6 +51,7 @@ fn inactive_snapshot_forgets_all_task_state_once() {
     app.apply_sessions(Snapshot {
         sessions,
         has_more: false,
+        supervisions: vec![],
     });
     assert_eq!(
         std::fs::metadata(store).unwrap().modified().unwrap(),
@@ -60,7 +70,7 @@ fn reload(app: &mut App) {
     app.transcript = None;
     app.transcript_stamp = None;
     app.full_transcript_stamp = None;
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert!(app.pending_transcript.is_some());
     super::event_search_tests::finish_search(app);
 }
@@ -140,7 +150,7 @@ fn first_load_recovers_pins_and_removes_invalid_records_and_sources() {
 }
 
 #[test]
-fn inactive_snapshot_clears_displayed_and_parked_event_pins() {
+fn inactive_snapshot_keeps_displayed_and_parked_event_pins() {
     let (dir, mut app) = super::tests::fixture();
     let task = app.sessions[0].id.clone();
     let event = app
@@ -171,7 +181,7 @@ fn inactive_snapshot_clears_displayed_and_parked_event_pins() {
         .save_task_pinned_events(dir.path(), &task, vec![pinned.clone()])
         .unwrap();
     app.preferences
-        .save_task_pinned_events(dir.path(), &other.id, vec![pinned])
+        .save_task_pinned_events(dir.path(), &other.id, vec![pinned.clone()])
         .unwrap();
     let mut sessions = app.sessions.clone();
     sessions.push(other.clone());
@@ -181,16 +191,20 @@ fn inactive_snapshot_clears_displayed_and_parked_event_pins() {
     app.apply_sessions(Snapshot {
         sessions,
         has_more: false,
+        supervisions: vec![],
     });
-    assert!(!app.view.has_pinned_events(&task));
-    assert!(!app.view.has_pinned_events(&other.id));
+    assert!(app.view.has_pinned_events(&task));
+    assert!(app.view.has_pinned_events(&other.id));
     let saved = Preferences::load(dir.path());
-    assert!(!saved.tasks.contains_key(&task));
-    assert!(!saved.tasks.contains_key(&other.id));
+    assert_eq!(
+        saved.task_pinned_events(&task),
+        std::slice::from_ref(&pinned)
+    );
+    assert_eq!(saved.task_pinned_events(&other.id), [pinned]);
 }
 
 #[test]
-fn pending_pin_restore_does_not_resurrect_forgotten_state() {
+fn going_inactive_during_pin_restore_keeps_stored_pins() {
     let (dir, mut app) = super::tests::fixture();
     let task = app.sessions[0].id.clone();
     let event = app
@@ -205,20 +219,19 @@ fn pending_pin_restore_does_not_resurrect_forgotten_state() {
         .save_task_pinned_events(dir.path(), &task, vec![pinned.clone()])
         .unwrap();
     app.transcript = None;
-    app.refresh_event(8);
+    app.refresh_event_for_list_rows(8);
     assert!(app.pending_transcript.is_some());
     let mut sessions = app.sessions.clone();
     sessions[0].status = SessionStatus::Inactive;
     app.apply_sessions(Snapshot {
         sessions,
         has_more: false,
+        supervisions: vec![],
     });
     super::event_search_tests::finish_search(&mut app);
-    assert!(!app.view.has_pinned_events(&task));
-    assert!(
-        Preferences::load(dir.path())
-            .task_pinned_events(&task)
-            .is_empty()
+    assert_eq!(
+        Preferences::load(dir.path()).task_pinned_events(&task),
+        [pinned]
     );
 }
 

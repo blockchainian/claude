@@ -1,12 +1,12 @@
-use crate::event::{Event, Image, Kind, Section, ToolCall};
+use crate::event::{Event, Kind, Section, ToolCall};
+use crate::images::{Image, ImageSource};
 use crate::model::{Activity, SessionTask, TaskStatus};
 use crate::providers::text::printable;
-#[cfg(test)]
-use crate::providers::tool::Output;
-use crate::providers::tool::{self, list_title, tool_kind};
+use crate::providers::tool::{self, Body, ToolData, ToolResult, list_title, tool_kind};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufRead, Read, Seek, SeekFrom};
@@ -18,7 +18,7 @@ fn response_output(name: &str, text: &str) -> Vec<Section> {
 }
 
 #[cfg(test)]
-fn output_sections(text: &str, mode: Option<Output>) -> Vec<Section> {
+fn output_sections(text: &str, mode: Option<(tool::Pick<Body>, tool::Format)>) -> Vec<Section> {
     tool::text_output(text, mode, &Value::Null)
 }
 
@@ -160,6 +160,7 @@ impl Tasks {
             (Vec::new(), None)
         } else {
             first_prompt_records(
+                &reader.path,
                 reader
                     .records
                     .iter()
@@ -449,7 +450,12 @@ fn completed_user(record: &Value) -> bool {
 
 /// Pair by prompt text and, when present, turn ID. Consume each completed
 /// event only at its preceding user message.
-fn prompt_images(prompt: &Prompt, payload: &Value, completed: Option<&Value>) -> Vec<Image> {
+fn prompt_images(
+    prompt: &Prompt,
+    payload: &Value,
+    completed: Option<&Value>,
+    source: crate::event::SourceRecord,
+) -> Vec<Image> {
     let paired = completed.filter(|record| {
         let response_turn =
             payload["internal_chat_message_metadata_passthrough"]["turn_id"].as_str();
@@ -457,31 +463,92 @@ fn prompt_images(prompt: &Prompt, payload: &Value, completed: Option<&Value>) ->
         (response_turn.is_none() || response_turn == event_turn)
             && content_text(&record["payload"]["item"]["content"]) == prompt.text
     });
-    let paths: Vec<_> = paired
+    let local_paths: Vec<_> = paired
         .and_then(|record| record["payload"]["item"]["content"].as_array())
         .into_iter()
         .flatten()
-        .filter(|block| matches!(block["type"].as_str(), Some("local_image" | "image")))
-        .map(|block| block["path"].as_str())
+        .filter(|block| block["type"] == "local_image")
+        .filter_map(|block| block["path"].as_str())
         .collect();
-    prompt
-        .attachments
-        .iter()
+    let mut seen = Vec::new();
+    let images: Vec<_> = payload["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
         .enumerate()
-        .filter_map(|(index, (label, path))| {
-            let path = path
-                .as_deref()
-                .filter(|path| Path::new(path).is_file())
-                .or_else(|| {
-                    paths
-                        .get(index)
-                        .copied()
-                        .flatten()
-                        .filter(|path| Path::new(path).is_file())
-                })?;
+        .filter(|(_, block)| block["type"] == "input_image")
+        .enumerate()
+        .flat_map(|(index, (content_index, block))| {
+            let encoded = block["image_url"].as_str();
+            let pointer = format!("/payload/content/{content_index}/image_url");
+            let first = encoded.and_then(|encoded| {
+                seen.iter()
+                    .find(|(data, _)| *data == encoded)
+                    .map(|(_, pointer): &(&str, String)| pointer.clone())
+            });
+            let duplicate = first.is_some();
+            let pointer = first.unwrap_or(pointer);
+            if !duplicate && let Some(encoded) = encoded {
+                seen.push((encoded, pointer.clone()));
+            }
+            let image = Image {
+                label: prompt.attachments.get(index).map_or_else(
+                    || format!("[Image #{}]", index + 1),
+                    |(label, _)| label.clone(),
+                ),
+                source: ImageSource::Record {
+                    record: source.clone(),
+                    pointer,
+                },
+            };
+            let mut images = Vec::new();
+            if !duplicate {
+                images.push(image.clone());
+            }
+            for path in prompt
+                .attachments
+                .get(index)
+                .and_then(|(_, path)| path.as_deref())
+                .into_iter()
+                .chain(local_paths.get(index).copied())
+            {
+                if prompt
+                    .text
+                    .as_deref()
+                    .is_some_and(|text| text.contains(path))
+                    && !images.iter().any(|image| image.label == path)
+                {
+                    images.push(Image {
+                        label: path.into(),
+                        source: image.source.clone(),
+                    });
+                }
+            }
+            images
+        })
+        .collect();
+    if !images.is_empty() {
+        return images;
+    }
+    paired
+        .and_then(|record| record["payload"]["item"]["content"].as_array())
+        .into_iter()
+        .flatten()
+        .filter(|block| block["type"] == "local_image")
+        .enumerate()
+        .filter_map(|(index, block)| {
+            let path = PathBuf::from(block["path"].as_str()?);
+            let metadata = std::fs::metadata(&path).ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
             Some(Image {
-                label: label.clone(),
-                path: path.into(),
+                label: format!("[Image #{}]", index + 1),
+                source: ImageSource::File {
+                    path,
+                    len: metadata.len(),
+                    modified: metadata.modified().ok()?,
+                },
             })
         })
         .collect()
@@ -576,7 +643,7 @@ fn tool_body(payload: &Value) -> Option<String> {
         call.agent_message
             .as_ref()
             .map(|message| message.content.text().to_owned())
-            .unwrap_or(call.title),
+            .unwrap_or(call.summary),
     )
 }
 
@@ -600,6 +667,7 @@ fn tool_arguments(payload: &Value) -> Option<Value> {
     Some(arguments)
 }
 
+#[cfg(test)]
 fn text_section(label: &str, text: &str) -> Section {
     Section::Text {
         label: label.to_owned(),
@@ -612,41 +680,126 @@ fn agent_name(path: &str) -> &str {
     crate::event::agent::name(path)
 }
 
+fn parsed_object(text: &str) -> Value {
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .filter(Value::is_object)
+        .unwrap_or(Value::Null)
+}
+
+fn normalize_function_result(text: &str) -> ToolResult {
+    let structured = parsed_object(text);
+    let content = structured
+        .get("content")
+        .filter(|content| content.is_array())
+        .cloned()
+        .unwrap_or_else(|| Value::String(text.to_owned()));
+    let error = tool::result_state(text, &Value::Null, structured["isError"] == true).is_error;
+    ToolResult {
+        source: None,
+        content,
+        structured,
+        error,
+    }
+}
+
+fn normalize_mcp_result(item: &Value) -> Option<ToolResult> {
+    let result = item.get("result").filter(|result| !result.is_null());
+    let Some(result) = result else {
+        return item["error"]["message"].as_str().map(|text| ToolResult {
+            source: None,
+            content: text.into(),
+            structured: Value::Null,
+            error: tool::result_state(text, item, true).is_error,
+        });
+    };
+    if !result.is_object() {
+        let text = result
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| result.to_string());
+        return Some(ToolResult {
+            source: None,
+            content: text.clone().into(),
+            structured: Value::Null,
+            error: tool::result_state(&text, item, false).is_error,
+        });
+    }
+    let mut content = result["content"].clone();
+    let structured = if let Some(structured) = result
+        .get("structuredContent")
+        .filter(|value| !value.is_null())
+    {
+        let block = serde_json::json!({"type":"text", "text":structured.to_string()});
+        if let Some(blocks) = content.as_array_mut() {
+            blocks.push(block);
+        } else if content.is_null() {
+            content = Value::Array(vec![block]);
+        }
+        structured.clone()
+    } else {
+        content
+            .as_array()
+            .filter(|blocks| blocks.len() == 1)
+            .and_then(|blocks| {
+                (blocks[0]["type"] == "text")
+                    .then(|| blocks[0]["text"].as_str())
+                    .flatten()
+            })
+            .map(parsed_object)
+            .unwrap_or(Value::Null)
+    };
+    let text = content_text(&content).unwrap_or_default();
+    Some(ToolResult {
+        source: None,
+        content,
+        structured,
+        error: tool::result_state(&text, item, result["isError"] == true).is_error,
+    })
+}
+
+fn presentation_output(output: Option<Body>, completed: bool) -> (Option<Vec<Section>>, bool) {
+    match output {
+        Some(Body::Sections(sections)) => (Some(sections), false),
+        Some(Body::Hidden) => (completed.then(Vec::new), true),
+        None => (None, false),
+    }
+}
+
 fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     let raw = payload["arguments"].as_str().unwrap_or("");
     let arguments = tool_arguments(payload);
     let raw_name = response_tool_name(payload);
-    let (_, subject, mut input) =
-        crate::providers::tool::presentation(&raw_name, arguments.as_ref().unwrap_or(&Value::Null));
-    if payload["type"] == "custom_tool_call" {
-        input = vec![text_section(
-            "input",
-            payload["input"].as_str().unwrap_or(""),
-        )];
-    } else if arguments.is_none() {
-        input = vec![text_section("input", raw)];
-    }
+    let input_value = if payload["type"] == "custom_tool_call" {
+        Value::String(payload["input"].as_str().unwrap_or("").to_owned())
+    } else {
+        arguments
+            .clone()
+            .unwrap_or_else(|| Value::String(raw.to_owned()))
+    };
+    let normalized = output.map(normalize_function_result);
     let state = output.map(|text| {
-        let value = serde_json::from_str(text).unwrap_or(Value::Null);
-        tool::result_state(text, &Value::Null, value["isError"] == true)
-    });
-    let output = output.map(|text| {
-        tool::text_output(
+        tool::result_state(
             text,
-            tool::rule(&raw_name).output,
-            arguments.as_ref().unwrap_or(&Value::Null),
+            &Value::Null,
+            normalized.as_ref().is_some_and(|result| result.error),
         )
     });
-    let subject = crate::providers::tool::result_subject(&raw_name, output.as_deref()).or(subject);
-    let (event_detail_left, event_detail_title) =
-        tool::event_detail_titles(&raw_name, subject.as_deref());
+    let presentation = tool::presentation(
+        &raw_name,
+        &ToolData {
+            input: &input_value,
+            result: normalized.as_ref(),
+        },
+    );
+    let subject = presentation.title;
+    let (output, hide_output) = presentation_output(presentation.output, normalized.is_some());
     let mut call = ToolCall {
         agent_message: None,
-        event_detail_left,
-        event_detail_title,
+        title: subject.clone().unwrap_or_default(),
         show_event_detail: true,
         id: payload["call_id"].as_str().unwrap_or("").to_owned(),
-        title: list_title(
+        summary: list_title(
             &raw_name,
             subject.as_deref(),
             arguments.as_ref().unwrap_or(&Value::Null),
@@ -654,11 +807,11 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
         ),
         name: raw_name.clone(),
         started_at: None,
-        hide_output: false,
+        hide_output,
         model_settings: None,
         agent_thread_id: None,
         agent_path: None,
-        input,
+        input: presentation.input,
         output,
         exit_code: state.as_ref().and_then(|state| state.exit_code),
         is_error: state.is_some_and(|state| state.is_error),
@@ -684,26 +837,258 @@ fn response_tool_call(payload: &Value, output: Option<&str>) -> ToolCall {
     call
 }
 
+#[cfg(test)]
 fn result_section(text: &str) -> Section {
     text_section("output", text)
 }
 
-fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
+fn image_data(value: &str) -> &str {
+    if value.starts_with("data:") {
+        value.split_once(',').map_or(value, |(_, data)| data)
+    } else {
+        value
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static IMAGE_HASH_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static IMAGE_INTERVAL_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn image_hash(value: &str) -> [u8; 32] {
+    #[cfg(test)]
+    IMAGE_HASH_BYTES.with(|count| count.set(count.get() + image_data(value).len()));
+    Sha256::digest(image_data(value)).into()
+}
+
+fn output_image_blocks(output: &Value) -> impl Iterator<Item = (usize, &str)> {
+    output
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter(|(_, block)| block["type"] == "input_image")
+        .filter_map(|(index, block)| Some((index, block["image_url"].as_str()?)))
+}
+
+struct RecordImages {
+    generated: Option<[u8; 32]>,
+    output: HashMap<usize, [u8; 32]>,
+}
+
+impl RecordImages {
+    fn new(record: &Value) -> Self {
+        let payload = &record["payload"];
+        Self {
+            generated: (payload["item"]["kind"] == "image_gen.generation")
+                .then(|| payload["item"]["result"].as_str())
+                .flatten()
+                .map(image_hash),
+            output: output_image_blocks(&payload["output"])
+                .map(|(index, url)| (index, image_hash(url)))
+                .collect(),
+        }
+    }
+
+    fn hashes(&self) -> impl Iterator<Item = &[u8; 32]> {
+        self.generated.iter().chain(self.output.values())
+    }
+}
+
+type ImageHashes = HashMap<u64, RecordImages>;
+
+fn output_image(record: &crate::event::SourceRecord, index: usize, url: &str) -> Image {
+    let label = url
+        .strip_prefix("data:")
+        .and_then(|data| data.split_once(';'))
+        .filter(|(mime, _)| !mime.is_empty())
+        .map_or_else(
+            || "[image]".to_owned(),
+            |(mime, _)| format!("[image {mime}]"),
+        );
+    Image {
+        label,
+        source: ImageSource::Record {
+            record: record.clone(),
+            pointer: format!("/payload/output/{index}/image_url"),
+        },
+    }
+}
+
+fn image_file(value: &str) -> Option<Image> {
+    let path = if value.starts_with("file:") {
+        url::Url::parse(value).ok()?.to_file_path().ok()?
+    } else {
+        PathBuf::from(value)
+    };
+    Image::file(path)
+}
+
+fn record_turn(record: &Value) -> Option<&str> {
+    let payload = &record["payload"];
+    payload["turn_id"]
+        .as_str()
+        .or_else(|| payload["internal_chat_message_metadata_passthrough"]["turn_id"].as_str())
+}
+
+/// Only a single ImageView and a single output image establish an unambiguous source.
+fn image_views(path: &Path, records: &[(u64, Value)]) -> HashMap<u64, (Image, [u64; 2])> {
+    let outputs: HashMap<_, _> = records
+        .iter()
+        .filter(|(_, record)| {
+            record["type"] == "response_item"
+                && matches!(
+                    record["payload"]["type"].as_str(),
+                    Some("function_call_output" | "custom_tool_call_output")
+                )
+        })
+        .filter_map(|(offset, record)| {
+            Some((record["payload"]["call_id"].as_str()?, (*offset, record)))
+        })
+        .collect();
+    let calls: Vec<_> = records
+        .iter()
+        .filter(|(_, record)| {
+            record["type"] == "response_item"
+                && matches!(
+                    record["payload"]["type"].as_str(),
+                    Some("function_call" | "custom_tool_call")
+                )
+                && record["payload"]["name"]
+                    .as_str()
+                    .is_some_and(|name| tool::rule(name).wrapper)
+        })
+        .filter_map(|(start, record)| {
+            let id = record["payload"]["call_id"].as_str()?;
+            let (end, output) = outputs.get(id)?;
+            let turn = record_turn(record)?;
+            (record_turn(output) == Some(turn)).then_some((*start, *end, turn, *output))
+        })
+        .collect();
+    // Sweep each turn's strict call intervals. Endpoint ordering excludes both
+    // boundaries and the active set preserves the existing ambiguity rule.
+    let mut turns = HashMap::<&str, Vec<(u64, u8, usize)>>::new();
+    for (index, (start, end, turn, _)) in calls.iter().enumerate() {
+        if start < end {
+            let points = turns.entry(turn).or_default();
+            points.push((*start, 2, index));
+            points.push((*end, 0, index));
+        }
+    }
+    for (index, (offset, record)) in records.iter().enumerate() {
+        if record["type"] == "event_msg"
+            && record["payload"]["item"]["type"] == "ImageView"
+            && let Some(turn) = record_turn(record)
+        {
+            turns.entry(turn).or_default().push((*offset, 1, index));
+        }
+    }
+    let mut owners = HashMap::new();
+    let mut view_counts = vec![0; calls.len()];
+    for points in turns.values_mut() {
+        points.sort_unstable();
+        let mut active = std::collections::BTreeSet::new();
+        let mut views = 0;
+        for &(offset, kind, index) in points.iter() {
+            match kind {
+                0 => {
+                    view_counts[index] = views - view_counts[index];
+                    active.remove(&index);
+                }
+                2 => {
+                    view_counts[index] = views;
+                    active.insert(index);
+                }
+                _ => {
+                    views += 1;
+                    #[cfg(test)]
+                    IMAGE_INTERVAL_CHECKS.with(|count| count.set(count.get() + 1));
+                    if active.len() == 1 {
+                        owners.insert(offset, calls[*active.first().unwrap()].0);
+                    }
+                }
+            }
+        }
+    }
+    let mut positions = HashMap::<u64, Vec<u64>>::new();
+    for (offset, _) in records {
+        if let Some(start) = owners.get(offset) {
+            positions.entry(*start).or_default().push(*offset);
+        }
+    }
+    let mut images = HashMap::new();
+    for (call_index, (start, end, _, output)) in calls.into_iter().enumerate() {
+        if view_counts[call_index] != 1 {
+            continue;
+        }
+        let Some(positions) = positions
+            .get(&start)
+            .filter(|positions| positions.len() == 1)
+        else {
+            continue;
+        };
+        let mut blocks = output_image_blocks(&output["payload"]["output"]);
+        let Some((index, url)) = blocks.next() else {
+            continue;
+        };
+        if blocks.next().is_some() {
+            continue;
+        }
+        let record = crate::event::SourceRecord {
+            path: path.to_owned(),
+            offset: end,
+        };
+        images.insert(
+            positions[0],
+            (output_image(&record, index, url), [start, end]),
+        );
+    }
+    images
+}
+
+fn completed_call(
+    item: &Value,
+    command: Option<String>,
+    record: Option<&crate::event::SourceRecord>,
+) -> ToolCall {
     let item_type = item["type"].as_str().unwrap();
+    let mut normalized = (item_type == "McpToolCall")
+        .then(|| normalize_mcp_result(item))
+        .flatten();
+    if let Some(result) = &mut normalized {
+        result.source = record
+            .cloned()
+            .map(|record| (record, "/payload/item/result/content".into()));
+    }
     let (name, arguments, output) = match item_type {
-        "CommandExecution" => (
-            "exec_command".to_owned(),
-            serde_json::json!({"command": command.unwrap()}),
-            item["aggregated_output"]
-                .as_str()
-                .map(|text| vec![text_section("output", text)]),
-        ),
+        "CommandExecution" => {
+            let arguments = serde_json::json!({"command": command.unwrap()});
+            let output = item["aggregated_output"].as_str().and_then(|text| {
+                let result = ToolResult {
+                    source: None,
+                    content: text.into(),
+                    structured: Value::Null,
+                    error: tool::result_state("", item, false).is_error,
+                };
+                match super::tools::merged_shell_output(&ToolData {
+                    input: &arguments,
+                    result: Some(&result),
+                }) {
+                    Some(Body::Sections(sections)) => Some(sections),
+                    Some(Body::Hidden) => unreachable!("shell output cannot be hidden"),
+                    None => None,
+                }
+            });
+            ("exec_command".to_owned(), arguments, output)
+        }
         "FileChange" => {
             let changes = item["changes"].as_object().unwrap();
             let output = changes
                 .iter()
-                .filter_map(|(_, change)| {
+                .filter_map(|(path, change)| {
                     Some(Section::Diff {
+                        lang: crate::providers::tool::file_language(path).to_owned(),
                         label: String::new(),
                         text: file_change_diff(change)?,
                     })
@@ -721,67 +1106,66 @@ fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
                 item["server"].as_str().unwrap(),
                 item["tool"].as_str().unwrap()
             );
-            let output = item
-                .get("result")
-                .filter(|result| !result.is_null())
-                .map(|result| {
-                    if result.is_object() {
-                        let mut sections = tool::output(
-                            tool::rule(&name).output,
-                            &item["arguments"],
-                            &tool::ToolResult {
-                                content: &result["content"],
-                                value: result,
-                                text: "",
-                                error: result["isError"] == true,
-                            },
-                        );
-                        if let Some(structured) = result
-                            .get("structuredContent")
-                            .filter(|value| !value.is_null())
-                        {
-                            sections.push(Section::Structured {
-                                label: "output".to_owned(),
-                                text: structured.to_string(),
-                            });
-                        }
-                        sections
-                    } else if let Some(text) = result.as_str() {
-                        vec![result_section(text)]
-                    } else {
-                        vec![text_section("output", &result.to_string())]
-                    }
-                })
-                .or_else(|| {
-                    item["error"]["message"]
-                        .as_str()
-                        .map(|text| vec![result_section(text)])
-                });
-            (name, item["arguments"].clone(), output)
+            (name, item["arguments"].clone(), None)
         }
+        "Extension" if item["kind"] == "image_gen.generation" => {
+            let mut arguments = item.clone();
+            arguments.as_object_mut().unwrap().remove("result");
+            let output = item["result"].as_str().zip(record).map(|(_, record)| {
+                vec![Section::Image(Image {
+                    label: "[image]".into(),
+                    source: ImageSource::Record {
+                        record: record.clone(),
+                        pointer: "/payload/item/result".into(),
+                    },
+                })]
+            });
+            (item_type.to_owned(), arguments, output)
+        }
+        "ImageView" => (
+            item_type.to_owned(),
+            item.clone(),
+            item["path"]
+                .as_str()
+                .and_then(image_file)
+                .map(|image| vec![Section::Image(image)]),
+        ),
         _ => (item_type.to_owned(), item.clone(), None),
     };
     let raw_name = name;
-    let (_, subject, input) = crate::providers::tool::presentation(&raw_name, &arguments);
-    let subject = crate::providers::tool::result_subject(&raw_name, output.as_deref()).or(subject);
-    let (event_detail_left, event_detail_title) =
-        tool::event_detail_titles(&raw_name, subject.as_deref());
-    let state = tool::result_state("", item, false);
+    let presentation = tool::presentation(
+        &raw_name,
+        &ToolData {
+            input: &arguments,
+            result: normalized.as_ref(),
+        },
+    );
+    let subject = presentation.title;
+    let (table_output, hide_output) = presentation_output(presentation.output, true);
+    let output = if item_type == "McpToolCall" {
+        table_output
+    } else {
+        output
+    };
+    let state = tool::result_state(
+        "",
+        item,
+        normalized.as_ref().is_some_and(|result| result.error),
+    );
     let exit_code = state.exit_code;
     let mut call = ToolCall {
         agent_message: None,
-        event_detail_left,
-        event_detail_title,
+        title: subject.clone().unwrap_or_default(),
         show_event_detail: true,
         id: item["id"].as_str().unwrap_or("").to_owned(),
-        title: list_title(&raw_name, subject.as_deref(), &arguments, exit_code),
+        summary: list_title(&raw_name, subject.as_deref(), &arguments, exit_code),
         name: raw_name.clone(),
         started_at: None,
-        hide_output: false,
+        hide_output,
         model_settings: None,
         agent_thread_id: None,
         agent_path: None,
-        input,
+        input: presentation.input,
         // Completed items can have no result body; an empty output still marks completion.
         output: Some(output.unwrap_or_default()),
         exit_code,
@@ -835,7 +1219,10 @@ fn item_time(payload: &Value, key: &str) -> io::Result<DateTime<Utc>> {
     })
 }
 
-fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
+fn completed_tool(
+    record: &Value,
+    source: Option<&crate::event::SourceRecord>,
+) -> io::Result<Option<Event>> {
     let payload = &record["payload"];
     if record["type"] != "event_msg" || payload["type"] != "item_completed" {
         return Ok(None);
@@ -921,11 +1308,11 @@ fn completed_tool(record: &Value) -> io::Result<Option<Event>> {
         })?,
         None => ended_at,
     };
-    let call = completed_call(item, command_text);
-    let body = call.title.clone();
-    let paths = if item_type == "FileChange" && !call.event_detail_left.is_empty() {
-        let mut offset = call.event_detail_left.len() + 1;
-        call.event_detail_title
+    let call = completed_call(item, command_text, source);
+    let body = call.summary.clone();
+    let paths = if item_type == "FileChange" && !call.title.is_empty() {
+        let mut offset = call.detail_left().len() + 1;
+        call.title
             .split(" · ")
             .map(|path| {
                 let range = offset..offset + path.len();
@@ -997,16 +1384,21 @@ pub(super) fn first_prompt(
         {
             continue;
         }
-        if prompt.attachments.is_empty() {
-            return Ok((Vec::new(), Some(source(&record, start))));
-        }
         let completed = lines
             .next()
             .transpose()?
             .and_then(|line| serde_json::from_slice::<Value>(&line).ok())
             .filter(completed_user);
         return Ok((
-            prompt_images(&prompt, payload, completed.as_ref()),
+            prompt_images(
+                &prompt,
+                payload,
+                completed.as_ref(),
+                crate::event::SourceRecord {
+                    path: path.to_owned(),
+                    offset: start,
+                },
+            ),
             Some(source(&record, start)),
         ));
     }
@@ -1014,6 +1406,7 @@ pub(super) fn first_prompt(
 }
 
 fn first_prompt_records<'a>(
+    path: &Path,
     records: impl IntoIterator<Item = (u64, &'a Value)>,
     line_ends: &HashMap<u64, u64>,
     first_user_message: &str,
@@ -1043,16 +1436,20 @@ fn first_prompt_records<'a>(
         {
             continue;
         }
-        let images = if prompt.attachments.is_empty() {
-            Vec::new()
-        } else {
-            let completed = records
-                .next()
-                .filter(|(next, _)| line_ends.get(&offset) == Some(next))
-                .map(|(_, record)| record)
-                .filter(|record| completed_user(record));
-            prompt_images(&prompt, payload, completed)
-        };
+        let completed = records
+            .next()
+            .filter(|(next, _)| line_ends.get(&offset) == Some(next))
+            .map(|(_, record)| record)
+            .filter(|record| completed_user(record));
+        let images = prompt_images(
+            &prompt,
+            payload,
+            completed,
+            crate::event::SourceRecord {
+                path: path.to_owned(),
+                offset,
+            },
+        );
         return (images, Some(source(record, offset)));
     }
     (Vec::new(), None)
@@ -1339,6 +1736,7 @@ pub(crate) struct Reader {
     line_ends: HashMap<u64, u64>,
     entries: Vec<(u64, Event)>,
     dependencies: HashMap<String, u64>,
+    image_hashes: ImageHashes,
     latest_prompt: Option<u64>,
     shown: usize,
     boundary: crate::jsonl::Boundary,
@@ -1361,6 +1759,7 @@ impl Reader {
             line_ends: HashMap::new(),
             entries: Vec::new(),
             dependencies: HashMap::new(),
+            image_hashes: ImageHashes::new(),
             latest_prompt: None,
             shown: 0,
             boundary: crate::jsonl::Boundary::default(),
@@ -1459,6 +1858,7 @@ impl Reader {
     fn dependency(
         entries: &[(u64, Event)],
         dependencies: &mut HashMap<String, u64>,
+        image_hashes: &mut ImageHashes,
         latest_prompt: &mut Option<u64>,
         record: &Value,
         offset: u64,
@@ -1500,6 +1900,18 @@ impl Reader {
                     .or_insert(offset),
             );
         }
+        for hash in image_hashes
+            .entry(offset)
+            .or_insert_with(|| RecordImages::new(record))
+            .hashes()
+        {
+            affected = affected.min(
+                *dependencies
+                    .entry(format!("image:{hash:02x?}"))
+                    .and_modify(|previous| *previous = (*previous).min(offset))
+                    .or_insert(offset),
+            );
+        }
         if completed_user(record) {
             affected = affected.min(latest_prompt.unwrap_or(offset));
         }
@@ -1518,6 +1930,7 @@ impl Reader {
         file.read_to_end(&mut bytes)?;
         if let Ok(record) = serde_json::from_slice::<Value>(&bytes) {
             if !inherited(&record, self.history_start) {
+                self.image_hashes.remove(&self.read);
                 self.pending_offset = Some(self.read);
                 self.pending_bytes = bytes.clone();
                 self.records.push((self.read, record));
@@ -1559,16 +1972,18 @@ impl Reader {
             self.records.clear();
             self.entries.clear();
             self.dependencies.clear();
+            self.image_hashes.clear();
             self.latest_prompt = None;
             self.shown = 0;
             self.pending_offset = None;
             parsed_bytes += self.read_pending(&mut file)?;
-            self.entries = events_with_context(
+            self.entries = events_with_images(
                 &self.path,
                 &self.records,
                 usize::MAX,
                 None,
                 self.metadata.as_ref(),
+                &mut self.image_hashes,
             )?;
         } else if changed && metadata.len() > self.read {
             if self.read == 0 {
@@ -1604,6 +2019,7 @@ impl Reader {
                         reused += line.len() as u64;
                     }
                 } else if let Ok(record) = serde_json::from_slice::<Value>(line) {
+                    self.image_hashes.remove(&offset);
                     incoming.push((offset, record));
                 }
                 offset += line.len() as u64 + 1;
@@ -1616,6 +2032,7 @@ impl Reader {
                 affected = affected.min(Self::dependency(
                     &self.entries,
                     &mut self.dependencies,
+                    &mut self.image_hashes,
                     &mut self.latest_prompt,
                     record,
                     *offset,
@@ -1627,6 +2044,7 @@ impl Reader {
                 affected = affected.min(Self::dependency(
                     &self.entries,
                     &mut self.dependencies,
+                    &mut self.image_hashes,
                     &mut self.latest_prompt,
                     record,
                     *offset,
@@ -1638,12 +2056,13 @@ impl Reader {
             let start = self
                 .records
                 .partition_point(|(offset, _)| *offset < affected);
-            let mut suffix = events_with_context(
+            let mut suffix = events_with_images(
                 &self.path,
                 &self.records[start..],
                 usize::MAX,
                 None,
                 self.metadata.as_ref(),
+                &mut self.image_hashes,
             )?;
             if let Some((_, previous)) = prefix
                 .checked_sub(1)
@@ -1700,12 +2119,25 @@ impl Reader {
                 .iter()
                 .flat_map(|(_, record)| record_ids(record).map(str::to_owned))
                 .collect();
+            for (offset, record) in &older {
+                self.image_hashes
+                    .entry(*offset)
+                    .or_insert_with(|| RecordImages::new(record));
+            }
+            let images: HashSet<_> = older
+                .iter()
+                .flat_map(|(offset, _)| self.image_hashes[offset].hashes().copied())
+                .collect();
             older.append(&mut self.records);
             self.records = older;
             // Rebuild retained rows when either half of a paired event arrives,
             // including every member of a merged message group.
             for (offset, record) in &self.records[added..] {
-                if record_ids(record).any(|id| ids.contains(id)) {
+                if record_ids(record).any(|id| ids.contains(id))
+                    || self.image_hashes[offset]
+                        .hashes()
+                        .any(|hash| images.contains(hash))
+                {
                     selected.insert(*offset);
                 }
             }
@@ -1722,12 +2154,13 @@ impl Reader {
                     true
                 }
             });
-            let incoming = events_with_context(
+            let incoming = events_with_images(
                 &self.path,
                 &self.records,
                 usize::MAX,
                 Some(&selected),
                 self.metadata.as_ref(),
+                &mut self.image_hashes,
             )?;
             self.entries.extend(incoming);
             merge_entries(&self.records, &mut self.entries);
@@ -1735,6 +2168,7 @@ impl Reader {
                 Self::dependency(
                     &self.entries,
                     &mut self.dependencies,
+                    &mut self.image_hashes,
                     &mut self.latest_prompt,
                     record,
                     *offset,
@@ -2050,12 +2484,30 @@ fn events(path: &Path, records: &[(u64, Value)], count: usize) -> io::Result<Vec
 
 /// Converts selected records while borrowing every retained record for pairing and deduplication.
 /// Selected entries stay unmerged so callers can combine them with retained entries first.
-fn events_with_context<'a>(
+fn events_with_context(
+    path: &Path,
+    records: &[(u64, Value)],
+    count: usize,
+    selected: Option<&HashSet<u64>>,
+    metadata: Option<&Value>,
+) -> io::Result<Vec<(u64, Event)>> {
+    events_with_images(
+        path,
+        records,
+        count,
+        selected,
+        metadata,
+        &mut ImageHashes::new(),
+    )
+}
+
+fn events_with_images<'a>(
     path: &Path,
     records: &'a [(u64, Value)],
     count: usize,
     selected: Option<&HashSet<u64>>,
     metadata: Option<&Value>,
+    image_hashes: &mut ImageHashes,
 ) -> io::Result<Vec<(u64, Event)>> {
     let sender = metadata
         .as_ref()
@@ -2073,6 +2525,22 @@ fn events_with_context<'a>(
     let mut completed_messages = HashMap::new();
     let mut collaboration = HashMap::new();
     let mut sources: HashMap<&str, Vec<u64>> = HashMap::new();
+    let views = image_views(path, records);
+    for (offset, record) in records {
+        image_hashes
+            .entry(*offset)
+            .or_insert_with(|| RecordImages::new(record));
+    }
+    let generated: HashSet<_> = records
+        .iter()
+        .filter(|(_, record)| record["payload"]["item"]["kind"] == "image_gen.generation")
+        .filter_map(|(offset, _)| image_hashes[offset].generated)
+        .collect();
+    let completed_mcp: HashSet<_> = records
+        .iter()
+        .filter(|(_, record)| record["payload"]["item"]["type"] == "McpToolCall")
+        .filter_map(|(_, record)| record["payload"]["item"]["id"].as_str())
+        .collect();
     for (offset, record) in records {
         for id in record_ids(record) {
             sources.entry(id).or_default().push(*offset);
@@ -2187,12 +2655,16 @@ fn events_with_context<'a>(
             payload["item"]["type"].as_str(),
             Some("SubAgentActivity" | "CollabAgentToolCall")
         ) {
-            completed_tool(record)?;
+            completed_tool(record, Some(&reference(offset)))?;
             return Ok(true);
         }
-        if let Some(mut event) = completed_tool(record)? {
+        if let Some(mut event) = completed_tool(record, Some(&reference(offset)))? {
             event.turn = turns.at(offset);
             event.source = Some(source(record, offset));
+            if let Some((image, offsets)) = views.get(&offset) {
+                event.calls[0].output = Some(vec![Section::Image(image.clone())]);
+                source_records.extend(offsets.iter().map(|offset| reference(*offset)));
+            }
             event.source_records = source_records;
             if !seen.insert(required_text(&payload["item"], "id")?.to_owned()) {
                 return Ok(true);
@@ -2214,11 +2686,51 @@ fn events_with_context<'a>(
                 {
                     return Ok(true);
                 }
+                if payload["call_id"]
+                    .as_str()
+                    .is_some_and(|id| completed_mcp.contains(id))
+                {
+                    return Ok(true);
+                }
                 if let Some(id) = payload["call_id"].as_str()
                     && !seen.insert(id.to_owned())
                 {
                     return Ok(true);
                 }
+                let image_output = payload["call_id"]
+                    .as_str()
+                    .and_then(|id| results.get(id))
+                    .filter(|(_, output, _)| output_image_blocks(output).next().is_some())
+                    .map(|(_, output, offset)| {
+                        let source = reference(*offset);
+                        let mut seen_images = Vec::new();
+                        output
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, block)| match block["type"].as_str()? {
+                                "input_text" => Some(Section::Text {
+                                    label: "output".into(),
+                                    text: block["text"].as_str()?.to_owned(),
+                                }),
+                                "input_image" => {
+                                    let url = block["image_url"].as_str()?;
+                                    if seen_images.contains(&url) {
+                                        return None;
+                                    }
+                                    seen_images.push(url);
+                                    (!(payload["name"] == "wait"
+                                        && image_hashes[offset]
+                                            .output
+                                            .get(&index)
+                                            .is_some_and(|hash| generated.contains(hash))))
+                                    .then(|| Section::Image(output_image(&source, index, url)))
+                                }
+                                _ => None,
+                            })
+                            .collect()
+                    });
                 let ended = payload["call_id"]
                     .as_str()
                     .and_then(|id| results.remove(id))
@@ -2239,6 +2751,10 @@ fn events_with_context<'a>(
                     });
                 let mut call =
                     response_tool_call(payload, ended.as_ref().map(|(_, text, _)| text.as_str()));
+                if let Some(output) = image_output {
+                    call.output = Some(output);
+                    call.hide_output = false;
+                }
                 if let Some(message) = &mut call.agent_message {
                     message.author = metadata
                         .as_ref()
@@ -2250,7 +2766,7 @@ fn events_with_context<'a>(
                     .agent_message
                     .as_ref()
                     .map(|m| m.content.text().to_owned())
-                    .unwrap_or_else(|| call.title.clone());
+                    .unwrap_or_else(|| call.summary.clone());
                 call.started_at = call.agent_path.as_ref().map(|_| at);
                 let mut completed_at = ended.as_ref().map(|(at, _, _)| *at);
                 if let Some((offset, record)) = payload["call_id"]
@@ -2356,11 +2872,11 @@ fn events_with_context<'a>(
                 let body = text.clone();
                 calls.push(ToolCall {
                     agent_message: Some(message),
-                    event_detail_left: String::new(),
-                    event_detail_title: String::new(),
+
+                    title: String::new(),
                     show_event_detail: true,
                     id: required_text(payload, "id")?.to_owned(),
-                    title: body.clone(),
+                    summary: body.clone(),
                     name: message_type.to_owned(),
                     started_at: Some(at),
                     hide_output: true,
@@ -2400,6 +2916,7 @@ fn events_with_context<'a>(
                         &prompt,
                         payload,
                         completed.as_ref().map(|(_, record)| *record),
+                        reference(offset),
                     );
                     prompt.body()
                 } else {
@@ -2510,6 +3027,26 @@ fn events_with_context<'a>(
 }
 #[cfg(test)]
 mod tests {
+    fn completed_tool(record: &Value) -> std::io::Result<Option<Event>> {
+        super::completed_tool(
+            record,
+            Some(&crate::event::SourceRecord {
+                path: "fixture.jsonl".into(),
+                offset: 0,
+            }),
+        )
+    }
+    fn completed_call(item: &Value, command: Option<String>) -> ToolCall {
+        super::completed_call(
+            item,
+            command,
+            Some(&crate::event::SourceRecord {
+                path: "fixture.jsonl".into(),
+                offset: 0,
+            }),
+        )
+    }
+
     #[test]
     fn turn_groups_mark_a_page_without_the_prompt_as_partial() {
         let records: Vec<_> = include_str!("../../../tests/fixtures/codex-rollout.jsonl")
@@ -2650,8 +3187,17 @@ mod tests {
             (Some("{}"), input["threadId"].as_str().unwrap()),
         ] {
             let call = response_tool_call(&payload, output);
-            assert_eq!(call.event_detail_title, expected);
-            assert!(call.title.contains(expected));
+            assert_eq!(call.title, expected);
+            assert!(call.summary.contains(expected));
+            if expected == "模型和new挪位" {
+                assert_eq!(
+                    call.output,
+                    Some(vec![text_section(
+                        "output",
+                        input["threadId"].as_str().unwrap()
+                    )])
+                );
+            }
             let mut records: Vec<Value> =
                 include_str!("../../../tests/fixtures/codex-tool-calls.jsonl")
                     .lines()
@@ -2691,19 +3237,19 @@ mod tests {
                     .to_owned(),
             ),
         );
+        assert_eq!(call.summary, "sed, cat");
+        assert_eq!(call.detail_left(), "Exec command");
         assert_eq!(call.title, "sed, cat");
-        assert_eq!(call.event_detail_left, "Exec command");
-        assert_eq!(call.event_detail_title, "sed, cat");
         let mut failed = record["payload"]["item"].clone();
         failed["exit_code"] = 2.into();
         assert_eq!(
-            completed_call(&failed, Some("yarn tsc".into())).title,
+            completed_call(&failed, Some("yarn tsc".into())).summary,
             "yarn tsc · 2"
         );
         let mut empty = record["payload"]["item"].clone();
         empty["exit_code"] = 0.into();
         assert_eq!(
-            completed_call(&empty, Some("$command".into())).title,
+            completed_call(&empty, Some("$command".into())).summary,
             "Exec command"
         );
     }
@@ -2738,8 +3284,8 @@ mod tests {
                 tool_body(&payload).as_deref(),
                 Some("A command description")
             );
-            assert_eq!(call.title, "A command description");
-            assert!(!call.event_detail_title.is_empty());
+            assert_eq!(call.summary, "A command description");
+            assert!(!call.title.is_empty());
             assert!(matches!(&call.input[0], Section::Shell { text, .. } if text == command));
         }
     }
@@ -2774,10 +3320,7 @@ mod tests {
     fn command_rules_declare_summaries() {
         for name in ["exec_command", "shell", "CommandExecution"] {
             assert!(
-                matches!(
-                    tool::rule(name).subject,
-                    Some(tool::Subject::Shell { description: false })
-                ),
+                matches!(tool::rule(name).title, [tool::Pick::With(_)]),
                 "missing command subject: {name}"
             );
         }
@@ -2809,12 +3352,15 @@ mod tests {
         let mut timed_out: Value = serde_json::from_str(raw).unwrap();
         timed_out["timed_out"] = true.into();
         assert_eq!(
-            output_sections(&timed_out.to_string(), Some(Output::Wait)),
+            output_sections(&timed_out.to_string(), tool::rule("wait_agent").output),
             vec![text_section("output", "(timed out)")]
         );
         assert_eq!(
             output_sections(raw, None),
-            vec![text_section("output", raw)]
+            vec![Section::Structured {
+                label: "output".into(),
+                text: raw.to_owned()
+            }]
         );
     }
 
@@ -2853,7 +3399,8 @@ mod tests {
         assert_eq!(actual, rows[1..]);
         assert_eq!(reader.refresh(usize::MAX).unwrap().parsed_bytes, 0);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&update.events[0].raw_text().unwrap()).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&update.events[0].raw_text().unwrap())
+                .unwrap(),
             rows[0]
         );
     }
@@ -3030,15 +3577,18 @@ mod tests {
             });
             let call = response_tool_call(&payload, Some("output"));
             assert_eq!(call.name, name);
+            assert_eq!(call.summary, "cat, sed");
             assert_eq!(call.title, "cat, sed");
-            assert_eq!(call.event_detail_title, "cat, sed");
-            assert_eq!(
-                call.event_detail_left,
-                crate::providers::tool::title_name(name)
+            assert_eq!(call.detail_left(), crate::providers::tool::title_name(name));
+            let arguments = tool_arguments(&payload).unwrap();
+            let presentation = tool::presentation(
+                name,
+                &ToolData {
+                    input: &arguments,
+                    result: None,
+                },
             );
-            let (_, _, input) =
-                crate::providers::tool::presentation(name, &tool_arguments(&payload).unwrap());
-            assert_eq!(call.input, input);
+            assert_eq!(call.input, presentation.input);
             assert_eq!(call.output, Some(response_output(name, "output")));
         }
     }
@@ -3068,7 +3618,7 @@ mod tests {
             let events = tail(file.path(), 100).unwrap();
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].body, "cat, sed");
-            assert_eq!(events[0].calls[0].event_detail_left, "Exec command");
+            assert_eq!(events[0].calls[0].detail_left(), "Exec command");
         }
     }
 
@@ -3080,18 +3630,15 @@ mod tests {
             .find(|r| r["payload"]["item"]["type"] == "CommandExecution")
             .unwrap();
         let event = completed_tool(read).unwrap().unwrap();
-        assert_eq!(event.calls[0].event_detail_title, "cat, sed");
-        assert_eq!(event.calls[0].event_detail_left, "Exec command");
+        assert_eq!(event.calls[0].title, "cat, sed");
+        assert_eq!(event.calls[0].detail_left(), "Exec command");
         assert_eq!(event.body, "cat, sed");
         let file = records
             .iter()
             .find(|r| r["payload"]["item"]["type"] == "FileChange")
             .unwrap();
         let event = completed_tool(file).unwrap().unwrap();
-        assert_eq!(
-            event.calls[0].event_detail_title,
-            "/workspace/agents/src/processes.rs"
-        );
+        assert_eq!(event.calls[0].title, "/workspace/agents/src/processes.rs");
         assert!(event.calls[0].input.is_empty());
         assert!(
             matches!(&event.calls[0].output.as_ref().unwrap()[0], Section::Diff { text, .. } if text == file["payload"]["item"]["changes"]["/workspace/agents/src/processes.rs"]["unified_diff"].as_str().unwrap())
@@ -3305,14 +3852,14 @@ mod tests {
         let response = &records[0]["payload"];
         let call = response_tool_call(response, None);
         assert_eq!(call.id, response["call_id"].as_str().unwrap());
-        assert_eq!(call.title, "Spawn agent claude_calls");
+        assert_eq!(call.summary, "Spawn agent claude_calls");
         let record = records
             .iter()
             .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
             .unwrap();
         let call = &completed_tool(record).unwrap().unwrap().calls[0];
         assert_eq!(call.id, record["payload"]["item"]["id"].as_str().unwrap());
-        assert_eq!(call.title, "cat, sed");
+        assert_eq!(call.summary, "cat, sed");
     }
 
     #[test]
@@ -3325,6 +3872,7 @@ mod tests {
         let event = completed_tool(record).unwrap().unwrap();
         assert!(event.calls[0].input.is_empty());
         assert_eq!(event.calls[0].output, Some(vec![Section::Diff {
+            lang: "rs".into(),
             label: String::new(),
             text: record["payload"]["item"]["changes"]["/workspace/agents/src/processes.rs"]["unified_diff"].as_str().unwrap().to_owned(),
         }]));
@@ -3346,10 +3894,12 @@ mod tests {
             .collect();
         assert_eq!(outputs, [
             Some(vec![Section::Diff {
+                lang: "mjs".into(),
                 label: String::new(),
                 text: "@@ -0,0 +1,2 @@\n+// Ported from wakaru v1.14.0 SimplifySequence (Apache-2.0).\n+export default { name: 'SimplifySequence', visitor() { return {}; } };".to_owned(),
             }]),
             Some(vec![Section::Diff {
+                lang: "txt".into(),
                 label: String::new(),
                 text: "@@ -1,7 +0,0 @@\n-                 Prompt\n-Current prompt Current prompt Current\n-prompt Current prompt Current prompt\n-Current prompt Current prompt Current\n-prompt Current prompt Current prompt\n-Current prompt Current prompt\n-Queued prompt that extends beyond the".to_owned(),
             }]),
@@ -3377,7 +3927,7 @@ mod tests {
             matches!(&custom.input[0], crate::event::Section::Text { text, .. } if text.starts_with("// codex-js-repl"))
         );
         assert!(
-            matches!(&custom.output.as_ref().unwrap()[0], crate::event::Section::Text { text, .. } if text == "[]")
+            matches!(&custom.output.as_ref().unwrap()[0], crate::event::Section::Structured { text, .. } if text == "[]")
         );
         assert!(!calls.iter().any(|call| call.name == "exec"));
     }
@@ -3403,7 +3953,35 @@ mod tests {
             .unwrap();
         let event = completed_tool(file).unwrap().unwrap();
         assert!(
-            matches!(&event.calls[0].output.as_ref().unwrap()[0], crate::event::Section::Diff { label, text } if label.is_empty() && text.starts_with("@@ -132,2 +132,22 @@"))
+            matches!(&event.calls[0].output.as_ref().unwrap()[0], crate::event::Section::Diff { label, text, .. } if label.is_empty() && text.starts_with("@@ -132,2 +132,22 @@"))
+        );
+    }
+
+    #[test]
+    fn inline_image_pointer_resolves_captured_mcp_record() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/mcp-codex/image.json");
+        let record: Value = serde_json::from_reader(std::fs::File::open(&path).unwrap()).unwrap();
+        let entries = events(&path, &[(0, record.clone())], usize::MAX).unwrap();
+        let output = entries[0].1.calls[0].output.as_ref().unwrap();
+        let Section::Image(image) = &output[1] else {
+            panic!("expected image")
+        };
+        assert_eq!(image.label, "[image image/png]");
+        let ImageSource::Record {
+            record: source,
+            pointer,
+        } = &image.source
+        else {
+            panic!("expected record source")
+        };
+        assert_eq!(*source, crate::event::SourceRecord { path, offset: 0 });
+        assert_eq!(pointer, "/payload/item/result/content/1/data");
+        assert_eq!(
+            record.pointer(pointer).unwrap().as_str().unwrap(),
+            record["payload"]["item"]["result"]["content"][1]["data"]
+                .as_str()
+                .unwrap()
         );
     }
 
@@ -3418,22 +3996,31 @@ mod tests {
             let call = &completed_tool(&record).unwrap().unwrap().calls[0];
             assert_eq!(call.output.as_ref().unwrap().len(), 2, "{}", call.name);
             assert_eq!(call.input.len(), 1);
-            assert!(matches!(&call.input[0], Section::Structured { label, text }
-                if label == "input" && serde_json::from_str::<Value>(text).unwrap() == record["payload"]["item"]["arguments"]));
+            if record["payload"]["item"]["server"] == "appium-mcp" {
+                assert!(
+                    matches!(&call.input[0], Section::Markdown { text, .. }
+                    if text.contains("platform") && !text.contains("action")),
+                    "appium session calls title their action and table the rest: {:?}",
+                    call.input
+                );
+            } else {
+                assert!(matches!(&call.input[0], Section::Structured { label, text }
+                    if label == "input" && serde_json::from_str::<Value>(text).unwrap() == record["payload"]["item"]["arguments"]));
+            }
             let result = &record["payload"]["item"]["result"];
             assert!(
                 matches!(&call.output.as_ref().unwrap()[0], Section::Text { text, .. }
                 if text == result["content"][0]["text"].as_str().unwrap())
             );
             match &call.output.as_ref().unwrap()[1] {
-                Section::Placeholder(text) => {
-                    let mime = if record["payload"]["item"]["server"] == "cua_repl" {
-                        "[image image/png]"
-                    } else {
-                        "[resource text/html]"
+                Section::Image(image) => {
+                    assert_eq!(image.label, "[image image/png]");
+                    let ImageSource::Record { pointer, .. } = &image.source else {
+                        panic!("expected record source")
                     };
-                    assert_eq!(text, mime);
+                    assert_eq!(record.pointer(pointer), Some(&result["content"][1]["data"]));
                 }
+                Section::Placeholder(text) => assert_eq!(text, "[resource text/html]"),
                 Section::Structured { label, text } => {
                     assert_eq!(label, "output");
                     assert_eq!(
@@ -3473,11 +4060,11 @@ mod tests {
                 text: "{unfinished".to_owned()
             }]
         );
-        let mcp = records
-            .iter()
-            .find(|record| record["payload"]["item"]["type"] == "McpToolCall")
-            .unwrap();
-        let event = completed_tool(mcp).unwrap().unwrap();
+        let mcp: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-client/notify.jsonl"
+        ))
+        .unwrap();
+        let event = completed_tool(&mcp).unwrap().unwrap();
         assert!(
             matches!(&event.calls[0].input[0], Section::Markdown {label, text} if label == "text" && text == mcp["payload"]["item"]["arguments"]["text"].as_str().unwrap())
         );
@@ -3579,6 +4166,8 @@ mod tests {
             let event = completed_tool(&record).unwrap().unwrap();
             let expected = if arguments.is_null() {
                 Vec::new()
+            } else if let Some(text) = arguments.as_str() {
+                vec![text_section("input", text)]
             } else {
                 vec![Section::Structured {
                     label: "input".into(),
@@ -3634,10 +4223,7 @@ mod tests {
         let call = response_tool_call(&payload, Some(output));
         assert_eq!(
             call.output.unwrap(),
-            vec![text_section(
-                "output",
-                "Chat about this\n\nYou have not answered all questions"
-            )]
+            vec![text_section("output", "Chat about this")]
         );
         assert!(call.is_error);
     }
@@ -3649,9 +4235,9 @@ mod tests {
             .find(|record| record["payload"]["name"] == "request_user_input")
             .unwrap();
         let call = response_tool_call(&record["payload"], None);
-        assert_eq!(call.event_detail_left, "Request user input");
-        assert_eq!(call.event_detail_title, "Color");
-        assert_eq!(call.title, "Request user input Color");
+        assert_eq!(call.detail_left(), "Request user input");
+        assert_eq!(call.title, "Color");
+        assert_eq!(call.summary, "Request user input Color");
         assert!(call.show_event_detail);
         assert_eq!(
             call.input,
@@ -3740,9 +4326,9 @@ mod tests {
                     }
                 };
                 assert_eq!(tool_body(&payload).unwrap(), "(encrypted)");
-                assert_eq!(call.title, expected);
+                assert_eq!(call.summary, expected);
                 assert_eq!(
-                    call.event_detail_title,
+                    call.title,
                     if tool == "spawn_agent" {
                         subject.to_owned()
                     } else {
@@ -3784,16 +4370,9 @@ mod tests {
                 let mut payload = record["payload"].clone();
                 payload["name"] = name.clone().into();
                 let call = response_tool_call(&payload, None);
+                assert_eq!(call.detail_left(), "");
                 assert_eq!(
-                    call.event_detail_left,
-                    if tool == "send_message" {
-                        "Message".to_owned()
-                    } else {
-                        crate::providers::tool::display_tool_name(&name)
-                    }
-                );
-                assert_eq!(
-                    call.event_detail_title,
+                    call.title,
                     if tool == "spawn_agent" {
                         subject.to_owned()
                     } else {
@@ -4042,6 +4621,43 @@ mod tests {
     }
 
     #[test]
+    fn image_generation_input_excludes_result() {
+        let record: Value =
+            include_str!("../../../tests/fixtures/codex-images/tool-generation.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .find(|record| record["payload"]["item"]["kind"] == "image_gen.generation")
+                .unwrap();
+        let item = &record["payload"]["item"];
+        assert!(!item["result"].as_str().unwrap().is_empty());
+        let call = completed_tool(&record).unwrap().unwrap().calls.remove(0);
+        let [Section::Structured { label, text }] = call.input.as_slice() else {
+            panic!(
+                "expected structured image generation input: {:?}",
+                call.input
+            );
+        };
+        assert_eq!(label, "input");
+        let input: Value = serde_json::from_str(text).unwrap();
+        let mut expected = item.clone();
+        expected.as_object_mut().unwrap().remove("result");
+        assert_eq!(input, expected);
+    }
+
+    #[test]
+    fn image_view_exec_calls_do_not_emit_events() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/codex-images/tool-view.jsonl");
+        let events = tail(&path, usize::MAX).unwrap();
+        assert_eq!(events.len(), 1);
+        let [call] = events[0].calls.as_slice() else {
+            panic!("expected the image view call");
+        };
+        assert_eq!(call.name, "ImageView");
+        assert_eq!(call.id, "exec-a6b963e9-ca3f-48c6-9a37-5ffae408af41");
+    }
+
+    #[test]
     fn exec_wrappers_never_supply_activity() {
         assert!(
             tool_body(&serde_json::json!({"type":"custom_tool_call", "name":"exec"})).is_none()
@@ -4193,9 +4809,9 @@ mod perspective_tests {
     fn perspective_sentence_names_from_real_records() {
         let records = include_str!("../../../tests/fixtures/codex-perspective/root.jsonl");
         for (name, expected_left, expected_title) in [
-            ("spawn_agent", "Spawn agent", "alpha"),
-            ("wait_agent", "", "Wait agent"),
-            ("followup_task", "Followup task", "← alpha"),
+            ("spawn_agent", "", "alpha"),
+            ("wait_agent", "Wait agent", ""),
+            ("followup_task", "", "← alpha"),
         ] {
             let record: Value = records
                 .lines()
@@ -4203,8 +4819,8 @@ mod perspective_tests {
                 .find(|r| r["payload"]["name"] == name)
                 .unwrap();
             let call = response_tool_call(&record["payload"], None);
-            assert_eq!(call.event_detail_left, expected_left);
-            assert_eq!(call.event_detail_title, expected_title);
+            assert_eq!(call.detail_left(), expected_left);
+            assert_eq!(call.title, expected_title);
         }
         assert_eq!(
             crate::providers::tool::title_name("FINAL_ANSWER"),
@@ -4310,7 +4926,7 @@ mod perspective_tests {
             events[0]
                 .calls
                 .iter()
-                .all(|call| call.event_detail_title == "beta → root")
+                .all(|call| call.title == "beta → root")
         );
     }
 
@@ -4588,12 +5204,102 @@ mod summary_cache_tests {
     }
 
     #[test]
-    fn prompt_attachments_recheck_paths_and_keep_physical_line_pairing() {
+    fn prompt_images_keep_record_sources_after_local_files_disappear() {
+        // Real prompt-image probe records, with the recorded base64 truncation retained.
         let records: Vec<Value> =
+            include_str!("../../../tests/fixtures/codex-images/prompt-record.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let context = include_str!("../../../tests/fixtures/codex-images/context.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        write!(file, "{context}").unwrap();
+        let offset = context.len() as u64;
+        for record in &records {
+            writeln!(file, "{record}").unwrap();
+        }
+        let prompt = user_prompt(&records[0]["payload"]["content"])
+            .body()
+            .unwrap();
+        let expected = vec![Image {
+            label: "[Image #1]".into(),
+            source: ImageSource::Record {
+                record: crate::event::SourceRecord {
+                    path: file.path().to_owned(),
+                    offset,
+                },
+                pointer: "/payload/content/1/image_url".into(),
+            },
+        }];
+        assert_eq!(tail(file.path(), 1).unwrap()[0].images, expected);
+        assert_eq!(first_prompt(file.path(), &prompt).unwrap().0, expected);
+        let mut tasks = Tasks::default();
+        tasks.summary(file.path()).unwrap();
+        assert_eq!(tasks.first_prompt(&prompt).unwrap().0, expected);
+        // The completed local-image copy is not required for the Record source.
+        file.as_file_mut().set_len(offset).unwrap();
+        file.as_file_mut().seek(SeekFrom::Start(offset)).unwrap();
+        writeln!(file, "{}", records[0]).unwrap();
+        assert_eq!(tail(file.path(), 1).unwrap()[0].images, expected);
+        assert_eq!(first_prompt(file.path(), &prompt).unwrap().0, expected);
+    }
+
+    #[test]
+    fn prompt_images_keep_each_content_index_and_label() {
+        let mut record: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/codex-images/prompt-record.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        let mut second = record["payload"]["content"].as_array().unwrap()[..3].to_vec();
+        let distinct: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/codex-images/wrapped.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        second[1]["image_url"] = distinct["payload"]["content"][1]["image_url"].clone();
+        second[0]["text"] = second[0]["text"]
+            .as_str()
+            .unwrap()
+            .replace("[Image #1]", "[Image #2]")
+            .into();
+        record["payload"]["content"]
+            .as_array_mut()
+            .unwrap()
+            .extend(second);
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{record}").unwrap();
+        let events = tail(file.path(), 1).unwrap();
+        let images = &events[0].images;
+        assert_eq!(images.len(), 2);
+        for (image, (label, index)) in images.iter().zip([("[Image #1]", 1), ("[Image #2]", 5)]) {
+            assert_eq!(image.label, label);
+            assert_eq!(
+                image.source,
+                ImageSource::Record {
+                    record: crate::event::SourceRecord {
+                        path: file.path().to_owned(),
+                        offset: 0
+                    },
+                    pointer: format!("/payload/content/{index}/image_url"),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn prompt_attachments_recheck_paths_and_keep_physical_line_pairing() {
+        let mut records: Vec<Value> =
             include_str!("../../../tests/fixtures/codex-images/fallback.jsonl")
                 .lines()
                 .map(|line| serde_json::from_str(line).unwrap())
                 .collect();
+        records[0]["payload"]["content"] =
+            Value::Array(vec![records[0]["payload"]["content"][3].clone()]);
         let mut completed = records[1].clone();
         let image = tempfile::NamedTempFile::new().unwrap();
         completed["payload"]["item"]["content"][1]["path"] = image.path().to_str().unwrap().into();
@@ -4605,7 +5311,18 @@ mod summary_cache_tests {
         writeln!(file, "{}\n{completed}", records[0]).unwrap();
         let mut tasks = Tasks::default();
         tasks.summary(file.path()).unwrap();
-        assert_eq!(tasks.first_prompt(&prompt).unwrap().0.len(), 1);
+        let metadata = image.as_file().metadata().unwrap();
+        assert_eq!(
+            tasks.first_prompt(&prompt).unwrap().0,
+            vec![Image {
+                label: "[Image #1]".into(),
+                source: ImageSource::File {
+                    path: image.path().to_owned(),
+                    len: metadata.len(),
+                    modified: metadata.modified().unwrap(),
+                },
+            }]
+        );
         image.close().unwrap();
         assert!(tasks.first_prompt(&prompt).unwrap().0.is_empty());
         std::fs::write(
@@ -4822,3 +5539,7 @@ mod source_tests;
 #[cfg(test)]
 #[path = "rollout_pinned_reader_tests.rs"]
 mod pinned_reader_tests;
+
+#[cfg(test)]
+#[path = "rollout_image_tests.rs"]
+mod image_tests;

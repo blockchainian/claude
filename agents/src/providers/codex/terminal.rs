@@ -2,7 +2,7 @@ use super::*;
 use std::os::unix::fs::MetadataExt;
 
 /// Archives a thread loaded by this terminal only if its rollout contains no further turn.
-pub(super) fn cleanup(home: &Path, session: &Session) -> io::Result<Option<Job>> {
+pub(super) fn cleanup(home: &Path, session: &Session) -> io::Result<Option<SessionAction>> {
     if session.status != SessionStatus::Inactive || session.process.is_some() {
         return Ok(None);
     }

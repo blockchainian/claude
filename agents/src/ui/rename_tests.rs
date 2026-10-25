@@ -10,7 +10,7 @@ fn child_view(
         .unwrap()
         .execute_batch(include_str!("../../tests/fixtures/codex-state.sql"))
         .unwrap();
-    let mut provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let mut provider = CodexProvider::new(dir.path().into());
     let sessions = provider.refresh(2).sessions;
     let mut parent = sessions
         .iter()
@@ -99,25 +99,27 @@ fn codex_spawn_child_session_keys_emit_unsupported() {
         (KeyCode::Char('x'), KeyModifiers::NONE, Some("Stop")),
         (KeyCode::Char('a'), KeyModifiers::NONE, Some("Archive")),
         (KeyCode::Backspace, KeyModifiers::NONE, Some("Delete")),
-        (KeyCode::Char('h'), KeyModifiers::NONE, Some("Hide")),
-        (KeyCode::Char('p'), KeyModifiers::NONE, Some("Pin")),
     ] {
         for notice in [None, Some("Keep this notice".to_owned())] {
             let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
             let id = view.selected_id().unwrap().clone();
             assert!(!view.selected_row().unwrap().can_resume());
-            view.set_notice(notice.clone());
+            if let Some(notice) = &notice {
+                view.show_error(notice.clone());
+            }
             assert_eq!(
                 view.handle_key(KeyEvent::new(code, modifiers)),
                 label.map(Action::Unsupported),
                 "{code:?}"
             );
             assert_eq!(view.selected_id(), Some(&id));
-            assert_eq!(view.notice.clone().map(|(text, _)| text), notice);
+            assert_eq!(
+                view.feedback.clone().map(|(feedback, _)| feedback),
+                notice.map(footer::Feedback::Error)
+            );
             assert!(view.rename_target.is_none());
             assert!(view.confirm_dialog.is_none());
-            assert!(view.pinned.is_empty());
-            assert!(view.hidden.is_empty());
+            assert!(view.pinned.active.is_empty());
         }
     }
 }
@@ -126,7 +128,6 @@ fn codex_spawn_child_session_keys_emit_unsupported() {
 fn manager_thread_keys_match_ordinary_codex_threads() {
     for (code, modifiers) in [
         (KeyCode::Enter, KeyModifiers::NONE),
-        (KeyCode::Right, KeyModifiers::NONE),
         (KeyCode::Char('l'), KeyModifiers::CONTROL),
         (KeyCode::Char('o'), KeyModifiers::NONE),
         (KeyCode::Char('f'), KeyModifiers::NONE),
@@ -136,14 +137,14 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
         let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
         let session = view.selected_row().unwrap().clone();
         let expected = match code {
-            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l' | 'o') => None,
+            KeyCode::Enter | KeyCode::Char('l' | 'o') => None,
             KeyCode::Char('f') => Some(Action::Fork(session.id)),
             KeyCode::Char('n') => Some(Action::NewDraft { cwd: session.cwd }),
             KeyCode::Char('x') => Some(Action::Stop(session.id)),
             _ => unreachable!(),
         };
         assert_eq!(view.handle_key(KeyEvent::new(code, modifiers)), expected);
-        if matches!(code, KeyCode::Enter | KeyCode::Right | KeyCode::Char('o')) {
+        if matches!(code, KeyCode::Enter | KeyCode::Char('o')) {
             assert_eq!(view.active_panel, Panel::Prompt);
         } else if code == KeyCode::Char('l') {
             assert_eq!(view.active_panel, Panel::TaskList);
@@ -169,36 +170,30 @@ fn manager_thread_keys_match_ordinary_codex_threads() {
 }
 
 #[test]
-fn manager_thread_hides_itself_and_pins_its_parent_group() {
+fn manager_thread_pins_itself() {
     let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Claude);
     let child = view.selected_row().unwrap().clone();
-    let parent = child.parent.clone().unwrap();
     for pinned in [true, false] {
         assert_eq!(
             view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
             Some(Action::TogglePin {
-                id: parent.clone(),
+                tab: 0,
+                id: child.id.clone(),
                 pinned
             })
         );
-        view.set_pinned(if pinned {
-            std::slice::from_ref(&parent)
-        } else {
-            &[]
+        view.set_pinned(&crate::state::TaskPins {
+            active: (if pinned {
+                std::slice::from_ref(&child.id)
+            } else {
+                &[]
+            })
+            .to_vec(),
+            inactive: vec![],
         });
         assert_eq!(view.is_pinned(view.selected), pinned);
     }
-    assert!(
-        view.center_footer_hints()
-            .to_string()
-            .contains("enter open")
-    );
-    assert_eq!(
-        view.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE)),
-        Some(Action::Hide(child.id.clone()))
-    );
-    assert!(view.hidden.contains(&child.id));
-    assert!(!view.hidden.contains(&parent));
+    assert_eq!(view.center_footer_hints().to_string(), "? help");
 }
 
 #[test]
@@ -314,8 +309,22 @@ fn keyboard_title_rename_keeps_task_list_shortcuts_after_cancel() {
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     view.set_active_panel(Panel::TaskList);
     view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
-    assert!(view.searching);
+    assert!(view.search.focused());
 }
 
 #[path = "title_save_tests.rs"]
 mod title_save_tests;
+
+#[test]
+fn codex_spawn_child_pins_itself() {
+    let (_dir, mut view) = child_view(ProviderId::Codex, ProviderId::Codex);
+    let id = view.selected_id().unwrap().clone();
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
+        Some(Action::TogglePin {
+            tab: 0,
+            id,
+            pinned: true
+        })
+    );
+}

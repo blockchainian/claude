@@ -31,6 +31,10 @@ pub fn bin_of(at: DateTime<Utc>) -> i64 {
 pub struct Series {
     /// Nonempty bins by bin number.
     pub bins: BTreeMap<i64, Bin>,
+    since: Option<DateTime<Utc>>,
+    changed: bool,
+    #[cfg(test)]
+    records_read: usize,
     context_tokens: Option<u64>,
     context_window: Option<u64>,
     claude_context: crate::providers::claude::context::Context,
@@ -46,6 +50,146 @@ pub struct Series {
 }
 
 impl Series {
+    /// Reads only the requests needed by the visible bins, then follows appended records.
+    pub fn update_window(
+        &mut self,
+        path: &Path,
+        provider: ProviderId,
+        since: DateTime<Utc>,
+    ) -> io::Result<bool> {
+        let before_context = self.context_percent();
+        let mut file = File::open(path)?;
+        let len = file.metadata()?.len();
+        self.changed = false;
+        if len < self.read || self.since.is_none_or(|covered| since < covered) {
+            let had_bins = !self.bins.is_empty();
+            *self = Self {
+                since: Some(since),
+                changed: had_bins,
+                ..Self::default()
+            };
+            self.window_start(&mut file, provider, since)?;
+        }
+        self.since = Some(since);
+        let first = bin_of(since);
+        while self
+            .bins
+            .first_key_value()
+            .is_some_and(|(&bin, _)| bin < first)
+        {
+            self.bins.pop_first();
+            self.changed = true;
+        }
+        self.read =
+            crate::jsonl::read_lines(&mut file, self.read, |line| self.record(line, provider))?;
+        Ok(self.changed || self.context_percent() != before_context)
+    }
+
+    fn window_start(
+        &mut self,
+        file: &mut File,
+        provider: ProviderId,
+        since: DateTime<Utc>,
+    ) -> io::Result<()> {
+        let end = crate::jsonl::complete_end(file)?;
+        let mut anchor = None;
+        let mut start = 0;
+        let mut boundary = false;
+        let mut context_ready = false;
+        let mut context_model_seen = false;
+        let mut context_tokens_seen = false;
+        crate::jsonl::read_lines_back(file, end, |offset, line| {
+            #[cfg(test)]
+            {
+                self.records_read += 1;
+            }
+            match provider {
+                ProviderId::Claude => {
+                    if let Ok(record) = serde_json::from_slice::<ClaudeRecord>(line)
+                        && record.kind.as_deref() == Some("assistant")
+                        && let Some(message) = record.message
+                        && let Some(usage) = message.usage
+                    {
+                        let prompt = usage.prompt_tokens();
+                        if !context_ready {
+                            let window =
+                                self.claude_context.window(message.model.as_deref(), prompt);
+                            context_ready = prompt > 200_000
+                                || (!context_model_seen
+                                    && window.is_some_and(|window| window > 200_000));
+                            context_model_seen = true;
+                        }
+                        if !boundary
+                            && record
+                                .timestamp
+                                .as_deref()
+                                .and_then(parse_time)
+                                .is_some_and(|at| bin_of(at) < bin_of(since))
+                            && let Some(id) = message.id
+                        {
+                            match &anchor {
+                                None => {
+                                    anchor = Some(id);
+                                    start = offset;
+                                }
+                                Some(previous) if previous == &id => start = offset,
+                                Some(_) => boundary = true,
+                            }
+                        }
+                    }
+                }
+                ProviderId::Codex => {
+                    if let Ok(record) = serde_json::from_slice::<CodexRecord>(line) {
+                        if !context_tokens_seen
+                            && record.kind == "event_msg"
+                            && let Some(payload) = &record.payload
+                            && payload.kind.as_deref() == Some("token_count")
+                            && let Some(info) = &payload.info
+                        {
+                            self.context_tokens = info
+                                .last_token_usage
+                                .as_ref()
+                                .and_then(|usage| usage.total_tokens);
+                            context_tokens_seen = true;
+                        }
+                        if !context_ready
+                            && record.kind == "event_msg"
+                            && let Some(payload) = &record.payload
+                        {
+                            let window = match payload.kind.as_deref() {
+                                Some("token_count") => payload
+                                    .info
+                                    .as_ref()
+                                    .and_then(|info| info.model_context_window),
+                                Some("task_started") => payload.model_context_window,
+                                _ => None,
+                            };
+                            if let Some(window) = window {
+                                self.context_window = Some(window);
+                                context_ready = true;
+                            }
+                        }
+                        if !boundary
+                            && record.kind == "token_usage_record"
+                            && record
+                                .payload
+                                .as_ref()
+                                .is_some_and(|payload| payload.usage.is_some())
+                            && parse_time(&record.timestamp)
+                                .is_some_and(|at| bin_of(at) < bin_of(since))
+                        {
+                            start = offset;
+                            boundary = true;
+                        }
+                    }
+                }
+            }
+            !(boundary && context_ready && (provider == ProviderId::Claude || context_tokens_seen))
+        })?;
+        self.read = start;
+        Ok(())
+    }
+
     pub fn context_percent(&self) -> Option<u64> {
         let tokens = self.context_tokens?;
         let window = self.context_window.filter(|window| *window > 0)?;
@@ -53,6 +197,7 @@ impl Series {
     }
 
     /// Reads appended records; returns whether the bins or context percentage changed.
+    #[cfg(test)]
     pub fn update(&mut self, path: &Path, provider: ProviderId) -> io::Result<bool> {
         let before_context = self.context_percent();
         let mut file = File::open(path)?;
@@ -64,13 +209,17 @@ impl Series {
         if len == self.read {
             return Ok(self.context_percent() != before_context);
         }
-        let before = self.bins.clone();
+        self.changed = false;
         self.read =
             crate::jsonl::read_lines(&mut file, self.read, |line| self.record(line, provider))?;
-        Ok(self.bins != before || self.context_percent() != before_context)
+        Ok(self.changed || self.context_percent() != before_context)
     }
 
     fn record(&mut self, line: &[u8], provider: ProviderId) {
+        #[cfg(test)]
+        {
+            self.records_read += 1;
+        }
         match provider {
             ProviderId::Claude => self.claude_record(line),
             ProviderId::Codex => self.codex_record(line),
@@ -190,7 +339,8 @@ impl Series {
             };
             let share = share.min(left);
             left -= share;
-            if share > 0 {
+            if share > 0 && self.since.is_none_or(|since| bin >= bin_of(since)) {
+                self.changed = true;
                 let entry = self.bins.entry(bin).or_default();
                 entry.output += share;
             }
@@ -201,6 +351,10 @@ impl Series {
         if input == 0 && output == 0 {
             return;
         }
+        if self.since.is_some_and(|since| bin_of(at) < bin_of(since)) {
+            return;
+        }
+        self.changed = true;
         let bin = self.bins.entry(bin_of(at)).or_default();
         bin.input += input;
         bin.output += output;
@@ -487,5 +641,179 @@ mod tests {
         };
         assert_eq!(input("2026-09-20T16:40:00.000Z"), 80_000 - 74313 - 925);
         assert_eq!(input("2026-09-20T16:50:00.000Z"), 0);
+    }
+
+    #[test]
+    fn window_usage_matches_full_read_across_request_boundaries() {
+        for (provider, source, usage, timestamp) in [
+            (
+                ProviderId::Claude,
+                CLAUDE_TOOL_RESULT,
+                CLAUDE_THINKING,
+                "2026-10-14T10:25:37.798Z",
+            ),
+            (
+                ProviderId::Codex,
+                CODEX_TOOL_OUTPUT,
+                CODEX_USAGE,
+                "2026-09-20T16:32:57.845Z",
+            ),
+        ] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            let end = at(timestamp);
+            for index in 0..1_000 {
+                let time = end - chrono::Duration::seconds((1_000 - index) * 20);
+                let mut record: serde_json::Value = serde_json::from_str(usage).unwrap();
+                record["timestamp"] = time.to_rfc3339().into();
+                if provider == ProviderId::Claude {
+                    record["message"]["id"] = format!("msg_{index}").into();
+                }
+                writeln!(file, "{record}").unwrap();
+            }
+            writeln!(file, "{source}\n{usage}").unwrap();
+            if provider == ProviderId::Codex {
+                writeln!(file, "{CODEX_TOKEN_COUNT}").unwrap();
+            }
+            let since = end - chrono::Duration::seconds(5);
+            let mut full = Series::default();
+            full.update(file.path(), provider).unwrap();
+            let mut window = Series::default();
+            window.update_window(file.path(), provider, since).unwrap();
+            assert_eq!(window.bins, full.bins.split_off(&bin_of(since)));
+            assert!(window.records_read < 20, "{} records", window.records_read);
+        }
+    }
+
+    #[test]
+    fn window_usage_follows_appends_prunes_and_expands() {
+        let (mut file, full) = series(ProviderId::Claude, &[CLAUDE_TOOL_RESULT, CLAUDE_THINKING]);
+        let since = at("2026-10-14T10:25:30Z");
+        let mut window = Series::default();
+        assert!(
+            window
+                .update_window(file.path(), ProviderId::Claude, since)
+                .unwrap()
+        );
+        assert_eq!(
+            window.bins,
+            full.bins
+                .range(bin_of(since)..)
+                .map(|(&at, &bin)| (at, bin))
+                .collect()
+        );
+        assert!(
+            !window
+                .update_window(file.path(), ProviderId::Claude, since)
+                .unwrap()
+        );
+        writeln!(file, "{CLAUDE_TOOL_USE}").unwrap();
+        assert!(
+            !window
+                .update_window(file.path(), ProviderId::Claude, since)
+                .unwrap()
+        );
+        assert!(
+            window
+                .update_window(file.path(), ProviderId::Claude, at("2026-10-14T10:25:40Z"))
+                .unwrap()
+        );
+        assert!(window.bins.is_empty());
+        assert!(
+            window
+                .update_window(file.path(), ProviderId::Claude, at("2026-10-14T10:25:20Z"))
+                .unwrap()
+        );
+        assert_eq!(window.bins, full.bins);
+    }
+    #[test]
+    fn window_usage_keeps_duplicate_message_state_at_the_left_edge() {
+        let mut first: serde_json::Value = serde_json::from_str(CLAUDE_THINKING).unwrap();
+        first["timestamp"] = "2026-10-14T10:25:20Z".into();
+        first["message"]["usage"]["output_tokens"] = 300.into();
+        let mut repeated = first.clone();
+        repeated["timestamp"] = "2026-10-14T10:25:25Z".into();
+        repeated["message"]["usage"]["output_tokens"] = 200.into();
+        let mut next = first.clone();
+        next["timestamp"] = "2026-10-14T10:25:40Z".into();
+        next["message"]["id"] = "next-response".into();
+        next["message"]["usage"]["input_tokens"] = 1_000.into();
+        let (file, mut full) = series(
+            ProviderId::Claude,
+            &[&first.to_string(), &repeated.to_string(), &next.to_string()],
+        );
+        let since = at("2026-10-14T10:25:30Z");
+        let mut window = Series::default();
+        window
+            .update_window(file.path(), ProviderId::Claude, since)
+            .unwrap();
+        assert_eq!(window.bins, full.bins.split_off(&bin_of(since)));
+    }
+
+    #[test]
+    fn window_usage_retains_context_from_before_the_visible_requests() {
+        let started = include_str!("../tests/fixtures/codex-rollout.jsonl")
+            .lines()
+            .find(|line| line.contains("task_started"))
+            .unwrap();
+        let mut count: serde_json::Value = serde_json::from_str(CODEX_TOKEN_COUNT).unwrap();
+        count["payload"]["info"]
+            .as_object_mut()
+            .unwrap()
+            .remove("model_context_window");
+        let (file, full) = series(
+            ProviderId::Codex,
+            &[started, CODEX_USAGE, &count.to_string()],
+        );
+        let mut window = Series::default();
+        window
+            .update_window(file.path(), ProviderId::Codex, at("2026-09-20T16:33:00Z"))
+            .unwrap();
+        assert_eq!(window.context_percent(), full.context_percent());
+
+        let mut record: serde_json::Value = serde_json::from_str(CLAUDE_THINKING).unwrap();
+        record["message"]["model"] = "claude-opus-4-6".into();
+        record["message"]["usage"]["input_tokens"] = 300_000.into();
+        let first = record.to_string();
+        record["message"]["id"] = "compacted".into();
+        record["timestamp"] = "2026-10-14T11:00:00Z".into();
+        record["message"]["usage"]["input_tokens"] = 0.into();
+        let (file, full) = series(ProviderId::Claude, &[&first, &record.to_string()]);
+        let mut window = Series::default();
+        window
+            .update_window(file.path(), ProviderId::Claude, at("2026-10-14T10:59:00Z"))
+            .unwrap();
+        assert_eq!(window.context_percent(), full.context_percent());
+    }
+
+    #[test]
+    fn window_usage_resets_after_a_transcript_shrinks() {
+        let (file, _) = series(
+            ProviderId::Codex,
+            &[CODEX_TOOL_OUTPUT, CODEX_USAGE, CODEX_TOKEN_COUNT],
+        );
+        let since = at("2026-09-20T16:32:55Z");
+        let mut window = Series::default();
+        window
+            .update_window(file.path(), ProviderId::Codex, since)
+            .unwrap();
+        std::fs::write(file.path(), format!("{CODEX_USAGE}\n")).unwrap();
+        assert!(
+            window
+                .update_window(file.path(), ProviderId::Codex, since)
+                .unwrap()
+        );
+        let mut full = Series::default();
+        full.update(file.path(), ProviderId::Codex).unwrap();
+        assert_eq!(window.bins, full.bins.split_off(&bin_of(since)));
+    }
+    #[test]
+    fn window_usage_keeps_context_count_before_its_request_anchor() {
+        let earlier = CODEX_TOKEN_COUNT.replace("2026-09-20T16:33:00.206Z", "2026-09-20T15:00:00Z");
+        let (file, full) = series(ProviderId::Codex, &[&earlier, CODEX_USAGE]);
+        let mut window = Series::default();
+        window
+            .update_window(file.path(), ProviderId::Codex, at("2026-09-20T16:33:00Z"))
+            .unwrap();
+        assert_eq!(window.context_percent(), full.context_percent());
     }
 }

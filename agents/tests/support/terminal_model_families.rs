@@ -1,5 +1,12 @@
 use super::*;
 
+fn model_picker_visible(capture: &str) -> bool {
+    capture.lines().any(|line| {
+        line.split('│')
+            .any(|part| matches!(part.trim(), "Opus" | "Sol"))
+    })
+}
+
 fn position(capture: &str, text: &str) -> (usize, usize) {
     capture
         .lines()
@@ -14,7 +21,7 @@ fn position(capture: &str, text: &str) -> (usize, usize) {
 
 fn open_model(tmux: &Tmux, label: &str) {
     let capture = tmux.capture_when(|screen| {
-        !screen.contains("enter select")
+        !model_picker_visible(screen)
             && screen
                 .lines()
                 .any(|line| line.contains(label) && line.contains("medium"))
@@ -25,7 +32,7 @@ fn open_model(tmux: &Tmux, label: &str) {
         .find(|(_, line)| line.contains(label) && line.contains("medium"))
         .unwrap();
     tmux.mouse(0, line[..line.find(label).unwrap()].width(), row, true);
-    tmux.wait_for(|screen| screen.contains("enter select"));
+    tmux.wait_for(model_picker_visible);
 }
 
 #[test]
@@ -131,9 +138,9 @@ fn terminal_model_families_keep_headers_out_of_selection() {
         }
         let (x, y) = position(&capture, header);
         tmux.mouse(0, x, y, true);
-        tmux.wait_for(|screen| screen.contains("enter select"));
+        tmux.wait_for(model_picker_visible);
         tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-        tmux.wait_for(|screen| !screen.contains("enter select") && screen.contains(current));
+        tmux.wait_for(|screen| !model_picker_visible(screen) && screen.contains(current));
         let stored: serde_json::Value = serde_json::from_slice(
             &std::fs::read(directory.path().join("claude/agents.json")).unwrap(),
         )
@@ -142,11 +149,11 @@ fn terminal_model_families_keep_headers_out_of_selection() {
         open_model(&tmux, current);
         tmux.run(&["send-keys", "-t", "probe", "Down"]);
         tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-        tmux.wait_for(|screen| !screen.contains("enter select") && screen.contains(next));
+        tmux.wait_for(|screen| !model_picker_visible(screen) && screen.contains(next));
         open_model(&tmux, next);
         tmux.run(&["send-keys", "-t", "probe", "Up"]);
         tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-        tmux.wait_for(|screen| !screen.contains("enter select") && screen.contains(current));
+        tmux.wait_for(|screen| !model_picker_visible(screen) && screen.contains(current));
         let stored: serde_json::Value = serde_json::from_slice(
             &std::fs::read(directory.path().join("claude/agents.json")).unwrap(),
         )

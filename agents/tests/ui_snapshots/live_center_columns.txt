@@ -1,12 +1,12 @@
   Active 5                                                                                                                                          Inactive 1
 ────────────────────────────────────────┬──────────────── Ready ─────────────────┬──────────────────────────────────────────────────────────────────────────────
                  Pinned                 │                 Prompt                 │
- ○ Current task             Ready       │ Current task                           │
+ ○ Current task             Ready       │              Current task              │
  ● Needs an answer          Needs input │                                        │
                                         │                                        │
-              /tmp/project              │                                        │
- ○ A longer task title th…  Ready       │                                        │
+                project                 │                                        │
  ● Failed task              Needs input │                                        │
+ ○ A longer task title th…  Ready       │                                        │
  ● Working task             Working     │                                        │
                                         │                                        │
 ────────────────────────────────────────┴╴project ──── Current task ─────────────┴──────────────────────────────────────────────────────────────────────────────
@@ -19,4 +19,4 @@
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- ? help  esc previous  ↑/↓ move  enter open  n new
+ ? help

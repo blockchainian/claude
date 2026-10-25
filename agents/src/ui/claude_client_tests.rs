@@ -5,12 +5,12 @@ use crate::providers::{Provider, codex::CodexProvider};
 fn claude_client_recorded_input_and_reply_snapshot() {
     for (tool, source) in [
         (
-            "ask_claude",
-            include_str!("../../tests/fixtures/claude-client/ask_claude.jsonl"),
+            "ask",
+            include_str!("../../tests/fixtures/claude-client/ask.jsonl"),
         ),
         (
-            "notify_claude",
-            include_str!("../../tests/fixtures/claude-client/notify_claude.jsonl"),
+            "notify",
+            include_str!("../../tests/fixtures/claude-client/notify.jsonl"),
         ),
     ] {
         let directory = tempfile::tempdir().unwrap();
@@ -26,8 +26,7 @@ fn claude_client_recorded_input_and_reply_snapshot() {
             [transcript.to_str().unwrap()],
         )
         .unwrap();
-        let mut provider =
-            CodexProvider::new(directory.path().into(), directory.path().join("manager"));
+        let mut provider = CodexProvider::new(directory.path().into());
         let session = provider.refresh(1).sessions.remove(0);
         let events = provider.event_panel(&session, usize::MAX, false).unwrap();
         let record: serde_json::Value = serde_json::from_str(source).unwrap();
@@ -38,8 +37,8 @@ fn claude_client_recorded_input_and_reply_snapshot() {
         let call = &events[0].calls[0];
         let display_name = crate::providers::tool::display_tool_name(&call.name);
         assert_eq!(events[0].body, format!("{display_name} {input}"));
-        assert_eq!(call.event_detail_left, "");
-        assert_eq!(call.event_detail_title, display_name);
+        assert_eq!(call.detail_left(), display_name);
+        assert_eq!(super::tool_detail::call_title(call).1, "");
         let reply = record["payload"]["item"]["result"]["content"][0]["text"]
             .as_str()
             .unwrap();
@@ -58,6 +57,39 @@ fn claude_client_recorded_input_and_reply_snapshot() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join(format!("tests/ui_snapshots/claude_client_{tool}.txt"));
         if std::env::var_os("UPDATE_CLAUDE_CLIENT_SNAPSHOTS").is_some() {
+            std::fs::write(&path, &rendered).unwrap();
+        }
+        assert_eq!(rendered, std::fs::read_to_string(path).unwrap());
+    }
+}
+
+#[test]
+fn chrome_javascript_recorded_input_and_output_blocks_snapshot() {
+    let directory = tempfile::tempdir().unwrap();
+    let transcript = directory.path().join("chrome.jsonl");
+    std::fs::write(
+        &transcript,
+        include_str!("../../tests/fixtures/claude-chrome-javascript.jsonl"),
+    )
+    .unwrap();
+    let events = crate::providers::claude::event_reader::tail(&transcript, usize::MAX).unwrap();
+    assert_eq!(events.len(), 1);
+    let now = events[0].ended_at.unwrap();
+    assert_eq!(events[0].calls[0].output.as_ref().unwrap().len(), 2);
+    let (mut view, _) = event_fixture();
+    view.set_event(events);
+    for width in [120, 180] {
+        let rendered = event_screen(&view, width, 90, now);
+        assert!(
+            rendered.contains(".getEntriesByType('resource')"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("\"action\""), "{rendered}");
+        assert!(!rendered.contains("\"tabId\""), "{rendered}");
+        assert!(rendered.contains("- Available tabs:"), "{rendered}");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("tests/ui_snapshots/chrome_javascript_{width}.txt"));
+        if std::env::var_os("UPDATE_CHROME_JAVASCRIPT_SNAPSHOTS").is_some() {
             std::fs::write(&path, &rendered).unwrap();
         }
         assert_eq!(rendered, std::fs::read_to_string(path).unwrap());

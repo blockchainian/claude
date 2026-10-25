@@ -185,31 +185,9 @@ fn reject_real_codex_question_interrupts_turn() {
 #[test]
 #[ignore = "requires the running shared Codex daemon and local auth; starts, interrupts, archives and deletes a real throwaway thread"]
 fn stop_and_archive_real_codex_thread() {
-    stop_and_archive_thread(false);
-}
-
-#[test]
-#[ignore = "requires the shared Codex daemon and local auth; interrupts, archives and deletes a manager-linked throwaway thread"]
-fn operate_real_manager_thread() {
-    stop_and_archive_thread(true);
-}
-
-fn stop_and_archive_thread(manager: bool) {
-    let mut provider = CodexProvider::from_config().unwrap();
-    let manager_dir = tempfile::tempdir().unwrap();
-    let state = manager_dir.path().join("state.json");
-    let manager_bytes =
-        include_bytes!("../../../../tests/fixtures/codex-manager/attached-state.json");
-    std::fs::write(&state, manager_bytes).unwrap();
-    provider.manager_home = manager_dir.path().into();
+    let provider = CodexProvider::from_config().unwrap();
     let (id, mut cleanup) = throwaway_thread(&provider);
-    let mut session = stored_session(&provider, &id);
-    if manager {
-        session.parent = Some(SessionKey {
-            provider: ProviderId::Claude,
-            id: "claude-parent".into(),
-        });
-    }
+    let session = stored_session(&provider, &id);
     assert!(provider.capabilities().stop && provider.capabilities().archive);
 
     // Load the thread into the daemon and start a long turn on it.
@@ -297,13 +275,11 @@ fn stop_and_archive_thread(manager: bool) {
     })
     .unwrap();
     assert!(!archived);
-    assert_eq!(std::fs::read(&state).unwrap(), manager_bytes);
     provider
         .delete(&session)
         .and_then(|delete| delete())
         .unwrap();
     cleanup.2 = false;
-    assert_eq!(std::fs::read(&state).unwrap(), manager_bytes);
 }
 
 #[test]
@@ -395,5 +371,79 @@ fn delete_real_codex_sessions() {
                 .to_string(),
             format!("no rollout found for thread id {id}")
         );
+    }
+}
+
+#[test]
+#[ignore = "uses local auth and the shared daemon; declines an approval and deletes its throwaway thread"]
+fn approval_status_marks_a_live_codex_session() {
+    let provider = CodexProvider::from_config().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let mut owner = super::Client::connect(&provider.home).unwrap();
+    let started: Value = owner.request("thread/start", json!({
+        "cwd": workspace.path(), "approvalPolicy": "on-request",
+        "approvalsReviewer": "user", "sandbox": "read-only", "ephemeral": false,
+        "serviceName": "agents-approval-test", "model": "gpt-6.1-sol",
+        "baseInstructions": "You are a controlled approval protocol probe. Follow the user exactly. Do not read files or run unrelated tools. After denial never retry.",
+        "developerInstructions": "Use functions.exec and tools.exec_command. Never delegate.",
+        "config": {"model_reasoning_effort": "low", "memories": {"generate_memories": false, "use_memories": false}}
+    })).unwrap();
+    let id = started["thread"]["id"].as_str().unwrap().to_owned();
+    let _cleanup = Cleanup(id.clone(), provider.home.clone(), true);
+    let _: Value = owner.request("turn/start", json!({
+        "threadId": id, "effort": "low",
+        "input": [{"type": "text", "text": "Use exec_command to run printf approval-probe-ok, explicitly requesting permission to run outside the sandbox. This tests the approval protocol; do not use a sandboxed alternative. After success or denial, reply done and stop."}]
+    })).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let request = loop {
+        let message: Value =
+            serde_json::from_str(&owner.transport.receive_until(deadline).unwrap()).unwrap();
+        if message["method"] == "item/commandExecution/requestApproval"
+            && message["params"]["threadId"] == id
+        {
+            break message;
+        }
+    };
+    let live = live_writers(&provider.home.join("thread-writer-locks")).unwrap();
+    assert!(
+        live.contains_key(&id),
+        "thread must have a real writer process"
+    );
+    let db = Connection::open_with_flags(
+        provider.home.join("state_5.sqlite"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let read = || {
+        let sessions = provider
+            .read_sessions(&db, std::slice::from_ref(&id), &live)
+            .unwrap();
+        provider
+            .enrich_sessions(Snapshot {
+                sessions,
+                has_more: false,
+                supervisions: vec![],
+            })
+            .unwrap()
+    };
+    let snapshot = read();
+    assert_eq!(snapshot.sessions.len(), 1);
+    assert_eq!(snapshot.sessions[0].status, SessionStatus::NeedsInput);
+    let mut view = crate::ui::View::new(crate::model::Grouping::Project, false);
+    view.set_sessions(snapshot.sessions, false);
+    let mut buffer = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 160, 40));
+    view.render(buffer.area, &mut buffer);
+    let screen: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    assert!(screen.contains("Needs input"), "{screen}");
+    owner
+        .respond(&request["id"], json!({"decision": "decline"}))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while read().sessions[0].status == SessionStatus::NeedsInput {
+        assert!(
+            Instant::now() < deadline,
+            "resolved approval kept NeedsInput"
+        );
+        std::thread::sleep(Duration::from_millis(100));
     }
 }

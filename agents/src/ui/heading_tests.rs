@@ -14,9 +14,7 @@ fn headings_center_at_wide_and_narrow_widths() {
             let mut buf = Buffer::empty(Rect::new(0, 0, width + 6, 10));
             view.render_center_rows(area, &mut buf, Utc::now());
             let label = match grouping {
-                Grouping::Project => {
-                    line_truncation::abbreviate_path("/tmp/project", usize::from(width), None)
-                }
+                Grouping::Project => "project".to_owned(),
                 Grouping::Model => "Unknown".to_owned(),
                 Grouping::Status => "Ready".to_owned(),
             };
@@ -40,6 +38,7 @@ fn headings_center_at_wide_and_narrow_widths() {
 
 #[test]
 fn centered_project_heading_clicks_and_underline_cover_only_text() {
+    let project = crate::test_project();
     for width in [8, 13, 20, 39, 80, 120] {
         let mut view = test_view(Grouping::Project, false);
         view.set_sessions(
@@ -49,8 +48,7 @@ fn centered_project_heading_clicks_and_underline_cover_only_text() {
         let area = Rect::new(3, 2, width, 6);
         let mut buf = Buffer::empty(Rect::new(0, 0, width + 6, 10));
         view.render_center_rows(area, &mut buf, Utc::now());
-        let label =
-            line_truncation::abbreviate_path("/tmp/project", usize::from(width).min(64), None);
+        let label = formatting::format_directory_display(&project, Some(usize::from(width)));
         let start = area.x + (width - label.width() as u16) / 2;
         let end = start + label.width() as u16;
         let links = view.viewport.borrow().list_links.clone();
@@ -58,7 +56,7 @@ fn centered_project_heading_clicks_and_underline_cover_only_text() {
             links,
             vec![(
                 Rect::new(start, area.y, end - start, 1),
-                PathBuf::from("/tmp/project")
+                LinkTarget::Path(project.clone())
             )]
         );
         links::underline(&mut buf, &links);
@@ -80,7 +78,7 @@ fn centered_project_heading_clicks_and_underline_cover_only_text() {
                 view.flush_pending_click(Instant::now() + std::time::Duration::from_secs(1));
             assert_eq!(
                 action,
-                on_text.then(|| Action::OpenPath("/tmp/project".into())),
+                on_text.then(|| Action::Open(crate::ui::links::LinkTarget::Path(project.clone()))),
                 "click x={x}, width={width}"
             );
             if on_text {
@@ -97,7 +95,7 @@ fn centered_project_heading_clicks_and_underline_cover_only_text() {
                         mouse(MouseEventKind::Down(MouseButton::Left), x, area.y)
                     ),
                     Some(Action::NewDraft {
-                        cwd: "/tmp/project".into()
+                        cwd: project.clone()
                     })
                 );
             } else {

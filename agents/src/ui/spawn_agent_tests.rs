@@ -11,10 +11,7 @@ fn display_view() -> View {
     )
     .unwrap();
     let claude = crate::providers::claude::ClaudeProvider::new(config.path().into());
-    let codex = crate::providers::codex::CodexProvider::new(
-        config.path().into(),
-        config.path().join("manager"),
-    );
+    let codex = crate::providers::codex::CodexProvider::new(config.path().into());
     let mut view = test_view(Grouping::Project, false);
     view.set_input_choices(HashMap::from([
         (ProviderId::Claude, claude.input_choices()),
@@ -93,10 +90,7 @@ fn spawn_agent_claude_background_name_model_and_hidden_receipt() {
     let mut view = display_view();
     assert_eq!(event.summary(), "Spawn agent 查 Claude 前台转后台");
     let shown = view.display_event(event);
-    assert_eq!(
-        shown.calls[0].event_detail_title,
-        "查 Claude 前台转后台 · Sonnet 5.5"
-    );
+    assert_eq!(shown.calls[0].title, "查 Claude 前台转后台 · Sonnet 5.5");
     let body = view.event_detail_text(event);
     assert!(
         !body.contains("Async agent launched successfully"),
@@ -122,7 +116,7 @@ fn spawn_agent_codex_model_and_hidden_receipt() {
         include_str!("../../tests/fixtures/codex-interaction/parent.jsonl"),
     )
     .unwrap();
-    let provider = CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let provider = CodexProvider::new(dir.path().into());
     let mut session = fixture().rows.remove(0);
     session.transcript = Some(path);
     let events = provider.event_panel(&session, usize::MAX, false).unwrap();
@@ -130,10 +124,7 @@ fn spawn_agent_codex_model_and_hidden_receipt() {
     let mut view = display_view();
     assert_eq!(event.summary(), "Spawn agent demo_sub");
     let shown = view.display_event(event);
-    assert_eq!(
-        shown.calls[0].event_detail_title,
-        "demo_sub · GPT-6.1-Sol · low"
-    );
+    assert_eq!(shown.calls[0].title, "demo_sub · GPT-6.1-Sol · low");
     let body = view.event_detail_text(event);
     assert!(!body.contains("task_name"), "{body}");
     snapshot("spawn_agent_codex.txt", &panel(&mut view, event));

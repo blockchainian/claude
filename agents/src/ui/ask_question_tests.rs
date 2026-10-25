@@ -36,7 +36,10 @@ fn ask_question_list_uses_questions_and_detail_uses_headers() {
             .map(|question| question["header"].as_str().unwrap())
             .collect::<Vec<_>>()
             .join(" · ");
-        assert_eq!(event.calls[0].title, format!("AskUserQuestion {questions}"));
+        assert_eq!(
+            event.calls[0].summary,
+            format!("AskUserQuestion {questions}")
+        );
         assert_eq!(event.body, format!("AskUserQuestion {questions}"));
         assert!(event_list::shows_calls(&event));
         let (mut view, now) = event_fixture();
@@ -61,7 +64,7 @@ fn ask_question_list_uses_questions_and_detail_uses_headers() {
                 .collect::<Vec<_>>(),
             title
         );
-        assert_eq!(event.calls[0].event_detail_title, title.join(" · "));
+        assert_eq!(event.calls[0].title, title.join(" · "));
     }
 }
 
@@ -159,10 +162,7 @@ fn ask_question_answers_list_headers_like_the_submit_tab() {
 
 #[test]
 fn ask_question_rejections_list_what_was_answered() {
-    assert_eq!(
-        output(&question_event(REJECTED)),
-        "Chat about this\n\nYou have not answered all questions"
-    );
+    assert_eq!(output(&question_event(REJECTED)), "Chat about this");
     let record: serde_json::Value = serde_json::from_str(REJECTED.lines().nth(1).unwrap()).unwrap();
     let original = record["message"]["content"][0]["content"].as_str().unwrap();
     let answered = original.replace("(No answer provided)", "Answer: 直接隐藏");
@@ -224,10 +224,7 @@ fn ask_question_detail_snapshots_keep_sections_centered_and_copyable() {
         let parts = event_detail_parts(&event);
         let viewport = view.viewport.borrow();
         let region = &viewport.event_text;
-        let columns = super::super::event_detail::event_detail_columns(
-            area,
-            view.center_layout(area).event_panel,
-        );
+        let columns = super::super::event_detail::EventDetailColumns::new(area);
         for row in &region.rows {
             assert_eq!(row.x, columns.text.x);
             assert!(

@@ -1,68 +1,74 @@
 use super::shortcut_help::{Group, Shortcut};
 use super::*;
 
-pub(super) fn hint_line(items: &[(&str, &str)]) -> Line<'static> {
-    let mut line = Line::default();
-    for (key, label) in items {
-        if !line.spans.is_empty() {
-            line.spans.push("  ".dim());
-        }
-        line.spans.push(key.to_string().bold());
-        line.spans.push(format!(" {label}").dim().not_bold());
-    }
-    line
+pub(super) fn key_span(key: &str) -> Span<'static> {
+    super::key_name::display(key).bold()
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum HintAction {
+    Help,
+    CloseHelp,
+    Question(question_view::FooterAction),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct HintTarget {
+    pub area: Rect,
+    pub action: HintAction,
+}
+
+/// Records only the visible key cells, splitting arrow combinations at their slash.
+pub(super) fn action_targets(
+    line: &Line<'_>,
+    area: Rect,
+    actions: &[(&str, HintAction)],
+) -> Vec<HintTarget> {
+    let mut targets = Vec::new();
+    let mut x = area.x;
+    for span in &line.spans {
+        if span
+            .style
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD)
+        {
+            let parts: Vec<_> = if span.content.contains('/') && span.content.as_ref() != "/" {
+                span.content.split('/').collect()
+            } else {
+                vec![span.content.as_ref()]
+            };
+            let mut offset = 0;
+            for part in parts {
+                let width = part.width() as u16;
+                if let Some((_, action)) = actions.iter().find(|(label, _)| *label == part) {
+                    let rect =
+                        Rect::new(x.saturating_add(offset), area.y, width, 1).intersection(area);
+                    if !rect.is_empty() {
+                        targets.push(HintTarget {
+                            area: rect,
+                            action: *action,
+                        });
+                    }
+                }
+                offset += width + 1;
+            }
+        }
+        x = x.saturating_add(span.width() as u16);
+    }
+    targets
+}
+
 impl View {
     pub(super) fn center_footer_hints(&self) -> Line<'static> {
-        if self.confirm_dialog.is_some() {
-            hint_line(&[("↑/↓", "move"), ("enter", "select"), ("esc", "back")])
-        } else if self.help {
-            hint_line(&[("esc", "back")])
-        } else if self.active_panel == Panel::TaskDetails && self.title_editor().is_some() {
-            if self.name_target.is_some() {
-                hint_line(&[("esc", "cancel"), ("enter", "next")])
-            } else {
-                hint_line(&[("esc", "back"), ("enter", "rename")])
-            }
-        } else if self.active_panel == Panel::Prompt && self.active_question().is_some() {
-            hint_line(&[("↑/↓", "move"), ("enter", "confirm"), ("esc", "close")])
-        } else if self.selected_draft().is_some()
-            && (self.prompt_focused()
-                || (self.active_panel == Panel::TaskDetails && self.selector.is_some()))
-        {
-            if self.prompt_focused() {
-                hint_line(&[("esc", "cancel"), ("enter", "next")])
-            } else if self.selector.as_ref().is_some_and(Selector::input_active) {
-                hint_line(&[("esc", "back"), ("enter", "select")])
-            } else {
-                hint_line(&[("↑/↓", "move"), ("esc", "back"), ("enter", "select")])
-            }
-        } else if self.task_search_editing() {
-            hint_line(&[("esc", "back"), ("enter", "keep")])
-        } else if self
-            .selected_row()
-            .is_some_and(|session| !session.can_resume())
-        {
-            hint_line(&[
-                ("?", "help"),
-                ("esc", "previous"),
-                ("↑/↓", "move"),
-                ("n", "new"),
-            ])
-        } else if self.searching {
-            hint_line(&[("esc", "back"), ("enter", "open")])
+        let (key, label) = if self.help {
+            ("Esc", " back")
         } else {
-            hint_line(&[
-                ("?", "help"),
-                ("esc", "previous"),
-                ("↑/↓", "move"),
-                ("enter", "open"),
-                ("n", "new"),
-            ])
-        }
+            ("?", " help")
+        };
+        Line::from(vec![key.bold(), label.dim().not_bold()])
     }
-    /// Whether the footer shows the task hints rather than a dialog's, an editor's or a search's.
-    pub(super) fn footer_shows_task_hints(&self) -> bool {
+    /// Whether the footer shows the task title outside dialogs, editors and searches.
+    pub(super) fn footer_shows_task_title(&self) -> bool {
         !(self.confirm_dialog.is_some()
             || self.help
             || (self.active_panel == Panel::TaskDetails && self.title_editor().is_some())
@@ -70,7 +76,7 @@ impl View {
             || (self.selected_draft().is_some()
                 && (self.prompt_focused()
                     || (self.active_panel == Panel::TaskDetails && self.selector.is_some())))
-            || self.task_search_editing())
+            || self.search_focused())
     }
 
     pub(super) fn center_help_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -86,48 +92,39 @@ impl View {
         };
         let groups = [
             group(
-                "Navigate",
-                &[
-                    ("↑", "Up"),
-                    ("↓", "Down"),
-                    ("⌃w h/j/k/l", "Focus left/down/up/right"),
-                    ("enter", "Open"),
-                    ("→", "Open"),
-                    ("pgup", "Page up"),
-                    ("pgdn", "Page down"),
-                    ("⌃c", "Quit"),
-                    ("esc", "Previous"),
-                ],
-            ),
-            group(
                 "Tasks",
                 &[
                     ("n", "New"),
-                    ("o", "Open"),
-                    ("f", "Fork"),
+                    ("o, enter", "Open"),
                     ("r", "Rename"),
-                    ("x", "Stop"),
                     ("a", "Archive"),
-                    ("h", "Hide"),
                     ("backspace", "Delete"),
+                    ("esc", "Back"),
+                    ("f", "Fork"),
+                    ("x", "Stop"),
+                    ("/", "Search"),
+                    ("tab/⇧tab", "Filter"),
+                    ("g", "Group"),
                     ("p", "Pin/unpin"),
+                    ("⌃c", "Quit"),
                 ],
             ),
+            group("Events", &[("/", "Search"), ("t", "Sort")]),
             group(
-                "View",
-                &[("tab/⇧tab", "Filter"), ("/", "Search"), ("g", "Group")],
-            ),
-            group(
-                "Events",
+                "Navigate",
                 &[
-                    ("/", "Search"),
-                    ("t", "Sort"),
-                    ("2× click top border", "Earliest"),
-                    ("2× click bottom border", "Latest"),
+                    ("⌃w h/j/k/l", "Focus left/down/up/right"),
+                    ("↑", "Up"),
+                    ("↓", "Down"),
+                    ("pgup", "Page up"),
+                    ("pgdn", "Page down"),
+                    ("⌃w _", "Max width"),
+                    ("⌃w |", "Max height"),
+                    ("⌃w =", "Reset size"),
                 ],
             ),
         ];
-        let mut lines = vec!["Task shortcuts".bold().into(), Line::default()];
+        let mut lines = vec!["Shortcuts".bold().into(), Line::default()];
         for line in super::shortcut_help::group_lines(groups, width) {
             if line.width() <= usize::from(width) {
                 lines.push(line);
@@ -147,36 +144,271 @@ impl View {
 mod tests {
     use super::*;
 
+    fn render(view: &View) -> Buffer {
+        let area = Rect::new(0, 0, 160, 50);
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer);
+        buffer
+    }
+
+    fn click(view: &mut View, x: u16, y: u16) -> Option<Action> {
+        let event = |kind| MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        };
+        view.handle_mouse(event(MouseEventKind::Down(MouseButton::Left)));
+        view.handle_mouse(event(MouseEventKind::Up(MouseButton::Left)))
+    }
+
     #[test]
-    fn task_footer_uses_open_and_lowercase_descriptions() {
-        let mut view = View::default();
-        assert_eq!(
-            view.center_footer_hints().to_string(),
-            "? help  esc previous  ↑/↓ move  enter open  n new"
-        );
-        view.searching = true;
-        assert_eq!(
-            view.center_footer_hints().to_string(),
-            "esc back  enter open"
-        );
+    fn footer_help_and_back_clicks_preserve_focused_input() {
+        for panel in [
+            Panel::Prompt,
+            Panel::TaskDetails,
+            Panel::TaskList,
+            Panel::EventList,
+            Panel::EventDetail,
+        ] {
+            let mut view = View::default();
+            view.add_draft(DraftSetup {
+                provider: ProviderId::Claude,
+                cwd: crate::test_project(),
+                model: None,
+                effort: None,
+                branch: "main".into(),
+            });
+            if panel != Panel::TaskDetails {
+                view.name_target = None;
+            }
+            view.set_active_panel(panel);
+            if panel == Panel::TaskList {
+                view.search.focus();
+            } else {
+                view.search.blur();
+            }
+            if panel == Panel::EventList {
+                view.event_list.search.input.focus()
+            } else {
+                view.event_list.search.input.blur()
+            };
+            if panel == Panel::EventDetail {
+                view.event_detail.search.input.focus()
+            } else {
+                view.event_detail.search.input.blur()
+            };
+            view.input_box.editor.set_text("draft");
+            view.rename.set_text("title");
+            view.search.set_text("search");
+            view.event_list.search.input.set_text("event");
+            view.event_detail.search.input.set_text("detail");
+            render(&view);
+            let target = view
+                .viewport
+                .borrow()
+                .hint_targets
+                .iter()
+                .find(|target| {
+                    target.area.y == view.center_layout(Rect::new(0, 0, 160, 50)).footer.y
+                })
+                .copied()
+                .expect("help target");
+            click(&mut view, target.area.x, target.area.y);
+            assert!(view.help, "panel {panel:?}");
+            assert_eq!(view.input_box.editor.text(), "draft");
+            assert_eq!(view.rename.text(), "title");
+            assert_eq!(view.search.text(), "search");
+            assert_eq!(view.event_list.search.input.text(), "event");
+            assert_eq!(view.event_detail.search.input.text(), "detail");
+            assert_eq!(view.active_panel, panel);
+            let buffer = render(&view);
+            let text = buffer
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(text.contains("Shortcuts"), "panel {panel:?}");
+            let target = view
+                .viewport
+                .borrow()
+                .hint_targets
+                .iter()
+                .find(|target| {
+                    target.area.y == view.center_layout(Rect::new(0, 0, 160, 50)).footer.y
+                })
+                .copied()
+                .expect("back target");
+            click(&mut view, target.area.x, target.area.y);
+            assert_eq!(view.active_panel, panel);
+            assert_eq!(view.search.focused(), panel == Panel::TaskList);
+            assert_eq!(
+                view.event_list.search.input.focused(),
+                panel == Panel::EventList
+            );
+            assert_eq!(
+                view.event_detail.search.input.focused(),
+                panel == Panel::EventDetail
+            );
+            assert!(!view.help, "help did not close in {panel:?}");
+            assert_eq!(view.input_box.editor.text(), "draft");
+            assert_eq!(view.rename.text(), "title");
+            assert_eq!(view.search.text(), "search");
+            assert_eq!(view.event_list.search.input.text(), "event");
+            assert_eq!(view.event_detail.search.input.text(), "detail");
+        }
+    }
+
+    #[test]
+    fn help_key_columns_do_not_handle_clicks() {
+        let mut view = View {
+            help: true,
+            ..View::default()
+        };
+        let buffer = render(&view);
+        let (row, x) = (0..buffer.area.height - 1)
+            .find_map(|y| {
+                let line = (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>();
+                line.to_lowercase()
+                    .find("enter")
+                    .map(|start| (y, line[..start].width() as u16))
+            })
+            .expect("help Enter key");
+        assert!(click(&mut view, x, row).is_none());
+        assert!(view.help);
+        assert_eq!(render(&view), buffer);
+    }
+
+    #[test]
+    fn footer_shows_back_in_help_and_help_in_other_states() {
+        for mode in 0..8 {
+            let mut view = View::default();
+            match mode {
+                0 => {}
+                1 => view.help = true,
+                2 => view.search.focus(),
+                3 => view.active_panel = Panel::Prompt,
+                4 => {
+                    view.confirm_dialog = Some(ConfirmDialog {
+                        action: ConfirmAction::Delete("claude:footer".parse().unwrap()),
+                        title: "Task".into(),
+                        confirm: false,
+                    })
+                }
+                5 => {
+                    view.rename_target = Some("claude:footer".parse().unwrap());
+                    view.set_active_panel(Panel::TaskDetails);
+                }
+                6 => {
+                    view.set_active_panel(Panel::EventList);
+                    view.event_list.search.input.focus();
+                }
+                7 => {
+                    view.set_active_panel(Panel::EventDetail);
+                    view.event_detail.search.input.focus();
+                }
+                _ => unreachable!(),
+            }
+            let line = view.center_footer_hints();
+            let expected = if view.help { "Esc back" } else { "? help" };
+            assert_eq!(line.to_string(), expected, "mode {mode}");
+            let buffer = render(&view);
+            let footer = view.center_layout(buffer.area).footer;
+            let rendered = (0..buffer.area.width)
+                .map(|x| buffer[(x, footer.y)].symbol())
+                .collect::<String>();
+            assert_eq!(rendered.trim(), expected, "mode {mode}");
+            assert_eq!(line.spans[0].style.fg, None);
+            assert!(
+                !line.spans[0]
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::DIM)
+            );
+            assert!(
+                line.spans[0]
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::BOLD)
+            );
+            assert!(
+                line.spans[1]
+                    .style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::DIM)
+            );
+        }
+    }
+
+    #[test]
+    fn help_groups_tasks_events_and_navigation_at_existing_breakpoints() {
+        let view = View::default();
+        for width in [120, 70, 40, 20] {
+            let lines: Vec<_> = view
+                .center_help_lines(width)
+                .iter()
+                .map(Line::to_string)
+                .collect();
+            assert_eq!(lines[0], "Shortcuts");
+            assert!(!lines.iter().any(|line| line.trim() == "View"));
+            assert!(lines.iter().all(|line| line.width() <= usize::from(width)));
+            if width == 120 {
+                assert_eq!(
+                    lines[2].split_whitespace().collect::<Vec<_>>(),
+                    ["Tasks", "Events", "Navigate"]
+                );
+                let tasks: Vec<_> = lines[3..16]
+                    .iter()
+                    .map(|line| line.split_whitespace().next().unwrap())
+                    .collect();
+                assert_eq!(
+                    tasks,
+                    [
+                        "n",
+                        "o,",
+                        "r",
+                        "a",
+                        "Backspace",
+                        "Esc",
+                        "f",
+                        "x",
+                        "/",
+                        "Tab/⇧Tab",
+                        "g",
+                        "p",
+                        "⌃c"
+                    ]
+                );
+            } else if width == 70 {
+                assert_eq!(
+                    lines[2].split_whitespace().collect::<Vec<_>>(),
+                    ["Tasks", "Events"]
+                );
+                assert!(lines.iter().any(|line| line.trim() == "Navigate"));
+            } else {
+                let headings: Vec<_> = lines
+                    .iter()
+                    .filter(|line| matches!(line.trim(), "Tasks" | "Events" | "Navigate"))
+                    .map(|line| line.trim())
+                    .collect();
+                assert_eq!(headings, ["Tasks", "Events", "Navigate"]);
+            }
+        }
     }
 
     #[test]
     fn task_help_describes_open_keys_without_control_l() {
         let view = View::default();
         let lines = view.center_help_lines(120);
-        for key in ["enter", "→", "o"] {
-            assert!(
-                lines.iter().any(|line| {
-                    let text = line.to_string();
-                    text.split_whitespace()
-                        .collect::<Vec<_>>()
-                        .windows(2)
-                        .any(|words| words == [key, "Open"])
-                }),
-                "missing {key} Open"
-            );
-        }
+        assert!(lines.iter().any(|line| {
+            line.to_string()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .windows(3)
+                .any(|words| words == ["o,", "Enter", "Open"])
+        }));
         assert!(lines.iter().all(|line| !line.to_string().contains("⌃l")));
     }
 
@@ -198,65 +430,10 @@ mod tests {
                 let text = line.to_string();
                 text.contains("g") && text.contains("Group")
             }));
-            assert!(
-                !view
-                    .center_footer_hints()
-                    .to_string()
-                    .contains("g group by")
-            );
             assert_eq!(
                 view.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
                 Some(Action::PersistGrouping(grouping.next()))
             );
-        }
-    }
-
-    #[test]
-    fn grouping_hint_is_hidden_when_the_grouping_key_is_consumed() {
-        for mode in 0..7 {
-            let mut view = View::new(Grouping::Project, false);
-            let id = SessionKey {
-                provider: ProviderId::Claude,
-                id: "task".into(),
-            };
-            match mode {
-                0 => view.active_panel = Panel::Prompt,
-                1 => {
-                    view.confirm_dialog = Some(ConfirmDialog {
-                        action: ConfirmAction::Delete(id),
-                        title: "Task".into(),
-                        confirm: false,
-                    });
-                }
-                2 => view.help = true,
-                3 => {
-                    view.rename_target = Some(id);
-                    view.set_active_panel(Panel::TaskDetails);
-                }
-                4 => {
-                    view.set_active_panel(Panel::EventList);
-                    view.event_list.search.editing = true;
-                }
-                5 => {
-                    view.set_active_panel(Panel::EventDetail);
-                    view.event_detail.search.editing = true;
-                }
-                6 => view.searching = true,
-                _ => unreachable!(),
-            }
-            assert!(
-                !view
-                    .center_footer_hints()
-                    .to_string()
-                    .contains("g group by"),
-                "mode {mode}"
-            );
-            assert_eq!(
-                view.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
-                None,
-                "mode {mode}"
-            );
-            assert_eq!(view.grouping(), Grouping::Project, "mode {mode}");
         }
     }
 }

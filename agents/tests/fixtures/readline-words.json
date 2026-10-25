@@ -1,0 +1,212 @@
+[
+  {
+    "input": "foo-bar_baz",
+    "key": "Alt+B",
+    "result": "foo-bar_baz",
+    "point": 8
+  },
+  {
+    "input": "foo-bar_baz",
+    "key": "Alt+F",
+    "result": "foo-bar_baz",
+    "point": 3
+  },
+  {
+    "input": "foo-bar_baz",
+    "key": "Alt+D",
+    "result": "-bar_baz",
+    "point": 0
+  },
+  {
+    "input": "foo-bar_baz",
+    "key": "Alt+Backspace",
+    "result": "foo-bar_",
+    "point": 8
+  },
+  {
+    "input": "foo-bar_baz",
+    "key": "Ctrl+W",
+    "result": "",
+    "point": 0
+  },
+  {
+    "input": "path/to/file.rs",
+    "key": "Alt+B",
+    "result": "path/to/file.rs",
+    "point": 13
+  },
+  {
+    "input": "path/to/file.rs",
+    "key": "Alt+F",
+    "result": "path/to/file.rs",
+    "point": 4
+  },
+  {
+    "input": "path/to/file.rs",
+    "key": "Alt+D",
+    "result": "/to/file.rs",
+    "point": 0
+  },
+  {
+    "input": "path/to/file.rs",
+    "key": "Alt+Backspace",
+    "result": "path/to/file.",
+    "point": 13
+  },
+  {
+    "input": "path/to/file.rs",
+    "key": "Ctrl+W",
+    "result": "",
+    "point": 0
+  },
+  {
+    "input": "--flag=value",
+    "key": "Alt+B",
+    "result": "--flag=value",
+    "point": 7
+  },
+  {
+    "input": "--flag=value",
+    "key": "Alt+F",
+    "result": "--flag=value",
+    "point": 6
+  },
+  {
+    "input": "--flag=value",
+    "key": "Alt+D",
+    "result": "=value",
+    "point": 0
+  },
+  {
+    "input": "--flag=value",
+    "key": "Alt+Backspace",
+    "result": "--flag=",
+    "point": 7
+  },
+  {
+    "input": "--flag=value",
+    "key": "Ctrl+W",
+    "result": "",
+    "point": 0
+  },
+  {
+    "input": "a.b,c;d",
+    "key": "Alt+B",
+    "result": "a.b,c;d",
+    "point": 6
+  },
+  {
+    "input": "a.b,c;d",
+    "key": "Alt+F",
+    "result": "a.b,c;d",
+    "point": 1
+  },
+  {
+    "input": "a.b,c;d",
+    "key": "Alt+D",
+    "result": ".b,c;d",
+    "point": 0
+  },
+  {
+    "input": "a.b,c;d",
+    "key": "Alt+Backspace",
+    "result": "a.b,c;",
+    "point": 6
+  },
+  {
+    "input": "a.b,c;d",
+    "key": "Ctrl+W",
+    "result": "",
+    "point": 0
+  },
+  {
+    "input": "修复，粘贴。",
+    "key": "Alt+B",
+    "result": "修复，粘贴。",
+    "point": 3
+  },
+  {
+    "input": "修复，粘贴。",
+    "key": "Alt+F",
+    "result": "修复，粘贴。",
+    "point": 2
+  },
+  {
+    "input": "修复，粘贴。",
+    "key": "Alt+D",
+    "result": "，粘贴。",
+    "point": 0
+  },
+  {
+    "input": "修复，粘贴。",
+    "key": "Alt+Backspace",
+    "result": "修复，",
+    "point": 3
+  },
+  {
+    "input": "修复，粘贴。",
+    "key": "Ctrl+W",
+    "result": "",
+    "point": 0
+  },
+  {
+    "input": "fix 粘贴 bug",
+    "key": "Alt+B",
+    "result": "fix 粘贴 bug",
+    "point": 7
+  },
+  {
+    "input": "fix 粘贴 bug",
+    "key": "Alt+F",
+    "result": "fix 粘贴 bug",
+    "point": 3
+  },
+  {
+    "input": "fix 粘贴 bug",
+    "key": "Alt+D",
+    "result": " 粘贴 bug",
+    "point": 0
+  },
+  {
+    "input": "fix 粘贴 bug",
+    "key": "Alt+Backspace",
+    "result": "fix 粘贴 ",
+    "point": 7
+  },
+  {
+    "input": "fix 粘贴 bug",
+    "key": "Ctrl+W",
+    "result": "fix 粘贴 ",
+    "point": 7
+  },
+  {
+    "input": "👍🏽 ok",
+    "key": "Alt+B",
+    "result": "👍🏽 ok",
+    "point": 3
+  },
+  {
+    "input": "👍🏽 ok",
+    "key": "Alt+F",
+    "result": "👍🏽 ok",
+    "point": 5
+  },
+  {
+    "input": "👍🏽 ok",
+    "key": "Alt+D",
+    "result": "",
+    "point": 0
+  },
+  {
+    "input": "👍🏽 ok",
+    "key": "Alt+Backspace",
+    "result": "👍🏽 ",
+    "point": 3
+  },
+  {
+    "input": "👍🏽 ok",
+    "key": "Ctrl+W",
+    "result": "👍🏽 ",
+    "point": 3
+  }
+]

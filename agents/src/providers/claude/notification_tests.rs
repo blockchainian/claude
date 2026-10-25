@@ -31,6 +31,14 @@ fn notification_output(contents: Option<&str>, summary: &str) -> Vec<Section> {
         .output
         .clone()
         .unwrap()
+        .into_iter()
+        .map(|section| match section {
+            Section::OutputFile { provider, path } => {
+                crate::providers::read_output_file(provider, &path)
+            }
+            section => section,
+        })
+        .collect()
 }
 
 #[test]
@@ -183,4 +191,68 @@ fn notification_await_events_keep_order_and_errors() {
             )
         }]
     );
+}
+
+#[test]
+fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
+    let fixture = include_str!("../../../tests/fixtures/claude-background-notifications.jsonl");
+    let expected = [
+        ("睡12秒再输出 ✓", Some(0)),
+        ("给 a16z 视频改名 · 1", Some(1)),
+        ("等右键改动 · -1", Some(-1)),
+        ("三个配置依次快速启动 · 144", Some(144)),
+        ("Sleep 600 seconds in background killed", None),
+        ("mkdir, cd, npm {init, i}, tail ✓", Some(0)),
+    ];
+    for (line, (title, code)) in fixture.lines().zip(expected) {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{line}").unwrap();
+        let event = tail(file.path(), 1).unwrap().remove(0);
+        assert_eq!(event.body, title);
+        let call = &event.calls[0];
+        assert_eq!(call.summary, title);
+        assert_eq!(call.title, title);
+        assert_eq!(call.exit_code, code);
+        assert_eq!(event.raw_text().unwrap(), line);
+    }
+    let chain = fixture.lines().nth(5).unwrap();
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    writeln!(file, "{chain}").unwrap();
+    let call = tail(file.path(), 1).unwrap().remove(0).calls.remove(0);
+    assert_eq!(
+        call.input,
+        [Section::Shell {
+            text: "mkdir -p /tmp/mermaid-debug/m && cd /tmp/mermaid-debug/m && npm init -y >/dev/null && npm i mermaid@11.12.2 jsdom 2>&1 | tail -3".into(),
+            prefix: 0,
+        }]
+    );
+    let row: Value = serde_json::from_str(fixture.lines().last().unwrap()).unwrap();
+    let summary = row["content"]
+        .as_str()
+        .unwrap()
+        .split_once("<summary>")
+        .unwrap()
+        .1
+        .split_once("</summary>")
+        .unwrap()
+        .0;
+    let description = summary
+        .strip_prefix("Background command \"")
+        .unwrap()
+        .strip_suffix("\" completed (exit code 0)")
+        .unwrap();
+    let event = events_from(vec![row.clone()]).remove(0);
+    assert_eq!(event.body, format!("{description} ✓"));
+    assert_eq!(event.calls[0].exit_code, Some(0));
+    for summary in ["Agent finished", "Monitor completed"] {
+        let mut record = row.clone();
+        let text = record["content"].as_str().unwrap();
+        let start = text.find("<summary>").unwrap() + "<summary>".len();
+        let end = text.find("</summary>").unwrap();
+        record["content"] = format!("{}{summary}{}", &text[..start], &text[end..]).into();
+        let event = events_from(vec![record]).remove(0);
+        assert_eq!(event.body, summary);
+        assert_eq!(event.calls[0].summary, summary);
+        assert_eq!(event.calls[0].exit_code, None);
+    }
 }

@@ -58,8 +58,8 @@ fn section_labels_stay_centered_before_right_values() {
             let start = (usize::from(width) - label.len()) / 2;
             assert_eq!(rendered.find(label), Some(start), "{width}: {rendered}");
             assert!(!rendered.contains("message"));
-            if !value.is_empty() && usize::from(width) - start - label.len() > value.len() {
-                assert!(rendered.ends_with(value), "{rendered}");
+            if !value.is_empty() && usize::from(width) - 1 - start - label.len() > value.len() {
+                assert!(rendered.ends_with(&format!("{value} ")), "{rendered}");
             }
             if !value.is_empty() {
                 let tail = rendered[start + label.len()..].trim();
@@ -90,7 +90,7 @@ fn status_rule_keeps_github_pr_hyperlink_and_visible_click_target() {
     let (rect, target) = links
         .iter()
         .find(|(_, target)| {
-            target
+            crate::ui::link_path(target)
                 .to_str()
                 .unwrap()
                 .starts_with("vscode://blockchainian.git/view-pr?")
@@ -108,6 +108,6 @@ fn status_rule_keeps_github_pr_hyperlink_and_visible_click_target() {
             &mut view,
             mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y)
         ),
-        Some(Action::OpenPath(target.clone()))
+        Some(Action::Open(target.clone()))
     );
 }

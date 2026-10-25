@@ -1,11 +1,19 @@
 //! Session sources: the live registry and transcripts.
 
+mod appium;
+mod claude_in_chrome;
+mod computer_use;
+mod tools;
+
 mod account;
 mod api;
+#[cfg(test)]
+mod archive_live_tests;
 mod attach;
 #[cfg(test)]
 mod attach_live_tests;
 mod background;
+pub(crate) mod background_output;
 pub(crate) mod context;
 #[cfg(test)]
 mod create_tests;
@@ -14,10 +22,15 @@ mod models;
 #[cfg(test)]
 mod rename_live_tests;
 #[cfg(test)]
+mod resume_tests;
+#[cfg(test)]
 mod settings_tests;
 #[cfg(test)]
 pub use models::write_fixture_cache;
 mod ask_user_question;
+pub(crate) mod codex_manager;
+#[cfg(test)]
+mod codex_manager_tests;
 pub(crate) mod event_reader;
 mod images;
 #[cfg(test)]
@@ -34,8 +47,8 @@ mod weekly_usage;
 
 use crate::model::{Action, Process, Session, SessionStatus};
 use crate::providers::{
-    Capabilities, Job, Provider, ProviderId, SessionInput, SessionKey, Snapshot, TerminalCommand,
-    TerminalInput,
+    Capabilities, Provider, ProviderId, SessionAction, SessionInput, SessionKey, Snapshot,
+    Supervision, SupervisionState, TerminalCommand, TerminalInput,
 };
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
@@ -56,7 +69,7 @@ pub const FOREGROUND_SESSION: &str = "Running in a terminal · /bg";
 const DETACH: &[u8] = b"\x1a";
 
 const PAGE_SIZE: usize = 10;
-const ASK_USER_QUESTION_PORT: u16 = 47831;
+const ASK_USER_QUESTION_PORT: u16 = 10000;
 
 /// Removes the transcript and its sibling directory without following symlinks.
 pub fn delete(transcript: &Path) -> io::Result<()> {
@@ -326,12 +339,18 @@ struct CachedSummary {
 
 pub struct ClaudeProvider {
     config_dir: PathBuf,
+    codex_manager: Option<PathBuf>,
     index: HashMap<String, Transcript>,
     summaries: HashMap<PathBuf, CachedSummary>,
     starts: HashMap<PathBuf, Option<DateTime<Utc>>>,
     background: background::Tasks,
     ask_user_question: Option<std::sync::Arc<ask_user_question::AskUserQuestion>>,
 }
+
+const BACKGROUND_ARGS: [&str; 2] = ["--bg", "--allow-dangerously-skip-permissions"];
+// A resume passes no options of its own: Claude copies a background session given
+// options, and otherwise wakes it with the options it was started with.
+const RESUME_ARG: &str = "--bg";
 
 fn created_job(output: &std::process::Output) -> io::Result<String> {
     if !output.status.success() {
@@ -370,6 +389,34 @@ fn created_job(output: &std::process::Output) -> io::Result<String> {
     Ok(id.to_owned())
 }
 
+fn finish_creation(
+    output: std::process::Output,
+    request: crate::tasks::NewTask,
+    settings: &Path,
+    created: &dyn Fn(String),
+) -> io::Result<std::process::Output> {
+    let input = (!request.images.is_empty()).then_some(SessionInput::PromptWithImages {
+        text: request.prompt,
+        images: request.images,
+    });
+    finish_background(output, &request.cwd, settings, input, created)
+}
+
+fn finish_background(
+    output: std::process::Output,
+    cwd: &Path,
+    settings: &Path,
+    input: Option<SessionInput>,
+    created: &dyn Fn(String),
+) -> io::Result<std::process::Output> {
+    let job_id = created_job(&output)?;
+    created(job_id.clone());
+    if let Some(input) = input {
+        attach::send(&job_id, cwd, settings, input)?;
+    }
+    Ok(output)
+}
+
 impl ClaudeProvider {
     fn terminal_question_pending(&self, session: &Session) -> bool {
         self.ask_user_question
@@ -379,7 +426,7 @@ impl ClaudeProvider {
 
     fn create_command(request: &crate::tasks::NewTask) -> Command {
         let mut command = Command::new("claude");
-        command.arg("--bg").current_dir(&request.cwd);
+        command.args(BACKGROUND_ARGS).current_dir(&request.cwd);
         if let Some(name) = &request.name {
             command.args(["--name", name]);
         }
@@ -398,12 +445,19 @@ impl ClaudeProvider {
     pub fn new(config_dir: PathBuf) -> Self {
         Self {
             config_dir,
+            codex_manager: None,
             index: HashMap::new(),
             summaries: HashMap::new(),
             starts: HashMap::new(),
             background: background::Tasks::default(),
             ask_user_question: None,
         }
+    }
+
+    /// Reports, watches and detaches the Codex threads codex-manager records under `state`.
+    pub fn with_codex_manager(mut self, state: PathBuf) -> Self {
+        self.codex_manager = Some(state);
+        self
     }
 
     pub fn from_config() -> io::Result<Self> {
@@ -658,7 +712,23 @@ impl ClaudeProvider {
                 }
             }
         }
-        Snapshot { sessions, has_more }
+        let supervisions = if let Some(state) = &self.codex_manager {
+            let keys: Vec<_> = sessions.iter().map(|session| session.id.clone()).collect();
+            match codex_manager::supervision::supervisions(state, &keys) {
+                Ok(supervisions) => supervisions,
+                Err(error) => {
+                    eprintln!("agents: codex-manager supervisions: {error}");
+                    vec![]
+                }
+            }
+        } else {
+            vec![]
+        };
+        Snapshot {
+            sessions,
+            has_more,
+            supervisions,
+        }
     }
 
     fn list_transcripts(&mut self) {
@@ -842,6 +912,7 @@ impl Provider for ClaudeProvider {
     fn session_source(&self) -> Box<dyn Provider> {
         let mut source = Self::new(self.config_dir.clone());
         source.ask_user_question = self.ask_user_question.clone();
+        source.codex_manager = self.codex_manager.clone();
         Box::new(source)
     }
 
@@ -897,7 +968,9 @@ impl Provider for ClaudeProvider {
             command
                 .args([
                     "-c",
-                    r#"claude --resume "$1" --bg >/dev/null && exec claude attach "$2""#,
+                    &format!(
+                        r#"claude {RESUME_ARG} --resume "$1" >/dev/null && exec claude attach "$2""#
+                    ),
                     "sh",
                     &session.id.id,
                     job,
@@ -916,7 +989,7 @@ impl Provider for ClaudeProvider {
         })
     }
 
-    fn terminal_cleanup(&self, session: &Session) -> io::Result<Option<Job>> {
+    fn terminal_cleanup(&self, session: &Session) -> io::Result<Option<SessionAction>> {
         if session.process.is_some() || self.terminal_question_pending(session) {
             return Ok(None);
         }
@@ -984,7 +1057,13 @@ impl Provider for ClaudeProvider {
             .mode(0o700)
             .recursive(true)
             .create(&jobs)?;
-        Ok(vec![sessions, self.config_dir.join("projects"), jobs])
+        let mut roots = vec![sessions, self.config_dir.join("projects"), jobs];
+        if let Some(state) = &self.codex_manager
+            && state.is_dir()
+        {
+            roots.push(state.clone());
+        }
+        Ok(roots)
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -1018,25 +1097,14 @@ impl Provider for ClaudeProvider {
     fn create(
         &self,
         request: &crate::tasks::NewTask,
+        created: Box<dyn Fn(String) + Send>,
     ) -> Option<io::Result<crate::providers::CreateJob>> {
         let mut command = Self::create_command(request);
         let request = request.clone();
         let settings = self.config_dir.join("settings.json");
         Some(Ok(Box::new(move || {
             let output = command.output()?;
-            if !request.images.is_empty() {
-                let job_id = created_job(&output)?;
-                attach::send(
-                    &job_id,
-                    &request.cwd,
-                    &settings,
-                    SessionInput::PromptWithImages {
-                        text: request.prompt,
-                        images: request.images,
-                    },
-                )?;
-            }
-            Ok(output)
+            finish_creation(output, request, &settings, &created)
         })))
     }
 
@@ -1084,7 +1152,7 @@ impl Provider for ClaudeProvider {
         created_job(output)
     }
 
-    fn send(&self, session: &Session, input: SessionInput) -> Option<Job> {
+    fn send(&self, session: &Session, input: SessionInput) -> Option<SessionAction> {
         if let SessionInput::Answer { ask, answer, .. } = &input {
             if ask.session != session.id {
                 return Some(Box::new(|| {
@@ -1146,6 +1214,17 @@ impl Provider for ClaudeProvider {
             }
             Some(_) => Err(io::Error::other(FOREGROUND_SESSION)),
             None => match input {
+                input @ SessionInput::PromptWithImages { .. } => {
+                    let output = resume_input(&session, &input)?.output()?;
+                    finish_background(
+                        output,
+                        &session.cwd,
+                        &config.join("settings.json"),
+                        Some(input),
+                        &|_| {},
+                    )?;
+                    Ok(())
+                }
                 input @ (SessionInput::Prompt(_)
                 | SessionInput::SetModel(_)
                 | SessionInput::SetEffort(_)) => {
@@ -1202,12 +1281,52 @@ impl Provider for ClaudeProvider {
         Some(command)
     }
 
-    fn delete(&self, session: &Session) -> io::Result<Job> {
+    fn delete(&self, session: &Session) -> io::Result<SessionAction> {
         let config_dir = self.config_dir.clone();
         let session = session.clone();
         Ok(Box::new(move || delete_session(&config_dir, &session)))
     }
-    fn archive(&self, session: &Session) -> io::Result<Job> {
+    fn detach(&self, supervision: &Supervision) -> io::Result<SessionAction> {
+        if supervision.session.provider != ProviderId::Codex {
+            return Err(io::ErrorKind::Unsupported.into());
+        }
+        let state = self
+            .codex_manager
+            .clone()
+            .ok_or(io::ErrorKind::Unsupported)?;
+        let config = self.config_dir.clone();
+        let supervision = supervision.clone();
+        Ok(Box::new(move || {
+            let current = codex_manager::supervision::supervisions(
+                &state,
+                std::slice::from_ref(&supervision.supervisor),
+            )?;
+            if current.iter().any(|current| {
+                current.session == supervision.session
+                    && current.state == SupervisionState::Detached
+            }) {
+                return Ok(());
+            }
+            let output = codex_manager::supervision::detach_command(
+                &config,
+                &state,
+                &supervision.session.id,
+            )?
+            .output()?;
+            if !output.status.success() {
+                return Err(io::Error::other(format!(
+                    "codex-manager detach failed ({}): {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                )));
+            }
+            let _: serde_json::Value = serde_json::from_slice(&output.stdout)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            Ok(())
+        }))
+    }
+
+    fn archive(&self, session: &Session) -> io::Result<SessionAction> {
         let config_dir = self.config_dir.clone();
         let session = session.clone();
         Ok(Box::new(move || {
@@ -1226,11 +1345,13 @@ impl Provider for ClaudeProvider {
             if !process_exists(pid)? {
                 return Err(ended());
             }
-            let bridge_id = entry
+            let Some(bridge_id) = entry
                 .bridge_session_id
                 .as_deref()
                 .filter(|id| !id.is_empty())
-                .ok_or_else(|| io::Error::other("session has no Remote Control link"))?;
+            else {
+                return stop_session(&session, &entry);
+            };
             let mut client = api::Client::connect(&config_dir)?;
             stop_session(&session, &entry)?;
             api::session::archive(&mut client, bridge_id)
@@ -1241,9 +1362,11 @@ impl Provider for ClaudeProvider {
 fn resume_input(session: &Session, input: &SessionInput) -> io::Result<Command> {
     let mut command = Command::new("claude");
     command
-        .args(["--bg", "--resume", &session.id.id])
+        .arg(RESUME_ARG)
+        .args(["--resume", &session.id.id])
         .current_dir(&session.cwd);
     match input {
+        SessionInput::PromptWithImages { .. } => {}
         SessionInput::Prompt(text) => {
             command.arg(text);
         }
@@ -1663,28 +1786,40 @@ mod tests {
     }
 
     #[test]
-    fn archive_without_remote_control_keeps_process_running() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut entry = registry::tests::fixture(dir.path());
-        entry.as_object_mut().unwrap().remove("bridgeSessionId");
-        let id = entry["sessionId"].as_str().unwrap();
-        transcript(dir.path(), id, 0);
-        let registry_path = dir
-            .path()
-            .join("sessions")
-            .join(format!("{}.json", std::process::id()));
-        fs::write(&registry_path, serde_json::to_vec(&entry).unwrap()).unwrap();
-        let mut provider = ClaudeProvider::new(dir.path().into());
-        let session = provider.refresh(1).sessions.remove(0);
-        assert!(session.process.is_some());
-        assert_eq!(
-            provider.archive(&session).unwrap()()
-                .unwrap_err()
-                .to_string(),
-            "session has no Remote Control link"
-        );
-        assert!(process_exists(std::process::id()).unwrap());
-        assert!(registry_path.exists());
+    fn archive_without_remote_control_stops_process() {
+        for bridge_id in [None, Some(serde_json::Value::Null), Some("".into())] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut child = Command::new("sleep").arg("60").spawn().unwrap();
+            let pid = child.id();
+            let reaper = std::thread::spawn(move || child.wait().unwrap());
+            let start = registry::process_starts(&[pid])[&pid][0];
+            let mut entry = registry::tests::fixture(dir.path());
+            entry["pid"] = pid.into();
+            entry["startedAt"] = start.timestamp_millis().into();
+            entry["procStart"] = start.format("%a %b %e %H:%M:%S %Y").to_string().into();
+            match bridge_id {
+                Some(value) => entry["bridgeSessionId"] = value,
+                None => {
+                    entry.as_object_mut().unwrap().remove("bridgeSessionId");
+                }
+            }
+            let id = entry["sessionId"].as_str().unwrap();
+            let path = transcript(dir.path(), id, 0);
+            let registry_path = dir.path().join("sessions").join(format!("{pid}.json"));
+            fs::write(&registry_path, serde_json::to_vec(&entry).unwrap()).unwrap();
+            let mut provider = ClaudeProvider::new(dir.path().into());
+            let session = provider.refresh(1).sessions.remove(0);
+            assert_eq!(session.process.as_ref().unwrap().pid, pid);
+            let result = provider.archive(&session).unwrap()();
+            let running = process_exists(pid).unwrap();
+            if running {
+                unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+            }
+            reaper.join().unwrap();
+            result.unwrap();
+            assert!(!running, "archiving must stop the local process");
+            assert!(path.exists(), "archiving must keep the transcript");
+        }
     }
 
     #[test]
@@ -2233,3 +2368,13 @@ mod delete_live_tests {
         }
     }
 }
+
+pub(crate) const TOOL_RULES: super::tool::ToolRules = super::tool::ToolRules {
+    native: tools::RULES,
+    servers: &[
+        appium::SERVER,
+        codex_manager::SERVER,
+        claude_in_chrome::SERVER,
+        computer_use::SERVER,
+    ],
+};

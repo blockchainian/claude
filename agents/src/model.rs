@@ -90,7 +90,7 @@ pub struct SessionTask {
 pub struct Session {
     /// Provider-qualified session identity.
     pub id: SessionKey,
-    /// Display parent for nesting, including codex-manager ownership links.
+    /// Display parent for nesting: an own-provider parent, or a supervisor of another provider.
     pub parent: Option<SessionKey>,
     pub cwd: PathBuf,
     /// Name the user gave the session (`/rename` or `--name`).
@@ -101,8 +101,8 @@ pub struct Session {
     pub prompt: String,
     /// Source record or tool-call identities for activity, update and prompt.
     pub task_details_sources: [Option<String>; 3],
-    /// Images attached to `prompt` whose files still exist.
-    pub prompt_images: Vec<crate::event::Image>,
+    /// Images attached to `prompt`.
+    pub prompt_images: Vec<crate::images::Image>,
     pub queued: Vec<String>,
     pub prompt_at: Option<DateTime<Utc>>,
     pub turn_messages: usize,
@@ -228,10 +228,11 @@ pub enum Action {
         id: SessionKey,
         ask: Option<crate::state::StoredAsk>,
     },
-    PasteImage,
+    PersistSkip {
+        id: SessionKey,
+        skipped_at: Option<DateTime<Utc>>,
+    },
     PasteText,
-    /// Puts text an input deleted on the clipboard, without a copy confirmation.
-    Cut(String),
     SendImages {
         id: SessionKey,
         text: String,
@@ -276,10 +277,9 @@ pub enum Action {
     Fork(SessionKey),
     /// Start a session when there is no previous task to return to.
     New,
-    /// `h`: hide the session until the next launch.
-    Hide(SessionKey),
     /// `p`: pin or unpin the session.
     TogglePin {
+        tab: usize,
         id: SessionKey,
         pinned: bool,
     },
@@ -293,6 +293,11 @@ pub enum Action {
     PersistSorting {
         id: SessionKey,
         sorting: EventSort,
+    },
+    /// Space: the event filter changed; persist it.
+    PersistFiltering {
+        id: SessionKey,
+        filter: crate::event::EventFilter,
     },
     PersistUsageView(crate::state::UsageView),
     PersistDrafts,
@@ -325,7 +330,7 @@ pub enum Action {
     },
     /// Click on a drawn path, image placeholder or pull request link: open the
     /// file, directory or URL with macOS `open`.
-    OpenPath(PathBuf),
+    Open(crate::ui::links::LinkTarget),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -358,14 +363,6 @@ impl Grouping {
             "status" => Some(Self::Status),
             "model" => Some(Self::Model),
             _ => None,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Project => "Project",
-            Self::Status => "Status",
-            Self::Model => "Model",
         }
     }
 

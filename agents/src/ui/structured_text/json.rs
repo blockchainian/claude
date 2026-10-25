@@ -100,37 +100,6 @@ impl Document for JsonDocument {
     fn highlighted(&self) -> Vec<Line<'static>> {
         value_lines(&self.0)
     }
-    fn lines(&self, width: usize) -> Vec<Line<'static>> {
-        use unicode_width::UnicodeWidthStr;
-        if width == 0 {
-            return Vec::new();
-        }
-        let mut lines = Vec::new();
-        for line in self.highlighted() {
-            let mut row = Line::default();
-            let mut used = 0;
-            for grapheme in line.styled_graphemes(Style::default()) {
-                let cells = grapheme.symbol.width();
-                if used > 0 && used + cells > width {
-                    lines.push(std::mem::take(&mut row));
-                    used = 0;
-                }
-                if let Some(span) = row
-                    .spans
-                    .last_mut()
-                    .filter(|span| span.style == grapheme.style)
-                {
-                    span.content.to_mut().push_str(grapheme.symbol);
-                } else {
-                    row.spans
-                        .push(Span::styled(grapheme.symbol.to_owned(), grapheme.style));
-                }
-                used += cells;
-            }
-            lines.push(row);
-        }
-        lines
-    }
 }
 
 #[cfg(test)]

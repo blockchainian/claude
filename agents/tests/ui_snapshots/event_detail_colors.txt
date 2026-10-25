@@ -15,26 +15,26 @@ Agent
   let value: Indexed(23) NONE
   list plain: Yellow
 Error
-  Error: Red BOLD
+  Error: Rgb(160, 99, 93) BOLD
   plain: Reset NONE
   bold: Reset NONE
   link: Reset NONE
   Heading: Reset NONE
   let value: Reset NONE
-  list plain: Red
+  list plain: Rgb(160, 99, 93)
 Denied
-  Denied: Red BOLD
+  Denied: Rgb(160, 99, 93) BOLD
   plain: Reset NONE
   bold: Reset NONE
   link: Reset NONE
   Heading: Reset NONE
   let value: Reset NONE
-  list plain: Red
+  list plain: Rgb(160, 99, 93)
 QueuedSystem
-  Queue: Indexed(24) BOLD
-  plain: Reset NONE
+  Queued System: Indexed(24) BOLD
+  plain: Reset BOLD
   bold: Reset BOLD
-  link: Reset NONE
+  link: Reset BOLD
   Heading: Reset BOLD
-  let value: Indexed(23) NONE
+  let value: Indexed(23) BOLD
   list plain: Indexed(24)
