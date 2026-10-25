@@ -49,7 +49,8 @@ pub fn linked_worktree(directory: &Path) -> Option<PathBuf> {
     (root != identity.primary_root).then_some(root)
 }
 
-/// Removes a linked checkout only when git can do so without discarding local changes.
+/// Removes a linked checkout only when git can do so without discarding local changes,
+/// then force-deletes the branch it had checked out.
 pub fn remove_worktree(path: &Path) -> io::Result<()> {
     use std::ffi::OsStr;
     let path = fs::canonicalize(path)?;
@@ -58,6 +59,17 @@ pub fn remove_worktree(path: &Path) -> io::Result<()> {
     if !identity.relative_cwd.as_os_str().is_empty() || path == identity.primary_root {
         return Err(io::Error::other("Directory is not a linked worktree root"));
     }
+    // A detached checkout has no branch to delete.
+    let branch = git(
+        &path,
+        &[
+            OsStr::new("symbolic-ref"),
+            OsStr::new("--quiet"),
+            OsStr::new("--short"),
+            OsStr::new("HEAD"),
+        ],
+    )
+    .ok();
     git(
         &identity.primary_root,
         &[
@@ -66,6 +78,12 @@ pub fn remove_worktree(path: &Path) -> io::Result<()> {
             path.as_os_str(),
         ],
     )?;
+    if let Some(branch) = branch {
+        git(
+            &identity.primary_root,
+            &[OsStr::new("branch"), OsStr::new("-D"), OsStr::new(&branch)],
+        )?;
+    }
     Ok(())
 }
 
@@ -581,6 +599,27 @@ pub(crate) mod tests {
         remove_worktree(&linked).unwrap();
         assert!(!linked.exists());
         assert!(repo.path().exists());
+    }
+
+    #[test]
+    fn remove_worktree_deletes_its_unmerged_branch() {
+        let (repo, linked) = worktree();
+        fs::write(linked.join("sub/file"), "changed").unwrap();
+        git(
+            &linked,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-am",
+                "unmerged",
+            ],
+        );
+        remove_worktree(&linked).unwrap();
+        assert!(!linked.exists());
+        assert_eq!(git(repo.path(), &["branch", "--list", "linked"]), "");
     }
 
     #[test]
