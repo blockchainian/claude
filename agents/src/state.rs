@@ -644,6 +644,28 @@ impl Preferences {
         Ok(())
     }
 
+    /// Drops a task's saved interface state but keeps its event pins.
+    pub fn keep_only_task_event_pins(
+        &mut self,
+        config_dir: &Path,
+        key: &SessionKey,
+    ) -> io::Result<()> {
+        let Some(task) = self.tasks.get(key) else {
+            return Ok(());
+        };
+        let pins_only = StoredTask {
+            pinned_events: task.pinned_events.clone(),
+            ..Default::default()
+        };
+        if *task == pins_only {
+            return Ok(());
+        }
+        self.update_task(config_dir, key, |task| {
+            task.retain(|field, _| field == "pinned_events");
+            Ok(())
+        })
+    }
+
     fn update_task(
         &mut self,
         config_dir: &Path,

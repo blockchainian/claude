@@ -1440,9 +1440,6 @@ impl View {
                 .pinned = rows;
         }
     }
-    pub fn clear_pinned_events(&mut self, key: &SessionKey) {
-        self.set_pinned_events(key, Vec::new());
-    }
     pub fn has_pinned_events(&self, key: &SessionKey) -> bool {
         if self.selected_id() == Some(key) {
             !self.event_list.pinned.is_empty()
@@ -1453,11 +1450,7 @@ impl View {
         }
     }
     pub(super) fn toggle_event_pin(&mut self) -> Option<Action> {
-        let session = self.selected_row()?;
-        if session.status == SessionStatus::Inactive {
-            return Some(Action::Unsupported("Pin"));
-        }
-        let task = session.id.clone();
+        let task = self.selected_row()?.id.clone();
         let event = self.visible_event()?.clone();
         if event.source.as_deref().is_none_or(str::is_empty)
             || event.source_records.is_empty()

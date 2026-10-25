@@ -1089,17 +1089,16 @@ impl App {
         self.view.set_sessions(sessions, has_more);
     }
 
-    /// Finished tasks discard saved interface state; task pins last while they or their root are active.
+    /// Finished tasks discard saved interface state except event pins; task pins last while they or their root are active.
     fn forget_inactive_state(&mut self, sessions: &[Session]) {
         for session in sessions
             .iter()
             .filter(|session| session.status == SessionStatus::Inactive)
         {
-            if self.preferences.tasks.contains_key(&session.id) {
-                let saved = self.preferences.forget_task(&self.config_dir, &session.id);
-                self.report_save(saved);
-            }
-            self.view.clear_pinned_events(&session.id);
+            let saved = self
+                .preferences
+                .keep_only_task_event_pins(&self.config_dir, &session.id);
+            self.report_save(saved);
         }
         let pinned = self.preferences.pinned.active.len();
         self.preferences.pinned.active.retain(|id| {
