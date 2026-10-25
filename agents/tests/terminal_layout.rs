@@ -66,6 +66,9 @@ use terminal_event_detail::event_detail_rows;
 #[path = "support/terminal_scripts.rs"]
 mod terminal_scripts;
 
+#[path = "support/terminal_heredoc_format.rs"]
+mod terminal_heredoc_format;
+
 #[path = "support/terminal_disabled_prompt.rs"]
 mod terminal_disabled_prompt;
 

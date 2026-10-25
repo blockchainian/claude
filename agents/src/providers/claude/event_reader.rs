@@ -1093,12 +1093,13 @@ impl EventReader {
         });
         let input = chain
             .as_ref()
-            .map(|(_, command)| Section::Shell {
-                text: (*command).to_owned(),
-                prefix: 0,
+            .and_then(|(_, command)| {
+                tool::shell_input(&ToolData {
+                    input: &serde_json::json!({"command": command}),
+                    result: None,
+                })
             })
-            .into_iter()
-            .collect();
+            .unwrap_or_default();
         let title = match background {
             Some(((description, _), status)) => {
                 let description = chain.as_ref().map_or(description, |(names, _)| names);
@@ -1474,6 +1475,46 @@ fn unescape_xml(text: &str) -> String {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn shell_heredoc_background_chain_formats_at_section_build() {
+        use std::io::Write;
+        let record: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-shell-heredoc.jsonl"
+        ))
+        .unwrap();
+        let command = record["message"]["content"][0]["input"]["command"]
+            .as_str()
+            .unwrap();
+        let script = crate::shell_commands::scripts(command).remove(0);
+        let formatted = crate::code_format::Language::JavaScript
+            .format(&command[script.range.clone()])
+            .unwrap();
+        let expected = format!(
+            "{}{}{}",
+            &command[..script.range.start],
+            formatted,
+            &command[script.range.end..]
+        );
+        let mut notification: Value = serde_json::from_str(
+            include_str!("../../../tests/fixtures/claude-task-notifications.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        notification["content"] = format!("<task-notification>\n<task-id>heredoc</task-id>\n<status>completed</status>\n<summary>Background command \"{command}\" completed (exit code 0)</summary>\n</task-notification>").into();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{notification}").unwrap();
+        let events = tail(file.path(), usize::MAX).unwrap();
+        let event = events.last().unwrap();
+        assert_eq!(
+            event.calls[0].input,
+            vec![Section::Shell {
+                text: expected,
+                prefix: 0
+            }]
+        );
+    }
     #[test]
     fn advisor_real_records_keep_a_separate_timed_row() {
         let fixture = include_str!("../../../tests/fixtures/claude-advisor.jsonl");

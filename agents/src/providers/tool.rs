@@ -8,6 +8,7 @@ use shell_output::sections as shell_output_sections;
 use crate::code_format::Language;
 use crate::event::{Section, SourceRecord, ToolCall};
 use crate::images::{Image, ImageSource};
+use crate::shell_commands::{ScriptKind, SyntaxSource, scripts};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -537,13 +538,68 @@ pub(crate) fn empty_input(_: &ToolData<'_>) -> Option<Vec<Section>> {
 pub(crate) fn questions_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     Some(question_sections(data.input))
 }
+fn formatted_shell(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for script in scripts(text) {
+        let ScriptKind::Heredoc {
+            literal: true,
+            strip_tabs,
+        } = script.kind
+        else {
+            continue;
+        };
+        let language = match script.syntax {
+            SyntaxSource::Interpreter(name) => Language::from_interpreter(name),
+            SyntaxSource::Extension(extension) => Language::from_extension(extension),
+        };
+        let Some(language) = language else {
+            continue;
+        };
+        let body = &text[script.range.clone()];
+        let tabs = if strip_tabs {
+            body.lines()
+                .filter(|line| !line.is_empty())
+                .map(|line| line.bytes().take_while(|&byte| byte == b'\t').count())
+                .min()
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let prefix = "\t".repeat(tabs);
+        let source = if strip_tabs {
+            body.split_inclusive('\n')
+                .map(|line| line.trim_start_matches('\t'))
+                .collect()
+        } else {
+            body.to_owned()
+        };
+        let Some(mut formatted) = language.format(&source) else {
+            continue;
+        };
+        if !formatted.ends_with('\n') {
+            formatted.push('\n');
+        }
+        output.push_str(&text[cursor..script.range.start]);
+        for line in formatted.split_inclusive('\n') {
+            if line != "\n" {
+                output.push_str(&prefix);
+            }
+            output.push_str(line);
+        }
+        cursor = script.range.end;
+    }
+    output.push_str(&text[cursor..]);
+    output
+}
+
 pub(crate) fn shell_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     Some(
         shell_command(data.input)
             .filter(|text| !text.trim().is_empty())
             .map(|text| {
                 vec![Section::Shell {
-                    text: text.into(),
+                    text: formatted_shell(text),
                     prefix: 0,
                 }]
             })
@@ -1063,6 +1119,122 @@ fn label_section(section: Section) -> Vec<Section> {
 
 #[cfg(test)]
 mod tests {
+    fn recorded_heredoc_command() -> String {
+        let record: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/claude-shell-heredoc.jsonl"
+        ))
+        .unwrap();
+        record["message"]["content"][0]["input"]["command"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn shown_shell(command: &str) -> String {
+        let input = serde_json::json!({"command": command});
+        let sections = super::shell_input(&super::ToolData {
+            input: &input,
+            result: None,
+        })
+        .unwrap();
+        let [crate::event::Section::Shell { text, prefix: 0 }] = sections.as_slice() else {
+            panic!("expected shell section: {sections:?}");
+        };
+        text.clone()
+    }
+
+    #[test]
+    fn shell_heredoc_formats_recorded_body_and_preserves_shell_bytes() {
+        let command = recorded_heredoc_command();
+        let script = crate::shell_commands::scripts(&command).remove(0);
+        let body = &command[script.range.clone()];
+        let formatted = crate::code_format::Language::JavaScript
+            .format(body)
+            .unwrap();
+        let expected = format!(
+            "{}{}{}",
+            &command[..script.range.start],
+            formatted,
+            &command[script.range.end..]
+        );
+        assert_ne!(expected, command);
+        assert_eq!(shown_shell(&command), expected);
+        let node = command.replacen("cat > render.mjs", "node", 1);
+        assert_eq!(
+            shown_shell(&node),
+            expected.replacen("cat > render.mjs", "node", 1)
+        );
+        assert_eq!(shown_shell(&expected), expected);
+    }
+
+    #[test]
+    fn shell_heredoc_keeps_expansion_arguments_and_invalid_code() {
+        let command = recorded_heredoc_command();
+        let script = crate::shell_commands::scripts(&command).remove(0);
+        let body = &command[script.range.clone()];
+        for changed in [
+            command
+                .replace("<<'EOF'", "<<EOF")
+                .replace(body, "console.log('$HOME')\n"),
+            format!("node -e '{}'", body.replace('\'', "\"")),
+            command.replace(body, "const broken = (\n"),
+            command.replace("render.mjs", "render.py"),
+        ] {
+            assert_eq!(shown_shell(&changed), changed);
+        }
+    }
+
+    #[test]
+    fn shell_heredoc_formats_multiple_bodies_in_source_order() {
+        let command = recorded_heredoc_command();
+        let script = crate::shell_commands::scripts(&command).remove(0);
+        let body = &command[script.range.clone()];
+        let formatted = crate::code_format::Language::JavaScript
+            .format(body)
+            .unwrap();
+        let command = format!("node <<'EOF' <<'SECOND'\n{body}EOF\n{body}SECOND\necho done");
+        let expected =
+            format!("node <<'EOF' <<'SECOND'\n{formatted}EOF\n{formatted}SECOND\necho done");
+        assert_eq!(shown_shell(&command), expected);
+    }
+
+    #[test]
+    fn shell_heredoc_restores_shortest_tab_prefix() {
+        let command = recorded_heredoc_command();
+        let script = crate::shell_commands::scripts(&command).remove(0);
+        let body = format!("\n{}", &command[script.range.clone()]);
+        let formatted = crate::code_format::Language::JavaScript
+            .format(&body)
+            .unwrap();
+        for prefix in ["", "\t", "\t\t"] {
+            let indented = body
+                .lines()
+                .enumerate()
+                .map(|(index, line)| {
+                    if line.is_empty() {
+                        "\n".to_owned()
+                    } else {
+                        format!("{prefix}{}{line}\n", if index == 1 { "\t" } else { "" })
+                    }
+                })
+                .collect::<String>();
+            let expected = formatted
+                .lines()
+                .map(|line| {
+                    if line.is_empty() {
+                        "\n".to_owned()
+                    } else {
+                        format!("{prefix}{line}\n")
+                    }
+                })
+                .collect::<String>();
+            let command = format!("node <<-'EOF'\n{indented}\tEOF\necho done");
+            assert_eq!(
+                shown_shell(&command),
+                format!("node <<-'EOF'\n{expected}\tEOF\necho done")
+            );
+        }
+    }
     #[test]
     fn field_titles_accept_numbers_and_numbers_in_arrays() {
         for (value, expected) in [
