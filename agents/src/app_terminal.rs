@@ -425,7 +425,7 @@ mod tests {
             "sh",
             &[
                 "-c",
-                r#"claude --bg --allow-dangerously-skip-permissions --resume "$1" >/dev/null && exec claude attach "$2""#,
+                r#"claude --bg --resume "$1" >/dev/null && exec claude attach "$2""#,
                 "sh",
                 &id.id,
                 &id.id[..8],
@@ -949,9 +949,7 @@ mod tests {
         assert!(draw(&mut app).contains("x"));
         app.handle_event(crossterm::event::Event::Mouse(
             crossterm::event::MouseEvent {
-                kind: crossterm::event::MouseEventKind::Down(
-                    crossterm::event::MouseButton::Left,
-                ),
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                 column: 2,
                 row: 10,
                 modifiers: crossterm::event::KeyModifiers::NONE,
@@ -959,9 +957,7 @@ mod tests {
         ));
         app.handle_event(crossterm::event::Event::Mouse(
             crossterm::event::MouseEvent {
-                kind: crossterm::event::MouseEventKind::Up(
-                    crossterm::event::MouseButton::Left,
-                ),
+                kind: crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
                 column: 2,
                 row: 10,
                 modifiers: crossterm::event::KeyModifiers::NONE,

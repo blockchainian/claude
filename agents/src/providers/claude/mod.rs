@@ -1622,14 +1622,7 @@ mod tests {
                 .collect();
             assert_eq!(
                 args,
-                [
-                    "--bg",
-                    "--allow-dangerously-skip-permissions",
-                    "--resume",
-                    &session.id.id,
-                    option,
-                    value
-                ]
+                ["--bg", "--resume", &session.id.id, option, value]
             );
             assert_eq!(command.get_current_dir(), Some(session.cwd.as_path()));
         }
