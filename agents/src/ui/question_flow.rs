@@ -315,6 +315,7 @@ mod tests {
             last_prompt: None,
             transcript: None,
             archived: false,
+            subagent_input: None,
         }
     }
     fn screen(view: &View, width: u16, height: u16) -> String {

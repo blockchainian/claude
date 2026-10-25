@@ -16,6 +16,7 @@ pub(super) fn send(
     job_id: &str,
     cwd: &Path,
     settings_path: &Path,
+    target: Option<&str>,
     input: SessionInput,
 ) -> io::Result<()> {
     validate_job_id(job_id)?;
@@ -53,7 +54,23 @@ pub(super) fn send(
     );
     let operation = || {
         let mut terminal = Terminal::spawn(job_id, cwd)?;
-        let result = terminal.deliver(input);
+        let result = (|| {
+            let original_state = terminal.current_view()?;
+            original_state.target(original_state.viewed.as_deref())?;
+            let original = original_state.viewed;
+            let result = terminal.navigate(target).and_then(|()| {
+                terminal.target = Some(target.map(str::to_owned));
+                terminal.deliver(input)
+            });
+            let restored = terminal.navigate(original.as_deref());
+            match (result, restored) {
+                (Err(error), Err(restore)) => Err(io::Error::other(format!(
+                    "{error}; restore view failed: {restore}"
+                ))),
+                (Err(error), _) => Err(error),
+                (Ok(()), result) => result,
+            }
+        })();
         let detach = terminal.detach();
         result.and(detach)
     };
@@ -69,13 +86,24 @@ pub(super) fn send(
 pub(super) fn inspect(job_id: &str, cwd: &Path) -> io::Result<String> {
     let mut terminal = Terminal::spawn(job_id, cwd)?;
     let result = terminal
-        .wait_at("inspect-ready", ready)
+        .wait_at("inspect-ready", |screen| {
+            ready(screen) && view_state(screen).is_some()
+        })
         .map(|()| terminal.screen());
     let detached = terminal.detach();
     match result {
         Ok(screen) => detached.map(|()| screen),
         Err(error) => Err(error),
     }
+}
+
+/// Selects a view through the same screen-checked navigation used for delivery.
+#[cfg(test)]
+pub(super) fn select_view(job_id: &str, cwd: &Path, target: Option<&str>) -> io::Result<()> {
+    let mut terminal = Terminal::spawn(job_id, cwd)?;
+    let result = terminal.navigate(target);
+    let detached = terminal.detach();
+    result.and(detached)
 }
 
 /// Leaves `text` in Claude's input without submitting it.
@@ -247,6 +275,7 @@ struct Terminal {
     // Attach clients share Claude's cursor and editor. Hold this through detach so
     // page inspection cannot navigate while another client is answering.
     _input_lock: File,
+    target: Option<Option<String>>,
     #[cfg(test)]
     raw: Vec<u8>,
 }
@@ -289,6 +318,7 @@ impl Terminal {
             pty,
             parser: OutputScreen::new(),
             _input_lock: input_lock,
+            target: None,
             #[cfg(test)]
             raw: Vec::new(),
         })
@@ -374,7 +404,22 @@ impl Terminal {
         self.pty.write(bytes)
     }
 
+    fn confirm_target(&mut self) -> io::Result<()> {
+        self.read(Duration::ZERO)?;
+        self.wait_at("target-screen-complete", |screen| {
+            view_state(screen).is_some()
+        })?;
+        if let Some(target) = &self.target
+            && !view_state(&self.screen())
+                .is_some_and(|state| state.focus == Focus::Input && state.viewed == *target)
+        {
+            return Err(self.unexpected("Claude input target or focus changed"));
+        }
+        Ok(())
+    }
+
     fn paste(&mut self, text: &str) -> io::Result<()> {
+        self.confirm_target()?;
         self.write(b"\x1b[200~")?;
         self.write(text.as_bytes())?;
         self.write(b"\x1b[201~")
@@ -392,6 +437,7 @@ impl Terminal {
             .ok_or_else(|| self.unexpected("Claude input disappeared before submission"))?
             .1
             .to_owned();
+        self.confirm_target()?;
         self.write(b"\r")?;
         Ok(pasted_input)
     }
@@ -419,6 +465,7 @@ impl Terminal {
                         .ok_or_else(|| self.unexpected("Claude image input disappeared"))?
                         .1
                         .to_owned();
+                    self.confirm_target()?;
                     self.write(b"\r")?;
                     pasted
                 } else {
@@ -511,11 +558,19 @@ fn screen_error(reason: &str, screen: &str) -> io::Error {
 }
 
 fn prompt(screen: &str) -> Option<(usize, &str)> {
-    screen
-        .lines()
+    let lines: Vec<_> = screen.lines().collect();
+    lines
+        .iter()
         .enumerate()
-        .filter_map(|(row, line)| line.trim_start().strip_prefix('❯').map(|text| (row, text)))
-        .last()
+        .filter_map(|(row, line)| {
+            let text = line.trim_start().strip_prefix('❯')?;
+            let editor = row
+                .checked_sub(1)
+                .and_then(|above| lines.get(above))
+                .is_some_and(|line| line.trim_start().starts_with('─'));
+            (editor || !text.trim_start().starts_with(['⏺', '◯'])).then_some((row, text))
+        })
+        .next_back()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -530,6 +585,7 @@ fn prompt_state(screen: &str) -> Option<PromptState<'_>> {
         "" => PromptState::Empty,
         // Claude renders this placeholder over an empty editor after accepting a busy prompt.
         "Press up to edit queued messages" => PromptState::Queued,
+        text if text.starts_with("Message @") && text.ends_with('…') => PromptState::Empty,
         text => PromptState::Editing(text),
     })
 }
@@ -1017,3 +1073,7 @@ mod input_tests;
 #[cfg(test)]
 #[path = "attach_image_tests.rs"]
 mod image_tests;
+
+#[path = "attach_view.rs"]
+mod view;
+use view::*;

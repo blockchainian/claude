@@ -1,0 +1,50 @@
+
+ ▐▛███▛█   Claude Code v2.1.309
+▝▜██████▀  Haiku 5.5 · Claude Max
+ ▝▝   ▝▝   ~/Code/example-org/example-repo/probe · /rc
+
+
+❯ This is a UI test that needs you to stay busy. Call the Bash tool with command "seq 1 3000000 | wc -l" (no sleep, no background), then call it again, 300 times, one call per turn. Never stop early
+  and never call SubagentHandback before 300 calls. If you receive a message from the user, answer it in one line and keep going.
+
+  Ran 15 shell commands
+
+❯ PING from probe: reply PONG
+
+⏺ Running 1 shell command…
+  ⎿  $ seq 1 3000000 | wc -l
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+● … (38s · ↓ 43.3k tokens)
+                                                                                                                                                Update available! Run: brew upgrade claude-code@latest
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── probe looper ─
+❯ Message @general-purpose…
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Haiku 5.5 medium · Context 95% left · 52.4k/1m · weekly 81%/95% left · 44s/43s
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents
+
+  ◯ main
+  ⏺ Haiku 5.5 medium · Context 96% left · 43.0k/1m · 34s                                                                                                                              probe looper

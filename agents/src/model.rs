@@ -86,6 +86,13 @@ pub struct SessionTask {
     pub status: TaskStatus,
 }
 
+/// The parent background process used to deliver a Claude subagent message.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SubagentInput {
+    pub process: Process,
+    pub job: BackgroundJob,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Session {
     /// Provider-qualified session identity.
@@ -116,6 +123,7 @@ pub struct Session {
     pub status: SessionStatus,
     pub process: Option<Process>,
     pub background_job: Option<BackgroundJob>,
+    pub subagent_input: Option<SubagentInput>,
     pub updated_at: DateTime<Utc>,
     /// Start of the session or thread, independent of its process and activity.
     pub started_at: Option<DateTime<Utc>>,
@@ -157,7 +165,15 @@ impl Session {
 
     pub fn input_disabled_reason(&self) -> Option<&'static str> {
         if !self.can_resume() {
-            Some("")
+            if self.id.provider != ProviderId::Claude {
+                Some("Subagent input is not supported")
+            } else if self.status != SessionStatus::Working {
+                Some("Subagent is no longer running")
+            } else if self.subagent_input.is_none() {
+                Some("Parent must be a running background Claude session")
+            } else {
+                None
+            }
         } else if self.id.provider == ProviderId::Claude
             && self
                 .process
