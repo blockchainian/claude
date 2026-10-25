@@ -30,6 +30,11 @@ pub(crate) const SERVER: McpServer = McpServer {
             ..DEFAULT_RULE
         },
         ToolRule {
+            name: "tabs_close_mcp",
+            title: &[Pick::Field(Source::Input, "/tabId")],
+            ..DEFAULT_RULE
+        },
+        ToolRule {
             name: "computer",
             title: &[
                 Pick::Field(Source::Input, "/action_summary"),
@@ -324,6 +329,33 @@ mod tests {
             assert_eq!(shown.title.as_deref(), title);
             assert_eq!(shown.input, Vec::new());
         }
+    }
+
+    #[test]
+    fn chrome_tabs_close_titles_recorded_tab_id_without_input() {
+        let records: Vec<Value> =
+            include_str!("../../../../tests/fixtures/claude-chrome-tabs-close.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let call = &records[0]["message"]["content"][0];
+        let reply = &records[1]["message"]["content"][0];
+        assert_eq!(call["id"], reply["tool_use_id"]);
+        let result = super::ToolResult {
+            source: None,
+            content: reply["content"].clone(),
+            structured: Value::Null,
+            error: false,
+        };
+        let shown = super::presentation(
+            call["name"].as_str().unwrap(),
+            &super::ToolData {
+                input: &call["input"],
+                result: Some(&result),
+            },
+        );
+        assert_eq!(shown.title.as_deref(), Some("665979963"));
+        assert!(shown.input.is_empty(), "unexpected input: {:?}", shown.input);
     }
 
     #[test]
