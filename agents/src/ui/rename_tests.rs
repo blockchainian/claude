@@ -102,6 +102,15 @@ fn codex_spawn_child_archive_emits_action() {
 }
 
 #[test]
+fn claude_subagent_archive_emits_unsupported() {
+    let (_dir, mut view) = child_view(ProviderId::Claude, ProviderId::Claude);
+    assert_eq!(
+        view.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+        Some(Action::Unsupported("Archive"))
+    );
+}
+
+#[test]
 fn codex_spawn_child_session_keys_emit_unsupported() {
     for (code, modifiers, label) in [
         (KeyCode::Char('l'), KeyModifiers::CONTROL, None),
