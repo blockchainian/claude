@@ -270,7 +270,7 @@ impl Part {
     ) -> (Vec<Line<'static>>, Vec<Option<bool>>) {
         let text = crate::providers::text::printable(&self.source);
         let paths = super::paths::text_paths(&text, cwd);
-        let display = super::line_truncation::abbreviate_paths(&text, &paths, usize::MAX, cwd);
+        let display = super::line_truncation::fit_paths_in_row(&text, &paths, usize::MAX, cwd);
         let numbered = matches!(&self.body, Body::Code(lang) if lang.starts_with("numbered:"));
         let drawn = if numbered {
             display
@@ -296,7 +296,7 @@ impl Part {
                     for line in &mut block.lines {
                         for span in &mut line.spans {
                             let paths = super::paths::text_paths(&span.content, cwd);
-                            span.content = super::line_truncation::abbreviate_paths_for_wrap(
+                            span.content = super::line_truncation::fit_paths_to_wrap_width(
                                 &span.content,
                                 &paths,
                                 width,
@@ -514,32 +514,26 @@ pub(super) fn transcript_content(
         .map(|text| {
             let record: serde_json::Value =
                 serde_json::from_str(text).expect("raw_text validates JSON");
-            let mut title =
-                super::formatting::title_words(record["type"].as_str().unwrap_or_default());
-            if provider == crate::providers::ProviderId::Codex
-                && let Some(kind) = record["payload"]["type"].as_str()
-            {
-                if !title.is_empty() {
-                    title.push_str(" / ");
-                }
-                title.push_str(&super::formatting::title_words(kind));
-            }
-            if provider == crate::providers::ProviderId::Claude
-                && let Some(content) = record["message"]["content"].as_array()
-            {
-                let types = content
-                    .iter()
+            // The record's content types when it has any, else its role.
+            let types = match provider {
+                crate::providers::ProviderId::Codex => record["payload"]["type"]
+                    .as_str()
+                    .map(super::formatting::title_words)
+                    .unwrap_or_default(),
+                crate::providers::ProviderId::Claude => record["message"]["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
                     .filter_map(|block| block["type"].as_str())
                     .map(super::formatting::title_words)
                     .collect::<Vec<_>>()
-                    .join(", ");
-                if !types.is_empty() {
-                    if !title.is_empty() {
-                        title.push_str(" / ");
-                    }
-                    title.push_str(&types);
-                }
-            }
+                    .join(", "),
+            };
+            let title = if types.is_empty() {
+                super::formatting::title_words(record["type"].as_str().unwrap_or_default())
+            } else {
+                types
+            };
             let time = record["timestamp"]
                 .as_str()
                 .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())

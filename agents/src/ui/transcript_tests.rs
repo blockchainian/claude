@@ -162,12 +162,9 @@ fn transcript_records_have_their_own_titles_and_pretty_json_in_file_order() {
     view.render_at(buf.area, &mut buf, now);
     let sources = view.viewport.borrow().event_text.sources.clone();
     assert_eq!(sources.len(), 4);
-    for (index, (source, title)) in [
-        (claude, "Assistant"),
-        (codex, "Response Item / Custom Tool Call"),
-    ]
-    .into_iter()
-    .enumerate()
+    for (index, (source, title)) in [(claude, "Assistant"), (codex, "Custom Tool Call")]
+        .into_iter()
+        .enumerate()
     {
         let value: serde_json::Value = serde_json::from_str(source).unwrap();
         let at = chrono::DateTime::parse_from_rfc3339(value["timestamp"].as_str().unwrap())
@@ -474,53 +471,53 @@ fn transcript_records_scroll_as_one_complete_document_without_fold_markers() {
 }
 
 #[test]
-fn transcript_claude_titles_include_content_types_in_order() {
+fn transcript_claude_titles_show_content_types_in_order_else_the_role() {
     use crate::providers::ProviderId;
     for (fixture, line, expected) in [
         (
             include_str!("../../tests/fixtures/claude-todos.jsonl"),
             0,
-            "Assistant / Tool Use",
+            "Tool Use",
         ),
         (
             include_str!("../../tests/fixtures/claude-subagent-model-history.jsonl"),
             1,
-            "Assistant / Thinking",
+            "Thinking",
         ),
         (
             include_str!("../../tests/fixtures/claude-bg-metadata.jsonl"),
             3,
-            "Assistant / Text",
+            "Text",
         ),
         (
             include_str!("../../tests/fixtures/claude-advisor.jsonl"),
             0,
-            "Assistant / Server Tool Use",
+            "Server Tool Use",
         ),
         (
             include_str!("../../tests/fixtures/claude-todos.jsonl"),
             1,
-            "User / Tool Result",
+            "Tool Result",
         ),
         (
             include_str!("../../tests/fixtures/claude-equal-timestamps.jsonl"),
             0,
-            "User / Text",
+            "Text",
         ),
         (
             include_str!("../../tests/fixtures/claude-prompt-images.jsonl"),
             0,
-            "User / Text, Image",
+            "Text, Image",
         ),
         (
             include_str!("../../tests/fixtures/claude-prompt-images.jsonl"),
             4,
-            "User / Text, Image, Image",
+            "Text, Image, Image",
         ),
         (
             include_str!("../../tests/fixtures/claude-prompt-images.jsonl"),
             7,
-            "User / Text, Text",
+            "Text, Text",
         ),
         (
             include_str!("../../tests/fixtures/claude-bg-metadata.jsonl"),
