@@ -22,6 +22,8 @@ mod models;
 #[cfg(test)]
 mod rename_live_tests;
 #[cfg(test)]
+mod resume_tests;
+#[cfg(test)]
 mod settings_tests;
 #[cfg(test)]
 pub use models::write_fixture_cache;
@@ -346,6 +348,15 @@ pub struct ClaudeProvider {
 }
 
 const BACKGROUND_ARGS: [&str; 2] = ["--bg", "--allow-dangerously-skip-permissions"];
+
+fn background_resume_args(session: &Session) -> &'static [&'static str] {
+    // Saved background options must be inherited: passing them again copies the session.
+    if session.background_job.is_some() {
+        &["--bg"]
+    } else {
+        &BACKGROUND_ARGS
+    }
+}
 
 fn created_job(output: &std::process::Output) -> io::Result<String> {
     if !output.status.success() {
@@ -959,7 +970,7 @@ impl Provider for ClaudeProvider {
                     "-c",
                     &format!(
                         r#"claude {} --resume "$1" >/dev/null && exec claude attach "$2""#,
-                        BACKGROUND_ARGS.join(" ")
+                        background_resume_args(session).join(" ")
                     ),
                     "sh",
                     &session.id.id,
@@ -1339,9 +1350,14 @@ impl Provider for ClaudeProvider {
 }
 
 fn resume_input(session: &Session, input: &SessionInput) -> io::Result<Command> {
+    let args = if matches!(input, SessionInput::Prompt(_)) {
+        background_resume_args(session)
+    } else {
+        &BACKGROUND_ARGS
+    };
     let mut command = Command::new("claude");
     command
-        .args(BACKGROUND_ARGS)
+        .args(args)
         .args(["--resume", &session.id.id])
         .current_dir(&session.cwd);
     match input {

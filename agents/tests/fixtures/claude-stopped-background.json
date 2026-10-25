@@ -1,0 +1,19 @@
+{
+  "state": "done",
+  "tempo": "idle",
+  "template": "bg",
+  "respawnFlags": [
+    "--allow-dangerously-skip-permissions",
+    "--name",
+    "工具名分组",
+    "--effort",
+    "medium",
+    "--model",
+    "claude-opus-5-5"
+  ],
+  "sessionId": "bf109f2e-fc35-4678-9c26-ff1cab81c4e5",
+  "resumeSessionId": "bf109f2e-fc35-4678-9c26-ff1cab81c4e5",
+  "daemonShort": "bf109f2e",
+  "cliVersion": "2.1.309",
+  "backend": "daemon"
+}
