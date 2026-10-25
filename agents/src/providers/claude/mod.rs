@@ -412,7 +412,7 @@ fn finish_background(
     let job_id = created_job(&output)?;
     created(job_id.clone());
     if let Some(input) = input {
-        attach::send(&job_id, cwd, settings, input)?;
+        attach::send(&job_id, cwd, settings, None, input)?;
     }
     Ok(output)
 }
@@ -695,6 +695,29 @@ impl ClaudeProvider {
         self.summaries.retain(|path, _| paths.contains(path));
         sessions.extend(children);
         sessions.extend(unchanged);
+        let input_parents: HashMap<_, _> = sessions
+            .iter()
+            .filter(|session| session.parent.is_none() && session.is_live_background())
+            .map(|session| {
+                (
+                    session.id.clone(),
+                    crate::model::SubagentInput {
+                        process: session.process.clone().expect("live background process"),
+                        job: session.background_job.clone().expect("live background job"),
+                    },
+                )
+            })
+            .collect();
+        for session in &mut sessions {
+            session.subagent_input = session
+                .parent
+                .as_ref()
+                .filter(|_| {
+                    session.id.provider == ProviderId::Claude
+                        && session.status == SessionStatus::Working
+                })
+                .and_then(|parent| input_parents.get(parent).cloned());
+        }
         for session in &mut sessions {
             session.ask = None;
         }
@@ -1176,7 +1199,62 @@ impl Provider for ClaudeProvider {
             }));
         }
         if !session.can_resume() {
-            return None;
+            let session = session.clone();
+            let config = self.config_dir.clone();
+            return Some(Box::new(move || {
+                if let Some(reason) = session.input_disabled_reason() {
+                    return Err(io::Error::other(reason));
+                }
+                if !matches!(
+                    &input,
+                    SessionInput::Prompt(_) | SessionInput::PromptWithImages { .. }
+                ) {
+                    return Err(io::Error::other(
+                        "Only messages can be sent to a Claude subagent",
+                    ));
+                }
+                let parent = session
+                    .parent
+                    .as_ref()
+                    .ok_or_else(|| io::Error::other("Subagent has no parent"))?;
+                let route = session.subagent_input.as_ref().ok_or_else(|| {
+                    io::Error::other("Parent must be a running background Claude session")
+                })?;
+                let entry = registry::live(&config)
+                    .into_iter()
+                    .find(|entry| {
+                        entry.session_id.as_deref() == Some(&parent.id)
+                            && entry.pid == Some(route.process.pid)
+                            && entry.started_at
+                                == route.process.started_at.map(|time| time.timestamp_millis())
+                            && entry.kind.as_deref() == Some("bg")
+                            && entry.job_id.as_deref() == Some(&route.job.id)
+                    })
+                    .ok_or_else(|| {
+                        io::Error::other("Parent background session is no longer running")
+                    })?;
+                let transcript = session
+                    .transcript
+                    .as_ref()
+                    .ok_or_else(|| io::Error::other("Subagent has no transcript"))?;
+                let meta = subagents::Metadata::read(&transcript.with_extension("meta.json"))
+                    .ok_or_else(|| io::Error::other("Cannot read subagent metadata"))?;
+                let summary =
+                    transcript::read_subagent_cached(transcript, fs::metadata(transcript)?.len(), None)?;
+                if meta.status(&summary, &config, true) != SessionStatus::Working {
+                    return Err(io::Error::other("Subagent is no longer running"));
+                }
+                let description = meta
+                    .description()
+                    .ok_or_else(|| io::Error::other("Subagent has no description"))?;
+                attach::send(
+                    entry.job_id.as_deref().expect("validated background job"),
+                    &session.cwd,
+                    &config.join("settings.json"),
+                    Some(description),
+                    input,
+                )
+            }));
         }
         let session = session.clone();
         let config = self.config_dir.clone();
@@ -1210,7 +1288,13 @@ impl Provider for ClaudeProvider {
                     .job_id
                     .filter(|id| !id.is_empty())
                     .ok_or_else(|| io::Error::other("Claude background session has no job id"))?;
-                attach::send(&job_id, &session.cwd, &config.join("settings.json"), input)
+                attach::send(
+                    &job_id,
+                    &session.cwd,
+                    &config.join("settings.json"),
+                    None,
+                    input,
+                )
             }
             Some(_) => Err(io::Error::other(FOREGROUND_SESSION)),
             None => match input {
@@ -1453,6 +1537,7 @@ fn session(
         last_prompt: summary.last_prompt,
         transcript: path,
         archived: false,
+        subagent_input: None,
     }
 }
 

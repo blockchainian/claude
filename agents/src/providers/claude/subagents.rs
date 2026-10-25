@@ -32,6 +32,12 @@ impl Metadata {
             .to_owned()
     }
 
+    pub(super) fn description(&self) -> Option<&str> {
+        self.description
+            .as_deref()
+            .filter(|description| !description.trim().is_empty())
+    }
+
     pub(super) fn name(&self) -> Option<String> {
         self.name.clone()
     }
@@ -193,6 +199,65 @@ mod tests {
             .unwrap();
         }
         meta.status(&summary, dir.path(), alive)
+    }
+
+    #[test]
+    fn subagent_input_requires_running_background_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut entry = registry::tests::fixture(dir.path());
+        let id = entry["sessionId"].as_str().unwrap().to_owned();
+        let parent = transcript(dir.path(), &id, 0);
+        let agents = parent.with_extension("").join("subagents");
+        fs::create_dir_all(&agents).unwrap();
+        let child = agents.join("agent-input.jsonl");
+        fs::write(&child, pending()[0].to_string()).unwrap();
+        fs::write(
+            child.with_extension("meta.json"),
+            r#"{"description":"Check directory","taskKind":"background"}"#,
+        )
+        .unwrap();
+        entry["kind"] = "bg".into();
+        entry["jobId"] = id[..8].into();
+        fs::write(dir.path().join("sessions/live.json"), entry.to_string()).unwrap();
+        let mut store = ClaudeProvider::new(dir.path().into());
+        let snapshot = store.refresh(1);
+        let child = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "agent-input")
+            .unwrap();
+        assert_eq!(child.status, SessionStatus::Working);
+        assert_eq!(child.input_disabled_reason(), None);
+        assert!(!child.can_resume());
+
+        entry["kind"] = "interactive".into();
+        fs::write(dir.path().join("sessions/live.json"), entry.to_string()).unwrap();
+        let snapshot = store.refresh(1);
+        let child = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "agent-input")
+            .unwrap();
+        assert_eq!(
+            child.input_disabled_reason(),
+            Some("Parent must be a running background Claude session")
+        );
+
+        fs::write(
+            agents.join("agent-input.meta.json"),
+            r#"{"description":"Check directory","finished":true}"#,
+        )
+        .unwrap();
+        let snapshot = store.refresh(1);
+        let child = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id.id == "agent-input")
+            .unwrap();
+        assert_eq!(
+            child.input_disabled_reason(),
+            Some("Subagent is no longer running")
+        );
     }
 
     #[test]

@@ -2530,6 +2530,7 @@ mod wrapped_path_tests {
             last_prompt: None,
             transcript: None,
             archived: false,
+            subagent_input: None,
         };
         let mut view = View::new(Grouping::Project, false);
         view.set_sessions(vec![session], false);

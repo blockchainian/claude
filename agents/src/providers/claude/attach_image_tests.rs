@@ -59,6 +59,7 @@ fn real_background_image_attach() {
             &job,
             &cwd,
             &cwd.join("unused-settings.json"),
+            None,
             SessionInput::PromptWithImages {
                 text: text.to_owned(),
                 images: vec![image.clone()],
