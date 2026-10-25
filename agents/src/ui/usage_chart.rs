@@ -1,5 +1,5 @@
-//! The selected task's token usage, drawn in braille behind the task list: each dot column is one
-//! bin, rising from the list's bottom as high as the bin's tokens, and the list's rows cover it.
+//! Active tasks' stacked token usage, drawn in braille behind the task list: each cell combines
+//! two bins, rising from the list's bottom as high as their tokens, and the list's rows cover it.
 //! The chart looks at most half as tall as it is wide, so a tall list keeps it to its bottom part.
 
 use super::View;
@@ -15,11 +15,11 @@ use std::collections::BTreeMap;
 /// Dot rows one cell holds.
 const CELL_DOTS: u16 = 4;
 
-/// The percentile of bin totals that fills the chart.
+/// The percentile of cell totals that fills the chart.
 const TOP_PERCENTILE: usize = 95;
 
-/// The braille bits of a cell's left and right dot columns, bottom to top.
-const DOT_BITS: [[u8; 4]; 2] = [[0x40, 0x04, 0x02, 0x01], [0x80, 0x20, 0x10, 0x08]];
+/// The braille bits of each dot row, bottom to top.
+const DOT_BITS: [u8; 4] = [0xc0, 0x24, 0x12, 0x09];
 
 impl View {
     pub(crate) fn set_context_usage(&mut self, id: &SessionKey, percent: Option<u64>) {
@@ -32,57 +32,75 @@ impl View {
         (*id == session.id).then_some(*percent)
     }
 
+    #[cfg(test)]
     pub(crate) fn set_usage(&mut self, id: &SessionKey, bins: BTreeMap<i64, Bin>) {
-        self.usage = Some((id.clone(), bins));
+        assert_eq!(self.selected_row().map(|session| &session.id), Some(id));
+        self.set_usage_totals(bins, BTreeMap::new());
     }
 
-    pub(crate) fn usage_session(&self) -> Option<&SessionKey> {
-        self.usage.as_ref().map(|(id, _)| id)
+    pub(crate) fn usage_width(&self, area: Rect) -> u16 {
+        self.center_layout(area).usage_chart.width
     }
 
-    /// The selected task's usage bins, when the view holds any.
-    fn selected_usage(&self) -> Option<&BTreeMap<i64, Bin>> {
-        let session = self.selected_row()?;
-        let (id, bins) = self.usage.as_ref()?;
-        (*id == session.id && !bins.is_empty()).then_some(bins)
+    pub(crate) fn set_usage_totals(
+        &mut self,
+        total: BTreeMap<i64, Bin>,
+        others: BTreeMap<i64, Bin>,
+    ) {
+        self.usage = total;
+        self.other_usage = others;
     }
 
     pub(super) fn shows_usage(&self) -> bool {
-        self.selected_usage().is_some()
+        self.usage.values().any(|bin| total(bin) != 0)
     }
 
-    /// Draws the selected task's usage up to now into the blank rows below the list's content in
-    /// `area`.
+    /// Draws active tasks' stacked token usage in the blank rows below the list's content.
     pub(super) fn render_usage_chart(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
-        let Some(bins) = self.selected_usage() else {
+        if !self.shows_usage() {
             return;
-        };
-        let max = chart_top(bins.values().map(total).collect());
+        }
+        let columns: Vec<_> = (area.left()..area.right())
+            .map(|x| {
+                let bins = cell_bins(area, x, now);
+                let tokens = |usage: &BTreeMap<i64, Bin>| {
+                    bins.iter()
+                        .map(|bin| usage.get(bin).map_or(0, total))
+                        .sum::<u64>()
+                };
+                (tokens(&self.usage), tokens(&self.other_usage))
+            })
+            .collect();
+        let max = chart_top(
+            columns
+                .iter()
+                .map(|&(tokens, _)| tokens)
+                .filter(|&tokens| tokens > 0)
+                .collect(),
+        );
         let height = chart_rows(area, self.cell_aspect) * CELL_DOTS;
-        let dots = |bin: i64| {
-            bins.get(&bin)
-                .map_or(0, |usage| dot_height(total(usage), max, height))
-        };
+        let heights: Vec<_> = columns
+            .into_iter()
+            .map(|(tokens, others)| stack_heights(tokens, others, max, height))
+            .collect();
         let content_bottom = (area.top()..area.bottom())
             .rev()
             .find(|&y| (area.left()..area.right()).any(|x| !is_blank(&buf[(x, y)])))
             .map_or(area.top(), |y| y + 1);
         for y in content_bottom..area.bottom() {
             let floor = (area.bottom() - 1 - y) * CELL_DOTS;
-            for x in area.left()..area.right() {
-                let bits = cell_bins(area, x, now)
-                    .iter()
-                    .zip(DOT_BITS)
-                    .map(|(&bin, column)| {
-                        let filled = usize::from(dots(bin).saturating_sub(floor).min(CELL_DOTS));
-                        column[..filled].iter().fold(0, |bits, bit| bits | bit)
-                    })
-                    .fold(0, |bits, column| bits | column);
+            for (x, &(all, others)) in (area.left()..area.right()).zip(&heights) {
+                let filled = usize::from(all.saturating_sub(floor).min(CELL_DOTS));
+                let bits = DOT_BITS[..filled].iter().fold(0, |bits, bit| bits | bit);
                 if bits != 0 {
-                    let symbol = char::from_u32(0x2800 + u32::from(bits)).unwrap_or(' ');
-                    buf[(x, y)]
-                        .set_char(symbol)
-                        .set_style(super::style::timeline_style(self.use_colors));
+                    let symbol =
+                        char::from_u32(0x2800 + u32::from(bits)).expect("usage chart braille cell");
+                    let style = if self.use_colors && floor >= others {
+                        super::style::assistant_style()
+                    } else {
+                        super::style::timeline_style(self.use_colors)
+                    };
+                    buf[(x, y)].set_char(symbol).set_style(style);
                 }
             }
         }
@@ -91,6 +109,31 @@ impl View {
 
 fn total(usage: &Bin) -> u64 {
     usage.input + usage.output
+}
+
+/// Total dot rows and other tasks' dot rows, with the color boundary on a cell edge.
+fn stack_heights(tokens: u64, others: u64, max: u64, height: u16) -> (u16, u16) {
+    let selected = tokens
+        .checked_sub(others)
+        .expect("usage chart other tasks exceed total");
+    let all = dot_height(tokens, max, height);
+    if selected == 0 {
+        return (all, all);
+    }
+    if max == 0 || height == 0 {
+        return (all, 0);
+    }
+    let numerator = u128::from(others) * u128::from(height);
+    let denominator = u128::from(max) * u128::from(CELL_DOTS);
+    let cells = (numerator + denominator / 2) / denominator;
+    let mut lower = (cells * u128::from(CELL_DOTS)).min(u128::from(all)) as u16;
+    if selected > 0 {
+        lower = lower.min(all.saturating_sub(1) / CELL_DOTS * CELL_DOTS);
+    }
+    if others > 0 && lower == 0 && all > CELL_DOTS {
+        lower = CELL_DOTS;
+    }
+    (all, lower)
 }
 
 /// A cell nothing has drawn on since the frame was cleared.
@@ -105,7 +148,7 @@ fn chart_rows(area: Rect, cell_aspect: f64) -> u16 {
     area.height.min(half_width)
 }
 
-/// The tokens that fill the chart: the 95th percentile of the bins' totals, so a few outsized bins
+/// The tokens that fill the chart: the 95th percentile of the cells' totals, so a few outsized cells
 /// fill it and cut off rather than flatten the rest.
 fn chart_top(mut totals: Vec<u64>) -> u64 {
     if totals.is_empty() {
@@ -118,6 +161,9 @@ fn chart_top(mut totals: Vec<u64>) -> u64 {
 /// Dots `tokens` rises to in a chart `height` dots tall whose top is `max`; any usage shows one.
 fn dot_height(tokens: u64, max: u64, height: u16) -> u16 {
     if tokens == 0 || max == 0 {
+        return 0;
+    }
+    if height == 0 {
         return 0;
     }
     let dots = (u128::from(tokens) * u128::from(height)).div_ceil(u128::from(max));
@@ -135,6 +181,12 @@ mod tests {
         assert_eq!(dot_height(50, 100, 40), 20);
         assert_eq!(dot_height(100, 100, 40), 40);
         assert_eq!(dot_height(1_000, 100, 40), 40);
+    }
+
+    #[test]
+    fn a_bin_without_selected_usage_is_all_other_tasks() {
+        // 24 of 100 tokens fill 10 of 40 dots; rounding others to a cell edge would leave 2.
+        assert_eq!(stack_heights(24, 24, 100, 40), (10, 10));
     }
 
     #[test]

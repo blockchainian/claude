@@ -1,7 +1,7 @@
 //! Provider-neutral question pages and their collected answer.
-use super::line_edit::LineEdit;
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crate::ask::{Answer, Ask, AskKind, Question, QuestionAnswer};
+use crate::line_edit::Editor;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
@@ -17,6 +17,16 @@ pub(super) enum Outcome {
     Submit(Answer),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FooterAction {
+    PreviousTab,
+    NextTab,
+    Up,
+    Down,
+    Confirm,
+    Cancel,
+}
+
 /// What a mouse position points at: the question tab row, or an option row.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Target {
@@ -29,7 +39,7 @@ pub(super) enum Target {
 struct Page {
     focus: usize,
     selected: Vec<usize>,
-    other: LineEdit,
+    other: Editor,
     /// Whether a multi-select question's free-text row is checked; typing checks it.
     other_checked: bool,
 }
@@ -114,32 +124,91 @@ impl QuestionView {
         self.error = error;
     }
 
-    fn footer(&self, width: u16) -> Vec<Line<'static>> {
-        let mut lines = Vec::new();
-        if let Some(error) = &self.error {
-            lines.extend(
-                textwrap::wrap(error, usize::from(width.max(1)))
-                    .into_iter()
-                    .map(|text| {
-                        Line::styled(text.into_owned(), super::style::attention_title_style())
-                    }),
-            );
+    /// Why the last answer failed to send, until the next attempt.
+    pub(super) fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    pub(super) fn footer(&self) -> Vec<Line<'static>> {
+        let mut spans = Vec::new();
+        if self.tabs() > 1 {
+            spans.push(super::hints::key_span("←/→"));
+            spans.push(Span::styled(
+                " switch · ",
+                Style::default().dim().not_bold(),
+            ));
         }
-        let switch = if self.tabs() > 1 {
-            "←/→ switch · "
-        } else {
-            ""
-        };
-        lines.push(Line::styled(
-            format!("{switch}↑/↓ move · Enter to confirm · Esc to cancel"),
-            Style::default().dim(),
-        ));
-        lines
+        for (key, label) in [
+            ("↑/↓", " move · "),
+            ("Enter", " to confirm · "),
+            ("Esc", " to cancel"),
+        ] {
+            spans.push(super::hints::key_span(key));
+            spans.push(Span::styled(label, Style::default().dim().not_bold()));
+        }
+        vec![Line::from(spans)]
+    }
+
+    pub(super) fn footer_targets(&self, area: Rect) -> Vec<super::hints::HintTarget> {
+        use super::hints::HintAction::Question;
+        super::hints::action_targets(
+            &self.footer()[0],
+            area,
+            &[
+                ("←", Question(FooterAction::PreviousTab)),
+                ("→", Question(FooterAction::NextTab)),
+                ("↑", Question(FooterAction::Up)),
+                ("↓", Question(FooterAction::Down)),
+                ("Enter", Question(FooterAction::Confirm)),
+                ("Esc", Question(FooterAction::Cancel)),
+            ],
+        )
+    }
+
+    pub(super) fn footer_action(&mut self, action: FooterAction) -> Option<Outcome> {
+        if action == FooterAction::Cancel {
+            return Some(self.submit(true));
+        }
+        if self.pages.is_empty() {
+            return None;
+        }
+        match action {
+            FooterAction::PreviousTab => self.scroll(false, true),
+            FooterAction::NextTab => self.scroll(true, true),
+            FooterAction::Up | FooterAction::Down => {
+                if self.reviewing() {
+                    self.review_focus = 1 - self.review_focus;
+                } else {
+                    let focus = self.pages[self.page].focus;
+                    let rows = self.rows();
+                    let row = if action == FooterAction::Down {
+                        (focus + 1) % rows
+                    } else {
+                        (focus + rows - 1) % rows
+                    };
+                    self.set_focus(row);
+                }
+            }
+            FooterAction::Confirm => {
+                if self.reviewing() {
+                    return self.choose(self.review_focus);
+                }
+                if self.editing() && !self.pages[self.page].other.is_empty() {
+                    if !self.questions()[self.page].multi {
+                        self.pages[self.page].selected.clear();
+                    }
+                    return self.advance();
+                }
+                return self.choose(self.pages[self.page].focus);
+            }
+            FooterAction::Cancel => unreachable!(),
+        }
+        None
     }
 
     fn body_height(&self, area: Rect) -> usize {
         let height = usize::from(area.height);
-        height.saturating_sub(self.footer(area.width).len())
+        height.saturating_sub(self.footer().len())
     }
 
     fn questions(&self) -> &[Question] {
@@ -169,6 +238,10 @@ impl QuestionView {
         self.questions().get(self.page).is_some_and(|question| {
             Self::other_row(question) && self.pages[self.page].focus == question.options.len()
         })
+    }
+
+    pub(super) fn focused_editor(&self) -> Option<&Editor> {
+        self.editing().then_some(&self.pages[self.page].other)
     }
 
     fn rows(&self) -> usize {
@@ -241,17 +314,24 @@ impl QuestionView {
         }
     }
 
-    pub(super) fn key(&mut self, key: KeyEvent) -> Option<Outcome> {
+    pub(super) fn key(
+        &mut self,
+        key: KeyEvent,
+        kills: &mut crate::line_edit::KillBuffer,
+    ) -> Option<Outcome> {
         if key.kind == KeyEventKind::Release {
             return None;
         }
         if key.code == KeyCode::Esc {
-            return Some(self.submit(true));
+            return self.footer_action(FooterAction::Cancel);
         }
         if self.pages.is_empty() {
             return None;
         }
         let modifiers = key.modifiers - KeyModifiers::SHIFT;
+        if key.code == KeyCode::Enter && modifiers == KeyModifiers::NONE {
+            return self.footer_action(FooterAction::Confirm);
+        }
         if matches!(
             (key.code, modifiers),
             (KeyCode::PageUp, KeyModifiers::NONE) | (KeyCode::Char('p'), KeyModifiers::CONTROL)
@@ -268,22 +348,16 @@ impl QuestionView {
         }
         if self.editing() {
             match key.code {
-                KeyCode::Char(' ') | KeyCode::Enter
+                KeyCode::Char(' ')
                     if modifiers == KeyModifiers::NONE
                         && self.pages[self.page].other.is_empty() =>
                 {
                     return self.choose(self.pages[self.page].focus);
                 }
-                KeyCode::Enter if modifiers == KeyModifiers::NONE => {
-                    if !self.questions()[self.page].multi {
-                        self.pages[self.page].selected.clear();
-                    }
-                    return self.advance();
-                }
                 KeyCode::Up | KeyCode::Down | KeyCode::Tab | KeyCode::BackTab => {}
                 _ => {
                     let page = &mut self.pages[self.page];
-                    page.other.handle(key);
+                    page.other.handle_key(key, kills);
                     page.other_checked |= !page.other.is_empty();
                     return None;
                 }
@@ -295,13 +369,13 @@ impl QuestionView {
         if self.reviewing() {
             match key.code {
                 KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
-                    self.review_focus = 1 - self.review_focus;
+                    return self.footer_action(FooterAction::Down);
                 }
                 KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.scroll(false, true),
                 KeyCode::Char(digit @ '1'..='9') => {
                     return self.choose(digit as usize - '1' as usize);
                 }
-                KeyCode::Char(' ') | KeyCode::Enter => return self.choose(self.review_focus),
+                KeyCode::Char(' ') => return self.choose(self.review_focus),
                 _ => {}
             }
             return None;
@@ -309,17 +383,17 @@ impl QuestionView {
         let focus = self.pages[self.page].focus;
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.set_focus((focus + self.rows() - 1) % self.rows());
+                return self.footer_action(FooterAction::Up);
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.set_focus((focus + 1) % self.rows());
+                return self.footer_action(FooterAction::Down);
             }
             KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => self.scroll(false, true),
             KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => self.scroll(true, true),
             KeyCode::Char(digit @ '1'..='9') => {
                 return self.choose(digit as usize - '1' as usize);
             }
-            KeyCode::Char(' ') | KeyCode::Enter => return self.choose(focus),
+            KeyCode::Char(' ') => return self.choose(focus),
             KeyCode::Backspace | KeyCode::Delete => {
                 self.pages[self.page].selected.clear();
             }
@@ -442,7 +516,8 @@ impl QuestionView {
         let start = 5 + self.other_check().width() as u16;
         let focus = self.questions()[self.page].options.len();
         self.set_focus(focus);
-        self.pages[self.page].other.click_row_after(
+        super::render::click_input_row(
+            &mut self.pages[self.page].other,
             Rect::new(area.x + start, row, area.width.saturating_sub(start), 1),
             "",
             column,
@@ -453,7 +528,7 @@ impl QuestionView {
         if self.editing() {
             let page = &mut self.pages[self.page];
             page.other
-                .insert(text.replace("\r\n", "\n").replace('\r', "\n"));
+                .insert(&text.replace("\r\n", "\n").replace('\r', "\n"));
             page.other_checked |= !page.other.is_empty();
         }
     }
@@ -552,7 +627,7 @@ impl QuestionView {
             .unwrap_or(0);
         lines.push(Line::default());
         rows.push(None);
-        lines.extend(self.footer(width));
+        lines.extend(self.footer());
         (lines, focus_row, rows)
     }
 
@@ -605,7 +680,7 @@ impl QuestionView {
                 Span::raw(
                     page.other
                         .window(usize::from(width.saturating_sub(5 + check.width() as u16)))
-                        .0
+                        .text
                         .to_owned(),
                 )
             };
@@ -639,14 +714,14 @@ impl QuestionView {
         let height = usize::from(area.height);
         if lines.len() <= height {
             // Blank rows above the footer keep it on the area's last line on a shorter tab.
-            let footer = lines.len() - self.footer(area.width).len();
+            let footer = lines.len() - self.footer().len();
             lines.splice(
                 footer..footer,
                 std::iter::repeat_n(Line::default(), height - lines.len()),
             );
             return (lines, rows, 0);
         }
-        let footer = lines.split_off(lines.len() - self.footer(area.width).len());
+        let footer = lines.split_off(lines.len() - self.footer().len());
         let body_height = self.body_height(area);
         let offset = (focus + 1).saturating_sub(body_height);
         let rows = rows.into_iter().skip(offset).take(body_height).collect();
@@ -670,9 +745,10 @@ impl QuestionView {
         let focus = self.pages[self.page].focus;
         let row = rows.iter().position(|&row| row == Some(focus))?;
         let start = 5 + self.other_check().width() as u16;
-        let (_, caret) = self.pages[self.page]
+        let caret = self.pages[self.page]
             .other
-            .window(usize::from(area.width.saturating_sub(start)));
+            .window(usize::from(area.width.saturating_sub(start)))
+            .caret_column;
         Some((
             area.x + (start + caret).min(area.width - 1),
             area.y + row as u16,
@@ -737,7 +813,11 @@ mod tests {
     }
 
     fn press(view: &mut QuestionView, code: KeyCode) -> Option<Outcome> {
-        view.key(KeyEvent::new(code, KeyModifiers::NONE))
+        let mut kills = crate::line_edit::KillBuffer::default();
+        {
+            kills.begin_stroke();
+            view.key(KeyEvent::new(code, KeyModifiers::NONE), &mut kills)
+        }
     }
 
     fn submitted(outcome: Option<Outcome>) -> Answer {
@@ -762,6 +842,27 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
             + "\n"
+    }
+
+    #[test]
+    fn ask_footer_hotkeys_are_bold_and_not_dim() {
+        for header in ["Single", "Multi", "First"] {
+            let view = QuestionView::new(fixture(header));
+            let footer = view.footer().remove(0);
+            for key in ["←/→", "↑/↓", "Enter", "Esc"] {
+                if key == "←/→" && view.tabs() == 1 {
+                    continue;
+                }
+                let span = footer
+                    .spans
+                    .iter()
+                    .find(|span| span.content == key)
+                    .unwrap_or_else(|| panic!("missing key span: {key}"));
+                assert!(span.style.add_modifier.contains(Modifier::BOLD), "{key}");
+                assert!(!span.style.add_modifier.contains(Modifier::DIM), "{key}");
+                assert_eq!(span.style.fg, None, "{key}");
+            }
+        }
     }
 
     #[test]
@@ -961,19 +1062,25 @@ mod tests {
             ),
         ] {
             let view = QuestionView::new(fixture(header));
+            let mut rendered = screen(&view, 60, 14);
+            rendered.push_str("\nFooter spans:\n");
+            for span in &view.footer()[0].spans {
+                rendered.push_str(&format!(
+                    "{:?}: bold={}, dim={}\n",
+                    span.content,
+                    span.style.add_modifier.contains(Modifier::BOLD),
+                    span.style.add_modifier.contains(Modifier::DIM),
+                ));
+            }
             if let Some(directory) = std::env::var_os("UPDATE_ASK_VIEW_SNAPSHOT") {
                 let name = match header {
                     "Single" => "ask_view_single.txt",
                     "Multi" => "ask_view_multi.txt",
                     _ => "ask_view_two.txt",
                 };
-                std::fs::write(
-                    std::path::Path::new(&directory).join(name),
-                    screen(&view, 60, 14),
-                )
-                .unwrap();
+                std::fs::write(std::path::Path::new(&directory).join(name), &rendered).unwrap();
             }
-            assert_eq!(screen(&view, 60, 14), expected, "{header}");
+            assert_eq!(rendered, expected, "{header}");
         }
     }
     #[test]
@@ -1135,13 +1242,26 @@ mod tests {
 
     #[test]
     fn ask_view_release_and_modified_digits_do_not_submit() {
+        let mut kills = crate::line_edit::KillBuffer::default();
         let mut view = QuestionView::new(fixture("Single"));
         let mut key = KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE);
         key.kind = KeyEventKind::Release;
-        assert!(view.key(key).is_none());
         assert!(
-            view.key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::CONTROL))
-                .is_none()
+            {
+                kills.begin_stroke();
+                view.key(key, &mut kills)
+            }
+            .is_none()
+        );
+        assert!(
+            {
+                kills.begin_stroke();
+                view.key(
+                    KeyEvent::new(KeyCode::Char('2'), KeyModifiers::CONTROL),
+                    &mut kills,
+                )
+            }
+            .is_none()
         );
         assert_eq!(
             submitted(press(&mut view, KeyCode::Enter)).answers["Probe single choice?"].answers,
@@ -1165,7 +1285,8 @@ mod tests {
         view.set_error(Some("Question changed".into()));
         let rendered = screen(&view, 24, 4);
         assert!(rendered.contains("› 4."), "{rendered}");
-        assert!(rendered.contains("Question changed"), "{rendered}");
+        assert!(!rendered.contains("Question changed"), "{rendered}");
+        assert_eq!(view.error(), Some("Question changed"));
         assert!(rendered.contains("Enter"), "{rendered}");
     }
 }

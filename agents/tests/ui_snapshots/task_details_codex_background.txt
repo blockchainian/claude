@@ -1,5 +1,5 @@
                          Background
-────────────────── sleep 120 ; echo done ───────────── 1m 5s
+                  ● sleep 120 ; echo done             1m 5s
 
                            Prompt
-Background task
+                      Background task

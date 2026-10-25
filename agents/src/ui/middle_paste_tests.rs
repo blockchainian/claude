@@ -7,9 +7,9 @@ fn paste_at(view: &mut View, x: u16, y: u16) {
         Some(Action::PasteText),
         "at {x},{y}; title {:?}; search {} log {} detail {}",
         view.viewport.borrow().title_input,
-        view.searching,
-        view.event_list.search.editing,
-        view.event_detail.search.editing
+        view.search.focused(),
+        view.event_list.search.input.focused(),
+        view.event_detail.search.input.focused()
     );
     view.handle_paste("贴🦀");
 }
@@ -40,7 +40,9 @@ fn middle_paste_prompt_hits_display_cells_and_line_ends() {
     ] {
         let mut view = fixture();
         view.input_box.editor.set_text(text);
-        view.input_box.editor.home();
+        view.input_box
+            .editor
+            .move_caret(crate::line_edit::Motion::TextStart);
         screen(&view, 160, 40);
         let prompt = view.viewport.borrow().prompt;
         // The first line has the task label; later lines start at the padding.
@@ -107,26 +109,41 @@ fn middle_paste_title_and_search_use_the_clicked_editor() {
         let layout = view.center_layout(Rect::new(0, 0, 160, 40));
         let area = match panel {
             Panel::TaskList => layout.search,
-            Panel::EventList => super::super::event_list::search_input_rect(layout.event_panel),
-            _ => super::super::event_list::search_input_rect(
-                layout.event_detail.inner(Margin::new(1, 0)),
-            ),
+            Panel::EventList => super::super::search_input::search_row(layout.event_panel),
+            _ => {
+                super::super::search_input::search_row(layout.event_detail.inner(Margin::new(1, 0)))
+            }
         };
         paste_at(&mut view, area.right() - 1, area.y);
-        let editor = match panel {
-            Panel::TaskList => &view.search,
-            Panel::EventList => &view.event_list.search.query,
-            _ => &view.event_detail.search.query,
-        };
-        assert_eq!(editor.text(), "贴🦀");
-        assert_eq!(editor.cursor(), "贴🦀".len());
+        if panel == Panel::TaskList {
+            assert_eq!(view.search.text(), "贴🦀");
+            assert_eq!(
+                view.search.caret(area),
+                Some((
+                    (area.x + "Search ❯ 贴🦀".width() as u16).min(area.right() - 1),
+                    area.y
+                ))
+            );
+        } else {
+            let input = match panel {
+                Panel::EventList => &view.event_list.search.input,
+                _ => &view.event_detail.search.input,
+            };
+            assert_eq!(input.text(), "贴🦀");
+            let mut editor: crate::line_edit::Editor = super::super::line_edit::Editor::default();
+            editor.set_text("贴🦀");
+            let caret = editor
+                .window(usize::from(area.width.saturating_sub(9)))
+                .caret_column;
+            assert_eq!(input.caret(area), Some((area.x + 9 + caret, area.y)));
+        }
     }
 }
 
 #[test]
 fn middle_paste_branch_moves_focus_from_prompt() {
     let mut view = fixture();
-    let mut editor = crate::ui::line_edit::LineEdit::default();
+    let mut editor = crate::ui::line_edit::Editor::default();
     editor.set_text("剪贴板后");
     view.selector = Some(Selector::new(
         draft_controls::SelectorKind::Branch {
@@ -180,10 +197,10 @@ fn middle_paste_wrapped_rows_and_blank_rows_keep_line_ends() {
 
 #[test]
 fn middle_paste_narrow_input_uses_content_end() {
-    let mut editor = crate::ui::line_edit::LineEdit::default();
+    let mut editor: crate::line_edit::Editor = crate::ui::line_edit::Editor::default();
     editor.set_text("剪贴板");
-    editor.home();
-    editor.click_row_after(Rect::new(0, 0, 2, 1), "Search ❯ ", 1);
+    editor.move_caret(crate::line_edit::Motion::TextStart);
+    render::click_input_row(&mut editor, Rect::new(0, 0, 2, 1), "Search ❯ ", 1);
     editor.insert("贴🦀");
     assert_eq!(editor.text(), "剪贴板贴🦀");
     assert_eq!(editor.cursor(), "剪贴板贴🦀".len());

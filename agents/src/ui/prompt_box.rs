@@ -1,5 +1,5 @@
-use super::line_edit::LineEdit;
 use super::*;
+use crate::line_edit::Editor;
 
 #[path = "prompt_images.rs"]
 mod prompt_images;
@@ -24,16 +24,15 @@ pub(super) enum SendState {
 #[derive(Debug, Eq, PartialEq)]
 pub(super) enum PromptAction {
     Submit(String),
-    PasteImage,
     Quit,
     Stop,
 }
 
 #[derive(Default)]
 pub(super) struct PromptBox {
-    pending_editor: Option<LineEdit>,
+    pending_editor: Option<Composer>,
     mouse: prompt_mouse::PromptMouse,
-    pub(super) editor: LineEdit,
+    pub(super) editor: Composer,
     pub(super) state: SendState,
     pub(super) submitting: bool,
     pub(super) history: composer_history::History,
@@ -96,26 +95,23 @@ impl PromptBox {
             .search
             .as_ref()
             .map(|search| format!("History: {}", search.query.text()));
-        // A failed send keeps its reason after the label until the next send.
-        let failed_label = match &self.state {
-            SendState::Failed(reason) => {
-                Some(format!("{label} {}", reason.lines().next().unwrap_or("")))
-            }
-            SendState::Ready => None,
-        };
-        let label = search_label
-            .as_deref()
-            .or(failed_label.as_deref())
-            .unwrap_or(label);
+        // A failed send reverses the marker until the next send.
+        let failed = self.search.is_none() && self.failure().is_some();
+        let label = search_label.as_deref().unwrap_or(label);
         let prefix_budget = usize::from(width.saturating_sub((width / 3).max(1)));
-        let label_budget = if self.search.is_some() || failed_label.is_some() {
+        let label_budget = if self.search.is_some() {
             prefix_budget.saturating_sub(3)
         } else {
             usize::from(width / 3).min(prefix_budget.saturating_sub(3))
         };
-        let shows_task = self.search.is_none() && failed_label.is_none();
+        let shows_task = self.search.is_none() && !failed;
         let label = clip(label.lines().next().unwrap_or(""), label_budget);
-        let heading = format!("{} ", prompt_heading(&label, PROMPT_MARKER));
+        let marker = if failed {
+            DISABLED_PROMPT_MARKER
+        } else {
+            PROMPT_MARKER
+        };
+        let heading = format!("{} ", prompt_heading(&label, marker));
         let prefix = clip(&heading, prefix_budget);
         let task_label_len = if shows_task {
             label.len().min(prefix.len())
@@ -125,13 +121,19 @@ impl PromptBox {
         let inset = prefix.width() as u16;
         self.text_width
             .set((usize::from(width), usize::from(inset)));
-        let positions = self
-            .editor
-            .visual_positions(usize::from(width), usize::from(inset));
-        let row_count = positions.last().expect("end caret").2 + 1;
+        let positions = self.editor.caret_stops(line_edit::Wrap {
+            width: usize::from(width),
+            first_row_inset: usize::from(inset),
+        });
+        let row_count = positions.last().expect("end caret").row + 1;
         let mut lines = vec![String::new(); row_count];
         let mut caret = (0, 0);
-        for &(index, column, row) in &positions {
+        for &line_edit::CaretStop {
+            byte: index,
+            column,
+            row,
+        } in &positions
+        {
             if index == self.editor.cursor() {
                 caret = (column as u16, row);
             }
@@ -193,7 +195,10 @@ impl PromptBox {
         let style = if matches!(self.state, SendState::Failed(_)) && self.search.is_none() {
             style::error_style()
         } else if focused {
-            Style::default().cyan()
+            Style {
+                fg: style::accent_color(),
+                ..Style::default()
+            }
         } else {
             Style::default().dim()
         };
@@ -236,6 +241,14 @@ impl PromptBox {
         ))
     }
 
+    /// Why the last send failed, until the next send.
+    pub(super) fn failure(&self) -> Option<&str> {
+        match &self.state {
+            SendState::Failed(reason) => Some(reason),
+            SendState::Ready => None,
+        }
+    }
+
     pub(super) fn searching_history(&self) -> bool {
         self.search.is_some()
     }
@@ -245,25 +258,20 @@ impl PromptBox {
             self.search_paste(text);
         } else {
             self.editor
-                .insert(text.replace("\r\n", "\n").replace('\r', "\n"));
+                .insert(&text.replace("\r\n", "\n").replace('\r', "\n"));
         }
     }
 
-    pub(super) fn handle_key(&mut self, key: KeyEvent) -> Option<PromptAction> {
-        let key = super::line_edit::normalize_key(key);
+    pub(super) fn handle_key(
+        &mut self,
+        key: KeyEvent,
+        kills: &mut crate::line_edit::KillBuffer,
+    ) -> Option<PromptAction> {
+        let key = crate::line_edit::keymap::normalize_control_code(key);
         if key.kind == KeyEventKind::Release {
             return None;
         }
-        if key.code == KeyCode::Char('v')
-            && key.modifiers == KeyModifiers::CONTROL
-            && self.search.is_none()
-        {
-            return Some(PromptAction::PasteImage);
-        }
-        if self.editor.selection_key(key) {
-            return None;
-        }
-        if self.history_key(key) {
+        if self.history_key(key, kills) {
             return None;
         }
         let vertical = match (key.code, key.modifiers) {
@@ -276,8 +284,19 @@ impl PromptBox {
             _ => None,
         };
         if let Some(down) = vertical {
+            self.editor.clear_selection();
             let (width, inset) = self.text_width.get();
-            if !self.editor.move_vertical(width, inset, down) {
+            if !self.editor.move_row(
+                line_edit::Wrap {
+                    width,
+                    first_row_inset: inset,
+                },
+                if down {
+                    line_edit::Vertical::Down
+                } else {
+                    line_edit::Vertical::Up
+                },
+            ) {
                 self.recall_history(down);
             }
             return None;
@@ -298,7 +317,7 @@ impl PromptBox {
                 .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT))
             || (key.code == KeyCode::Char('j') && key.modifiers.contains(KeyModifiers::CONTROL))
         {
-            self.editor.insert('\n');
+            self.editor.insert("\n");
         } else if key.code == KeyCode::Enter {
             if !self.editor.is_empty()
                 && (!self.submitting || matches!(self.state, SendState::Failed(_)))
@@ -309,7 +328,7 @@ impl PromptBox {
                 return Some(PromptAction::Submit(self.editor.prompt_text()));
             }
         } else {
-            self.editor.handle(key);
+            self.editor.handle_key(key, kills);
         }
         None
     }
@@ -324,7 +343,11 @@ mod tests {
         PromptBox::default()
     }
     fn key(editor: &mut PromptBox, code: KeyCode) -> Option<PromptAction> {
-        editor.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+        let mut kills = crate::line_edit::KillBuffer::default();
+        {
+            kills.begin_stroke();
+            editor.handle_key(KeyEvent::new(code, KeyModifiers::NONE), &mut kills)
+        }
     }
     fn rendered(editor: &PromptBox, width: u16, disabled: Option<&str>) -> String {
         let area = Rect::new(0, 0, width, editor.height(width, "Task"));
@@ -466,22 +489,48 @@ mod tests {
 
     #[test]
     fn control_c_clears_then_quits() {
+        let mut kills = crate::line_edit::KillBuffer::default();
         let mut editor = focused();
         editor.paste(REAL_TEXT);
         let clear = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert_eq!(editor.handle_key(clear), None);
+        assert_eq!(
+            {
+                kills.begin_stroke();
+                editor.handle_key(clear, &mut kills)
+            },
+            None
+        );
         assert!(editor.editor.is_empty());
-        assert_eq!(editor.handle_key(clear), Some(PromptAction::Quit));
+        assert_eq!(
+            {
+                kills.begin_stroke();
+                editor.handle_key(clear, &mut kills)
+            },
+            Some(PromptAction::Quit)
+        );
     }
 
     #[test]
     fn escape_clears_then_stops_and_keeps_focus() {
+        let mut kills = crate::line_edit::KillBuffer::default();
         let mut editor = focused();
         editor.paste(REAL_TEXT);
         let escape = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        assert_eq!(editor.handle_key(escape), None);
+        assert_eq!(
+            {
+                kills.begin_stroke();
+                editor.handle_key(escape, &mut kills)
+            },
+            None
+        );
         assert!(editor.editor.is_empty());
-        assert_eq!(editor.handle_key(escape), Some(PromptAction::Stop));
+        assert_eq!(
+            {
+                kills.begin_stroke();
+                editor.handle_key(escape, &mut kills)
+            },
+            Some(PromptAction::Stop)
+        );
     }
 
     #[test]
@@ -502,30 +551,25 @@ mod tests {
     }
 
     #[test]
-    fn failed_send_shows_its_reason_in_red_after_the_label() {
+    fn failed_send_reverses_the_marker_and_keeps_its_reason_for_the_footer() {
         let mut editor = focused();
         editor.editor.set_text("retry me");
-        editor.state = SendState::Failed("Claude attach timed out\nscreen".into());
-        let area = Rect::new(0, 0, 80, 1);
+        editor.state = SendState::Failed("Claude attach timed out".into());
+        let area = Rect::new(0, 0, 40, 1);
         let mut buffer = Buffer::empty(area);
         editor.render(area, &mut buffer, "Task", Style::default(), None, true);
-        let heading = "Task Claude attach timed out ❯ retry me";
-        let screen: String = (0..heading.chars().count() as u16)
+        let screen: String = (0..area.width)
             .map(|column| buffer[(column, 0)].symbol().to_owned())
             .collect();
-        assert_eq!(screen, heading);
-        let marker = heading.find('❯').unwrap();
-        for column in 0..=heading[..marker].chars().count() as u16 {
-            assert_eq!(buffer[(column, 0)].fg, Color::Red, "column {column}");
+        assert_eq!(screen.trim_end(), "Task ❮ retry me");
+        for column in 0..7 {
+            assert_eq!(buffer[(column, 0)].fg, style::error_style().fg.unwrap());
         }
-        assert_ne!(
-            buffer[(heading.chars().count() as u16 - 1, 0)].fg,
-            Color::Red
-        );
-        let caret = editor.cursor(area, "Task").unwrap();
-        assert_eq!(caret, (heading.chars().count() as u16, 0));
+        assert_eq!(editor.failure(), Some("Claude attach timed out"));
+        assert_eq!(editor.cursor(area, "Task"), Some((15, 0)));
         editor.state = SendState::Ready;
-        assert!(!rendered(&editor, 80, None).contains("timed out"));
+        assert_eq!(editor.failure(), None);
+        assert!(rendered(&editor, 40, None).starts_with("Task ❯ retry me"));
     }
 
     #[test]
@@ -604,14 +648,24 @@ mod tests {
 
     #[test]
     fn release_events_do_not_edit_or_submit() {
+        let mut kills = crate::line_edit::KillBuffer::default();
         let mut editor = focused();
         editor.paste(REAL_TEXT);
         let mut release = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         release.kind = KeyEventKind::Release;
-        assert_eq!(editor.handle_key(release), None);
+        assert_eq!(
+            {
+                kills.begin_stroke();
+                editor.handle_key(release, &mut kills)
+            },
+            None
+        );
         assert_eq!(editor.state, SendState::Ready);
         release.code = KeyCode::Backspace;
-        editor.handle_key(release);
+        {
+            kills.begin_stroke();
+            editor.handle_key(release, &mut kills)
+        };
         assert_eq!(editor.editor.text(), REAL_TEXT);
     }
 

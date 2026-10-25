@@ -1,8 +1,8 @@
-use super::event_detail::{EventDetailColumns, Section, event_detail_columns};
+use super::event_detail::{EventDetailArea, EventDetailColumns, Section};
 use super::formatting::{format_event_duration, format_relative_time};
 use super::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use super::*;
-use crate::event::{Event, Kind};
+use crate::event::{ALL_EVENTS, Event, Kind};
 use chrono::{DateTime, Utc};
 
 const TURN_BRACKET: [&str; 3] = ["┐", "│", "┘"];
@@ -13,11 +13,42 @@ pub(super) const CLOCK_WIDTH: usize = 8;
 /// Rows above the scrolling sections: the top rule.
 pub(super) const EVENT_TOP: u16 = 1;
 
-pub(super) fn search_input_rect(area: Rect) -> Rect {
-    super::render::row(area, area.height.saturating_sub(1), 1)
-}
-
 impl View {
+    /// The newest events the list needs: `ALL_EVENTS` while it jumps to the start,
+    /// searches, sorts by duration or restores a saved position; otherwise every loaded
+    /// event and at least `rows`, plus one page while it is scrolled to an older row.
+    pub(crate) fn event_list_read_count(&self, rows: usize) -> usize {
+        if self.event_list.start_requested
+            || self.transcript_fully_loaded()
+            || self.restoring_event_position()
+        {
+            return ALL_EVENTS;
+        }
+        let loaded = self.event_panel.len().max(rows);
+        if self.event_list.has_older
+            && (self.event_page_pending()
+                || (self.event_scroll() == 0
+                    && !self.following_event()
+                    && !matches!(self.selected_event_row(), Some(EventRow::Pinned(_)))))
+        {
+            loaded.saturating_add(rows.max(self.event_list.pending_older).max(1))
+        } else {
+            loaded
+        }
+    }
+
+    /// Takes a finished read into the list and restores its position before clamping.
+    pub(crate) fn finish_event_load(&mut self, has_older: bool) {
+        self.event_list.has_older = has_older;
+        if self.event_list.restoring {
+            self.prepare_event_search();
+            self.restore_event_list();
+        }
+        self.event_list.pending_older = 0;
+        self.finish_event_start();
+        self.clamp_event_scroll(self.event_max_scroll());
+    }
+
     pub(super) fn refresh_transcript(&mut self) {
         let mode = if self.terminal_requested() {
             self.event_detail.return_mode
@@ -56,14 +87,18 @@ impl View {
             if let Some(settings) = &call.model_settings {
                 if let Some(model) = settings.model.as_deref().filter(|model| !model.is_empty()) {
                     let model = self.model_text(settings.provider, model);
-                    call.event_detail_title.push_str(&format!(" · {model}"));
+                    call.title.push_str(&format!(" · {model}"));
+                    if call.name == "advisor" {
+                        call.summary.push_str(&format!(" · {model}"));
+                        display.body.clone_from(&call.summary);
+                    }
                 }
                 if let Some(effort) = settings
                     .effort
                     .as_deref()
                     .filter(|effort| !effort.is_empty())
                 {
-                    call.event_detail_title.push_str(&format!(" · {effort}"));
+                    call.title.push_str(&format!(" · {effort}"));
                 }
             }
         }
@@ -84,6 +119,29 @@ impl View {
         open_text(&self.display_event(event))
     }
 
+    fn event_detail_scroll_key(&self, event: &Event) -> u64 {
+        let record = event
+            .source_records
+            .first()
+            .map(|record| (&record.path, record.offset));
+        event_detail_key(&(
+            self.selected_id(),
+            self.event_detail.mode,
+            matches!(self.selected_event_row(), Some(EventRow::Pinned(_))),
+            &event.source,
+            record,
+            (event.source.is_none() && record.is_none()).then_some((&event.kind, event.started_at)),
+        ))
+    }
+
+    fn restore_event_detail_zoom(&self, event: &Event) {
+        self.restore_event_detail();
+        self.event_detail
+            .scroll
+            .borrow_mut()
+            .switch_zooms(self.event_detail_scroll_key(event));
+    }
+
     fn selected_event_detail_layout(
         &self,
         event: &Event,
@@ -91,6 +149,7 @@ impl View {
         cwd: &Path,
         now: DateTime<Utc>,
     ) -> EventDetailLayout {
+        self.restore_event_detail_zoom(event);
         if self.event_detail.mode == task_ui::EventDetailMode::Transcript {
             let transcript = self
                 .event_detail
@@ -102,6 +161,7 @@ impl View {
                 self.selected_id()
                     .expect("detail belongs to a session")
                     .provider,
+                &event.kind,
             )
             .sections;
             return event_detail_parts_layout(event, columns, cwd, now, sections);
@@ -109,8 +169,17 @@ impl View {
         let display = self.display_event(event);
         let sections =
             super::tool_detail::event_detail_content(&display, String::new(), Style::new().dim())
+                .with_images(&display, cwd)
                 .sections;
-        event_detail_parts_layout(event, columns, cwd, now, sections)
+        let zooms = &self.event_detail.scroll.borrow().zooms;
+        let mut images = self.inline_images.borrow_mut();
+        event_detail_parts_layout_with_images(event, columns, cwd, now, sections, |index, image| {
+            images.as_mut()?.size(
+                image,
+                columns.text.width,
+                zooms.get(&index).copied().unwrap_or_default(),
+            )
+        })
     }
 
     pub(super) fn render_event(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
@@ -136,21 +205,9 @@ impl View {
         if self.event_session.as_ref() != Some(&session.id) {
             return;
         }
-        if self.event_list.search.active() && area.height > 1 {
-            let input = search_input_rect(area);
-            if self.event_list.search.editing {
-                super::render::render_input_row(
-                    &format!("Search {PROMPT_MARKER} "),
-                    &self.event_list.search.query,
-                    input,
-                    buf,
-                );
-            } else {
-                Line::from(self.event_list.search.query.text().to_owned())
-                    .dim()
-                    .right_aligned()
-                    .render(input, buf);
-            }
+        if self.event_list.search.input.applied() && area.height > 1 {
+            let input = super::search_input::search_row(area);
+            self.event_list.search.input.render(input, buf);
         }
         let max_scroll = self.event_max_scroll();
         self.event_list
@@ -163,7 +220,7 @@ impl View {
         let pinned_count = self.shown_pinned_count();
         let height = usize::from(
             area.height
-                .saturating_sub(u16::from(self.event_list.search.active())),
+                .saturating_sub(u16::from(self.event_list.search.input.applied())),
         );
         let (pinned_height, timeline_height) = self.event_section_heights(height);
         let separator = usize::from(pinned_height > 0);
@@ -205,8 +262,9 @@ impl View {
                 self.event_list.sort
             };
             let time = event_time(event, session, last, now, sort);
+            let display = self.display_event(event);
             let links = render_event(
-                event,
+                &display,
                 &time,
                 last,
                 super::render::row(area, y as u16, 1),
@@ -281,7 +339,15 @@ impl View {
         })
     }
 
-    pub(super) fn render_event_detail(&self, area: Rect, buf: &mut Buffer, now: DateTime<Utc>) {
+    pub(super) fn render_event_detail(
+        &self,
+        areas: impl Into<EventDetailArea>,
+        buf: &mut Buffer,
+        now: DateTime<Utc>,
+    ) {
+        self.viewport.borrow_mut().event_detail_images.clear();
+        let areas = areas.into();
+        let area = areas.content;
         if self.event_session.as_ref() == self.selected_id() {
             self.restore_event_detail();
         }
@@ -306,8 +372,27 @@ impl View {
             self.event_list.sort,
         );
         let list_links = self.viewport.borrow().event_links.clone();
-        self.render_event_detail_content(event, &time, area, buf, &session.cwd, now);
+        self.render_event_detail_content(event, &time, areas, buf, &session.cwd, now);
         self.viewport.borrow_mut().event_links.extend(list_links);
+    }
+
+    /// The following event's first title, once the current event's last row is visible.
+    pub(super) fn next_event_title(&self) -> Option<Line<'static>> {
+        let viewport = self.viewport.borrow();
+        let layout = viewport.event_detail_layout.as_ref()?;
+        if layout.visible.last().copied()? + 1 != layout.lines.len() {
+            return None;
+        }
+        let width = usize::from(layout.columns.text.width);
+        let session = self.selected_row()?;
+        let (_, event) = self.shown_event_rows().nth(self.event_list.cursor? + 1)?;
+        let title =
+            super::tool_detail::event_detail_content(event, String::new(), Style::default())
+                .sections
+                .into_iter()
+                .next()?
+                .title;
+        Some(title.title_in(width, &session.cwd).0)
     }
 
     /// Draws the duration label or the New button at the time column’s right edge.
@@ -321,7 +406,7 @@ impl View {
         }
         let label = if self.event_list.sort == EventSort::Duration {
             self.event_list.unseen.set(0);
-            " duration ".to_owned()
+            " duration".to_owned()
         } else {
             if self.following_event() {
                 self.event_list.unseen.set(0);
@@ -330,17 +415,20 @@ impl View {
             if self.event_list.unseen.get() == 0 {
                 return;
             }
-            format!(" ↓ {} New ", self.event_list.unseen.get())
+            format!(" ↓ {} New", self.event_list.unseen.get())
         };
         let width = (label.width() as u16).min(area.width.saturating_sub(2));
-        let right = viewport
-            .event_panel
-            .right()
-            .saturating_add(1)
-            .min(area.right());
+        let right = event_row_areas(self.center_layout(buf.area).event_panel)
+            .1
+            .right();
         let jump = Rect::new(right.saturating_sub(width), area.y, width, 1);
         Clear.render(jump, buf);
-        Line::from(Span::styled(label, Style::new().dim())).render(jump, buf);
+        Line::from(Span::styled(label, style::rule_label_style())).render(jump, buf);
+        for x in jump.right()..area.right() {
+            buf[(x, area.y)]
+                .set_symbol(if x == jump.right() { "╶" } else { "─" })
+                .set_style(Style::default().dim());
+        }
         viewport.event_label = jump;
         if self.event_list.sort == EventSort::Time {
             viewport.event_jump = jump;
@@ -352,34 +440,24 @@ impl View {
         &self,
         event: &Event,
         time: &str,
-        area: Rect,
+        areas: impl Into<EventDetailArea>,
         buf: &mut Buffer,
         cwd: &std::path::Path,
         now: DateTime<Utc>,
     ) {
-        let list = self.center_layout(buf.area).event_panel;
-        let columns = event_detail_columns(area, list);
+        self.restore_event_detail_zoom(event);
+        let areas = areas.into();
+        let area = areas.content;
+        let columns = EventDetailColumns::new(area);
         let mut body_area = super::render::row(
             columns.text,
             EVENT_TOP,
             area.height.saturating_sub(EVENT_TOP),
         );
-        if self.event_detail.search.active() {
+        if self.event_detail.search.input.applied() {
             body_area.height = body_area.height.saturating_sub(1);
-            let input = search_input_rect(area);
-            if self.event_detail.search.editing {
-                super::render::render_input_row(
-                    &format!("Search {PROMPT_MARKER} "),
-                    &self.event_detail.search.query,
-                    input,
-                    buf,
-                );
-            } else {
-                Line::from(self.event_detail.search.query.text().to_owned())
-                    .dim()
-                    .right_aligned()
-                    .render(input, buf);
-            }
+            let input = super::search_input::search_row(area);
+            self.event_detail.search.input.render(input, buf);
         }
         let height = usize::from(body_area.height);
         let mut viewport = self.viewport.borrow_mut();
@@ -387,7 +465,8 @@ impl View {
             Some(layout)
                 if layout.columns == columns
                     && layout.height == height
-                    && layout.theme_generation == super::highlight::theme_generation() =>
+                    && layout.theme_generation == super::highlight::theme_generation()
+                    && !layout.file_images_changed() =>
             {
                 layout
             }
@@ -415,30 +494,35 @@ impl View {
                 .content = super::tool_detail::running_frame(now).into();
         }
         // The scrollbar sits in the panel's right padding, outside the body.
-        let scrollbar_x = area.right();
-        let overflow = layout.lines.len() > height && scrollbar_x < buf.area.right();
+        let scrollbar_x = Some(area.right()).filter(|&x| x < buf.area.right());
+        let overflow = layout.lines.len() > height;
         for (source, links) in layout.sources.iter().zip(&mut layout.links) {
             super::links::add_commits(&source.text, cwd, links);
         }
         viewport.event_detail_columns = Some(columns);
         let rows = self.event_detail_scroll_layout(event, &layout, body_area, &mut viewport);
         let scroll = rows.scroll;
-        let cuts = rows.cuts;
+        let cuts = rows
+            .cuts
+            .into_iter()
+            .filter(|&row| layout.cut_text(row))
+            .collect::<Vec<_>>();
         let kept = rows.kept;
-        if overflow && height > 0 {
+        let mut thumb_rows = 0..0;
+        if let Some(x) = scrollbar_x.filter(|_| overflow && height > 0) {
             let thumb = (height * height)
                 .div_ceil(height + viewport.event_detail_max)
                 .max(1)
                 .min(height);
             let top = scroll * (height - thumb) / viewport.event_detail_max.max(1);
+            thumb_rows = top..top + thumb;
             for row in 0..height {
-                buf[(scrollbar_x, body_area.y + row as u16)].set_symbol(
-                    if (top..top + thumb).contains(&row) {
-                        "▕"
-                    } else {
-                        " "
-                    },
-                );
+                let y = body_area.y + row as u16;
+                buf[(x, y)].set_symbol(if thumb_rows.contains(&row) {
+                    "▕"
+                } else {
+                    " "
+                });
             }
         }
         let visible_rows = kept
@@ -458,9 +542,12 @@ impl View {
                 }
                 text_selection::DrawnRow {
                     segment: *segment,
+                    index: source,
+                    continuation: layout.continuations.get(&source).copied(),
                     x: body_area.x,
                     y: body_area.y + row as u16,
                     cells,
+                    ..Default::default()
                 }
             })
             .collect();
@@ -479,6 +566,9 @@ impl View {
         let mut visible = visible_rows
             .iter()
             .map(|&source| {
+                if !layout.cut_text(source) {
+                    return Line::default();
+                }
                 let mut line = layout.lines[source].clone();
                 if cuts.contains(&source) {
                     line = super::line_truncation::truncate_line_to_width(
@@ -491,7 +581,12 @@ impl View {
             })
             .collect::<Vec<_>>();
         let times = layout.times.clone();
-        // The section on the top row keeps its title in the footer once the title scrolls off.
+        let call_titles: Vec<usize> = if shows_calls(event) && layout.titles.len() > 1 {
+            layout.titles.iter().map(|(row, _)| *row).collect()
+        } else {
+            Vec::new()
+        };
+        // The section on the top row keeps its title on the top edge once its title scrolls off.
         viewport.event_detail_footer_title = visible_rows.first().and_then(|&top| {
             layout
                 .titles
@@ -501,11 +596,26 @@ impl View {
                 .filter(|(row, _)| *row < top)
                 .map(|(_, title)| (title.clone(), columns))
         });
+        let drawn_images = layout.drawn_images(&visible_rows, body_area);
         layout.visible = visible_rows.clone();
         viewport.event_detail_layout = Some(layout);
         drop(viewport);
         for line in &mut visible {
             highlight_matches(line, &self.event_detail.search);
+        }
+        // Text keeps its inset and clock column; changed rows fill the pane including padding.
+        for (row, line) in visible.iter().enumerate() {
+            if let Some(background) = line.style.bg {
+                buf.set_style(
+                    Rect::new(
+                        areas.panel.x,
+                        body_area.y + row as u16,
+                        areas.panel.width,
+                        1,
+                    ),
+                    Style::new().bg(background),
+                );
+            }
         }
         Paragraph::new(visible).render(body_area, buf);
         for (row, time) in times {
@@ -519,8 +629,34 @@ impl View {
                 Line::from(time).right_aligned().render(time_area, buf);
             }
         }
+        // Merged calls' titles reach into the pane padding, like the task details' background titles.
+        // The scrollbar thumb hides the right one so the thumb stays whole.
+        if areas.panel.x < columns.text.x && areas.panel.right() > columns.time.right() {
+            for row in call_titles {
+                if let Some(row) = visible_rows.iter().position(|&source| source == row) {
+                    let y = body_area.y + row as u16;
+                    let right =
+                        (!thumb_rows.contains(&row)).then_some((areas.panel.right() - 1, "╶"));
+                    for (x, cap) in [(areas.panel.x, "╴")].into_iter().chain(right) {
+                        buf[(x, y)]
+                            .set_symbol(cap)
+                            .set_style(Style::default().dim());
+                    }
+                }
+            }
+        }
         self.highlight_text_selection(text_selection::Panel::Event, buf);
         super::links::underline(buf, &self.viewport.borrow().event_links);
+        if let Some(images) = self.inline_images.borrow_mut().as_mut() {
+            let detail = self.event_detail.scroll.borrow();
+            for drawn in &drawn_images {
+                // The image replaces its selectable placeholder text on screen.
+                Clear.render(drawn.area, buf);
+                let zoom = detail.zooms.get(&drawn.index).copied().unwrap_or_default();
+                images.draw(&drawn.image, zoom, drawn.first_row, drawn.area, buf);
+            }
+            self.viewport.borrow_mut().event_detail_images = drawn_images;
+        }
     }
 
     fn event_detail_scroll_layout(
@@ -533,19 +669,9 @@ impl View {
         self.restore_event_detail();
         let mut detail = self.event_detail.scroll.borrow_mut();
         detail.event = super::task_ui::EventId::from_event(event);
-        let record = event
-            .source_records
-            .first()
-            .map(|record| (&record.path, record.offset));
-        let key = event_detail_key(&(
-            self.selected_id(),
-            self.event_detail.mode,
-            matches!(self.selected_event_row(), Some(EventRow::Pinned(_))),
-            &event.source,
-            record,
-            (event.source.is_none() && record.is_none()).then_some((&event.kind, event.started_at)),
-        ));
+        let key = self.event_detail_scroll_key(event);
         let switched = detail.key != Some(key);
+        let follow_output = std::mem::take(&mut detail.follow_output) && !switched;
         let entry = detail.entry.take().filter(|_| switched);
         if switched {
             let mut left = std::mem::take(&mut detail.state);
@@ -572,8 +698,9 @@ impl View {
             .collect::<Vec<_>>();
         let static_rows = layout.lines.len() - wants.iter().sum::<usize>();
         let allocations = if self.event_detail.mode != task_ui::EventDetailMode::Transcript
+            && wants.len() <= 1
             && height >= static_rows + wants.iter().filter(|&&rows| rows > 0).count()
-            && !self.event_detail.search.active()
+            && !self.event_detail.search.input.applied()
             && !external_scroll
             && state.offset == 0
         {
@@ -593,7 +720,7 @@ impl View {
             0..0,
             height,
         );
-        if entry == Some(false) {
+        if entry == Some(false) || follow_output {
             if allocations.is_some() {
                 state.reveal = state.hidden.clone();
             } else {
@@ -620,6 +747,7 @@ impl View {
         let Some(session) = self.selected_row() else {
             return;
         };
+        self.restore_event_detail_zoom(event);
         let mut viewport = self.viewport.borrow_mut();
         let Some(columns) = viewport.event_detail_columns else {
             return;
@@ -630,7 +758,7 @@ impl View {
             EVENT_TOP,
             area.height.saturating_sub(EVENT_TOP),
         );
-        if self.event_detail.search.active() {
+        if self.event_detail.search.input.applied() {
             body_area.height = body_area.height.saturating_sub(1);
         }
         let layout = viewport.event_detail_layout.take().unwrap_or_else(|| {
@@ -647,20 +775,18 @@ impl View {
         let Some(event) = self.visible_event() else {
             return;
         };
-        if self.event_detail.search.query.is_empty() {
+        if self.event_detail.search.input.text().is_empty() {
             return;
         }
         let viewport = self.viewport.borrow();
+        let Some(columns) = viewport.event_detail_columns else {
+            return;
+        };
         let cwd = self
             .selected_row()
             .map(|session| session.cwd.as_path())
             .unwrap_or(Path::new("."));
-        let layout = self.selected_event_detail_layout(
-            event,
-            event_detail_columns(viewport.event_detail, viewport.event_panel),
-            cwd,
-            DateTime::UNIX_EPOCH,
-        );
+        let layout = self.selected_event_detail_layout(event, columns, cwd, DateTime::UNIX_EPOCH);
         let found = layout
             .lines
             .iter()
@@ -704,15 +830,15 @@ impl View {
                 .min(last)
         });
         if self.event_list.cursor != index || background {
+            self.exit_image_zoom();
             self.cancel_event_detail_selection();
             self.event_list.cursor = index;
-            self.event_detail.search.clear();
+            self.edit_search(Panel::EventDetail, search_input::SearchInput::close);
             let mut viewport = self.viewport.borrow_mut();
             viewport.event_detail_layout = None;
             let mut detail = self.event_detail.scroll.borrow_mut();
             detail.offset = 0;
             detail.entry = None;
-            detail.title_hold = None;
         }
         if self.following_event() {
             self.event_list.unseen.set(0);
@@ -940,10 +1066,15 @@ impl View {
         self.event_list.scroll.set(0);
     }
 
-    pub(crate) fn initialize_event_sort(&mut self, sorting: EventSort) {
-        if !self.event_list.sort_initialized {
+    pub(crate) fn initialize_event_list(
+        &mut self,
+        sorting: EventSort,
+        filter: crate::event::EventFilter,
+    ) {
+        if !self.event_list.settings_initialized {
             self.event_list.sort = sorting;
-            self.event_list.sort_initialized = true;
+            self.event_list.filter = filter;
+            self.event_list.settings_initialized = true;
         }
     }
 
@@ -1267,7 +1398,7 @@ impl View {
                 .borrow()
                 .event_panel
                 .height
-                .saturating_sub(u16::from(self.event_list.search.active())),
+                .saturating_sub(u16::from(self.event_list.search.input.applied())),
         )
     }
 
@@ -1313,9 +1444,6 @@ impl View {
                 .pinned = rows;
         }
     }
-    pub fn clear_pinned_events(&mut self, key: &SessionKey) {
-        self.set_pinned_events(key, Vec::new());
-    }
     pub fn has_pinned_events(&self, key: &SessionKey) -> bool {
         if self.selected_id() == Some(key) {
             !self.event_list.pinned.is_empty()
@@ -1326,11 +1454,7 @@ impl View {
         }
     }
     pub(super) fn toggle_event_pin(&mut self) -> Option<Action> {
-        let session = self.selected_row()?;
-        if session.status == SessionStatus::Inactive {
-            return Some(Action::Unsupported("Pin"));
-        }
-        let task = session.id.clone();
+        let task = self.selected_row()?.id.clone();
         let event = self.visible_event()?.clone();
         if event.source.as_deref().is_none_or(str::is_empty)
             || event.source_records.is_empty()
@@ -1390,7 +1514,7 @@ impl View {
         })
     }
 
-    /// The events the search lets through, with their index in the event list.
+    /// The timeline events the active filters let through, with their full index.
     pub(super) fn shown_events(&self) -> impl Iterator<Item = (usize, &Event)> {
         let order: Box<dyn Iterator<Item = usize> + '_> =
             if self.event_list.sort == EventSort::Duration {
@@ -1400,6 +1524,11 @@ impl View {
             };
         order
             .filter(|&index| self.event_matches(index))
+            .filter(|&index| {
+                self.event_list
+                    .filter
+                    .includes(&self.event_panel[index].kind)
+            })
             .map(|index| (index, &self.event_panel[index]))
     }
 }
@@ -1435,18 +1564,37 @@ fn mode_row_time(event: &Event, session: &Session, last: bool, sort: EventSort) 
         return Some(row_time(event, session, last));
     }
     match event.kind {
+        _ if (event.kind == Kind::Assistant && event.completed_time)
+            || matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) =>
+        {
+            match row_time(event, session, last) {
+                time @ (RowTime::Settled(_) | RowTime::Running(_)) => Some(time),
+                RowTime::Clock(_) | RowTime::Ago(_) => None,
+            }
+        }
         Kind::User | Kind::Assistant => event
             .previous_end
             .map(|previous| RowTime::Settled(event.started_at - previous)),
-        Kind::Tool | Kind::Error | Kind::Denied => match row_time(event, session, last) {
-            time @ (RowTime::Settled(_) | RowTime::Running(_)) => Some(time),
-            RowTime::Clock(_) | RowTime::Ago(_) => None,
-        },
         _ => None,
     }
 }
 
 fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
+    if event.completed_time
+        && matches!(
+            event.kind,
+            Kind::Assistant | Kind::Tool | Kind::Error | Kind::Denied
+        )
+        && let Some(end) = event.ended_at
+    {
+        return match event.duration {
+            Some(duration) => RowTime::Settled(duration),
+            None => RowTime::Clock(end),
+        };
+    }
+    if event.completed_time && event.kind == Kind::Assistant {
+        return RowTime::Running(event.started_at);
+    }
     if !matches!(event.kind, Kind::Tool | Kind::Error | Kind::Denied) {
         return if last {
             RowTime::Ago(event.started_at)
@@ -1456,14 +1604,6 @@ fn row_time(event: &Event, session: &Session, last: bool) -> RowTime {
             RowTime::Settled(event.started_at - reference)
         } else {
             RowTime::Clock(event.started_at)
-        };
-    }
-    if event.completed_time
-        && let Some(end) = event.ended_at
-    {
-        return match event.duration {
-            Some(duration) => RowTime::Settled(duration),
-            None => RowTime::Clock(end),
         };
     }
     let Some(previous) = event.previous_end else {
@@ -1549,7 +1689,7 @@ fn render_event(
     last: bool,
     area: Rect,
     buf: &mut Buffer,
-    search: Option<&super::event_search::EventSearch>,
+    search: Option<&super::event_search::EventMatches>,
     cwd: &std::path::Path,
 ) -> Vec<super::links::DrawnLink> {
     if area.is_empty() {
@@ -1580,7 +1720,7 @@ fn render_event(
     } as u16;
     // Match the full row so a match crossing the right edge still highlights its prefix.
     let indices = search
-        .filter(|search| !search.query.is_empty())
+        .filter(|search| !search.input.text().is_empty())
         .map(|search| search.indices(&body.to_string()));
     body = truncate_line_with_ellipsis_if_overflow(body, body_width);
     let links = {
@@ -1603,6 +1743,7 @@ fn render_event(
                 x: body_x,
                 y: area.y,
                 cells,
+                ..Default::default()
             }],
             &links,
         )
@@ -1637,6 +1778,7 @@ pub(super) struct EventDetailLayout {
     visible: Vec<usize>,
     /// Each line's text part and the cells mapping it back to that part's bytes.
     rows: Vec<(usize, Cells)>,
+    continuations: std::collections::BTreeMap<usize, bool>,
     sources: Vec<text_selection::Source>,
     /// The links in each text part.
     links: Vec<Vec<super::links::Link>>,
@@ -1646,6 +1788,59 @@ pub(super) struct EventDetailLayout {
     titles: Vec<(usize, Line<'static>)>,
     bodies: Vec<std::ops::Range<usize>>,
     body_keys: Vec<u64>,
+    images: Vec<DetailImage>,
+    /// Includes files whose decoding failed, so repairing them can restore their rows.
+    file_images: std::collections::HashMap<PathBuf, Option<FileImageVersion>>,
+}
+
+type FileImageVersion = (u64, std::time::SystemTime);
+
+fn file_image_version(path: &Path) -> Option<FileImageVersion> {
+    let metadata = path.metadata().ok()?;
+    metadata
+        .is_file()
+        .then_some((metadata.len(), metadata.modified().ok()?))
+}
+
+struct DetailImage {
+    index: usize,
+    image: crate::images::ImageSource,
+    rows: std::ops::Range<usize>,
+    x: u16,
+    width: u16,
+}
+
+impl EventDetailLayout {
+    fn file_images_changed(&self) -> bool {
+        self.file_images
+            .iter()
+            .any(|(path, version)| file_image_version(path) != *version)
+    }
+
+    fn cut_text(&self, row: usize) -> bool {
+        !self.images.iter().any(|image| image.rows.contains(&row))
+    }
+
+    fn drawn_images(&self, visible: &[usize], area: Rect) -> Vec<super::event_detail::DrawnImage> {
+        self.images
+            .iter()
+            .filter_map(|image| {
+                let top = visible.iter().position(|row| image.rows.contains(row))?;
+                let height = visible[top..]
+                    .iter()
+                    .take_while(|row| image.rows.contains(row))
+                    .count() as u16;
+                let image_area =
+                    Rect::new(image.x, area.y + top as u16, image.width, height).intersection(area);
+                (!image_area.is_empty()).then(|| super::event_detail::DrawnImage {
+                    index: image.index,
+                    image: image.image.clone(),
+                    area: image_area,
+                    first_row: (visible[top] - image.rows.start) as u16,
+                })
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -1655,15 +1850,15 @@ fn event_detail_layout(
     cwd: &std::path::Path,
     now: DateTime<Utc>,
 ) -> EventDetailLayout {
-    let view = View::new(Grouping::Project, false);
     let panel = Rect::new(0, 0, width, 1);
-    let list = view.center_layout(Rect::new(0, 0, width, 45)).event_panel;
     event_detail_parts_layout(
         event,
-        event_detail_columns(panel, list),
+        EventDetailColumns::new(panel),
         cwd,
         now,
-        super::tool_detail::event_detail_content(event, String::new(), Style::new().dim()).sections,
+        super::tool_detail::event_detail_content(event, String::new(), Style::new().dim())
+            .with_images(event, cwd)
+            .sections,
     )
 }
 
@@ -1707,8 +1902,25 @@ fn event_detail_parts_layout(
     now: DateTime<Utc>,
     sections: Vec<Section>,
 ) -> EventDetailLayout {
+    event_detail_parts_layout_with_images(event, columns, cwd, now, sections, |_, _| None)
+}
+
+/// Layout uses resolved cell sizes, independently of image decoding and terminal uploads.
+fn event_detail_parts_layout_with_images(
+    event: &Event,
+    columns: EventDetailColumns,
+    cwd: &Path,
+    now: DateTime<Utc>,
+    sections: Vec<Section>,
+    mut image_size: impl FnMut(usize, &crate::images::ImageSource) -> Option<(u16, u16)>,
+) -> EventDetailLayout {
     let width = usize::from(columns.text.width);
-    let body_style = Style::default();
+    let body_style = if matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem) {
+        super::style::queued_style()
+    } else {
+        Style::default()
+    };
+    let mut image_index = 0;
     let mut layout = EventDetailLayout {
         columns,
         height: 0,
@@ -1717,12 +1929,15 @@ fn event_detail_parts_layout(
         running: Vec::new(),
         visible: Vec::new(),
         rows: Vec::new(),
+        continuations: Default::default(),
         sources: Vec::new(),
         links: Vec::new(),
         times: Vec::new(),
         titles: Vec::new(),
         bodies: Vec::new(),
         body_keys: Vec::new(),
+        images: Vec::new(),
+        file_images: Default::default(),
     };
     for (section_index, section) in sections.into_iter().enumerate() {
         if section_index > 0 {
@@ -1761,38 +1976,104 @@ fn event_detail_parts_layout(
         layout.rows.push((layout.sources.len() - 1, Vec::new()));
         let body_start = layout.lines.len();
         let source_start = layout.sources.len();
+        // A blank line separates content blocks; the arrow sits flush against the blocks it joins.
+        let mut previous_arrow: Option<bool> = None;
         for group in section.groups {
+            let arrow = group.parts.iter().all(super::tool_detail::Part::arrow);
+            if previous_arrow.is_some_and(|previous| !previous && !arrow) {
+                layout.lines.push(Line::default());
+                layout.rows.push((layout.sources.len() - 1, Vec::new()));
+            }
+            previous_arrow = Some(arrow);
             let rendered: Vec<_> = group
                 .parts
                 .into_iter()
                 .map(|part| {
                     let reading_width = if part.reading_column() {
-                        columns.reading_width.min(columns.text.width)
+                        columns.reading_width()
                     } else {
                         columns.text.width
                     };
-                    let lines = part.lines_in(usize::from(reading_width), body_style, now, cwd);
-                    (part, lines)
+                    let (mut lines, mut breaks) =
+                        part.layout_in(usize::from(reading_width), body_style, now, cwd);
+                    let image = part.shown_image().and_then(|image| {
+                        let index = image_index;
+                        image_index += 1;
+                        let mut source = image.source.clone();
+                        if let crate::images::ImageSource::File {
+                            path,
+                            len,
+                            modified,
+                        } = &mut source
+                        {
+                            let &(size, time) = layout
+                                .file_images
+                                .entry(path.clone())
+                                .or_insert_with(|| file_image_version(path))
+                                .as_ref()?;
+                            *len = size;
+                            *modified = time;
+                        }
+                        image_size(index, &source).map(|size| (index, source, size))
+                    });
+                    if let Some((_, _, (_, height))) = &image {
+                        lines.resize(usize::from(*height), Line::default());
+                        breaks.resize(lines.len(), None);
+                    }
+                    (part, lines, breaks, image)
                 })
                 .collect();
             let group_width = rendered
                 .iter()
-                .flat_map(|(_, lines)| lines.iter())
-                .map(Line::width)
+                .map(|(_, lines, _, image)| {
+                    image.as_ref().map_or_else(
+                        || lines.iter().map(Line::width).max().unwrap_or(0),
+                        |(_, _, (width, _))| usize::from(*width),
+                    )
+                })
                 .max()
                 .unwrap_or(0)
                 .min(width);
             let group_x =
                 super::centering::centered_x(columns.panel, columns.text, group_width as u16);
             let padding = usize::from(group_x - columns.text.x);
-            for (part, lines) in rendered {
+            for (part, lines, breaks, image) in rendered {
                 let id = layout.sources.len();
                 let mut maps = part.maps_in(&lines, cwd);
                 let first = layout.lines.len();
+                // A drawn image shows no text, so its label carries no text links.
+                let drawn_image = image.is_some();
+                let caption_image = if image.is_none() {
+                    part.shown_image()
+                } else {
+                    None
+                };
+                if let Some((index, source, (width, _))) = image {
+                    layout.images.push(DetailImage {
+                        index,
+                        image: source,
+                        rows: first..first + lines.len(),
+                        x: group_x,
+                        width: width.min(columns.text.right().saturating_sub(group_x)),
+                    });
+                }
+                layout.continuations.extend(
+                    breaks
+                        .into_iter()
+                        .enumerate()
+                        .filter_map(|(row, join)| join.map(|space| (first + row, space))),
+                );
                 if part.running() && width > 0 {
                     layout.running.push(first);
                 }
-                let mut links = if part.markdown()
+                let mut links = if drawn_image {
+                    Vec::new()
+                } else if let Some(image) = caption_image {
+                    vec![super::links::Link {
+                        range: 0..part.source.len(),
+                        target: super::links::LinkTarget::Image(image.source.clone()),
+                    }]
+                } else if part.markdown()
                     || (!shows_calls(event)
                         && (is_prose(&event.kind) || event.kind == Kind::QueuedUser))
                 {
@@ -1814,7 +2095,7 @@ fn event_detail_parts_layout(
                     if let Some(target) = super::vscode::file_line_link(&link.path, link.line) {
                         links.push(super::links::Link {
                             range: link.range.clone(),
-                            target: target.into(),
+                            target: super::links::LinkTarget::Path(target.into()),
                         });
                     }
                 }
@@ -1897,53 +2178,13 @@ pub(super) fn open_text(event: &Event) -> String {
         .join("\n")
 }
 
-/// Draws a scrolled-off section title in the footer after the hints: on the detail's midline
-/// when `centered` and that clears them, otherwise ending at the text column so the time
-/// column stays empty.
-pub(super) fn render_footer_title(
-    title: Line<'static>,
-    columns: EventDetailColumns,
-    footer: Rect,
-    hints_width: u16,
-    centered: bool,
-    buf: &mut Buffer,
-) {
-    let start = footer.x.saturating_add(hints_width).saturating_add(2);
-    let end = columns.text.right().min(footer.right());
-    if end <= start {
-        return;
-    }
-    let title = truncate_line_with_ellipsis_if_overflow(
-        Line::from(title.to_string()).dim(),
-        usize::from(end - start),
-    );
-    let width = title.width() as u16;
-    let midline = super::centering::centered_x(columns.panel, columns.text, width);
-    let x = if centered && midline >= start {
-        midline
-    } else {
-        end - width
-    };
-    title.render(Rect::new(x, footer.y, width, 1), buf);
-}
-
 /// The footer confirmation after copying an open event.
 pub(super) fn copied_label(_event: &Event) -> String {
     "Copied message".into()
 }
 
-pub(super) fn kind_label(kind: &Kind) -> &'static str {
-    match kind {
-        Kind::User => "User",
-        Kind::Compaction => "Compaction",
-        Kind::Assistant => "Assistant",
-        Kind::Agent => "Agent",
-        Kind::Session => "Session",
-        Kind::Tool => "Tool",
-        Kind::Error => "Error",
-        Kind::Denied => "Denied",
-        Kind::QueuedUser | Kind::QueuedSystem => "Queue",
-    }
+pub(super) fn kind_label(kind: &Kind) -> String {
+    super::formatting::title_words(&format!("{kind:?}"))
 }
 
 use super::text::is_prose;
@@ -1964,8 +2205,9 @@ pub(super) struct FittedBody {
 
 fn fitted_body_line(event: &Event, body_width: usize, cwd: &std::path::Path) -> FittedBody {
     let activity = event.activity();
+    let label = super::render::image_labels(&activity.label, &event.images);
     summary_line(
-        &activity.label,
+        &label,
         &activity.kind,
         activity.exit_code,
         &activity.paths,
@@ -2003,8 +2245,8 @@ pub(super) fn summary_line(
     }
 }
 
-/// An event's body with whitespace runs collapsed and home paths shown as
-/// `~`, and the byte ranges of its paths in that text.
+/// An event's body with whitespace runs collapsed, and the byte ranges of its
+/// paths in that text.
 fn display_paths(
     label: &str,
     paths: &[std::ops::Range<usize>],
@@ -2015,9 +2257,9 @@ fn display_paths(
     let mut end = 0;
     for range in &summary_paths(label, paths, cwd) {
         text.push_str(&collapse_whitespace(&label[end..range.start]));
-        let path = super::line_truncation::abbreviate_path(&label[range.clone()], usize::MAX, None);
+        let path = &label[range.clone()];
         ranges.push(text.len()..text.len() + path.len());
-        text.push_str(&path);
+        text.push_str(path);
         end = range.end;
     }
     text.push_str(&collapse_whitespace(&label[end..]));
@@ -2063,8 +2305,8 @@ fn collapse_whitespace(text: &str) -> String {
     collapsed
 }
 
-fn highlight_matches(line: &mut Line<'static>, search: &super::event_search::EventSearch) {
-    if !search.query.is_empty() {
+fn highlight_matches(line: &mut Line<'static>, search: &super::event_search::EventMatches) {
+    if !search.input.text().is_empty() {
         let indices = search.indices(&line.to_string());
         highlight_indices(line, &indices);
     }
@@ -2082,7 +2324,7 @@ fn highlight_indices(line: &mut Line<'static>, indices: &[u32]) {
                     true,
                 ) {
                     let style = if indices.binary_search(&offset).is_ok() {
-                        span.style.bold()
+                        style::search_match_style(span.style)
                     } else {
                         span.style
                     };
@@ -2099,6 +2341,62 @@ fn highlight_indices(line: &mut Line<'static>, indices: &[u32]) {
 pub(super) mod event_markdown {
     use super::*;
     use ratatui::style::Modifier;
+
+    #[test]
+    fn search_matches_swap_assistant_and_tool_colors_in_bold() {
+        let assistant = style::assistant_style();
+        let tool = Style::default().fg(crate::theme::text_accent_color());
+        let mut line = Line::from(vec![
+            Span::styled("ab", assistant),
+            Span::styled("cd", tool),
+            Span::raw("ef"),
+        ]);
+        highlight_indices(&mut line, &[0, 2, 4]);
+        let styles: Vec<_> = line.spans.iter().map(|span| span.style).collect();
+        assert_eq!(styles[0], tool.bold());
+        assert_eq!(styles[1], assistant);
+        assert_eq!(styles[2], assistant.bold());
+        assert_eq!(styles[3], tool);
+        assert_eq!(styles[4], assistant.bold());
+        assert_eq!(styles[5], Style::default());
+    }
+
+    #[test]
+    fn mixed_prompt_image_label_is_visible_and_linked_in_the_list() {
+        let mut record: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-prompt-images.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        record["message"]["content"][0]["text"] = "Inspect image".into();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("transcript.jsonl");
+        std::fs::write(&path, format!("{record}\n")).unwrap();
+        let event = crate::providers::claude::event_reader::tail(&path, 20)
+            .unwrap()
+            .remove(0);
+        let area = Rect::new(0, 0, 120, 1);
+        let mut buffer = Buffer::empty(area);
+        let links = render_event(&event, "", false, area, &mut buffer, None, dir.path());
+        let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("Inspect image"), "{text}");
+        assert!(text.contains(&event.images[0].label), "{text}");
+        let snapshot = format!("{}\n", text.trim_end());
+        if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+            std::fs::write("tests/ui_snapshots/mixed_prompt_image_list.txt", &snapshot).unwrap();
+        }
+        assert_eq!(
+            snapshot,
+            include_str!("../../tests/ui_snapshots/mixed_prompt_image_list.txt")
+        );
+        assert_eq!(links.len(), 1);
+        assert_eq!(
+            links[0].1,
+            super::super::links::LinkTarget::Image(event.images[0].source.clone())
+        );
+    }
 
     #[test]
     fn queued_pasted_image_links_in_the_list_and_event_detail() {
@@ -2123,13 +2421,9 @@ pub(super) mod event_markdown {
         let event = &events[0];
         let image = &event.images[0];
         let layout = event_detail_layout(event, 200, dir.path(), DateTime::UNIX_EPOCH);
-        assert!(
-            layout
-                .links
-                .iter()
-                .flatten()
-                .any(|link| link.target == image.path)
-        );
+        assert!(layout.links.iter().flatten().any(
+            |link| link.target == super::super::links::LinkTarget::Image(image.source.clone())
+        ));
         let area = Rect::new(0, 0, 200, 1);
         let links = render_event(
             event,
@@ -2140,7 +2434,54 @@ pub(super) mod event_markdown {
             None,
             dir.path(),
         );
-        assert!(links.iter().any(|(_, target)| target == &image.path));
+        assert!(
+            links.iter().any(|(_, target)| target
+                == &super::super::links::LinkTarget::Image(image.source.clone()))
+        );
+    }
+
+    #[test]
+    fn queued_prompt_is_bold_in_the_list_and_event_detail_until_dequeued() {
+        let delivery: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/claude-queued-image.jsonl"
+        ))
+        .unwrap();
+        let text = &delivery["attachment"]["prompt"][0]["text"];
+        let enqueue = serde_json::json!({
+            "type": "queue-operation", "operation": "enqueue", "content": text,
+            "timestamp": delivery["timestamp"]
+        });
+        let remove = serde_json::json!({
+            "type": "queue-operation", "operation": "remove", "content": text,
+            "commandUuid": delivery["attachment"]["source_uuid"],
+            "timestamp": delivery["timestamp"]
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("transcript.jsonl");
+        let bold = |records: String| {
+            std::fs::write(&transcript, records).unwrap();
+            let events = crate::providers::claude::event_reader::tail(&transcript, 20).unwrap();
+            let event = events.last().unwrap().clone();
+            let area = Rect::new(0, 0, 200, 1);
+            let mut buf = Buffer::empty(area);
+            render_event(&event, "19:58:06", false, area, &mut buf, None, dir.path());
+            let list = buf.content[..20]
+                .iter()
+                .filter(|cell| !cell.symbol().trim().is_empty())
+                .all(|cell| cell.modifier.contains(Modifier::BOLD));
+            let layout = event_detail_layout(&event, 200, dir.path(), DateTime::UNIX_EPOCH);
+            let body = layout.lines[layout.bodies[0].clone()]
+                .iter()
+                .flat_map(|line| &line.spans)
+                .filter(|span| !span.content.trim().is_empty())
+                .all(|span| span.style.add_modifier.contains(Modifier::BOLD));
+            (event.kind, list, body)
+        };
+        assert_eq!(bold(format!("{enqueue}\n")), (Kind::QueuedUser, true, true));
+        assert_eq!(
+            bold(format!("{enqueue}\n{remove}\n{delivery}\n")),
+            (Kind::User, false, false)
+        );
     }
 
     #[test]
@@ -2149,10 +2490,10 @@ pub(super) mod event_markdown {
         let events = notification_events(dir.path(), Some("all 3 tests passed"));
         assert_eq!(events.len(), 1);
         for event in events {
-            let summary = "Background command \"等 tab 线程\" completed (exit code 0)";
+            let summary = "等 tab 线程 ✓";
             assert_eq!(event.kind, Kind::Tool);
             assert_eq!(event.body, summary);
-            assert_eq!(event.calls[0].title, summary);
+            assert_eq!(event.calls[0].summary, summary);
             assert_eq!(event.calls[0].id, "b9wi31ww0");
             let body = open_text(&event);
             assert!(body.contains("all 3 tests passed"), "{body}");
@@ -2355,10 +2696,7 @@ pub(super) mod event_markdown {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures/codex-inner/inline-array.jsonl"),
         );
-        let provider = crate::providers::codex::CodexProvider::new(
-            std::path::PathBuf::new(),
-            std::path::PathBuf::new(),
-        );
+        let provider = crate::providers::codex::CodexProvider::new(std::path::PathBuf::new());
         let events =
             crate::providers::Provider::event_panel(&provider, &session, 100, false).unwrap();
         let event = &events[1];
@@ -2445,10 +2783,7 @@ pub(super) mod event_markdown {
     fn file_change_without_start_shows_clock_instead_of_duration() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/codex-inner/file-change-without-start.jsonl");
-        let provider = crate::providers::codex::CodexProvider::new(
-            std::path::PathBuf::new(),
-            std::path::PathBuf::new(),
-        );
+        let provider = crate::providers::codex::CodexProvider::new(std::path::PathBuf::new());
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().join("projects/project");
         std::fs::create_dir_all(&project).unwrap();
@@ -2550,7 +2885,7 @@ pub(super) mod event_markdown {
                 "Report: /private/tmp/claude-501/report.md 1. done",
                 35,
             );
-            assert_eq!(body_text(&buffer), "      Report: /…/report.md 1. done");
+            assert_eq!(body_text(&buffer), "         Report: report.md 1. done");
         }
     }
 
@@ -2590,7 +2925,10 @@ pub(super) mod event_markdown {
             let targets: Vec<_> = links.into_iter().map(|link| link.target).collect();
             assert_eq!(
                 targets,
-                [dir.path().join("src/ui/log.rs"), report.clone()],
+                [
+                    crate::ui::links::LinkTarget::Path(dir.path().join("src/ui/log.rs")),
+                    crate::ui::links::LinkTarget::Path(report.clone())
+                ],
                 "{kind:?}"
             );
             assert!(
@@ -2644,10 +2982,100 @@ pub(super) mod event_markdown {
     }
 
     #[test]
+    fn merged_call_titles_carry_edge_rules_and_single_calls_do_not() {
+        for (calls, rules) in [(&["a", "b"][..], true), (&["a"][..], false)] {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            for id in calls {
+                let record = serde_json::json!({
+                    "type":"assistant", "timestamp":"2026-10-06T16:39:01Z", "uuid":id,
+                    "message":{"id":"batch", "content":[
+                        {"type":"tool_use", "id":id, "name":"Read", "input":{"file_path":format!("/opt/{id}.rs")}}
+                    ]}
+                });
+                std::io::Write::write_all(&mut file, format!("{record}\n").as_bytes()).unwrap();
+            }
+            let events = crate::providers::claude::event_reader::tail(file.path(), 1).unwrap();
+            let view = View::new(Grouping::Project, false);
+            let panel = Rect::new(0, 0, 80, 12);
+            let content = panel.inner(ratatui::layout::Margin::new(1, 0));
+            let mut buffer = Buffer::empty(panel);
+            view.render_event_detail_content(
+                &events[0],
+                "12:34:56",
+                super::super::event_detail::EventDetailArea { panel, content },
+                &mut buffer,
+                Path::new("/"),
+                DateTime::UNIX_EPOCH,
+            );
+            let titles: Vec<u16> = (panel.y..panel.bottom())
+                .filter(|&y| buffer[(content.x, y)].symbol() == "R")
+                .collect();
+            assert_eq!(titles.len(), calls.len());
+            for y in titles {
+                let edges = [
+                    buffer[(panel.x, y)].symbol(),
+                    buffer[(panel.right() - 1, y)].symbol(),
+                ];
+                assert_eq!(
+                    edges,
+                    if rules { ["╴", "╶"] } else { [" ", " "] },
+                    "row {y}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn overflowing_detail_draws_its_scrollbar_in_the_right_padding() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for id in (0..12).map(|id| id.to_string()) {
+            let record = serde_json::json!({
+                "type":"assistant", "timestamp":"2026-10-06T16:39:01Z", "uuid":id,
+                "message":{"id":"batch", "content":[
+                    {"type":"tool_use", "id":id, "name":"Read", "input":{"file_path":format!("/opt/{id}.rs")}}
+                ]}
+            });
+            std::io::Write::write_all(&mut file, format!("{record}\n").as_bytes()).unwrap();
+        }
+        let events = crate::providers::claude::event_reader::tail(file.path(), 1).unwrap();
+        let view = View::new(Grouping::Project, false);
+        let panel = Rect::new(0, 0, 80, 16);
+        let content = panel.inner(ratatui::layout::Margin::new(1, 0));
+        let mut buffer = Buffer::empty(panel);
+        view.render_event_detail_content(
+            &events[0],
+            "12:34:56",
+            super::super::event_detail::EventDetailArea { panel, content },
+            &mut buffer,
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+        );
+        let rows: Vec<_> = (panel.y..panel.bottom())
+            .map(|y| {
+                (
+                    buffer[(panel.x, y)].symbol().to_string(),
+                    buffer[(panel.right() - 1, y)].symbol().to_string(),
+                    buffer[(content.x, y)].symbol() == "R",
+                )
+            })
+            .collect();
+        assert!(rows.iter().any(|(_, right, title)| right == "▕" && !*title));
+        assert!(rows.iter().any(|(_, right, title)| right == "▕" && *title));
+        assert!(rows.iter().any(|(_, right, title)| right == "╶" && *title));
+        for (left, right, title) in rows {
+            assert_ne!(left, "▏");
+            if title {
+                assert_eq!(left, "╴");
+                assert!(["▕", "╶"].contains(&right.as_str()), "{right}");
+            }
+        }
+    }
+
+    #[test]
     fn merged_tool_row_preserves_the_left_path_first() {
         assert_eq!(
             merged_tool_row(70),
-            "Edit /opt/work/agents/src/ui/tests.rs, Read /…/codex/tests.rs"
+            "Edit /opt/work/agents/src/ui/tests.rs, Read /opt/work/…/tests.rs"
         );
     }
 
@@ -2655,7 +3083,7 @@ pub(super) mod event_markdown {
     fn merged_tool_row_shrinks_the_right_name_before_the_left_path() {
         assert_eq!(
             merged_tool_row(40),
-            "Edit /…/agents/src/ui/tests.rs, Read …"
+            "Edit /opt/work/agents/…/tests.rs, Read …"
         );
     }
 
@@ -2690,6 +3118,10 @@ pub(super) mod event_markdown {
 mod reading_tests;
 
 #[cfg(test)]
+#[path = "text_image_layout_tests.rs"]
+mod text_image_layout_tests;
+
+#[cfg(test)]
 mod panel_detail_tests {
     use super::super::event_detail::Group;
     use super::super::tool_detail::Part;
@@ -2710,7 +3142,7 @@ mod panel_detail_tests {
     }
 
     fn columns(width: u16) -> EventDetailColumns {
-        event_detail_columns(Rect::new(10, 2, width, 20), Rect::new(0, 0, 50, 20))
+        EventDetailColumns::new(Rect::new(10, 2, width, 20))
     }
 
     fn layout_part(columns: EventDetailColumns, part: Part) -> EventDetailLayout {
@@ -2731,6 +3163,294 @@ mod panel_detail_tests {
                 groups: vec![Group { parts: vec![part] }],
             }],
         )
+    }
+
+    fn image_section() -> (Event, Vec<Section>, crate::images::ImageSource) {
+        let fixture = include_str!("../../tests/fixtures/claude-read-image.jsonl");
+        let record: serde_json::Value =
+            serde_json::from_str(fixture.lines().nth(1).unwrap()).unwrap();
+        let pointer = "/message/content/0/content/0/source/data";
+        assert!(record.pointer(pointer).unwrap().is_string());
+        let image = crate::images::ImageSource::Record {
+            record: crate::event::SourceRecord {
+                path: Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/claude-read-image.jsonl"),
+                offset: (fixture.lines().next().unwrap().len() + 1) as u64,
+            },
+            pointer: pointer.into(),
+        };
+        let event = fixture_event();
+        let mut sections =
+            super::tool_detail::event_detail_content(&event, String::new(), Style::new().dim())
+                .sections;
+        sections[0].groups = vec![Group {
+            parts: vec![Part::image(
+                crate::images::Image {
+                    label: "[image image/png]".into(),
+                    source: image.clone(),
+                },
+                true,
+            )],
+        }];
+        (event, sections, image)
+    }
+
+    #[test]
+    fn inline_image_rows_budget_copy_and_clipping() {
+        let (event, sections, image) = image_section();
+        let layout = event_detail_parts_layout_with_images(
+            &event,
+            columns(100),
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+            sections,
+            |_, _| Some((20, 8)),
+        );
+        let image_rows = layout.images[0].rows.clone();
+        assert_eq!(image_rows.len(), 8);
+        assert_eq!(
+            layout.lines[image_rows.start].to_string().trim(),
+            "[image image/png]"
+        );
+        for row in image_rows.start + 1..image_rows.end {
+            assert_eq!(layout.lines[row].to_string().trim(), "");
+            assert!(layout.rows[row].1.is_empty());
+        }
+        let source = &layout.sources[layout.rows[image_rows.start].0].text;
+        assert_eq!(source.as_ref(), "[image image/png]");
+        let mut scroll = SectionScroll::default();
+        scroll.prepare(layout.body_keys.clone());
+        let heights = vec![1; layout.lines.len()];
+        let rows = scroll.layout(&heights, &layout.bodies, Some(&[3]), 0..0, 5);
+        assert_eq!(scroll.hidden, [5]);
+        let visible: Vec<_> = rows.kept.into_iter().skip(rows.scroll).take(5).collect();
+        let area = Rect::new(10, 4, 80, 5);
+        let drawn = layout.drawn_images(&visible, area);
+        assert_eq!(drawn.len(), 1);
+        assert_eq!(drawn[0].index, 0);
+        assert_eq!(drawn[0].image, image);
+        assert_eq!(drawn[0].area.height, 3);
+        assert_eq!(drawn[0].area.y, 6);
+        assert_eq!(drawn[0].area.width, 20);
+        assert_eq!(drawn[0].first_row, 0);
+        assert!(!layout.cut_text(rows.cuts[0]));
+        scroll.reveal[0] = 2;
+        let rows = scroll.layout(&heights, &layout.bodies, Some(&[3]), 0..0, 5);
+        let visible: Vec<_> = rows.kept.into_iter().skip(rows.scroll).take(5).collect();
+        let drawn = layout.drawn_images(&visible, area);
+        assert_eq!(drawn[0].first_row, 0);
+        assert_eq!(drawn[0].area.height, 5);
+        let drawn = layout.drawn_images(
+            &(image_rows.start + 3..image_rows.end).collect::<Vec<_>>(),
+            area,
+        );
+        assert_eq!(drawn[0].first_row, 3);
+        assert_eq!(drawn[0].area.height, 5);
+    }
+
+    #[test]
+    fn inline_image_render_records_visible_rows_and_clears_next_frame() {
+        let (event, sections, image) = image_section();
+        let view = View::new(Grouping::Project, false);
+        let panel = Rect::new(0, 0, 100, 6);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 101, 6));
+        let columns = EventDetailColumns::new(panel);
+        let mut layout = event_detail_parts_layout_with_images(
+            &event,
+            columns,
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+            sections,
+            |_, _| Some((4, 8)),
+        );
+        layout.height = 5;
+        view.viewport.borrow_mut().event_detail_layout = Some(layout);
+        *view.inline_images.borrow_mut() =
+            Some(super::super::inline_images::InlineImages::new(None));
+        view.render_event_detail_content(
+            &event,
+            "12:34:56",
+            panel,
+            &mut buffer,
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+        );
+        {
+            let viewport = view.viewport.borrow();
+            let drawn = &viewport.event_detail_images;
+            assert_eq!(drawn.len(), 1);
+            assert_eq!(drawn[0].index, 0);
+            assert_eq!(drawn[0].image, image);
+            assert_eq!(drawn[0].first_row, 0);
+            assert_eq!(drawn[0].area.height, 3);
+            assert_eq!(drawn[0].area.width, 4);
+            let last = drawn[0].area.bottom() - 1;
+            assert!(
+                (columns.text.x..columns.text.right()).all(|x| buffer[(x, last)].symbol() != "…")
+            );
+            assert!(!buffer.content.iter().any(|cell| cell.symbol() == "["));
+            assert_eq!(
+                viewport.event_text.sources[1].text.as_ref(),
+                "[image image/png]"
+            );
+        }
+        view.render_event_detail(Rect::default(), &mut buffer, DateTime::UNIX_EPOCH);
+        assert!(view.viewport.borrow().event_detail_images.is_empty());
+        // Also discard hit regions when the whole frame omits the detail pane.
+        view.viewport.borrow_mut().event_detail_images.push(
+            super::super::event_detail::DrawnImage {
+                index: 0,
+                image,
+                area: panel,
+                first_row: 0,
+            },
+        );
+        view.render_at(buffer.area, &mut buffer, DateTime::UNIX_EPOCH);
+        assert!(view.viewport.borrow().event_detail_images.is_empty());
+    }
+
+    #[test]
+    fn inline_image_zoom_resets_when_switching_events() {
+        let (mut first, _, _) = image_section();
+        first.source = Some("image-first".into());
+        let mut second = first.clone();
+        second.source = Some("image-second".into());
+        let view = View::new(Grouping::Project, false);
+        let panel = Rect::new(0, 0, 100, 12);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 101, 12));
+        let render = |event: &Event, buffer: &mut Buffer| {
+            view.viewport.borrow_mut().event_detail_layout = None;
+            view.render_event_detail_content(
+                event,
+                "12:34:56",
+                panel,
+                buffer,
+                Path::new("/"),
+                DateTime::UNIX_EPOCH,
+            );
+        };
+        render(&first, &mut buffer);
+        let zoom = super::super::inline_images::Zoom {
+            level: 2,
+            left: 0.25,
+        };
+        view.event_detail.scroll.borrow_mut().zooms.insert(0, zoom);
+        render(&second, &mut buffer);
+        assert!(view.event_detail.scroll.borrow().zooms.is_empty());
+        let second_zoom = super::super::inline_images::Zoom {
+            level: 3,
+            left: 0.5,
+        };
+        view.event_detail
+            .scroll
+            .borrow_mut()
+            .zooms
+            .insert(0, second_zoom);
+        render(&first, &mut buffer);
+        assert!(view.event_detail.scroll.borrow().zooms.is_empty());
+        render(&second, &mut buffer);
+        assert!(view.event_detail.scroll.borrow().zooms.is_empty());
+    }
+
+    #[test]
+    fn inline_image_caption_is_optional_when_unavailable() {
+        let (_, _, source) = image_section();
+        let image = crate::images::Image {
+            label: "[image image/png]".into(),
+            source,
+        };
+        for caption in [false, true] {
+            let (event, mut sections, _) = image_section();
+            sections[0].groups[0].parts = vec![Part::image(image.clone(), caption)];
+            let layout = event_detail_parts_layout(
+                &event,
+                columns(100),
+                Path::new("/"),
+                DateTime::UNIX_EPOCH,
+                sections,
+            );
+            assert_eq!(layout.lines.len(), 2 + usize::from(caption));
+            assert_eq!(layout.images.len(), 0);
+            let text = layout
+                .lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert_eq!(text.contains(&image.label), caption);
+        }
+    }
+
+    #[test]
+    fn inline_image_without_caption_still_draws_and_retains_copy_source() {
+        let (event, mut sections, source) = image_section();
+        sections[0].groups[0].parts = vec![Part::image(
+            crate::images::Image {
+                label: "[image image/png]".into(),
+                source: source.clone(),
+            },
+            false,
+        )];
+        let mut images = super::super::inline_images::InlineImages::new(Some((10, 20)));
+        let size = images.size(&source, 80, Default::default()).unwrap();
+        let layout = event_detail_parts_layout_with_images(
+            &event,
+            columns(100),
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+            sections,
+            |index, image| {
+                assert_eq!(index, 0);
+                assert_eq!(image, &source);
+                images.size(image, 80, Default::default())
+            },
+        );
+        assert_eq!(layout.images.len(), 1);
+        assert_eq!(layout.images[0].rows.len(), usize::from(size.1));
+        assert_eq!(layout.images[0].image, source);
+        assert_eq!(layout.sources[1].text.as_ref(), "[image image/png]");
+    }
+
+    #[test]
+    fn inline_image_order_includes_unavailable_images() {
+        let (event, mut sections, image) = image_section();
+        sections[0].groups[0].parts.push(Part::image(
+            crate::images::Image {
+                label: "[image image/png]".into(),
+                source: image,
+            },
+            true,
+        ));
+        let layout = event_detail_parts_layout_with_images(
+            &event,
+            columns(100),
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+            sections,
+            |index, _| (index == 1).then_some((20, 4)),
+        );
+        assert_eq!(layout.images.len(), 1);
+        assert_eq!(layout.images[0].index, 1);
+        assert_eq!(layout.bodies[0].len(), 5);
+    }
+
+    #[test]
+    fn inline_image_unavailable_keeps_placeholder() {
+        let (event, sections, _) = image_section();
+        let layout = event_detail_parts_layout_with_images(
+            &event,
+            columns(100),
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+            sections,
+            |_, _| None,
+        );
+        assert!(layout.images.is_empty());
+        assert_eq!(layout.bodies[0].len(), 1);
+        assert_eq!(
+            layout.lines.last().unwrap().to_string().trim(),
+            "[image image/png]"
+        );
     }
 
     #[test]
@@ -2774,9 +3494,8 @@ mod panel_detail_tests {
     }
 
     #[test]
-    fn json_detail_keeps_its_body_without_an_event_list() {
-        let columns = event_detail_columns(Rect::new(0, 0, 80, 12), Rect::default());
-        assert_eq!(columns.reading_width, 0);
+    fn json_detail_uses_the_text_column() {
+        let columns = EventDetailColumns::new(Rect::new(0, 0, 80, 12));
         assert!(columns.text.width > 0);
         let raw = include_str!("../../tests/fixtures/codex-manager-await.jsonl");
         let part = Part::text(raw.into(), false);
@@ -2805,8 +3524,8 @@ mod panel_detail_tests {
             .into_iter()
             .find(|event| event.calls.len() > 1)
             .unwrap();
-        let panel = Rect::new(0, 0, 200, 12);
-        let mut buffer = Buffer::empty(Rect::new(0, 0, 201, 12));
+        let panel = Rect::new(0, 0, 200, 8);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 201, 8));
         let view = View::new(Grouping::Project, false);
         view.render_event_detail_content(
             &event,
@@ -2827,6 +3546,10 @@ mod panel_detail_tests {
         );
         let viewport = view.viewport.borrow();
         let layout = viewport.event_detail_layout.as_ref().unwrap();
+        assert!(
+            layout.lines.len() > 8,
+            "the detail must overflow the panel to scroll"
+        );
         let mut expected = Buffer::empty(buffer.area);
         layout.lines[0].clone().render(
             super::super::render::row(layout.columns.text, EVENT_TOP, 1),
@@ -2893,7 +3616,7 @@ mod panel_detail_tests {
             let columns = columns(width);
             let layout = layout_part(columns, Part::prose(source.into(), false));
             assert!(layout.lines.len() > 1);
-            let wrap_width = columns.reading_width.min(columns.text.width);
+            let wrap_width = columns.reading_width();
             for (_, cells) in layout.rows.iter().skip(2) {
                 let start = cells.first().unwrap().0.start;
                 let end = cells.last().unwrap().0.end;
@@ -3118,3 +3841,112 @@ mod turn_group_tests;
 #[cfg(test)]
 #[path = "event_identity_tests.rs"]
 mod event_identity_tests;
+
+#[cfg(test)]
+mod file_image_refresh_tests {
+    use super::*;
+    use crate::images::{Image, ImageSource};
+
+    fn event() -> Event {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-prompt-images.jsonl");
+        let mut event = crate::providers::claude::event_reader::tail(&path, 100)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.kind == Kind::User && !event.images.is_empty())
+            .unwrap();
+        event.images.clear();
+        event
+    }
+
+    fn render(view: &View, event: &Event) -> Vec<ImageSource> {
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buffer = Buffer::empty(area);
+        view.render_event_detail_content(
+            event,
+            "12:34:56",
+            area,
+            &mut buffer,
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+        );
+        view.viewport
+            .borrow()
+            .event_detail_layout
+            .as_ref()
+            .unwrap()
+            .images
+            .iter()
+            .map(|image| image.image.clone())
+            .collect()
+    }
+
+    fn view() -> View {
+        let view = View::new(Grouping::Project, false);
+        *view.inline_images.borrow_mut() = Some(super::super::inline_images::InlineImages::new(
+            Some((10, 20)),
+        ));
+        view
+    }
+
+    #[test]
+    fn file_image_cached_detail_recovers_after_corrupt_file_is_repaired() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().canonicalize().unwrap().join("screen.png");
+        std::fs::write(&path, b"broken image").unwrap();
+        let mut event = event();
+        event.body = path.to_str().unwrap().into();
+        let view = view();
+        assert!(render(&view, &event).is_empty());
+        std::fs::write(&path, crate::images::fixture_png()).unwrap();
+        let sources = render(&view, &event);
+        assert_eq!(
+            sources.len(),
+            1,
+            "repair must invalidate the cached empty layout"
+        );
+        assert!(matches!(&sources[0], ImageSource::File { len, .. }
+            if *len == path.metadata().unwrap().len()));
+    }
+
+    #[test]
+    fn file_image_cached_detail_rekeys_same_length_overwrites() {
+        for attached in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().canonicalize().unwrap().join("screen.png");
+            std::fs::write(&path, crate::images::fixture_png()).unwrap();
+            let file = std::fs::File::options().write(true).open(&path).unwrap();
+            let time =
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+            file.set_modified(time).unwrap();
+            let mut event = event();
+            event.body = if attached {
+                "[Image #1]".into()
+            } else {
+                path.to_str().unwrap().into()
+            };
+            if attached {
+                event.images.push(Image {
+                    label: event.body.clone(),
+                    source: ImageSource::File {
+                        path: path.clone(),
+                        len: path.metadata().unwrap().len(),
+                        modified: time,
+                    },
+                });
+            }
+            let view = view();
+            let first = render(&view, &event);
+            assert_eq!(first.len(), 1);
+            assert_eq!(render(&view, &event), first);
+            file.set_modified(time + std::time::Duration::from_secs(1))
+                .unwrap();
+            let second = render(&view, &event);
+            assert_eq!(second.len(), 1);
+            assert_ne!(
+                first, second,
+                "mtime must refresh the source, attached={attached}"
+            );
+        }
+    }
+}

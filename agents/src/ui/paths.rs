@@ -15,7 +15,7 @@ pub(super) fn text_paths(text: &str, cwd: &Path) -> Vec<Range<usize>> {
     paths
 }
 
-/// A path inside `cwd`, relative to that directory. Component boundaries matter;
+/// A path inside `cwd`, relative to that directory; `cwd` itself is its own name. Component boundaries matter;
 /// parent components stay absolute so a lexical prefix cannot hide an escape.
 pub(super) fn relative_path(path: &str, cwd: &Path) -> Option<String> {
     let expanded;
@@ -36,7 +36,7 @@ pub(super) fn relative_path(path: &str, cwd: &Path) -> Option<String> {
         return None;
     }
     Some(if relative.as_os_str().is_empty() {
-        ".".into()
+        cwd.file_name()?.to_str()?.to_owned()
     } else {
         relative.to_str()?.to_owned()
     })
@@ -58,13 +58,13 @@ fn text_words(text: &str) -> impl Iterator<Item = (usize, &str)> {
 
 /// The bytes of the path-shaped part of one word, before any existence check:
 /// an absolute or home path after punctuation, or a relative path such as
-/// `src/ui/log.rs`. URLs and words with letters before the path stay prose.
+/// `src/ui/log.rs` or `screen.png`. URLs and words with letters before the path stay prose.
 pub(super) fn word_path(word: &str) -> Option<Range<usize>> {
     // A rooted path starts at the first `/` or `~` after punctuation only, so
-    // `a/b` and `https://…` are not rooted while `报告：/tmp/…` is.
-    let rooted = word
-        .find(['/', '~'])
-        .filter(|&start| !word[..start].contains(|c: char| c.is_ascii_alphanumeric() || c == ':'));
+    // `a/b`, `./a/b` and `https://…` are not rooted while `报告：/tmp/…` is.
+    let rooted = word.find(['/', '~']).filter(|&start| {
+        !word[..start].contains(|c: char| c.is_ascii_alphanumeric() || matches!(c, ':' | '.'))
+    });
     let start = match rooted {
         Some(start) => start,
         None => {
@@ -81,7 +81,7 @@ pub(super) fn word_path(word: &str) -> Option<Range<usize>> {
         // The first component after the root must be named, so `//` and `///` comments stay prose.
         path[1..].contains('/') && !path.trim_start_matches('~')[1..].starts_with('/')
     } else {
-        path.contains('/')
+        (path.contains('/') || Path::new(path).extension().is_some())
             && !path.contains("://")
             && path
                 .chars()
@@ -172,6 +172,48 @@ mod tests {
             .into_iter()
             .map(|range| &text[range])
             .collect()
+    }
+
+    #[test]
+    fn existing_filenames_and_dot_paths_keep_relative_ranges() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("screens")).unwrap();
+        for name in ["screen.png", "screens/screen.png"] {
+            std::fs::write(dir.path().join(name), "").unwrap();
+        }
+        for label in ["screen.png", "./screen.png", "./screens/screen.png"] {
+            let text = format!("看 `{label}`，");
+            assert_eq!(found(&text, dir.path()), [label], "{label}");
+        }
+        assert!(found("missing.png ./missing.png ./missing/screen.png", dir.path()).is_empty());
+    }
+
+    #[test]
+    fn dot_paths_link_and_abbreviate_as_relative_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("screens")).unwrap();
+        for name in ["screen.png", "screens/screen.png"] {
+            std::fs::write(dir.path().join(name), "").unwrap();
+        }
+        for label in ["screen.png", "./screen.png", "./screens/screen.png"] {
+            let links = super::super::links::text_links(label, dir.path(), &[]);
+            assert_eq!(links.len(), 1, "{label}");
+            assert_eq!(links[0].range, 0..label.len());
+            assert_eq!(
+                links[0].target,
+                super::super::links::LinkTarget::Path(dir.path().join(label))
+            );
+        }
+        let text = "./screens/screen.png";
+        assert_eq!(
+            super::super::line_truncation::fit_paths_to_wrap_width(
+                text,
+                &text_paths(text, dir.path()),
+                12,
+                dir.path()
+            ),
+            "…/screen.png"
+        );
     }
 
     #[test]

@@ -54,10 +54,13 @@ mod task_details_budget {
         view.status_filter = 0;
         view.set_sessions(vec![row], false);
         let rows = panel(&view);
-        assert!(rows.iter().any(|line| line == "Queued work"));
         assert!(
             rows.iter()
-                .any(|line| line.starts_with("─") && line.contains("Check 4")),
+                .any(|line| line == &format!("{}Queued work", " ".repeat(54)))
+        );
+        assert!(
+            rows.iter()
+                .any(|line| line.trim_start().starts_with("● Check 4")),
             "{rows:?}"
         );
         assert!(!rows.iter().any(|line| line.contains("Check 5")));
@@ -79,7 +82,11 @@ mod task_details_budget {
         );
         assert_eq!(
             &rows[prompt + 1..prompt + 4],
-            ["Prompt text…", "", "Queued work"]
+            [
+                format!("{}Prompt text…", " ".repeat(54)),
+                String::new(),
+                format!("{}Queued work", " ".repeat(54))
+            ]
         );
         let attention = rows
             .iter()
@@ -153,7 +160,10 @@ mod task_details_budget {
             .iter()
             .position(|line| line.trim() == "Needs input")
             .unwrap();
-        assert_eq!(rest[attention + 2], "Waiting for your response.");
+        assert_eq!(
+            rest[attention + 2],
+            format!("{}Waiting for your response.", " ".repeat(47))
+        );
         let prompt = rest
             .iter()
             .position(|line| line.trim() == "Prompt")
@@ -179,9 +189,12 @@ mod task_details_budget {
         );
         let scrolled = panel(&view);
         assert_eq!(scrolled[0], rest[1]);
-        assert_eq!(scrolled[attention - 2], "Prompt row 7…");
+        assert_eq!(
+            scrolled[attention - 2],
+            format!("{}Prompt row 7…", " ".repeat(53))
+        );
         assert_eq!(scrolled[attention..], rest[attention..]);
-        assert_eq!(scrolled[prompt], "Prompt row 1");
+        assert_eq!(scrolled[prompt], format!("{}Prompt row 1", " ".repeat(53)));
         view.scroll_content_row(false, false, prompt as u16);
         assert_eq!(panel(&view), rest);
     }
@@ -264,7 +277,7 @@ mod task_details_curtain {
         let mut view = fixture();
         let before = panel(&view);
         let pointer = (0..19)
-            .find(|&y| text(&before, y).starts_with("Reply row 1"))
+            .find(|&y| text(&before, y).trim_start().starts_with("Reply row 1"))
             .unwrap();
         let hidden = view.viewport.borrow().task_details_scroll.hidden[0];
         assert!(hidden > 0);
@@ -277,7 +290,10 @@ mod task_details_curtain {
             .find(|&y| text(&opened, y).trim() == "Prompt")
             .unwrap();
         assert!((1..prompt).all(|y| !text(&opened, y).ends_with('…')));
-        assert_eq!(text(&opened, prompt - 2), "Reply row 7");
+        assert_eq!(
+            text(&opened, prompt - 2),
+            format!("{}Reply row 7", " ".repeat(54))
+        );
         view.scroll_content_row(true, false, pointer);
         let after = panel(&view);
         assert_eq!(
@@ -287,9 +303,12 @@ mod task_details_curtain {
         let attention = (0..19)
             .find(|&y| text(&after, y).trim() == "Needs input")
             .unwrap();
-        assert_eq!(text(&after, attention - 2), "Prompt row 7…");
+        assert_eq!(
+            text(&after, attention - 2),
+            format!("{}Prompt row 7…", " ".repeat(53))
+        );
         let prompt_pointer = (0..19)
-            .find(|&y| text(&after, y).starts_with("Prompt row"))
+            .find(|&y| text(&after, y).trim_start().starts_with("Prompt row"))
             .unwrap();
         let prompt_hidden = view.viewport.borrow().task_details_scroll.hidden[1];
         for _ in 1..prompt_hidden {
@@ -297,7 +316,9 @@ mod task_details_curtain {
             panel(&view);
         }
         let fully_open = panel(&view);
-        assert!((1..19).any(|y| text(&fully_open, y) == "Prompt row 12"));
+        assert!(
+            (1..19).any(|y| text(&fully_open, y) == format!("{}Prompt row 12", " ".repeat(53)))
+        );
         assert_eq!(
             view.viewport.borrow().task_details_scroll.reveal,
             vec![hidden, prompt_hidden, 0]
@@ -323,14 +344,14 @@ mod task_details_curtain {
         }
         let before = panel(&view);
         let queued = (0..19)
-            .find(|&y| text(&before, y) == "Queued prompt")
+            .find(|&y| text(&before, y).trim_start() == "Queued prompt")
             .unwrap();
         assert_eq!(
             view.viewport.borrow().task_details_scroll.fallback_max,
             None
         );
         let pointer = (0..19)
-            .find(|&y| text(&before, y).starts_with("Prompt row 1"))
+            .find(|&y| text(&before, y).trim_start().starts_with("Prompt row 1"))
             .unwrap();
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, pointer));
         let after = panel(&view);
@@ -363,7 +384,7 @@ mod task_details_curtain {
             .task_details_links
             .iter()
             .find(|(_, target)| {
-                target
+                crate::ui::link_path(target)
                     .to_string_lossy()
                     .contains("https://example.com/pull/833")
             })
@@ -402,7 +423,7 @@ mod task_details_curtain {
         let mut view = fixture();
         let before = panel(&view);
         let pointer = (0..19)
-            .find(|&y| text(&before, y) == "Prompt row 3")
+            .find(|&y| text(&before, y).trim_start() == "Prompt row 3")
             .unwrap();
         for _ in 0..4 {
             view.scroll_content_row(true, false, pointer);
@@ -441,7 +462,7 @@ mod task_details_curtain {
         );
         let before = panel(&view);
         let pointer = (0..19)
-            .find(|&y| text(&before, y) == "Reply row 3")
+            .find(|&y| text(&before, y).trim_start() == "Reply row 3")
             .unwrap();
         let tail = (0..19)
             .find(|&y| text(&before, y).trim() == "Prompt")
@@ -456,7 +477,10 @@ mod task_details_curtain {
                 assert_eq!(after[(x, y)], before[(x, y)], "tail {x},{y}");
             }
         }
-        assert_eq!(text(&after, pointer), "Reply row 4");
+        assert_eq!(
+            text(&after, pointer),
+            format!("{}Reply row 4", " ".repeat(54))
+        );
         let cut_before = (pointer..tail)
             .map(|y| text(&before, y))
             .find(|s| s.ends_with('…'))
@@ -591,7 +615,7 @@ fn task_details_border_links_and_title_keep_actions_without_scrolling() {
             for _ in 0..2 {
                 assert_eq!(
                     click_mouse(&mut view, click),
-                    Some(Action::OpenPath(target.clone()))
+                    Some(Action::Open(target.clone()))
                 );
                 assert_eq!(
                     view.viewport.borrow().task_details_scroll.position(),

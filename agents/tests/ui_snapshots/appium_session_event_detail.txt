@@ -1,0 +1,19 @@
+appium-mcp appium session management                     create
+
+                  platform │ capabilities
+                  ─────────┼───────────────────────────────────────────────────────────────────────────
+                  ios      │ {
+                           │   "appium:udid": "00000000-0000000000000000",
+                           │   "appium:usePreinstalledWDA": true,
+                           │   "appium:prebuiltWDAPath": "/Users/user/.cache/appium-mcp/wda-real/16.12.
+                           │ 4/signed/23ed55a4-b472-45e1-b469-ee696e1e150c/Payload-resigned.ipa",
+                           │   "appium:wdaLaunchTimeout": 30000,
+                           │   "appium:shouldTerminateApp": false,
+                           │   "appium:newCommandTimeout": 600
+                           │ }
+                                                            ↓
+                     IOS session created successfully with ID: 85f36cd8-4ade-476f-b3f1-814d9ac36275
+                     Platform: iOS
+                     Automation: XCUITest
+                     Device: iPhone Simulator
+                     Active sessions: 1

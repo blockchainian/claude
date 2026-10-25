@@ -1,6 +1,0 @@
-*.log
-*.json
-*.ansi
-*-startup.txt
-*-failure.txt
-__pycache__/

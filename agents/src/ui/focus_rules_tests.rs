@@ -59,21 +59,26 @@ fn click_selected(view: &mut View) {
     );
 }
 #[test]
-fn rule_1_list_wheel_keeps_prompt_focus_and_cursor() {
+fn rule_1_list_wheel_focuses_list_and_keeps_parked_focus() {
     let mut view = tasks();
     view.prepare_prompt();
-    screen(&view, 200, 45);
-    assert!(view.cursor_pos(Rect::new(0, 0, 200, 45)).is_some());
-    let before = view.selected_id().cloned();
+    let before = view.selected_task_key();
     panel_mouse(&mut view, Panel::TaskList, MouseEventKind::ScrollDown);
-    assert_ne!(view.selected_id(), before.as_ref());
-    assert_eq!(view.active_panel, Panel::Prompt);
+    assert_ne!(view.selected_task_key(), before);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(!view.task_entry_pending);
+    assert_eq!(remembered(&view), None);
     screen(&view, 200, 45);
-    assert!(view.cursor_pos(Rect::new(0, 0, 200, 45)).is_some());
+    assert!(view.cursor_pos(Rect::new(0, 0, 200, 45)).is_none());
+    panel_mouse(&mut view, Panel::TaskList, MouseEventKind::ScrollUp);
+    assert_eq!(view.selected_task_key(), before);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(view.task_entry_pending);
+    assert_eq!(remembered(&view), Some(Focus::Prompt));
 }
 #[test]
 fn rule_2_open_keys_restore_pending_without_terminal() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut view = pending();
         assert_eq!(key(&mut view, code), None, "{code:?}");
         assert_eq!(view.active_panel, Panel::EventDetail);
@@ -82,15 +87,58 @@ fn rule_2_open_keys_restore_pending_without_terminal() {
     }
 }
 #[test]
-fn rule_2_click_pending_row_restores_focus() {
+fn rule_2_click_pending_row_keeps_list_bindings() {
     let mut view = pending();
     click_selected(&mut view);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(view.task_entry_pending);
+    assert!(matches!(
+        key(&mut view, KeyCode::Char('p')),
+        Some(Action::TogglePin { .. })
+    ));
+}
+#[test]
+fn rule_2_selected_row_click_from_task_panel_keeps_parked_focus_pending() {
+    let mut view = tasks();
+    view.set_active_panel(Panel::EventDetail);
+    click_selected(&mut view);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(view.task_entry_pending);
+    assert_eq!(remembered(&view), Some(Focus::EventDetail));
+    assert!(matches!(
+        key(&mut view, KeyCode::Char('p')),
+        Some(Action::TogglePin { .. })
+    ));
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert_eq!(view.active_panel, Panel::EventDetail);
-    assert!(!view.task_entry_pending);
+}
+#[test]
+fn rule_2_row_click_from_prompt_on_another_task_focuses_list() {
+    let mut view = tasks();
+    let first = view.selected;
+    let other = *view
+        .selectable_indices()
+        .iter()
+        .find(|&&i| i != first)
+        .unwrap();
+    view.prepare_prompt();
+    let rendered = screen(&view, 200, 45);
+    let title = view.rows[other].display_title().to_owned();
+    let (x, y) = rendered_cell(&rendered, &title);
+    click_mouse(
+        &mut view,
+        mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+    );
+    assert_eq!(view.selected, other);
+    assert_eq!(view.active_panel, Panel::TaskList);
+    assert!(matches!(
+        key(&mut view, KeyCode::Char('p')),
+        Some(Action::TogglePin { .. })
+    ));
 }
 #[test]
 fn rule_3_open_keys_without_pending_enter_enabled_prompt() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut view = tasks();
         assert!(!view.task_entry_pending);
         assert!(view.input_disabled().is_none());
@@ -101,7 +149,7 @@ fn rule_3_open_keys_without_pending_enter_enabled_prompt() {
 }
 #[test]
 fn rule_3_open_keys_without_pending_leave_disabled_prompt_alone() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let (mut view, _) = event_fixture();
         assert!(view.input_disabled().is_some());
         assert_eq!(key(&mut view, code), None);
@@ -120,7 +168,7 @@ fn rule_3_click_unvisited_row_only_selects() {
 }
 #[test]
 fn rule_3_draft_open_keys_enter_prompt() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let directory = tempfile::tempdir().unwrap();
         let mut view = tasks();
         let id = view.add_draft(DraftSetup {
@@ -142,7 +190,7 @@ fn rule_3_draft_open_keys_enter_prompt() {
 }
 #[test]
 fn rule_3_subagent_open_keys_respect_disabled_prompt() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut view = tasks();
         let mut rows = view.rows.clone();
         let mut child = rows[0].clone();
@@ -164,7 +212,7 @@ fn rule_3_subagent_open_keys_respect_disabled_prompt() {
 }
 #[test]
 fn rule_4_show_more_open_keys_and_click_keep_loading_behavior() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut view = fixture();
         view.status_filter = 1;
         view.has_more = true;
@@ -281,7 +329,7 @@ fn rule_6_ctrl_w_overrides_pending_focus() {
 fn rule_6_list_search_does_not_enter_pending_task() {
     let mut view = pending();
     assert_eq!(key(&mut view, KeyCode::Char('/')), None);
-    assert!(view.searching);
+    assert!(view.search.focused());
     assert_eq!(view.active_panel, Panel::TaskList);
     assert!(view.task_entry_pending);
     assert_eq!(remembered(&view), Some(Focus::EventDetail));
@@ -473,7 +521,7 @@ fn confirmed_list_ctrl_l_does_nothing() {
 
 #[test]
 fn rule_2_disabled_pending_prompt_open_keys_stay_on_list() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut view = tasks();
         let first = view.selected;
         let other = *view
@@ -722,7 +770,7 @@ fn rule_1_list_browsing_question_does_not_activate_or_remember_it() {
 
 #[test]
 fn rule_2_pending_question_restores_despite_disabled_prompt() {
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let mut view = test_view(Grouping::Project, false);
         let question = question_session();
         let other = session("other", "Other task", SessionStatus::Ready, 10);

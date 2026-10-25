@@ -17,12 +17,18 @@ impl Group {
         let key_width = self
             .entries
             .iter()
-            .map(|entry| Span::raw(&entry.key).width())
+            .map(|entry| Span::raw(super::key_name::display(&entry.key)).width())
             .max()
             .unwrap_or(0);
         let mut lines = vec![self.title.bold().into()];
         for entry in &self.entries {
-            let key = entry.key.clone().fg(accent_color());
+            let key = Span::styled(
+                super::key_name::display(&entry.key),
+                Style {
+                    fg: accent_color(),
+                    ..Style::default()
+                },
+            );
             let padding = " ".repeat(key_width.saturating_sub(key.width()) + 2);
             lines.push(vec![key, padding.into(), entry.action.into()].into());
         }
@@ -30,7 +36,7 @@ impl Group {
     }
 }
 
-pub(crate) fn group_lines(groups: [Group; 4], width: u16) -> Vec<Line<'static>> {
+pub(crate) fn group_lines(groups: [Group; 3], width: u16) -> Vec<Line<'static>> {
     let groups = groups.map(|group| group.lines());
     let widths: Vec<usize> = groups
         .iter()
@@ -40,15 +46,15 @@ pub(crate) fn group_lines(groups: [Group; 4], width: u16) -> Vec<Line<'static>> 
     let mut result = Vec::new();
     if widths.iter().sum::<usize>() + COLUMN_GAP * (groups.len() - 1) <= width {
         result.extend(columns(&groups, &widths));
-    } else if widths[0].max(widths[2]) + COLUMN_GAP + widths[1].max(widths[3]) <= width {
+    } else if widths[0].max(widths[2]) + COLUMN_GAP + widths[1] <= width {
         result.extend(columns(
             &groups[..2],
-            &[widths[0].max(widths[2]), widths[1].max(widths[3])],
+            &[widths[0].max(widths[2]), widths[1]],
         ));
         result.push(Line::default());
         result.extend(columns(
             &groups[2..],
-            &[widths[0].max(widths[2]), widths[1].max(widths[3])],
+            &[widths[0].max(widths[2]), widths[1]],
         ));
     } else {
         for (index, group) in groups.into_iter().enumerate() {
@@ -77,4 +83,31 @@ fn columns(groups: &[Vec<Line<'static>>], widths: &[usize]) -> Vec<Line<'static>
             line
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn help_key_column_uses_display_names_and_widths() {
+        let group = Group {
+            title: "Keys",
+            entries: vec![
+                Shortcut {
+                    key: "tab/⇧tab".into(),
+                    action: "Filter",
+                },
+                Shortcut {
+                    key: "esc".into(),
+                    action: "Back",
+                },
+            ],
+        };
+        let lines = group.lines();
+        assert_eq!(lines[1].spans[0].content, "Tab/⇧Tab");
+        assert_eq!(lines[2].spans[0].content, "Esc");
+        assert_eq!(lines[1].spans[0].width() + lines[1].spans[1].width(), 10);
+        assert_eq!(lines[2].spans[0].width() + lines[2].spans[1].width(), 10);
+    }
 }

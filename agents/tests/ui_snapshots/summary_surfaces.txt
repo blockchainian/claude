@@ -35,16 +35,20 @@ Subagent width=120
 100: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
 107: Style::new().yellow().bg(Color::Reset).underline_color(Color::Reset)
 Last activity width=120
-Read .config/tmux/tmux.conf:44-63
-0: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
+                                           Read .config/tmux/tmux.conf:44-63
+0: Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset)
+43: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
 Subagent width=120
-Read .config/tmux/tmux.conf:44-63
-0: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
+                                           Read .config/tmux/tmux.conf:44-63
+0: Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset)
+43: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
 Last activity width=120
-false · 1
-0: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
-8: Style::new().red().bg(Color::Reset).underline_color(Color::Reset)
+                                                       false · 1
+0: Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset)
+55: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
+63: Style::new().fg(Color::Rgb(160, 99, 93)).bg(Color::Reset).underline_color(Color::Reset)
 Subagent width=120
-false · 1
-0: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
-8: Style::new().red().bg(Color::Reset).underline_color(Color::Reset)
+                                                       false · 1
+0: Style::new().fg(Color::Reset).bg(Color::Reset).underline_color(Color::Reset)
+55: Style::new().fg(Color::Indexed(24)).bg(Color::Reset).underline_color(Color::Reset)
+63: Style::new().fg(Color::Rgb(160, 99, 93)).bg(Color::Reset).underline_color(Color::Reset)

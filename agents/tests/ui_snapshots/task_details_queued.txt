@@ -1,6 +1,6 @@
                  Prompt
-Current prompt
+             Current prompt
 
-First queued prompt
+          First queued prompt
 
-Second queued prompt
+          Second queued prompt

@@ -11,7 +11,6 @@ fn app(directory: &std::path::Path) -> App {
             )),
             Box::new(crate::providers::codex::CodexProvider::new(
                 directory.into(),
-                directory.join("manager"),
             )),
         ]),
         directory.into(),

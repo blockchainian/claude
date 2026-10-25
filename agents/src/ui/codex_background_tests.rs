@@ -109,7 +109,7 @@ fn background_without_output_shows_title_time_and_does_not_open_event() {
     let before = view.visible_event().cloned();
     assert_eq!(double_click_text(&mut view, &rendered, command), None);
     assert_eq!(view.visible_event().cloned(), before);
-    assert!(view.notice.is_none());
+    assert!(view.feedback.is_none());
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/ui_snapshots/task_details_codex_background.txt");
     if std::env::var_os("UPDATE_EVENT_DETAIL_SNAPSHOT").is_some() {

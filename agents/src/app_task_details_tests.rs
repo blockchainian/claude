@@ -42,7 +42,7 @@ fn setup(activity: bool) -> (tempfile::TempDir, App) {
     let (directory, mut app) = fixture();
     let now = Utc::now();
     let session = &mut app.sessions[0];
-    session.cwd = "/tmp/project".into();
+    session.cwd = crate::test_project();
     session.prompt = "Check rendering".into();
     session.prompt_at = Some(now - Age::seconds(65));
     session.last_record_at = Some(now);
@@ -106,7 +106,11 @@ fn app_task_details_groups_and_project_links_follow_panel_rules() {
                 let (x, y) = position(buffer, label);
                 assert_eq!(x, left + (right - left - label.len() as u16) / 2);
                 let actual = row_text(buffer, y, left, right);
-                assert!(actual.ends_with(value), "{width}: {actual:?}");
+                assert!(actual.trim_end().ends_with(value), "{width}: {actual:?}");
+                assert_eq!(
+                    actual.trim_end().len(),
+                    usize::from(right - left - u16::from(width < 150))
+                );
                 assert!(!actual.contains("messages"));
             }
             let pr_x = right - 3 - u16::from(width < 150);
@@ -132,14 +136,23 @@ fn app_task_details_groups_and_project_links_follow_panel_rules() {
                     .iter()
                     .all(|row| !row.contains("Project") && !row.contains("Model"))
             );
-            assert!(rendered.iter().all(|row| !row.contains("/tmp/project")));
+            assert!(
+                rendered
+                    .iter()
+                    .all(|row| !row.contains(crate::test_project().to_str().unwrap()))
+            );
 
             let (_, background_y) = position(buffer, "Check files");
-            assert_eq!(row_text(buffer, background_y, right - 5, right), "1h 0m");
+            let time_right = right - u16::from(width < 150);
+            assert_eq!(
+                row_text(buffer, background_y, time_right - 5, time_right),
+                "1h 0m"
+            );
+            assert_eq!(cell_text(buffer, time_right, background_y), "╶");
             for x in pr_x..pr_x + 3 {
                 assert_eq!(click_link(&mut app, MouseEvent {
                     kind: MouseEventKind::Down(MouseButton::Left), column: x, row: status_y, modifiers: KeyModifiers::NONE,
-                }), Some(Action::OpenPath("vscode://blockchainian.git/view-pr?repo=%2Ftmp%2Fproject&url=https%3A%2F%2Fgithub.com%2Fblockchainian%2Fclaude%2Fpull%2F13".into())));
+                }), Some(Action::Open(crate::ui::links::LinkTarget::Path(format!("vscode://blockchainian.git/view-pr?repo={}&url=https%3A%2F%2Fgithub.com%2Fblockchainian%2Fclaude%2Fpull%2F13", crate::test_project().to_str().unwrap().replace('/', "%2F")).into()))));
             }
             assert_eq!(
                 click_link(
@@ -151,7 +164,9 @@ fn app_task_details_groups_and_project_links_follow_panel_rules() {
                         modifiers: KeyModifiers::NONE,
                     }
                 ),
-                Some(Action::OpenPath("/tmp/project".into()))
+                Some(Action::Open(crate::ui::links::LinkTarget::Path(
+                    crate::test_project()
+                )))
             );
         }
     }
@@ -171,7 +186,7 @@ fn app_task_details_without_pr_has_only_folder_link_and_truncated_branch() {
         let separators: Vec<_> = (0..width)
             .filter(|&x| cell_text(buffer, x, 2) == "│")
             .collect();
-        let left = separators[0] + 2;
+        let left = if width < 100 { 1 } else { separators[0] + 2 };
         let end = if width >= 150 {
             separators[1] - 1
         } else {

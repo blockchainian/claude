@@ -21,8 +21,7 @@ fn recorded_summaries() -> Vec<crate::event::Event> {
     .find(|event| event.calls.iter().any(|call| call.name == "Read"))
     .unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let provider =
-        crate::providers::codex::CodexProvider::new(dir.path().into(), dir.path().join("manager"));
+    let provider = crate::providers::codex::CodexProvider::new(dir.path().into());
     let mut row = session("failed", "Failure", SessionStatus::Working, 0);
     row.transcript = Some(root.join("codex-command-failed.jsonl"));
     let failed = provider
@@ -101,9 +100,15 @@ fn assert_summary_surface(event: &crate::event::Event, width: u16, child: bool) 
                 rendered.join("\n")
             )
         });
+    let indent = (usize::from(width) - line.width()) / 2;
     for x in 0..line.width().min(usize::from(width)) {
-        let got = &actual[(x as u16, y as u16)];
+        let got = &actual[((indent + x) as u16, y as u16)];
         let want = &expected[(x as u16, 0)];
+        assert_eq!(
+            cell_text(got.symbol()),
+            cell_text(want.symbol()),
+            "child={child}, width={width}, column={x}"
+        );
         assert_eq!(
             got.style(),
             want.style(),
@@ -141,7 +146,7 @@ fn assert_summary_surface(event: &crate::event::Event, width: u16, child: bool) 
             .trim_end()
     );
     let mut previous = None;
-    for x in 0..line.width().min(usize::from(width)) {
+    for x in 0..indent + line.width().min(usize::from(width)) {
         if x > 0 && actual[((x - 1) as u16, y as u16)].symbol().width() > 1 {
             continue;
         }

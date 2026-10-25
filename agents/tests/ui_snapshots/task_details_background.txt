@@ -1,10 +1,10 @@
                Background
-────────────── Run checks ─────────── 0s
+              ● Run checks           0s
 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-────────── Waiting for output ─────── 0s
+          ● Waiting for output       0s
 
                  Update
-Checking the project
+          Checking the project
 
                  Prompt
-Background task
+            Background task

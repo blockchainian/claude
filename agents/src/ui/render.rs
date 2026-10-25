@@ -1,7 +1,29 @@
 use super::formatting::{format_duration, format_relative_time, tail_lines};
 use super::line_truncation::{truncate_line_to_width, truncate_line_with_ellipsis_if_overflow};
 use super::*;
-use ratatui::widgets::{Block, Borders};
+
+/// Adds labels for attached sources that the text does not already mention.
+pub(super) fn image_labels<'a>(
+    text: &'a str,
+    images: &[crate::images::Image],
+) -> std::borrow::Cow<'a, str> {
+    let mut seen: std::collections::HashSet<_> = images
+        .iter()
+        .filter(|image| text.contains(&image.label))
+        .map(|image| &image.source)
+        .collect();
+    let mut labelled = std::borrow::Cow::Borrowed(text);
+    for image in images {
+        if seen.insert(&image.source) {
+            let body = labelled.to_mut();
+            if !body.is_empty() {
+                body.push('\n');
+            }
+            body.push_str(&image.label);
+        }
+    }
+    labelled
+}
 
 pub(super) fn row(area: Rect, offset: u16, height: u16) -> Rect {
     let offset = offset.min(area.height);
@@ -18,21 +40,45 @@ pub(super) fn line(text: impl Into<Line<'static>>, area: Rect, buf: &mut Buffer)
             .render(row(area, 0, 1), buf);
     }
 }
-fn input_row(prompt: &str, edit: &line_edit::LineEdit, area: Rect) -> (Line<'static>, u16) {
+fn input_row<P: line_edit::Placeholder>(
+    prompt: &str,
+    edit: &line_edit::Editor<P>,
+    area: Rect,
+) -> (Line<'static>, u16) {
     let prompt_width = prompt.width();
-    let (text, caret) = edit.window(usize::from(area.width).saturating_sub(prompt_width));
+    let line_edit::Window {
+        text,
+        caret_column: caret,
+    } = edit.window(usize::from(area.width).saturating_sub(prompt_width));
     (
         Line::from(vec![
-            prompt.to_owned().cyan().bold(),
+            Span::styled(
+                prompt.to_owned(),
+                Style {
+                    fg: style::accent_color(),
+                    ..Style::default().bold()
+                },
+            ),
             text.to_owned().into(),
         ]),
         (prompt_width + usize::from(caret)).min(usize::from(area.width.saturating_sub(1))) as u16,
     )
 }
 
-pub(super) fn render_input_row(
+pub(super) fn click_input_row<P: line_edit::Placeholder>(
+    editor: &mut line_edit::Editor<P>,
+    area: Rect,
+    prefix: &str,
+    column: u16,
+) {
+    let columns = usize::from(area.width).saturating_sub(prefix.width());
+    let column = usize::from(column.saturating_sub(area.x)).saturating_sub(prefix.width());
+    editor.place_caret_in_window(columns, column);
+}
+
+pub(super) fn render_input_row<P: line_edit::Placeholder>(
     prompt: &str,
-    edit: &line_edit::LineEdit,
+    edit: &line_edit::Editor<P>,
     area: Rect,
     buf: &mut Buffer,
 ) {
@@ -54,9 +100,27 @@ pub(super) fn fill_list_row(area: Rect, buf: &mut Buffer, style: Style) {
     buf.set_style(padded, style);
 }
 
-pub(super) const WIDE_LAYOUT_COLUMNS: u16 = 150;
+/// The terminal width determines how the task and event panels share the screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ScreenLayout {
+    Large,
+    Medium,
+    Small,
+}
 
+impl ScreenLayout {
+    pub(super) fn for_width(width: u16) -> Self {
+        match width {
+            150.. => Self::Large,
+            100..150 => Self::Medium,
+            _ => Self::Small,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct CenterLayout {
+    pub(super) kind: ScreenLayout,
     pub(super) header: Rect,
     /// The panels above the prompt, where global dialogs center.
     pub(super) top: Rect,
@@ -69,27 +133,32 @@ pub(super) struct CenterLayout {
     pub(super) event_panel: Rect,
     pub(super) prompt: Rect,
     pub(super) event_detail: Rect,
+    pub(super) prompt_top_rule: Rect,
+    pub(super) prompt_bottom_rule: Rect,
+    pub(super) event_detail_top_rule: Rect,
+    pub(super) footer_rule: Rect,
 }
 
 impl View {
-    fn input(&self) -> (String, &line_edit::LineEdit) {
-        (format!("Search {PROMPT_MARKER} "), &self.search)
+    pub(super) fn center_layout(&self, area: Rect) -> CenterLayout {
+        self.panel_layout(area, true)
     }
 
-    pub(super) fn center_layout(&self, area: Rect) -> CenterLayout {
+    pub(super) fn panel_layout(&self, area: Rect, zoom: bool) -> CenterLayout {
         let footer_height = u16::from(area.height >= 2);
         let header_height = if area.height >= 6 { 2 } else { 0 };
         let footer = row(area, area.height - footer_height, footer_height);
         let header = row(area, 0, header_height);
-        let wide = area.width >= WIDE_LAYOUT_COLUMNS;
+        let kind = ScreenLayout::for_width(area.width);
+        let large = kind == ScreenLayout::Large;
         // The prompt or question grows with its content up to a share of the rows between
-        // the header and the footer: half in narrow mode, where the event list stacks below
-        // it, and two thirds in wide mode, where the event list sits beside the panels.
+        // the header and the footer: half in medium and small layouts, where the event list stacks below
+        // it, and two thirds in the large layout, where the event list sits beside the panels.
         let content_rows = area
             .height
             .saturating_sub(header_height + footer_height + 2)
             .max(2);
-        let prompt_cap = if wide {
+        let prompt_cap = if large {
             content_rows * 2 / 3
         } else {
             content_rows / 2
@@ -110,22 +179,29 @@ impl View {
         let event_height = bottom_height.saturating_sub(footer_height).max(10);
         let show_event =
             area.height.saturating_sub(footer_height + event_height) >= header_height + 6;
-        // Exclude both rules around the prompt and, in narrow mode, the list/detail rule.
+        // Exclude both rules around the prompt and, in medium and small layouts, the list/detail rule.
         // The output keeps its top rule inside this share and leaves one row for its bottom rule.
         let content_height = area
             .height
-            .saturating_sub(header_height + footer_height + prompt_height + 2 + u16::from(!wide));
-        let (top_height, list_height, event_detail_height) = if !show_event {
+            .saturating_sub(header_height + footer_height + prompt_height + 2 + u16::from(!large));
+        let (mut top_height, mut list_height, mut event_detail_height) = if !show_event {
             (
                 area.height
-                    .saturating_sub(header_height + footer_height + prompt_height),
+                    .saturating_sub(header_height + footer_height + prompt_height + 2),
                 0,
                 0,
             )
-        } else if wide {
+        } else if large {
             // Round the upper share down and give the remaining content rows below.
             let top = (u32::from(content_height) * 618 / 1000) as u16;
             (top, 0, content_height - top)
+        } else if kind == ScreenLayout::Small {
+            // Reserve the task separator and output's top rule before sharing content.
+            // Outer panels get one sixth each; middle panels split the rest, taking spare rows first.
+            let rows = content_height.saturating_sub(2);
+            let outer = rows / 6;
+            let middle = rows - 2 * outer;
+            (outer + middle.div_ceil(2) + 1, middle / 2, outer + 1)
         } else {
             (
                 content_height.div_ceil(3),
@@ -133,14 +209,43 @@ impl View {
                 content_height / 3,
             )
         };
+        if zoom && let Some(panel) = self.height_zoom {
+            let height = top_height + list_height + event_detail_height;
+            // Adjacent frame rules coincide when the panel between them disappears.
+            // The detail's first row already counts its top rule in `height`.
+            match panel {
+                Panel::EventDetail if show_event => {
+                    (top_height, list_height, event_detail_height) =
+                        (0, 0, height + u16::from(!large));
+                }
+                Panel::EventList if show_event && !large => {
+                    (top_height, list_height, event_detail_height) = (0, height, 0);
+                }
+                Panel::TaskList | Panel::TaskDetails | Panel::EventList => {
+                    (top_height, list_height, event_detail_height) =
+                        (height + u16::from(show_event && !large), 0, 0);
+                }
+                _ => {}
+            }
+        }
+        // With no top panels, the header already supplies the prompt's upper rule.
+        // Give the reclaimed row to the remaining panel below the prompt.
+        let prompt_top_gap = u16::from(top_height > 0);
+        if show_event && top_height == 0 {
+            if event_detail_height > 0 {
+                event_detail_height += 1;
+            } else if list_height > 0 {
+                list_height += 1;
+            }
+        }
         let body = row(area, header_height, top_height).inner(Margin::new(HORIZONTAL_PADDING, 0));
         let top = body;
         let prompt = row(
             area,
-            header_height + top_height + u16::from(show_event),
+            header_height + top_height + prompt_top_gap,
             prompt_height,
         );
-        let event_panel = if show_event && !wide {
+        let mut event_panel = if show_event && !large {
             row(area, prompt.bottom() - area.y + 1, list_height)
                 .inner(Margin::new(HORIZONTAL_PADDING, 0))
         } else {
@@ -149,13 +254,22 @@ impl View {
         let event_detail = if show_event {
             row(
                 area,
-                header_height + top_height + 1 + prompt_height + u16::from(!wide) + list_height,
+                prompt.bottom() - area.y + u16::from(!large && list_height > 0) + list_height,
                 event_detail_height,
             )
         } else {
             Rect::default()
         };
-        let (body, event_list) = if wide && show_event {
+        let frame_rule = |y| row(area, y, 1);
+        let prompt_top_rule = frame_rule(prompt.y.saturating_sub(area.y + 1));
+        let prompt_bottom_rule = frame_rule(prompt.bottom() - area.y);
+        let event_detail_top_rule = if show_event {
+            frame_rule(event_detail.y.saturating_sub(area.y))
+        } else {
+            prompt_bottom_rule
+        };
+        let footer_rule = frame_rule(footer.y.saturating_sub(area.y + 1));
+        let (body, mut event_list) = if large && show_event {
             let column_width = (body.width - 2 * PANEL_GAP) / 4;
             let event_width = body.width - 2 * PANEL_GAP - 2 * column_width;
             (
@@ -168,7 +282,32 @@ impl View {
         } else {
             (body, Rect::default())
         };
-        let [list, gap, task_details] = if body.width >= 2 * PANEL_GAP + 1 {
+        let [mut list, mut gap, mut task_details] = if body.is_empty() {
+            [body, Rect::default(), Rect::default()]
+        } else if kind == ScreenLayout::Small
+            && zoom
+            && let Some(panel @ (Panel::TaskList | Panel::TaskDetails)) = self.height_zoom
+        {
+            let hidden = Rect::default();
+            if panel == Panel::TaskList {
+                [body, hidden, hidden]
+            } else {
+                [hidden, hidden, body]
+            }
+        } else if kind == ScreenLayout::Small {
+            let rows = body.height.saturating_sub(1);
+            let task_list_height = if !show_event {
+                rows.div_ceil(2)
+            } else if list_height > 0 {
+                content_height.saturating_sub(2) / 6
+            } else {
+                rows / 3
+            };
+            let list = row(body, 0, task_list_height);
+            let gap = row(area, list.bottom() - area.y, u16::from(body.height > 0));
+            let details = row(body, list.height + gap.height, rows - list.height);
+            [list, gap, details]
+        } else if body.width > 2 * PANEL_GAP {
             let content = Rect {
                 width: body.width - PANEL_GAP,
                 ..body
@@ -182,10 +321,39 @@ impl View {
         } else {
             [body, Rect::default(), Rect::default()]
         };
+        if zoom && let Some(panel) = self.width_zoom {
+            match panel {
+                Panel::TaskList | Panel::TaskDetails if kind != ScreenLayout::Small => {
+                    list = if panel == Panel::TaskList {
+                        top
+                    } else {
+                        Rect::default()
+                    };
+                    task_details = if panel == Panel::TaskDetails {
+                        top
+                    } else {
+                        Rect::default()
+                    };
+                    gap = Rect::default();
+                    event_list = Rect::default();
+                }
+                Panel::EventList if large && show_event => {
+                    event_list = top;
+                    list = Rect::default();
+                    gap = Rect::default();
+                    task_details = Rect::default();
+                }
+                _ => {}
+            }
+        }
+        // Empty rows retain no usable hit targets.
+        if event_panel.is_empty() {
+            event_panel = Rect::default();
+        }
         // Keep the chart's original canvas and scale when the input row takes list space.
         let usage_chart = list;
-        let (list, search) = if self.searching {
-            let input = event_list::search_input_rect(list);
+        let (list, search) = if self.search.applied() {
+            let input = search_input::search_row(list);
             (
                 row(list, 0, list.height.saturating_sub(input.height)),
                 input,
@@ -194,6 +362,7 @@ impl View {
             (list, Rect::default())
         };
         CenterLayout {
+            kind,
             header,
             top,
             list,
@@ -202,22 +371,35 @@ impl View {
             search,
             usage_chart,
             footer,
-            event_panel: if wide && show_event {
+            event_panel: if large && show_event {
                 event_list
             } else {
                 event_panel
             },
             prompt,
             event_detail,
+            prompt_top_rule,
+            prompt_bottom_rule,
+            event_detail_top_rule,
+            footer_rule,
         }
     }
-    pub(crate) fn event_count(&self, area: Rect) -> usize {
-        usize::from(
-            self.center_layout(area)
+    /// How many of the selected task's newest events the drawn panels need.
+    pub(crate) fn event_read_count(&self, area: Rect) -> usize {
+        let layout = self.center_layout(area);
+        let list_rows = usize::from(
+            layout
                 .event_panel
                 .height
-                .saturating_sub(u16::from(self.event_list.search.active())),
-        )
+                .saturating_sub(u16::from(self.event_list.search.input.applied())),
+        );
+        self.event_read_count_for(list_rows, !layout.event_detail.is_empty())
+    }
+
+    /// The list's read count, including the newest event while details are shown.
+    pub(crate) fn event_read_count_for(&self, list_rows: usize, detail_shown: bool) -> usize {
+        self.event_list_read_count(list_rows)
+            .max(usize::from(detail_shown))
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
@@ -236,7 +418,7 @@ impl View {
             if input.is_empty() {
                 return None;
             }
-            let (_, caret) = editor.window(usize::from(input.width));
+            let caret = editor.window(usize::from(input.width)).caret_column;
             return Some((input.x + caret, input.y));
         }
         let layout = self.center_layout(area);
@@ -269,7 +451,8 @@ impl View {
                 &self.input_label(),
             );
         }
-        if self.task_search_editing()
+        if self.search_focused()
+            && matches!(self.active_panel, Panel::EventList | Panel::EventDetail)
             && !self.help
             && self.confirm_dialog.is_none()
             && !layout.event_panel.is_empty()
@@ -282,31 +465,56 @@ impl View {
                 } else {
                     layout.event_panel
                 };
-            let input = event_list::search_input_rect(search_area);
+            let input = search_input::search_row(search_area);
             let search = if self.active_panel == Panel::EventDetail {
                 &self.event_detail.search
             } else {
                 &self.event_list.search
             };
-            let (_, caret) = input_row(&format!("Search {PROMPT_MARKER} "), &search.query, input);
-            return Some((input.x + caret, input.y));
+            return search.input.caret(input);
         }
-        if !self.searching || self.confirm_dialog.is_some() || self.help || layout.search.is_empty()
+        if !self.search.focused()
+            || self.confirm_dialog.is_some()
+            || self.help
+            || layout.search.is_empty()
         {
             return None;
         }
-        let (prompt, edit) = self.input();
-        let (_, caret) = input_row(&prompt, edit, layout.search);
-        Some((layout.search.x + caret, layout.search.y))
+        self.search.caret(layout.search)
     }
 
     #[cfg(test)]
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         self.render_at(area, buf, chrono::Utc::now());
     }
+    /// Draws the footer: the hints, the scrolled-off section `title` beside the task hints, and
+    /// the latest feedback, or else the failure of the selected draft, question or prompt.
+    fn render_footer(
+        &self,
+        area: Rect,
+        large: bool,
+        title: Option<(Line<'static>, super::event_detail::EventDetailColumns)>,
+        buf: &mut Buffer,
+    ) {
+        let keys = super::footer::Footer {
+            hints: self.center_footer_hints(),
+            title: title.filter(|_| self.footer_shows_task_title()),
+            feedback: self
+                .feedback
+                .as_ref()
+                .map(|(feedback, _)| feedback.line())
+                .or_else(|| self.selection_failure().map(|failure| failure.line())),
+        }
+        .render(area, large, buf);
+        self.viewport.borrow_mut().hint_targets.extend(keys);
+    }
     pub(super) fn clear_overlay(&self, area: Rect, modal: bool, buf: &mut Buffer) {
         use ratatui::buffer::CellWidth;
 
+        self.viewport
+            .borrow_mut()
+            .hint_targets
+            .retain(|target| !target.area.intersects(area));
         self.viewport
             .borrow_mut()
             .overlays
@@ -334,16 +542,22 @@ impl View {
         now: chrono::DateTime<chrono::Utc>,
     ) {
         Clear.render(area, buf);
+        let navigation_layout = self.panel_layout(area, false);
         {
             // A panel this frame leaves out keeps no links from the last one.
             let mut viewport = self.viewport.borrow_mut();
+            viewport.area = area;
+            viewport.event_detail_images.clear();
+            viewport.navigation_layout = Some(navigation_layout);
             viewport.overlays.clear();
             viewport.picker_rows.clear();
             viewport.confirm_options.clear();
+            viewport.hint_targets.clear();
             viewport.list_links.clear();
             viewport.marker = None;
             viewport.field_targets.clear();
             viewport.task_details = Rect::default();
+            viewport.task_details_text = text_selection::TextRegion::default();
             viewport.task_details_title = Rect::default();
             viewport.title_input = Rect::default();
             viewport.task_details_input = Rect::default();
@@ -358,14 +572,23 @@ impl View {
         let layout = self.center_layout(area);
         self.viewport.borrow_mut().prompt = layout.prompt;
         if let Some(question) = self.active_question() {
-            question.render(layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)), buf);
+            let area = layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0));
+            question.render(area, buf);
+            if !area.is_empty() {
+                let footer = Rect::new(area.x, area.bottom() - 1, area.width, 1);
+                self.viewport
+                    .borrow_mut()
+                    .hint_targets
+                    .extend(question.footer_targets(footer));
+            }
         } else {
             self.input_box.render(
                 layout.prompt.inner(Margin::new(HORIZONTAL_PADDING, 0)),
                 buf,
                 &self.input_label(),
+                // The name matches the task details title.
                 self.selected_id()
-                    .map_or_else(Style::default, |id| self.title_style(id)),
+                    .map_or_else(Style::default, |id| self.title_style(id).bold()),
                 self.input_disabled(),
                 self.prompt_focused(),
             );
@@ -406,12 +629,6 @@ impl View {
         }
         rule(row(layout.header, 1, 1), buf);
 
-        line(self.center_footer_hints(), inset(layout.footer), buf);
-        if let Some((label, _)) = &self.copied {
-            Line::from(label.clone().dim())
-                .right_aligned()
-                .render(inset(layout.footer), buf);
-        }
         if self.help {
             let body = inset(row(
                 area,
@@ -425,53 +642,57 @@ impl View {
                 lines.push("… resize to see all".dim().into());
             }
             Paragraph::new(lines).render(body, buf);
+            self.render_footer(
+                inset(layout.footer),
+                layout.kind == ScreenLayout::Large,
+                None,
+                buf,
+            );
             return;
         }
+        if layout.kind == ScreenLayout::Small {
+            rule(layout.gap, buf);
+        }
         for y in layout.gap.y..layout.gap.bottom() {
-            if layout.gap.width > 1 {
+            if layout.kind != ScreenLayout::Small && layout.gap.width > 1 {
                 buf[(layout.gap.x + HORIZONTAL_PADDING, y)]
                     .set_symbol("│")
                     .set_style(Style::default().dim());
             }
         }
-        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.event_panel.is_empty() {
+        let event_separator = (layout.kind == ScreenLayout::Large
+            && !layout.event_panel.is_empty()
+            && layout.event_panel.x > layout.top.x)
+            .then(|| layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1));
+        if let Some(x) = event_separator {
             for y in layout.event_panel.y..layout.event_panel.bottom() {
-                buf[(
-                    layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1),
-                    y,
-                )]
+                buf[(x, y)]
                     .set_symbol("│")
                     .set_style(Style::default().dim());
             }
         }
         self.render_center_rows(layout.list, buf, now);
         self.render_usage_chart(layout.usage_chart, buf, now);
-        if self.searching {
-            let (prompt, edit) = self.input();
+        if self.search.applied() {
             Clear.render(layout.search, buf);
-            render_input_row(&prompt, edit, layout.search, buf);
-        }
-        if let Some((notice, _)) = &self.notice
-            && !layout.list.is_empty()
-        {
-            let bottom = row(layout.list, layout.list.height - 1, 1);
-            self.clear_overlay(bottom, false, buf);
-            line(notice.clone().dim(), bottom, buf);
+            self.search.render(layout.search, buf);
         }
         // Activity and task status share the rule immediately above the prompt.
-        let middle = row(area, layout.prompt.y.saturating_sub(area.y + 1), 1);
-        if !layout.event_detail.is_empty() {
-            rule(middle, buf);
+        let borders = [
+            layout.prompt_top_rule,
+            layout.prompt_bottom_rule,
+            layout.event_detail_top_rule,
+            layout.footer_rule,
+        ];
+        for (index, border) in borders.iter().enumerate() {
+            if !borders[..index].contains(border)
+                && *border != row(layout.header, 1, 1)
+                && !(layout.kind == ScreenLayout::Small && *border == layout.gap)
+            {
+                rule(*border, buf);
+            }
         }
-        let mut task_details = layout.task_details;
-        let task_details_rule = if task_details.is_empty() {
-            None
-        } else if !layout.event_detail.is_empty() {
-            Some(Rect::new(task_details.x, middle.y, task_details.width, 1))
-        } else {
-            task_details.height = task_details.height.saturating_sub(1);
-            Some(row(layout.task_details, task_details.height, 1))
-        };
+        let task_details = layout.task_details;
         if !task_details.is_empty() {
             self.render_task_details(task_details, buf, now);
         }
@@ -483,125 +704,132 @@ impl View {
         }
         self.render_event(layout.event_panel, buf, now);
         if !layout.event_detail.is_empty() {
-            rule(row(layout.event_detail, 0, 1), buf);
-            let bottom = row(area, layout.event_detail.bottom() - area.y, 1);
-            rule(bottom, buf);
-            self.viewport.borrow_mut().output_borders = [row(layout.event_detail, 0, 1), bottom];
-            self.render_event_detail(inset(layout.event_detail), buf, now);
+            self.viewport.borrow_mut().output_borders =
+                [layout.event_detail_top_rule, layout.footer_rule];
+            self.render_event_detail(
+                super::event_detail::EventDetailArea {
+                    panel: layout.event_detail,
+                    content: inset(layout.event_detail),
+                },
+                buf,
+                now,
+            );
         }
         let footer_title = self.viewport.borrow_mut().event_detail_footer_title.take();
-        if let Some((title, columns)) = footer_title
-            && self.copied.is_none()
-            && self.footer_shows_task_hints()
+        self.render_footer(
+            inset(layout.footer),
+            layout.kind == ScreenLayout::Large,
+            None,
+            buf,
+        );
+        self.render_frame_labels(navigation_layout, layout, area, buf, now);
+        if !layout.event_detail.is_empty()
+            && let Some((title, _)) = footer_title
         {
-            super::event_list::render_footer_title(
-                title,
-                columns,
-                inset(layout.footer),
-                self.center_footer_hints().width() as u16,
-                area.width >= WIDE_LAYOUT_COLUMNS,
-                buf,
-            );
+            render_section_edge(title, layout.event_detail_top_rule, buf);
         }
-        if !layout.event_panel.is_empty() {
-            self.viewport.borrow_mut().event_borders = [
-                Rect::new(
-                    layout.event_panel.x,
-                    layout.event_panel.y.saturating_sub(1),
-                    layout.event_panel.width,
-                    1,
-                ),
-                Rect::new(
-                    layout.event_panel.x,
-                    layout.event_panel.bottom(),
-                    layout.event_panel.width,
-                    1,
-                ),
-            ];
-            let model_y = if area.width >= WIDE_LAYOUT_COLUMNS {
-                layout.event_panel.bottom()
-            } else {
-                let border = row(area, layout.prompt.bottom() - area.y, 1);
-                rule(border, buf);
-                border.y
-            };
-            // The model and effort sit between the separator's joint, or the screen's left
-            // edge in the narrow layout, and the screen's right edge.
-            let left = if area.width >= WIDE_LAYOUT_COLUMNS {
-                layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1)
-            } else {
-                area.x
-            };
-            // The duration label sits on the border between the event list and its detail in both
-            // layouts; the New button, shown only in time order, shares the model's border.
-            let jump_y = if self.event_list.sort == EventSort::Duration {
-                layout.event_panel.bottom()
-            } else {
-                model_y
-            };
-            self.render_event_jump(
-                Rect::new(left, jump_y, area.right().saturating_sub(left), 1),
-                buf,
-            );
-            // The narrow layout starts them at the midline, under the task's folder on the title
-            // rule.
-            let model_left = if area.width < WIDE_LAYOUT_COLUMNS && !layout.gap.is_empty() {
-                layout.gap.x + HORIZONTAL_PADDING
-            } else {
-                left
-            };
-            self.render_event_model(
-                Rect::new(
-                    model_left,
-                    model_y,
-                    area.right().saturating_sub(model_left),
-                    1,
-                ),
-                buf,
-            );
-            let rule = Rect::new(layout.list.x, middle.y, layout.list.width, 1);
-            self.render_activity_strip(rule, buf, now);
-        }
-        if let Some(task_details_rule) = task_details_rule {
-            // The title and status rules run from the separator's joint on the left to the event list's
-            // joint or the screen's right edge.
-            let left = layout.gap.x + HORIZONTAL_PADDING;
-            let right = if area.width >= WIDE_LAYOUT_COLUMNS && !layout.event_panel.is_empty() {
-                layout.event_panel.x - HORIZONTAL_PADDING
-            } else {
-                area.right()
-            };
-            if layout.header.height >= 2 {
-                self.render_status_rule(
-                    Rect::new(left, layout.header.y + 1, right - left, 1),
-                    buf,
-                    now,
-                );
-            }
-            self.render_title_rule(Rect::new(left, task_details_rule.y, right - left, 1), buf);
+        if !layout.event_detail.is_empty()
+            && let Some(title) = self.next_event_title()
+        {
+            render_section_edge(title, layout.footer_rule, buf);
         }
         let mut separators = vec![];
-        if layout.gap.width > 1 {
+        if layout.kind != ScreenLayout::Small && !layout.gap.is_empty() && layout.gap.width > 1 {
             separators.push((
                 layout.gap.x + HORIZONTAL_PADDING,
                 layout.gap.y,
                 layout.gap.bottom(),
             ));
         }
-        if area.width >= WIDE_LAYOUT_COLUMNS && !layout.event_panel.is_empty() {
-            separators.push((
-                layout.event_panel.x.saturating_sub(HORIZONTAL_PADDING + 1),
-                layout.event_panel.y,
-                layout.event_panel.bottom(),
-            ));
+        if let Some(x) = event_separator {
+            separators.push((x, layout.event_panel.y, layout.event_panel.bottom()));
         }
         join_separators(&separators, area, buf);
+        // A prompt the attention queue took over is framed by heavy rules in the attention
+        // color, drawn after every label and joint on those rules.
+        if self.attention_selection.is_some()
+            && self.attention_selection.as_ref() == self.selected_id()
+        {
+            for rule in [layout.prompt_top_rule, layout.prompt_bottom_rule] {
+                heavy_rule(rule, buf);
+            }
+        }
         self.render_controls(task_details, buf);
         if let Some(dialog) = &self.confirm_dialog {
             self.render_confirm_dialog(dialog, layout.top, buf);
             self.viewport.borrow_mut().marker = None;
         }
     }
+    /// Task labels stay within the visible owner's edges or the task list's borrowed edge.
+    fn render_task_frame_labels(
+        &self,
+        layout: CenterLayout,
+        area: Rect,
+        buf: &mut Buffer,
+        now: DateTime<Utc>,
+    ) {
+        if layout.task_details.is_empty() {
+            return;
+        }
+        let edge = |panel: Rect, y| {
+            let left = if panel.x == layout.top.x {
+                area.x
+            } else {
+                panel.x.saturating_sub(HORIZONTAL_PADDING + 1)
+            };
+            let right = if panel.right() == layout.top.right() {
+                area.right()
+            } else {
+                panel.right() + HORIZONTAL_PADDING + 1
+            };
+            Rect::new(left, y, right.saturating_sub(left), 1).intersection(area)
+        };
+        self.render_status_rule(
+            edge(layout.task_details, layout.task_details.y.saturating_sub(1)),
+            buf,
+            now,
+        );
+        // The chart canvas includes the search row and retains the panel edges.
+        let list = layout.usage_chart;
+        let borrowed = !list.is_empty();
+        self.render_title_rule(
+            edge(layout.task_details, layout.task_details.bottom()),
+            !borrowed,
+            buf,
+        );
+        if borrowed {
+            let y = if layout.kind == ScreenLayout::Small {
+                list.y.saturating_sub(1)
+            } else {
+                list.bottom()
+            };
+            self.render_task_model(edge(list, y), Rect::default(), true, buf);
+        }
+    }
+
+    /// Renders labels on the dashboard frame.
+    fn render_frame_labels(
+        &self,
+        _baseline: CenterLayout,
+        layout: CenterLayout,
+        area: Rect,
+        buf: &mut Buffer,
+        now: DateTime<Utc>,
+    ) {
+        if !layout.event_panel.is_empty() {
+            let panel = layout.event_panel;
+            self.viewport.borrow_mut().event_borders = [
+                Rect::new(panel.x, panel.y.saturating_sub(1), panel.width, 1),
+                Rect::new(panel.x, panel.bottom(), panel.width, 1),
+            ];
+            let left = panel.x.saturating_sub(HORIZONTAL_PADDING + 1);
+            let edge = Rect::new(left, panel.bottom(), area.right() - left, 1);
+            self.render_event_jump(edge, buf);
+            self.render_event_filter(edge, buf);
+        }
+        self.render_task_frame_labels(layout, area, buf, now);
+    }
+
     pub(super) fn render_confirm_dialog(
         &self,
         dialog: &ConfirmDialog,
@@ -695,7 +923,6 @@ impl View {
             (None, Some(_)) => SessionStatus::New.label(),
             (None, None) => return,
         };
-        self::rule(rule, buf);
         // The status stays centered on the whole rule, keeping both end labels clear.
         let fits = |text: &String| usize::from(rule.width) >= 2 * (text.width() + 2) + 7;
         let elapsed = session
@@ -712,12 +939,19 @@ impl View {
         let cache_remaining = session
             .and_then(|session| session.cache_expires_at)
             .map(|expires| expires - now);
+        // A Claude subagent's five-minute cache counts down only in its last minute.
+        let countdown_window = if session.is_some_and(|session| {
+            session.id.provider == ProviderId::Claude && session.parent.is_some()
+        }) {
+            chrono::Duration::seconds(59)
+        } else {
+            chrono::Duration::minutes(15)
+        };
         let elapsed = elapsed.map(|elapsed| {
             let mut spans = Vec::new();
             if let Some(seconds) = cache_remaining
                 .filter(|remaining| {
-                    *remaining >= chrono::Duration::seconds(1)
-                        && *remaining <= chrono::Duration::minutes(15)
+                    *remaining >= chrono::Duration::seconds(1) && *remaining <= countdown_window
                 })
                 .map(|remaining| remaining.num_seconds())
             {
@@ -764,19 +998,14 @@ impl View {
             };
             truncate_line_with_ellipsis_if_overflow(Line::from(status).bold(), width)
         };
-        let mut header = truncate_line_to_width(status, width);
-        header.spans.insert(0, " ".into());
-        header.spans.push(" ".into());
-        let label_width = header.width() as u16;
-        let x = rule.x + rule.width.saturating_sub(label_width) / 2;
-        let label = Rect::new(x, rule.y, label_width.min(rule.width), 1).intersection(rule);
+        let (header, label) = centered_rule_label(truncate_line_to_width(status, width), rule);
         Clear.render(label, buf);
         line(header, label, buf);
     }
     /// Centers the selected task's name, or a new task's label, on the rule under the details
     /// panel, a space apart on each side; a double click edits a task's name. The project
-    /// folder on the left and the pull request or branch on the right flank it.
-    fn render_title_rule(&self, rule: Rect, buf: &mut Buffer) {
+    /// folder and branch flank it while borrowing; otherwise they share its right edge.
+    fn render_title_rule(&self, rule: Rect, settings_on_edge: bool, buf: &mut Buffer) {
         let session = self
             .selected_row()
             .filter(|_| self.selected_draft().is_none());
@@ -800,14 +1029,6 @@ impl View {
         // The name, shown or edited, keeps the color it has in the task list.
         let name_style = self.title_style(&key);
         let title_style = name_style.bold();
-        // The left corner is a joint, or the separator that keeps going down beside the prompt.
-        self::rule(
-            Rect::new(rule.x + 1, rule.y, rule.width.saturating_sub(1), 1),
-            buf,
-        );
-        if buf[(rule.x, rule.y)].symbol() == "│" {
-            buf[(rule.x, rule.y)].set_symbol("├");
-        }
         let folder_width = usize::from(rule.width).saturating_sub(title.width().min(20) + 10) / 2;
         let folder_width = folder_width.min(usize::from(rule.width / 3));
         let folder = super::formatting::format_directory_display(&heading, Some(folder_width));
@@ -827,16 +1048,49 @@ impl View {
                 .map(|branch| Span::styled(branch, style::time_style())),
             _ => None,
         };
+        let has_branch = right.is_some();
+        let folder_cells = folder.width() as u16;
+        let right = if settings_on_edge {
+            let mut spans = vec![Span::styled(folder.clone(), style::time_style())];
+            if let Some(branch) = right {
+                spans.push(" ─ ".dim());
+                spans.push(branch);
+            }
+            Some(Line::from(spans))
+        } else {
+            right.map(Line::from)
+        };
         // Keep short branch labels intact; longer labels share the folder's width budget.
-        let right = right.map(|span| {
-            truncate_line_with_ellipsis_if_overflow(Line::from(span), folder_width.max(20))
-        });
+        let right =
+            right.map(|span| truncate_line_with_ellipsis_if_overflow(span, folder_width.max(20)));
+        if settings_on_edge {
+            self.render_task_model(
+                rule,
+                Rect::new(rule.x + rule.width / 2, rule.y, rule.width.div_ceil(2), 1),
+                false,
+                buf,
+            );
+        }
+        let model_width = self
+            .viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .filter(|(_, field)| matches!(field, Field::Model | Field::Effort))
+            .filter(|(rect, _)| rect.y == rule.y)
+            .map(|(rect, _)| usize::from(rect.right().saturating_sub(rule.x + 2)))
+            .max()
+            .unwrap_or(0);
         // The title stays centered on the whole rule, so the wider side label's width is kept
         // clear on both sides, plus the corner, one rule cell and a space on each side.
         let side = right
             .as_ref()
             .map_or(0, |line| line.width())
-            .max(folder.width());
+            .max(if settings_on_edge {
+                model_width
+            } else {
+                folder.width()
+            });
         let width = usize::from(rule.width).saturating_sub(6 + 2 * (side + 2));
         let editor = self.title_editor();
         let title = if let Some(editor) = editor {
@@ -847,7 +1101,7 @@ impl View {
                 editor.text().width() + 1
             };
             let input_width = display_width.min(width);
-            let (text, _) = editor.window(input_width);
+            let text = editor.window(input_width).text;
             let (text, style) = if placeholder {
                 ("New task", Style::default().dim())
             } else {
@@ -891,10 +1145,22 @@ impl View {
         let (folder_area, right_area) = render_rule_ends(
             rule,
             label_width,
-            Some(Line::from(Span::styled(folder, style::time_style()))),
+            (!settings_on_edge).then(|| Line::from(Span::styled(folder, style::time_style()))),
             right,
             buf,
         );
+        let (folder_area, right_area) = if settings_on_edge {
+            let folder_area =
+                right_area.map(|area| Rect::new(area.x, area.y, folder_cells.min(area.width), 1));
+            let branch_area = right_area.and_then(|area| {
+                let start = area.x + folder_cells + 3;
+                (has_branch && start < area.right())
+                    .then(|| Rect::new(start, area.y, area.right() - start, 1))
+            });
+            (folder_area, branch_area)
+        } else {
+            (folder_area, right_area)
+        };
         let mut viewport = self.viewport.borrow_mut();
         let Some(session) = session else {
             // A new task's folder is still a choice, so it opens the repository browser, not the folder.
@@ -906,21 +1172,46 @@ impl View {
             return;
         };
         let mut links = Vec::new();
-        if let Some(area) = folder_area {
-            links.push((area, cwd.clone()));
+        if let Some(area) = folder_area
+            && let Some(target) = super::links::existing(cwd.clone())
+        {
+            links.push((area, LinkTarget::Path(target)));
         }
         if let (Some(area), Some(pr)) = (right_area, &session.pr) {
             let url = super::vscode::pull_request_link(&pr.url, &session.cwd)
                 .unwrap_or_else(|| pr.url.clone());
             super::hyperlink::hyperlink(buf, area, &url);
-            links.push((area, PathBuf::from(url)));
+            links.push((area, LinkTarget::Path(PathBuf::from(url))));
         }
         super::links::underline(buf, &links);
         viewport.task_details_links.extend(links);
     }
 
-    /// Groups the model and effort on the left; each value opens its own picker.
-    fn render_event_model(&self, rule: Rect, buf: &mut Buffer) {
+    fn render_event_filter(&self, rule: Rect, buf: &mut Buffer) {
+        let title = match self.event_list.filter {
+            crate::event::EventFilter::All => return,
+            crate::event::EventFilter::Message => "Assistant",
+            crate::event::EventFilter::Tool => "Tool",
+        };
+        let width = title.width() as u16;
+        if rule.is_empty() || rule.width < width + 4 {
+            return;
+        }
+        let (mut header, mut label) = centered_rule_label(Line::from(title), rule);
+        header.style = style::rule_label_style();
+        label.x = rule.x;
+        if label.intersects(self.viewport.borrow().event_label) {
+            return;
+        }
+        Clear.render(label, buf);
+        line(header, label, buf);
+    }
+
+    /// Places model and effort together or at opposite ends; each value opens its own picker.
+    fn render_task_model(&self, rule: Rect, reservation: Rect, ends: bool, buf: &mut Buffer) {
+        if rule.width < 4 || rule.is_empty() {
+            return;
+        }
         let draft = self.selected_draft();
         let (model, effort) = match (self.selected_row().filter(|_| draft.is_none()), draft) {
             // A session shows only the settings it has reported; nothing stands in for the rest.
@@ -941,9 +1232,8 @@ impl View {
             (None, None) => return,
         };
         let separator = super::title_rule::SEPARATOR;
-        let label = self.viewport.borrow().event_label;
-        let right = if label.intersects(rule) {
-            label.x.saturating_sub(1)
+        let right = if reservation.intersects(rule) {
+            reservation.x.saturating_sub(1)
         } else {
             rule.right().saturating_sub(2)
         };
@@ -956,6 +1246,23 @@ impl View {
                     .map(|value| (value, field))
             })
             .collect();
+        if ends {
+            let value = |field| {
+                values
+                    .iter()
+                    .find(|(_, key)| *key == field)
+                    .map(|(text, _)| Line::from(text.clone()).style(style::time_style()))
+            };
+            let (model, effort) =
+                render_rule_ends(rule, 0, value(Field::Model), value(Field::Effort), buf);
+            let mut viewport = self.viewport.borrow_mut();
+            for (rect, field) in [(model, Field::Model), (effort, Field::Effort)] {
+                if let Some(rect) = rect {
+                    viewport.field_targets.push((rect, field));
+                }
+            }
+            return;
+        }
         for (index, (value, field)) in values.iter().enumerate() {
             let gap = if index == 0 {
                 0
@@ -1014,13 +1321,8 @@ impl View {
             viewport.task_details_links.clear();
             viewport.task_details_text = text_selection::TextRegion::default();
         }
-        if let Some(draft) = self.selected_draft() {
+        if self.selected_draft().is_some() || self.selector.is_some() {
             self.viewport.borrow_mut().task_details = area;
-            if let Some(error) = &draft.error {
-                Paragraph::new(error.as_str())
-                    .wrap(ratatui::widgets::Wrap { trim: false })
-                    .render(area, buf);
-            }
             return;
         }
         let Some(session) = self.selected_row() else {
@@ -1028,12 +1330,18 @@ impl View {
         };
         self.viewport.borrow_mut().task_details = area;
         let width = usize::from(area.width.max(1));
+        let layout = ScreenLayout::for_width(buf.area.width);
+        let right_padding = usize::from(layout != ScreenLayout::Large);
+        let section_header =
+            |label, value, width| centered_header(label, value, width, right_padding);
         // Sections top to bottom: background, activity, update, prompt and queued
         // messages, needs input, tasks. The title sits on the rule below the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
+        let mut continuations = std::collections::BTreeMap::new();
         let mut bodies = Vec::new();
         // The full text a double click copies from each body, parallel to `bodies`.
+        let labelled_prompt = image_labels(&session.prompt, &session.prompt_images);
         let mut copies: Vec<Option<(&str, &'static str)>> = Vec::new();
         // A fingerprint of each body's text, parallel to `bodies`.
         let mut keys = Vec::new();
@@ -1041,7 +1349,7 @@ impl View {
         let mut body_links: Vec<Vec<super::links::Link>> = Vec::new();
         // The columns each item draws a link on, parallel to `items`; bodies fill theirs
         // once their rows are mapped to their text.
-        let mut item_links: Vec<Vec<(std::ops::Range<u16>, PathBuf)>> = Vec::new();
+        let mut item_links: Vec<Vec<(std::ops::Range<u16>, LinkTarget)>> = Vec::new();
 
         // The agent appends an exit marker to the output file when the
         // command ends, which lands before the completion notification does.
@@ -1066,7 +1374,7 @@ impl View {
         let subagents = self.subagents_for(session).collect::<Vec<_>>();
         if !boxes.is_empty() || !subagents.is_empty() {
             separate_section(&mut items);
-            items.push(Item::Decoration(centered_header(
+            items.push(Item::Decoration(section_header(
                 "Background".dim().into(),
                 Line::default(),
                 width,
@@ -1126,7 +1434,7 @@ impl View {
             separate_section(&mut items);
             let start = items.len() + 1;
             items.extend([
-                Item::Decoration(centered_header(
+                Item::Decoration(section_header(
                     "Last activity".dim().into(),
                     Span::styled(
                         format_relative_time(now, Some(activity.at)),
@@ -1164,15 +1472,22 @@ impl View {
                     Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
             }
             separate_section(&mut items);
-            items.push(Item::Decoration(centered_header(
+            items.push(Item::Decoration(section_header(
                 "Update".dim().into(),
                 header,
                 width,
             )));
             let start = items.len();
             let body_style = style::event_styles(&crate::event::Kind::Assistant).1;
+            let (lines, breaks) = super::text::layout(message, &session.cwd, width, true);
+            continuations.extend(
+                breaks
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(row, join)| join.map(|space| (start + row, space))),
+            );
             items.extend(
-                super::text::lines(message, &session.cwd, width, true)
+                lines
                     .into_iter()
                     .map(|mut line| {
                         for span in &mut line.spans {
@@ -1195,27 +1510,33 @@ impl View {
                 .is_none_or(|parent| parent.provider != ProviderId::Codex)
         {
             let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
-                centered_header("Prompt".dim().into(), elapsed.dim().into(), width)
+                section_header("Prompt".dim().into(), elapsed.dim().into(), width)
             } else {
-                centered_header("Prompt".dim().into(), Line::default(), width)
+                section_header("Prompt".dim().into(), Line::default(), width)
             };
             separate_section(&mut items);
             items.push(Item::Decoration(prompt_header));
-            let prompt_text = match session.prompt.trim() {
+            let prompt_text = match labelled_prompt.trim() {
                 "" => "No prompt available.",
                 prompt => prompt,
             };
             let prompt_start = items.len();
-            let prompt_body = super::text::lines(prompt_text, &session.cwd, width, true);
+            let (prompt_body, breaks) = super::text::layout(prompt_text, &session.cwd, width, true);
+            continuations.extend(
+                breaks
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(row, join)| join.map(|space| (prompt_start + row, space))),
+            );
             items.extend(prompt_body.into_iter().map(Item::from));
             bodies.push(prompt_start..items.len());
-            keys.push(body_key("Prompt", &session.prompt));
+            keys.push(body_key("Prompt", &labelled_prompt));
             copies.push(
-                Some((session.prompt.as_str(), "Copied prompt"))
+                Some((labelled_prompt.as_ref(), "Copied prompt"))
                     .filter(|(prompt, _)| !prompt.trim().is_empty()),
             );
             body_links.push(super::links::text_links(
-                &session.prompt,
+                &labelled_prompt,
                 &session.cwd,
                 &session.prompt_images,
             ));
@@ -1224,11 +1545,17 @@ impl View {
         for queued in &session.queued {
             separate_section(&mut items);
             let start = items.len();
-            items.extend(
-                super::text::lines(queued, &session.cwd, width, true)
+            let (mut lines, breaks) = super::text::layout(queued, &session.cwd, width, true);
+            for span in lines.iter_mut().flat_map(|line| &mut line.spans) {
+                span.style = style::queued_style().patch(span.style);
+            }
+            continuations.extend(
+                breaks
                     .into_iter()
-                    .map(Item::from),
+                    .enumerate()
+                    .filter_map(|(row, join)| join.map(|space| (start + row, space))),
             );
+            items.extend(lines.into_iter().map(Item::from));
             bodies.push(start..items.len());
             keys.push(body_key("Prompt", queued));
             copies.push(Some((queued.as_str(), "Copied prompt")));
@@ -1244,7 +1571,7 @@ impl View {
         if session.status == SessionStatus::NeedsInput || needs.is_some() {
             separate_section(&mut items);
             let start = items.len();
-            items.push(Item::Decoration(centered_header(
+            items.push(Item::Decoration(section_header(
                 Span::styled("Needs input", style::attention_title_style()).into(),
                 Line::default(),
                 width,
@@ -1261,18 +1588,10 @@ impl View {
                     "Waiting for your response.".into(),
                 ]);
             } else {
-                items.extend(session.pending_questions.iter().map(|question| {
-                    truncate_line_with_ellipsis_if_overflow(
-                        super::text::summary(
-                            question,
-                            &session.cwd,
-                            width,
-                            &crate::event::Kind::Assistant,
-                            None,
-                        ),
-                        width,
-                    )
-                    .into()
+                items.extend(session.pending_questions.iter().flat_map(|question| {
+                    super::text::lines(question, &session.cwd, width, false)
+                        .into_iter()
+                        .map(Item::from)
                 }));
             }
             bodies.push(start..items.len());
@@ -1310,12 +1629,18 @@ impl View {
             .collect::<Vec<_>>()
             .join("\n");
         if !tasks.is_empty() {
+            // The tasks section sits on the panel's bottom row when everything fits.
+            let above = items.iter().map(Item::height).sum::<usize>();
+            let section = usize::from(!items.is_empty()) + 1 + tasks.len();
+            let gap = usize::from(area.height).saturating_sub(above + section);
+            items.extend((0..gap).map(|_| Item::Decoration(Line::default())));
+            item_links.resize(items.len(), Vec::new());
             separate_section(&mut items);
             let in_progress = tasks
                 .iter()
                 .filter(|(_, status)| *status == SessionStatus::Working)
                 .count();
-            items.push(Item::Decoration(centered_header(
+            items.push(Item::Decoration(section_header(
                 "Tasks".dim().into(),
                 format!("{in_progress}/{}", tasks.len()).dim().into(),
                 width,
@@ -1366,9 +1691,12 @@ impl View {
                 item_links[index] = super::links::row_links(&cells, &body_links[id]);
                 text_rows[index] = Some(text_selection::DrawnRow {
                     segment: body.start,
+                    index,
+                    continuation: continuations.get(&index).copied(),
                     x: area.x,
                     y: 0,
                     cells,
+                    ..Default::default()
                 });
             }
             sources.push(text_selection::Source {
@@ -1384,7 +1712,7 @@ impl View {
         };
         let available = usize::from(area.height);
         let budget = budget_task_details(&items, &bodies, background, available);
-        let (scroll, body_rows, total) = {
+        let (scroll, body_rows, total, indents) = {
             let mut viewport = self.viewport.borrow_mut();
             let state = &mut viewport.task_details_scroll;
             state.content_top = content_top;
@@ -1424,6 +1752,24 @@ impl View {
                 }
                 item_links[cut].retain(|(cells, _)| cells.end <= width.saturating_sub(1) as u16);
             }
+            // Each body's rows share one left edge, centered as a block in the panel.
+            let mut indents = vec![0; items.len()];
+            for body in &bodies {
+                let block = items[body.clone()]
+                    .iter()
+                    .map(|item| match item {
+                        Item::Text(text) => text.width(),
+                        _ => 0,
+                    })
+                    .max()
+                    .unwrap_or(0);
+                let indent = (width.saturating_sub(block) / 2) as u16;
+                for index in body.clone() {
+                    if matches!(items[index], Item::Text(_)) {
+                        indents[index] = indent;
+                    }
+                }
+            }
             let mut keep = vec![false; items.len()];
             for &index in &layout.kept {
                 keep[index] = true;
@@ -1436,7 +1782,9 @@ impl View {
             text_rows.retain(|_| *rows.next().unwrap());
             let mut rows = keep.iter();
             item_links.retain(|_| *rows.next().unwrap());
-            (layout.scroll, state.bodies.clone(), layout.total)
+            let mut rows = keep.iter();
+            indents.retain(|_| *rows.next().unwrap());
+            (layout.scroll, state.bodies.clone(), layout.total, indents)
         };
         self.viewport.borrow_mut().task_details_copy = body_rows
             .into_iter()
@@ -1449,20 +1797,25 @@ impl View {
                 Some((screen_row(start)..screen_row(end), text.to_owned(), label))
             })
             .collect();
-        let content_area = Rect::new(0, 0, area.width, total as u16);
+        // Include the padding cell beside the panel in the content buffer.
+        let content_width = area.width + u16::from(area.right() < buf.area.right());
+        let content_area = Rect::new(0, 0, content_width, total as u16);
         let mut content = Buffer::empty(content_area);
         let mut offset = 0;
         let mut drawn_links = Vec::new();
-        for (((item, mapped), links), id) in items
+        let mut background_titles = Vec::new();
+        for ((((item, mapped), links), id), indent) in items
             .into_iter()
             .zip(text_rows)
             .zip(item_links)
             .zip(item_ids)
+            .zip(indents)
         {
             let fallback = mapped.is_none() && !matches!(item, Item::Decoration(_));
             if offset >= scroll && offset < scroll + available {
                 let y = area.y + (offset - scroll) as u16;
                 if let Some(mut mapped) = mapped {
+                    mapped.x += indent;
                     mapped.y = y;
                     self.viewport
                         .borrow_mut()
@@ -1472,16 +1825,31 @@ impl View {
                 }
                 drawn_links.extend(links.into_iter().map(|(columns, target)| {
                     (
-                        Rect::new(area.x + columns.start, y, columns.end - columns.start, 1),
+                        Rect::new(
+                            area.x + indent + columns.start,
+                            y,
+                            columns.end - columns.start,
+                            1,
+                        ),
                         target,
                     )
                 }));
             }
             let height = item.height();
-            let item_area = row(content_area, offset as u16, height as u16);
+            let item_area = row(
+                Rect {
+                    width: area.width,
+                    ..content_area
+                },
+                offset as u16,
+                height as u16,
+            );
             let title_columns = match item {
                 Item::Text(text) | Item::Decoration(text) => {
-                    line(text, item_area, &mut content);
+                    let mut text_area = item_area;
+                    text_area.x += indent;
+                    text_area.width = text_area.width.saturating_sub(indent);
+                    line(text, text_area, &mut content);
                     None
                 }
                 Item::Background { task, output } => {
@@ -1500,6 +1868,7 @@ impl View {
                         &session.cwd,
                         now,
                         item_area,
+                        right_padding,
                         &mut content,
                     ))
                 }
@@ -1528,13 +1897,24 @@ impl View {
                     });
                     Some(render_background_box(
                         child.display_title(),
+                        child.status,
                         elapsed.as_deref(),
                         body.into_iter().collect(),
                         item_area,
+                        right_padding,
                         &mut content,
                     ))
                 }
             };
+            if title_columns.is_some()
+                && offset >= scroll
+                && offset < scroll + available
+                && !(budget.is_none()
+                    && total - scroll > available
+                    && offset + 1 == scroll + available)
+            {
+                background_titles.push(area.y + (offset - scroll) as u16);
+            }
             if fallback {
                 let mut source = String::new();
                 let mut rows = Vec::new();
@@ -1594,9 +1974,11 @@ impl View {
                                 .rows
                                 .push(text_selection::DrawnRow {
                                     segment: id,
+                                    index: y,
                                     x: area.x,
                                     y: area.y + (y - scroll) as u16,
                                     cells,
+                                    ..Default::default()
                                 });
                         }
                     }
@@ -1605,8 +1987,38 @@ impl View {
             offset += height;
         }
         for y in 0..available.min(total - scroll) {
-            for x in 0..area.width {
+            for x in 0..content_width {
                 buf[(area.x + x, area.y + y as u16)] = content[(x, (scroll + y) as u16)].clone();
+            }
+        }
+        // The panel padding and its adjacent separator belong to the frame,
+        // outside the title's layout and text-selection columns.
+        if area.x > buf.area.x && area.right() < buf.area.right() {
+            for y in background_titles {
+                let left = area.x.saturating_sub(2).max(buf.area.x);
+                let right_border = area.right() + 1 < buf.area.right()
+                    && buf[(area.right() + 1, y)].symbol() == "│";
+                let right = area.right() + u16::from(right_border);
+                let left_joint = if buf[(left, y)].symbol() == "│" {
+                    "├"
+                } else {
+                    "─"
+                };
+                for (outer, inner, joint, cap) in [
+                    (left, left + 1, left_joint, "╴"),
+                    (right, right - 1, if right_border { "┤" } else { "─" }, "╶"),
+                ] {
+                    // Very narrow panels may use the padding for title content.
+                    if buf[(inner, y)].symbol() == " "
+                        && matches!(buf[(outer, y)].symbol(), " " | "│")
+                    {
+                        for (x, symbol) in [(outer, joint), (inner, cap)] {
+                            buf[(x, y)]
+                                .set_symbol(symbol)
+                                .set_style(Style::default().dim());
+                        }
+                    }
+                }
             }
         }
         if budget.is_none() && total - scroll > available && available > 0 {
@@ -1738,17 +2150,24 @@ fn budget_task_details(
 }
 
 /// Centers a section label, fitting its right value into the space after it.
-fn centered_header(label: Line<'static>, value: Line<'static>, width: usize) -> Line<'static> {
+fn centered_header(
+    label: Line<'static>,
+    value: Line<'static>,
+    width: usize,
+    right_padding: usize,
+) -> Line<'static> {
     let label = truncate_line_with_ellipsis_if_overflow(label, width);
     let start = (width - label.width()) / 2;
-    let available = width.saturating_sub(start + label.width() + 1);
+    let value_right = width.saturating_sub(right_padding);
+    let available = value_right.saturating_sub(start + label.width() + 1);
     let value = truncate_line_with_ellipsis_if_overflow(value, available);
     let mut header = Line::from(" ".repeat(start).dim());
     header.spans.extend(label.spans);
     if value.width() > 0 {
-        header
-            .spans
-            .push(" ".repeat(width - header.width() - value.width()).dim());
+        header.spans.push(
+            " ".repeat(value_right - header.width() - value.width())
+                .dim(),
+        );
         header.spans.extend(value.spans);
     }
     header
@@ -1775,9 +2194,56 @@ fn join_separators(separators: &[(u16, u16, u16)], area: Rect, buf: &mut Buffer)
     }
 }
 
+/// Centers a section title on its owner's frame edge, preserving its panel style.
+fn render_section_edge(title: Line<'static>, edge: Rect, buf: &mut Buffer) {
+    if edge.width < 4 || edge.is_empty() {
+        return;
+    }
+    let title = truncate_line_with_ellipsis_if_overflow(title, usize::from(edge.width - 4));
+    let mut header = Line::from(" ");
+    header.spans.extend(title.spans);
+    header.spans.push(" ".into());
+    let width = header.width() as u16;
+    let label = Rect::new(edge.x + (edge.width - width) / 2, edge.y, width, 1);
+    Clear.render(label, buf);
+    line(header, label, buf);
+}
+
+fn centered_rule_label(title: Line<'_>, rule: Rect) -> (Line<'_>, Rect) {
+    let mut header = title.bold();
+    header.spans.insert(0, " ".into());
+    header.spans.push(" ".into());
+    let width = header.width() as u16;
+    let x = rule.x + rule.width.saturating_sub(width) / 2;
+    let label = Rect::new(x, rule.y, width.min(rule.width), 1).intersection(rule);
+    (header, label)
+}
+
 /// Draws a dim rule across `area`'s first row.
 fn rule(area: Rect, buf: &mut Buffer) {
     line("─".repeat(usize::from(area.width)).dim(), area, buf);
+}
+
+/// Turns the light line pieces of a rule heavy and colors them for attention, leaving its labels.
+fn heavy_rule(area: Rect, buf: &mut Buffer) {
+    let style = Style::default()
+        .not_dim()
+        .patch(style::attention_title_style());
+    for x in area.left()..area.right() {
+        let cell = &mut buf[(x, area.y)];
+        let heavy = match cell.symbol() {
+            "─" => "━",
+            "╴" => "╸",
+            "╶" => "╺",
+            "┬" => "┯",
+            "┴" => "┷",
+            "┼" => "┿",
+            "├" => "┝",
+            "┤" => "┥",
+            _ => continue,
+        };
+        cell.set_symbol(heavy).set_style(style);
+    }
 }
 
 /// Draws end labels with a half line toward their corner and a space toward the center,
@@ -1877,18 +2343,20 @@ fn subagent_line(
 }
 
 /// A running background command: its description and elapsed time on the top
-/// rule, the last output line below it when there is one.
+/// row, the last output line below it when there is one.
 fn render_background(
     task: &crate::model::BackgroundTask,
     output: Vec<String>,
     cwd: &std::path::Path,
     now: chrono::DateTime<chrono::Utc>,
     box_area: Rect,
+    right_padding: usize,
     buf: &mut Buffer,
 ) -> Vec<std::ops::Range<u16>> {
     let elapsed = format_duration((now - task.started_at).num_seconds().max(0));
     render_background_box(
         &task.description,
+        SessionStatus::Working,
         Some(&elapsed),
         output
             .into_iter()
@@ -1901,43 +2369,58 @@ fn render_background(
             })
             .collect(),
         box_area,
+        right_padding,
         buf,
     )
 }
 
 fn render_background_box(
     description: &str,
+    status: SessionStatus,
     elapsed: Option<&str>,
     output: Vec<Line<'static>>,
     box_area: Rect,
+    right_padding: usize,
     buf: &mut Buffer,
 ) -> Vec<std::ops::Range<u16>> {
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .border_style(Style::default().dim());
-    let inner = block.inner(box_area);
-    block.render(box_area, buf);
-    let title =
-        super::title_rule::centered_title_rule(description, usize::from(box_area.width), elapsed);
-    // The first and last spans draw rules; the middle spans contain the title.
+    let title = super::title_rule::centered_title(
+        description,
+        View::status_indicator(status),
+        usize::from(box_area.width),
+        elapsed,
+        right_padding,
+    );
     let mut columns = Vec::new();
-    if title.spans.len() >= 4 {
-        let start = title.spans[0].width() as u16;
-        let end = (title.width() - title.spans.last().unwrap().width()).saturating_sub(1) as u16;
-        columns.push(start..end);
-        if let Some(elapsed) = elapsed {
-            let last = title.spans.last().unwrap();
-            if last.content.ends_with(elapsed) {
-                columns.push(box_area.width - elapsed.width() as u16..box_area.width);
-            }
+    let mut x = box_area.x;
+    for span in &title.spans {
+        let end = x + span.width() as u16;
+        if !span.content.trim().is_empty() {
+            columns.push(x..end);
         }
+        x = end;
     }
-    line(title, row(box_area, 0, 1), buf);
-    Paragraph::new(output).render(inner, buf);
+    title.render(row(box_area, 0, 1), buf);
+    let output = output
+        .into_iter()
+        .map(|line| {
+            let mut line = truncate_line_to_width(line, usize::from(box_area.width));
+            let left = usize::from(box_area.width).saturating_sub(line.width()) / 2;
+            line.spans.insert(0, Span::raw(" ".repeat(left)));
+            line.left_aligned()
+        })
+        .collect::<Vec<_>>();
+    Paragraph::new(output).render(
+        Rect {
+            y: box_area.y + 1,
+            height: box_area.height.saturating_sub(1),
+            ..box_area
+        },
+        buf,
+    );
     columns
 }
 
-/// Rows a background task takes: its titled rule and the output lines below.
+/// Rows a background task takes: its title and the output lines below.
 fn box_height(lines: usize) -> usize {
     1 + lines
 }
@@ -1980,7 +2463,7 @@ mod wrapped_path_tests {
             20,
             true,
         );
-        assert_eq!(lines[0].to_string(), "/…/reports/report.md");
+        assert_eq!(lines[0].to_string(), "/private/…/report.md");
         assert!(lines[0].spans.iter().all(|span| {
             span.style
                 .add_modifier
@@ -1997,7 +2480,7 @@ mod wrapped_path_tests {
                 id: "path-probe".into(),
             },
             parent: None,
-            cwd: "/tmp/project".into(),
+            cwd: crate::test_project(),
             name: None,
             title: "Path probe".into(),
             prompt: MESSAGE.into(),
@@ -2040,12 +2523,11 @@ mod wrapped_path_tests {
             .collect();
         assert_eq!(
             rows.iter()
-                .filter(|row| row.contains("/…/background-research/report.md"))
+                .filter(|row| row.contains("…/report.md"))
                 .count(),
             2
         );
         assert!(rows.iter().any(|row| row.contains("Update")));
-        assert!(!rows.iter().any(|row| row.contains("/private/")));
     }
 
     #[test]
@@ -2056,8 +2538,8 @@ mod wrapped_path_tests {
             plain,
             [
                 "报告已写到",
-                "/…/background-research/report.md，并已发",
-                "给 team-lead。",
+                "/private/tmp/claude-501/…/report.md，并",
+                "已发给 team-lead。",
             ]
         );
         assert!(lines.iter().all(|line| line.width() <= 40));
@@ -2086,13 +2568,13 @@ mod background_title_tests {
             view.event_list.restoring = false;
             view.render(area, &mut buf);
             let viewport = view.viewport.borrow();
-            let top = viewport.event_borders[0];
+            let other = viewport.event_borders[0];
             let y = viewport.event_borders[1].y;
-            let label = Rect::new(viewport.event_panel.right() + 1 - 10, y, 10, 1);
+            let label = viewport.event_label;
             let text: String = (label.x..label.right())
                 .map(|x| buf[(x, y)].symbol())
                 .collect();
-            assert_eq!(text, " duration ", "width {width}");
+            assert_eq!(text, " duration", "width {width}");
             let row: String = (0..width).map(|x| buf[(x, y)].symbol()).collect();
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
                 "tests/ui_snapshots/event_duration_label_{width}.txt"
@@ -2109,8 +2591,89 @@ mod background_title_tests {
             for (target, _) in &viewport.field_targets {
                 assert!(!target.intersects(label), "width {width}: {target:?}");
             }
-            let text: String = (0..width).map(|x| buf[(x, top.y)].symbol()).collect();
+            let text: String = (0..width).map(|x| buf[(x, other.y)].symbol()).collect();
             assert!(!text.contains("duration"), "width {width}: {text}");
+        }
+    }
+
+    #[test]
+    fn background_child_status_uses_task_list_glyph_and_color() {
+        assert_ne!(
+            View::status_indicator(SessionStatus::Working).content,
+            View::status_indicator(SessionStatus::Ready).content
+        );
+        for status in [SessionStatus::Working, SessionStatus::Ready] {
+            let area = Rect::new(0, 0, 40, 2);
+            let mut buf = Buffer::empty(area);
+            render_background_box("Child", status, Some("35s"), vec![], area, 0, &mut buf);
+            let expected = View::status_indicator(status);
+            let cell = buf
+                .content
+                .iter()
+                .find(|cell| cell.symbol() == expected.content)
+                .unwrap();
+            assert_eq!(cell.fg, expected.style.fg.unwrap());
+            assert!(!cell.modifier.contains(ratatui::style::Modifier::DIM));
+            assert!(!buf.content.iter().any(|cell| {
+                cell.symbol()
+                    .chars()
+                    .any(|c| ('\u{2500}'..='\u{257f}').contains(&c))
+            }));
+        }
+    }
+
+    #[test]
+    fn background_output_rows_share_title_center() {
+        for (width, title) in [160, 120, 90]
+            .into_iter()
+            .flat_map(|w| ["后台命令", "Working child"].map(|t| (w, t)))
+        {
+            let area = Rect::new(7, 3, width, 5);
+            let long = "中文输出".repeat(80);
+            let output = [
+                "python3, git status",
+                "已推送，开始干净安装。",
+                long.as_str(),
+            ];
+            let mut buf = Buffer::empty(area);
+            render_background_box(
+                title,
+                SessionStatus::Working,
+                Some("35s"),
+                output.iter().map(|s| Line::from(s.to_string())).collect(),
+                area,
+                2,
+                &mut buf,
+            );
+            let title_start = (area.x..area.right())
+                .find(|&x| buf[(x, area.y)].symbol() == "●")
+                .unwrap();
+            let title_center = 2 * title_start + format!("● {title}").width() as u16;
+            for (index, source) in output.iter().enumerate() {
+                let y = area.y + 1 + index as u16;
+                let expected =
+                    truncate_line_to_width(Line::from(source.to_string()), width as usize);
+                let expected_text = expected.to_string();
+                let start = (area.x..area.right())
+                    .find(|&x| buf[(x, y)].symbol() != " ")
+                    .unwrap();
+                let end = start + expected_text.width() as u16;
+                let left = start - area.x;
+                let right = area.right().saturating_sub(end);
+                assert!(
+                    left.abs_diff(right) <= 1,
+                    "width {width}, row {index}: {left} vs {right}"
+                );
+                assert!(
+                    title_center.abs_diff(start + end) <= 1,
+                    "width {width}, row {index}: title center differs"
+                );
+                let actual: String = (start..end)
+                    .filter(|&x| x == start || buf[(x - 1, y)].symbol().width() < 2)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect();
+                assert_eq!(actual, expected_text);
+            }
         }
     }
 
@@ -2120,7 +2683,15 @@ mod background_title_tests {
             for time in [None, Some("35s")] {
                 let area = Rect::new(0, 0, 40, 2);
                 let mut buf = Buffer::empty(area);
-                render_background_box(title, time, vec![Line::from("output")], area, &mut buf);
+                render_background_box(
+                    title,
+                    SessionStatus::Working,
+                    time,
+                    vec![Line::from("output")],
+                    area,
+                    0,
+                    &mut buf,
+                );
                 let text: String = buf.content[..40]
                     .iter()
                     .enumerate()
@@ -2131,13 +2702,13 @@ mod background_title_tests {
                 assert_eq!(
                     text,
                     format!(
-                        "{} {title} {}{suffix}",
-                        "─".repeat(left),
-                        "─".repeat(right - suffix.width())
+                        "{}● {title}{}{suffix}",
+                        " ".repeat(left),
+                        " ".repeat(right - suffix.width())
                     ),
                     "{title} {time:?}"
                 );
-                assert_eq!(buf[(0, 1)].symbol(), "o");
+                assert_eq!(buf[(17, 1)].symbol(), "o");
             }
         }
     }
@@ -2155,7 +2726,7 @@ mod branch_input_tests {
                 let area = Rect::new(4, 2, width, 40);
                 let mut view = View::default();
                 view.set_active_panel(Panel::TaskDetails);
-                let mut editor = line_edit::LineEdit::default();
+                let mut editor = line_edit::Editor::default();
                 editor.insert(text);
                 view.selector = Some(Selector::new(
                     SelectorKind::Branch {
@@ -2197,30 +2768,37 @@ mod title_input_tests {
     fn new_task_name_keeps_its_task_list_color_while_shown_and_edited() {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
         let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().join("Directory");
+        std::fs::create_dir(&cwd).unwrap();
         let mut view = View::new(Grouping::Project, true);
         view.set_active_panel(Panel::TaskDetails);
         view.add_draft(DraftSetup {
             provider: ProviderId::Claude,
-            cwd: directory.path().to_owned(),
+            cwd,
             model: None,
             effort: None,
             branch: String::new(),
         });
         let key = view.selected_draft().unwrap().key();
-        let color = Some(view.title_color(&key));
+        let color = view.title_color(&key);
         let rule = Rect::new(0, 0, 60, 1);
-        let name_cell = |view: &View, text: &str| {
+        let name_cell = |view: &View| {
             let mut buf = Buffer::empty(rule);
-            view.render_title_rule(rule, &mut buf);
-            let x = (0..rule.width)
-                .find(|&x| buf[(x, 0)].symbol() == &text[..1])
-                .unwrap();
-            buf[(x, 0)].clone()
+            view.render_title_rule(rule, false, &mut buf);
+            let viewport = view.viewport.borrow();
+            let label = if view.title_editor().is_some() {
+                viewport.title_input
+            } else {
+                viewport.task_details_title
+            };
+            assert!(!label.is_empty());
+            assert_eq!(buf[(label.x, label.y)].symbol(), "D");
+            buf[(label.x, label.y)].clone()
         };
         view.rename.set_text("Draft name");
-        assert_eq!(name_cell(&view, "D").fg, color.unwrap());
+        assert_eq!(name_cell(&view).fg, color);
         assert!(view.accept_draft_name());
-        assert_eq!(name_cell(&view, "D").fg, color.unwrap());
+        assert_eq!(name_cell(&view).fg, color);
     }
 
     #[test]
@@ -2245,11 +2823,14 @@ mod title_input_tests {
                     let rule = Rect::new(7, 3, width, 1);
                     let mut buf = Buffer::empty(Rect::new(5, 2, width + 4, 3));
                     view.viewport.borrow_mut().field_targets.clear();
-                    view.render_title_rule(rule, &mut buf);
+                    view.render_title_rule(rule, false, &mut buf);
                     let input = view.viewport.borrow().title_input;
                     assert!(input.x >= rule.x && input.right() <= rule.right());
                     if !input.is_empty() {
-                        let (visible, caret) = view.rename.window(usize::from(input.width));
+                        let line_edit::Window {
+                            text: visible,
+                            caret_column: caret,
+                        } = view.rename.window(usize::from(input.width));
                         assert!(caret < input.width);
                         if !text.is_empty() {
                             let mut expected = Buffer::empty(input);
@@ -2270,5 +2851,280 @@ mod title_input_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[path = "panel_frame_tests.rs"]
+mod panel_frame_tests;
+
+#[cfg(test)]
+#[path = "owner_label_tests.rs"]
+mod owner_label_tests;
+
+#[cfg(test)]
+mod small_height_tests {
+    use super::*;
+
+    fn heights(layout: CenterLayout) -> [u16; 4] {
+        [
+            layout.list.height,
+            layout.task_details.height,
+            layout.event_panel.height,
+            layout.event_detail.height.saturating_sub(1),
+        ]
+    }
+
+    #[test]
+    fn small_heights_reserve_input_and_rules() {
+        for (height, input, expected) in [
+            (57, "", [8, 16, 16, 8]),
+            (60, "", [8, 18, 17, 8]),
+            (60, "one\ntwo\nthree", [8, 17, 16, 8]),
+            (59, "", [8, 17, 17, 8]),
+            (61, "", [8, 18, 18, 8]),
+            (62, "", [8, 19, 18, 8]),
+        ] {
+            let mut view = View::default();
+            view.input_box.editor.set_text(input);
+            let layout = view.center_layout(Rect::new(0, 0, 90, height));
+            assert_eq!(
+                heights(layout),
+                expected,
+                "height {height}, input {input:?}"
+            );
+            assert_eq!(
+                expected.iter().sum::<u16>()
+                    + layout.header.height
+                    + layout.footer.height
+                    + layout.prompt.height
+                    + 5,
+                height
+            );
+            assert_eq!(layout.list.bottom(), layout.gap.y);
+            assert_eq!(layout.gap.bottom(), layout.task_details.y);
+            assert_eq!(layout.task_details.bottom(), layout.prompt_top_rule.y);
+            assert_eq!(layout.event_detail.bottom(), layout.footer_rule.y);
+        }
+    }
+
+    #[test]
+    fn small_heights_task_zoom_fills_available_rows() {
+        for panel in [Panel::TaskList, Panel::TaskDetails] {
+            for (width, height, input) in [(70, 18, ""), (90, 60, ""), (99, 60, "one\ntwo\nthree")]
+            {
+                let mut view = View {
+                    height_zoom: Some(panel),
+                    ..View::default()
+                };
+                view.input_box.editor.set_text(input);
+                let area = Rect::new(3, 5, width, height);
+                let layout = view.center_layout(area);
+                let (target, hidden) = if panel == Panel::TaskList {
+                    (layout.list, layout.task_details)
+                } else {
+                    (layout.task_details, layout.list)
+                };
+                assert_eq!(target.x, area.x + HORIZONTAL_PADDING);
+                assert_eq!(target.width, width - 2 * HORIZONTAL_PADDING);
+                assert_eq!(target.y, layout.header.bottom());
+                assert_eq!(target.bottom(), layout.prompt_top_rule.y);
+                assert_eq!(
+                    target.height,
+                    height - layout.header.height - layout.footer.height - layout.prompt.height - 2,
+                    "{panel:?} {width}x{height} {input:?}"
+                );
+                assert!(hidden.is_empty(), "{panel:?}: {hidden:?}");
+                assert!(layout.gap.is_empty());
+                assert!(layout.event_panel.is_empty());
+                assert!(layout.event_detail.is_empty());
+                assert_eq!(layout.prompt_top_rule.bottom(), layout.prompt.y);
+                assert_eq!(layout.prompt.bottom(), layout.prompt_bottom_rule.y);
+                assert_eq!(layout.prompt_bottom_rule, layout.footer_rule);
+                assert_eq!(layout.footer_rule.bottom(), layout.footer.y);
+            }
+        }
+    }
+
+    #[test]
+    fn small_heights_event_zoom_and_wider_layouts_unchanged() {
+        for (width, panel, expected) in [
+            (90, Some(Panel::EventList), [0, 0, 54, 0]),
+            (90, Some(Panel::EventDetail), [0, 0, 0, 54]),
+            (120, None, [18, 18, 18, 16]),
+            (160, None, [33, 33, 33, 20]),
+        ] {
+            let view = View {
+                height_zoom: panel,
+                ..View::default()
+            };
+            assert_eq!(
+                heights(view.center_layout(Rect::new(0, 0, width, 60))),
+                expected
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod section_edge_tests {
+    use super::*;
+
+    #[test]
+    fn section_edge_truncation_preserves_the_panel_title_style() {
+        let title = super::super::event_detail::TitleRow {
+            left: None,
+            exit_code: None,
+            title: "A long section title".into(),
+            title_style: Style::new().fg(Color::Blue).bold(),
+            time: None,
+            meta_style: Style::new().dim(),
+        };
+        let panel = Rect::new(0, 0, 100, 1);
+        let columns = super::super::event_detail::EventDetailColumns::new(panel);
+        let (line, maps) = title.line(columns);
+        let mut panel_buffer = Buffer::empty(panel);
+        line.render(panel, &mut panel_buffer);
+        let expected = &panel_buffer[(maps[0].0.start, 0)];
+        for width in [5, 12, 40] {
+            let edge = Rect::new(0, 0, width, 1);
+            let mut buffer = Buffer::empty(edge);
+            rule(edge, &mut buffer);
+            render_section_edge(
+                title.title_in(100, std::path::Path::new("/")).0,
+                edge,
+                &mut buffer,
+            );
+            let text: String = (0..width).map(|x| buffer[(x, 0)].symbol()).collect();
+            assert_eq!(text.contains('…'), width < 24, "{text}");
+            for x in 0..width {
+                let cell = &buffer[(x, 0)];
+                if cell.symbol() != " " && cell.symbol() != "─" {
+                    assert_eq!(cell.fg, expected.fg, "{text}");
+                    assert_eq!(cell.modifier, expected.modifier, "{text}");
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod prompt_image_tests {
+    use super::*;
+    use crate::providers::Provider;
+
+    #[test]
+    fn mixed_prompt_image_aliases_share_one_display_label() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-prompt-images.jsonl");
+        let event = crate::providers::claude::event_reader::tail(&path, 100)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.images.len() == 1)
+            .unwrap();
+        let mut image = event.images[0].clone();
+        image.label = "[image image/png]".into();
+        let mut alias = image.clone();
+        alias.label = "/screens/example.png".into();
+        let images = [image.clone(), alias.clone(), image.clone()];
+        assert_eq!(
+            image_labels("Inspect image", &images),
+            "Inspect image\n[image image/png]"
+        );
+        for text in [&image.label, &alias.label] {
+            assert!(matches!(
+                image_labels(text, &images),
+                std::borrow::Cow::Borrowed(_)
+            ));
+            assert_eq!(image_labels(text, &images), text.as_str());
+        }
+        assert_eq!(image_labels("No attachments", &[]), "No attachments");
+    }
+
+    #[test]
+    fn mixed_prompt_image_label_is_visible_and_clickable_in_task_details() {
+        let mut record: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-prompt-images.jsonl")
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        record["message"]["content"][0]["text"] = "Inspect image".into();
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("projects/probe");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+            format!("{record}\n"),
+        )
+        .unwrap();
+        let mut provider = crate::providers::claude::ClaudeProvider::new(dir.path().into());
+        let mut sessions = provider.refresh(1).sessions;
+        assert_eq!(sessions.len(), 1);
+        sessions[0].status = SessionStatus::Ready;
+        let image = sessions[0].prompt_images[0].clone();
+        let mut view = View::default();
+        view.set_sessions(sessions, false);
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, Utc::now());
+        let text = buffer
+            .content
+            .chunks(120)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell_text(cell.symbol()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Inspect image"), "{text}");
+        assert!(
+            text.contains(&image.label),
+            "label={:?}\n{text}",
+            image.label
+        );
+        let snapshot = format!(
+            "{}\n",
+            text.lines()
+                .find(|line| line.contains(&image.label))
+                .unwrap()
+                .split_once('│')
+                .unwrap()
+                .1
+                .trim_end()
+        );
+        if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+            std::fs::write("tests/ui_snapshots/mixed_prompt_image_task.txt", &snapshot).unwrap();
+        }
+        assert_eq!(
+            snapshot,
+            include_str!("../../tests/ui_snapshots/mixed_prompt_image_task.txt")
+        );
+        let target = super::super::links::LinkTarget::Image(image.source);
+        let rect = view
+            .viewport
+            .borrow()
+            .task_details_links
+            .iter()
+            .find(|(_, link)| link == &target)
+            .unwrap()
+            .0;
+        let press = crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: rect.x,
+            row: rect.y,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        };
+        assert_eq!(view.handle_mouse(press), None);
+        let action = view.handle_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+            ..press
+        });
+        let action = action.or_else(|| {
+            view.flush_pending_click(std::time::Instant::now() + view.double_click_interval)
+        });
+        assert_eq!(action, Some(Action::Open(target)));
     }
 }

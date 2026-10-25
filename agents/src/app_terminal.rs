@@ -6,6 +6,18 @@ use crate::providers::{SessionInput, SessionKey, TerminalCommand, TerminalInput}
 use crate::session_terminal::SessionTerminal;
 
 impl App {
+    pub(super) fn refresh_cell_pixels(&mut self) {
+        match crate::terminal::cell_pixels() {
+            Ok(cell_pixels) if cell_pixels != self.terminal_report.cell_pixels => {
+                self.terminal_report.cell_pixels = cell_pixels;
+                self.view
+                    .set_inline_images(self.terminal_report.supports_images, cell_pixels);
+            }
+            Ok(_) => {}
+            Err(error) => self.view.show_error(error.to_string()),
+        }
+    }
+
     pub(super) fn open_terminal(&mut self, id: SessionKey) {
         self.restore_terminal(id);
         self.view.focus_terminal();
@@ -18,15 +30,15 @@ impl App {
             return;
         };
         if !session.cwd.is_dir() {
-            self.view.set_notice(Some(format!(
+            self.view.show_error(format!(
                 "Directory no longer exists: {}",
                 session.cwd.display()
-            )));
+            ));
             return;
         }
         let Some(size) = self.view.terminal_size() else {
             self.view
-                .set_notice(Some("The event detail panel is hidden".into()));
+                .show_error("The event detail panel is hidden".into());
             return;
         };
         if self.closing_terminals.contains_key(&id) {
@@ -38,7 +50,7 @@ impl App {
             Ok(cleanup) => cleanup,
             Err(error) => {
                 self.view
-                    .set_notice(Some(format!("Cannot open the terminal: {error}")));
+                    .show_error(format!("Cannot open the terminal: {error}"));
                 return;
             }
         };
@@ -46,7 +58,7 @@ impl App {
             match self.hub.provider(id.provider).terminal_command(&session) {
                 Ok(command) => command,
                 Err(reason) => {
-                    self.view.set_notice(Some(reason.into()));
+                    self.view.show_error(reason.into());
                     return;
                 }
             };
@@ -64,7 +76,7 @@ impl App {
             }
             Err(error) => self
                 .view
-                .set_notice(Some(format!("Cannot open the terminal: {error}"))),
+                .show_error(format!("Cannot open the terminal: {error}")),
         }
     }
 
@@ -122,7 +134,7 @@ impl App {
         self.closing_terminals.remove(id);
         if let Err(error) = result {
             self.view
-                .set_notice(Some(format!("Cannot close the terminal: {error}")));
+                .show_error(format!("Cannot close the terminal: {error}"));
         }
     }
 
@@ -131,7 +143,7 @@ impl App {
             && let Err(error) = terminal.write(bytes)
         {
             self.view
-                .set_notice(Some(format!("Cannot write to the terminal: {error}")));
+                .show_error(format!("Cannot write to the terminal: {error}"));
         }
     }
 
@@ -140,7 +152,7 @@ impl App {
             && let Err(error) = terminal.paste(text)
         {
             self.view
-                .set_notice(Some(format!("Cannot write to the terminal: {error}")));
+                .show_error(format!("Cannot write to the terminal: {error}"));
         }
     }
 
@@ -198,7 +210,7 @@ impl App {
             && let Err(error) = terminal.resize(rows, cols)
         {
             self.view
-                .set_notice(Some(format!("Cannot resize the terminal: {error}")));
+                .show_error(format!("Cannot resize the terminal: {error}"));
         }
     }
 
@@ -232,7 +244,7 @@ impl App {
                         }
                         driver.paste(&text)?;
                         crate::providers::ScreenInput::write(&mut driver, submit)
-                    }) as crate::providers::Job
+                    }) as crate::providers::SessionAction
                 });
                 match job {
                     Ok(job) => {
@@ -413,7 +425,7 @@ mod tests {
             "sh",
             &[
                 "-c",
-                r#"claude --resume "$1" --bg >/dev/null && exec claude attach "$2""#,
+                r#"claude --bg --resume "$1" >/dev/null && exec claude attach "$2""#,
                 "sh",
                 &id.id,
                 &id.id[..8],
@@ -475,7 +487,6 @@ mod tests {
         let app = App::new(
             Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
                 directory.path().into(),
-                directory.path().join("manager"),
             ))]),
             directory.path().into(),
         );
@@ -610,7 +621,6 @@ mod tests {
         };
         app.hub = Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
             directory.path().into(),
-            directory.path().join("manager"),
         ))]);
         app.terminal.as_mut().unwrap().id = codex_id.clone();
         assert!(!app.send_to_terminal(&codex_id, &SessionInput::Prompt("not sent".into())));
@@ -914,7 +924,7 @@ mod tests {
     }
 
     #[test]
-    fn waiting_for_a_prompt_activates_prompt_once() {
+    fn waiting_for_a_prompt_activates_prompt_once_and_mouse_blur_sticks() {
         let (_directory, mut app, _id) = fixture();
         draw(&mut app);
         let session = &mut app.sessions[0];
@@ -937,14 +947,21 @@ mod tests {
             crossterm::event::KeyCode::Char('x').into(),
         ));
         assert!(draw(&mut app).contains("x"));
-        app.handle_event(crossterm::event::Event::Key(
-            crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Char('w'),
-                crossterm::event::KeyModifiers::CONTROL,
-            ),
+        app.handle_event(crossterm::event::Event::Mouse(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: 2,
+                row: 10,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
         ));
-        app.handle_event(crossterm::event::Event::Key(
-            crossterm::event::KeyCode::Char('k').into(),
+        app.handle_event(crossterm::event::Event::Mouse(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+                column: 2,
+                row: 10,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
         ));
         assert!(!app.view.pasting_prompt());
         app.sync_terminal();
@@ -1017,11 +1034,6 @@ mod tests {
     #[test]
     fn restored_terminal_enter_restores_last_panel() {
         restored_terminal_activation(crossterm::event::KeyCode::Enter);
-    }
-
-    #[test]
-    fn restored_terminal_right_restores_last_panel() {
-        restored_terminal_activation(crossterm::event::KeyCode::Right);
     }
 
     fn restored_terminal_activation(key: crossterm::event::KeyCode) {

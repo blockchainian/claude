@@ -91,7 +91,7 @@ impl TerminalScreen {
 pub struct SessionTerminal {
     pub id: SessionKey,
     pub screen: Screen,
-    pub cleanup: Option<crate::providers::Job>,
+    pub cleanup: Option<crate::providers::SessionAction>,
     pty: Pty,
     /// Bytes that detach the program instead of ending it; without them closing kills it.
     detach: Option<&'static [u8]>,
@@ -416,8 +416,7 @@ mod tests {
 
     #[test]
     fn startup_waits_through_recorded_resume_frames() {
-        let provider =
-            crate::providers::codex::CodexProvider::new("unused".into(), "unused".into());
+        let provider = crate::providers::codex::CodexProvider::new("unused".into());
         let frames = replay_ready(
             include_bytes!("../tests/fixtures/codex-terminal/resume.raw"),
             &provider,
@@ -435,8 +434,7 @@ mod tests {
     #[test]
     fn startup_recorded_read_boundaries_do_not_release_partial_frames() {
         let raw = include_bytes!("../tests/fixtures/codex-terminal/resume.raw");
-        let provider =
-            crate::providers::codex::CodexProvider::new("unused".into(), "unused".into());
+        let provider = crate::providers::codex::CodexProvider::new("unused".into());
         let mut screen = TerminalScreen::new(14, 101);
         let now = Instant::now();
         for chunk in include_str!("../tests/fixtures/codex-terminal/chunks.jsonl").lines() {

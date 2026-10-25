@@ -1,14 +1,31 @@
 pub(crate) mod groups;
 mod shell_output;
-#[cfg(test)]
-mod shell_output_tests;
 pub(crate) mod shell_summary;
 
-use shell_output::{Stream, sections as shell_output_sections};
+pub(crate) use shell_output::Stream;
+use shell_output::sections as shell_output_sections;
 
-use crate::event::{Section, ToolCall};
+use crate::code_format::Language;
+use crate::event::{Section, SourceRecord, ToolCall};
+use crate::images::{Image, ImageSource};
+use crate::shell_commands::{ScriptKind, SyntaxSource, scripts};
 use serde_json::Value;
 use std::collections::BTreeMap;
+
+/// Reads background output as plain text, retaining file-read error placeholders.
+pub(crate) fn read_plain_output_file(path: &std::path::Path) -> Section {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Section::Text {
+            label: String::new(),
+            text,
+        },
+        Err(error) => Section::Placeholder(if error.kind() == std::io::ErrorKind::NotFound {
+            "File no longer exists".to_owned()
+        } else {
+            error.to_string()
+        }),
+    }
+}
 
 pub(crate) fn json_input(value: &Value) -> Vec<Section> {
     if value.is_null() || value.as_object().is_some_and(|object| object.is_empty()) {
@@ -22,7 +39,10 @@ pub(crate) fn json_input(value: &Value) -> Vec<Section> {
 }
 
 /// Decode MCP and Anthropic content blocks without exposing binary payloads.
-pub(crate) fn mcp_content(content: &Value) -> Vec<Section> {
+pub(crate) fn mcp_content(
+    content: &Value,
+    source: Option<&(SourceRecord, String)>,
+) -> Vec<Section> {
     if let Some(text) = content.as_str() {
         return if text.is_empty() {
             Vec::new()
@@ -33,65 +53,80 @@ pub(crate) fn mcp_content(content: &Value) -> Vec<Section> {
             }]
         };
     }
+    let mut seen = Vec::new();
     content
         .as_array()
         .into_iter()
         .flatten()
-        .map(|block| {
+        .enumerate()
+        .filter_map(|(index, block)| {
             if let Some(text) = block["text"].as_str().filter(|_| block["type"] == "text") {
-                return Section::Text {
+                return Some(Section::Text {
                     label: "output".into(),
                     text: text.into(),
-                };
+                });
             }
             let kind = block["type"].as_str().unwrap_or("unknown");
             let mime = block["mimeType"]
                 .as_str()
                 .or_else(|| block["source"]["media_type"].as_str())
                 .or_else(|| block["resource"]["mimeType"].as_str());
-            Section::Placeholder(match mime {
+            if kind == "image"
+                && let Some((record, pointer)) = source
+                && let Some(mime) = mime
+            {
+                let data = if block["source"]["data"].is_string() {
+                    "source/data"
+                } else {
+                    "data"
+                };
+                let encoded = block.pointer(&format!("/{data}")).and_then(Value::as_str);
+                if let Some(encoded) = encoded {
+                    if seen.contains(&encoded) {
+                        return None;
+                    }
+                    seen.push(encoded);
+                }
+                return Some(Section::Image(Image {
+                    label: format!("[image {mime}]"),
+                    source: ImageSource::Record {
+                        record: record.clone(),
+                        pointer: format!("{pointer}/{index}/{data}"),
+                    },
+                }));
+            }
+            Some(Section::Placeholder(match mime {
                 Some(mime) => format!("[{kind} {mime}]"),
                 None => format!("[{kind}]"),
-            })
+            }))
         })
         .filter(|section| !matches!(section, Section::Text { text, .. } if text.is_empty()))
         .collect()
 }
 
 fn tool_name(name: &str) -> String {
-    if name.contains(' ') {
+    if let Some((server, tool)) = super::mcp::parse(name) {
+        let declared = super::TOOL_RULES
+            .iter()
+            .flat_map(|rules| rules.servers)
+            .any(|candidate| {
+                candidate.name == server
+                    && candidate
+                        .tools
+                        .iter()
+                        .any(|rule| rule.name == tool || rule.aliases.contains(&tool))
+            });
+        if name.starts_with("mcp__") || name.contains(' ') || declared {
+            return format!("{server} {tool}");
+        }
+        return tool.to_owned();
+    }
+    if name.starts_with("mcp__") || name.contains(' ') {
         return name.to_owned();
     }
-    let Some((server, tool)) = name
-        .strip_prefix("mcp__")
-        .and_then(|rest| rest.split_once("__"))
-    else {
-        return name
-            .rsplit_once('.')
-            .filter(|(server, tool)| !server.is_empty() && !tool.is_empty())
-            .map(|(server, tool)| {
-                let mcp = format!("{server} {tool}");
-                if TOOL_RULES.iter().any(|rule| rule.name == mcp) {
-                    mcp
-                } else {
-                    tool.to_owned()
-                }
-            })
-            .unwrap_or_else(|| name.to_owned());
-    };
-    let server = if let Some(rest) = server.strip_prefix("plugin_") {
-        match rest.split_once('_') {
-            Some((plugin, server)) if !plugin.is_empty() => server,
-            _ => return name.to_owned(),
-        }
-    } else {
-        server
-    };
-    if server.is_empty() || tool.is_empty() || tool.contains("__") {
-        name.to_owned()
-    } else {
-        [server, tool].join(" ")
-    }
+    name.rsplit_once('.')
+        .filter(|(server, tool)| !server.is_empty() && !tool.is_empty())
+        .map_or_else(|| name.to_owned(), |(_, tool)| tool.to_owned())
 }
 
 /// One display-name rule for both providers; protocol namespaces are not tool names.
@@ -127,49 +162,81 @@ pub(crate) fn title_name(name: &str) -> String {
     })
 }
 
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) enum Subject {
-    Field(&'static str),
-    ResultField {
-        result: &'static str,
-        input: &'static str,
-    },
-    QuestionHeaders,
-    Recipient,
-    Shell {
-        description: bool,
-    },
+/// The display rules used by one provider's transcripts.
+pub(crate) struct ToolRules {
+    pub native: &'static [ToolRule],
+    pub servers: &'static [super::mcp::McpServer],
+}
+
+pub(crate) struct ToolData<'a> {
+    pub input: &'a Value,
+    pub result: Option<&'a ToolResult>,
+}
+
+pub(crate) struct ToolResult {
+    /// The transcript record and JSON pointer of the content array.
+    pub source: Option<(SourceRecord, String)>,
+    pub content: Value,
+    pub structured: Value,
+    pub error: bool,
+}
+
+impl ToolResult {
+    pub fn text(&self) -> String {
+        self.content.as_str().map(str::to_owned).unwrap_or_else(|| {
+            self.content
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|block| match block["type"].as_str() {
+                    Some("text") => block["text"].as_str(),
+                    Some("tool_reference") => block["tool_name"].as_str(),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+    }
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum Input {
-    Field(&'static str),
-    QuestionList,
-    Arguments,
-    FetchPrompt,
-    Shell,
+pub(crate) enum Source {
+    Input,
+    Result,
+}
+
+pub(crate) enum Pick<T> {
+    Field(Source, &'static str),
+    With(fn(&ToolData<'_>) -> Option<T>),
+}
+
+impl<T> Copy for Pick<T> {}
+impl<T> Clone for Pick<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+pub(crate) enum Body {
+    Sections(Vec<Section>),
+    Hidden,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Format {
     Text,
     Markdown,
+    /// Formats source code in the given language as a code section.
+    Code(&'static str),
+    /// A JSON array as a Markdown table, one row per element and one column per field;
+    /// a JSON object is a single row.
+    Table,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum Output {
-    Field(&'static str, Format),
-    Extract(fn(&Value, &ToolResult<'_>) -> Option<Vec<Section>>),
-    Read,
-    Write,
-    Patch,
-    Shell,
-    Matches,
-    Questions,
-    Empty,
-    Hidden,
-    Agent,
-    Wait,
+pub(crate) struct Presentation {
+    pub title: Option<String>,
+    pub input: Vec<Section>,
+    pub output: Option<Body>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -179,27 +246,31 @@ pub(crate) enum TaskAction {
     Plan,
 }
 
-/// All tool-specific field and display choices are declared once, independent of provider.
+/// A tool's field and display choices.
 #[derive(Clone, Copy)]
 pub(crate) struct ToolRule {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
-    pub subject: Option<Subject>,
-    pub input: Option<(Input, Format)>,
-    pub output: Option<Output>,
+    pub title: &'static [Pick<String>],
+    pub label: bool,
+    pub input: Option<(Pick<Vec<Section>>, Format)>,
+    pub output: Option<(Pick<Body>, Format)>,
     pub question: bool,
     pub hidden: bool,
     pub wrapper: bool,
     pub task: Option<TaskAction>,
     pub list_subject: bool,
     pub list_input: bool,
-    shell_stream: Stream,
+    /// How the input fields no title or input pick shows are drawn; JSON when unset.
+    pub remaining_input: Option<Format>,
+    pub shell_stream: Stream,
 }
 
-const DEFAULT_RULE: ToolRule = ToolRule {
+pub(crate) const DEFAULT_RULE: ToolRule = ToolRule {
     name: "",
     aliases: &[],
-    subject: None,
+    title: &[],
+    label: true,
     input: None,
     output: None,
     question: false,
@@ -208,6 +279,7 @@ const DEFAULT_RULE: ToolRule = ToolRule {
     task: None,
     list_subject: false,
     list_input: false,
+    remaining_input: None,
     shell_stream: Stream {
         merged_stderr: false,
         trimmed: false,
@@ -216,272 +288,27 @@ const DEFAULT_RULE: ToolRule = ToolRule {
     },
 };
 
-pub(crate) const TOOL_RULES: &[ToolRule] = &[
-    ToolRule {
-        name: "SubagentHandback",
-        input: Some((Input::Field("message"), Format::Markdown)),
-        output: Some(Output::Field("message", Format::Text)),
-        list_subject: true,
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "Read",
-        subject: Some(Subject::Field("file_path")),
-        input: Some((Input::Field(""), Format::Text)),
-        output: Some(Output::Read),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "Write",
-        subject: Some(Subject::Field("file_path")),
-        input: Some((Input::Field("content"), Format::Text)),
-        output: Some(Output::Write),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "Edit",
-        subject: Some(Subject::Field("file_path")),
-        input: Some((Input::Field(""), Format::Text)),
-        output: Some(Output::Patch),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "Bash",
-        subject: Some(Subject::Shell { description: true }),
-        input: Some((Input::Shell, Format::Text)),
-        output: Some(Output::Shell),
-        list_subject: true,
-        shell_stream: Stream {
-            merged_stderr: false,
-            trimmed: true,
-            exit_code: None,
-            is_error: false,
-        },
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "exec_command",
-        subject: Some(Subject::Shell { description: false }),
-        input: Some((Input::Shell, Format::Text)),
-        output: Some(Output::Shell),
-        list_subject: true,
-        shell_stream: Stream {
-            merged_stderr: true,
-            trimmed: false,
-            exit_code: None,
-            is_error: false,
-        },
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "shell",
-        subject: Some(Subject::Shell { description: false }),
-        input: Some((Input::Shell, Format::Text)),
-        output: Some(Output::Shell),
-        list_subject: true,
-        shell_stream: Stream {
-            merged_stderr: true,
-            trimmed: false,
-            exit_code: None,
-            is_error: false,
-        },
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "CommandExecution",
-        subject: Some(Subject::Shell { description: false }),
-        input: Some((Input::Shell, Format::Text)),
-        output: Some(Output::Shell),
-        list_subject: true,
-        shell_stream: Stream {
-            merged_stderr: true,
-            trimmed: false,
-            exit_code: None,
-            is_error: false,
-        },
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "ToolSearch",
-        subject: Some(Subject::Field("query")),
-        input: Some((Input::Field(""), Format::Text)),
-        output: Some(Output::Matches),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "AskUserQuestion",
-        subject: Some(Subject::QuestionHeaders),
-        input: Some((Input::QuestionList, Format::Text)),
-        output: Some(Output::Questions),
-        question: true,
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "request_user_input",
-        subject: Some(Subject::QuestionHeaders),
-        input: Some((Input::QuestionList, Format::Text)),
-        output: Some(Output::Questions),
-        question: true,
-        ..DEFAULT_RULE
-    },
-    // Message owns spawn names and prompt bodies. Other input fields, including
-    // subagent_type, run_in_background and isolation, are intentionally not displayed.
-    ToolRule {
-        name: "Agent",
-        aliases: &["Task"],
-        output: Some(Output::Agent),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "spawn_agent",
-        output: Some(Output::Hidden),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "SendMessage",
-        subject: Some(Subject::Recipient),
-        input: Some((Input::Field("message"), Format::Markdown)),
-        output: Some(Output::Extract(markdown_output)),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "send_message",
-        subject: Some(Subject::Field("target")),
-        input: Some((Input::Field("message"), Format::Markdown)),
-        output: Some(Output::Empty),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "followup_task",
-        subject: Some(Subject::Field("target")),
-        input: Some((Input::Field("message"), Format::Markdown)),
-        output: Some(Output::Empty),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "wait_agent",
-        input: Some((Input::Field("timeout_ms"), Format::Text)),
-        output: Some(Output::Wait),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "WebSearch",
-        input: Some((Input::Field("query"), Format::Text)),
-        output: Some(Output::Extract(web_search_output)),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "WebFetch",
-        subject: Some(Subject::Field("url")),
-        input: Some((Input::FetchPrompt, Format::Text)),
-        output: Some(Output::Field("result", Format::Markdown)),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "Skill",
-        subject: Some(Subject::Field("skill")),
-        input: Some((Input::Arguments, Format::Text)),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "apply_patch",
-        subject: Some(Subject::Field("paths")),
-        input: Some((Input::Field(""), Format::Text)),
-        wrapper: true,
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "exec",
-        wrapper: true,
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "view_image",
-        wrapper: true,
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "update_plan",
-        task: Some(TaskAction::Plan),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "TaskCreate",
-        hidden: true,
-        task: Some(TaskAction::Create),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "TaskUpdate",
-        hidden: true,
-        task: Some(TaskAction::Update),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "TaskList",
-        hidden: true,
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "TaskGet",
-        hidden: true,
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "ListAgents",
-        hidden: true,
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "claude-client ask_claude",
-        input: Some((Input::Field("text"), Format::Markdown)),
-        output: Some(Output::Extract(mcp_markdown_output)),
-        list_input: true,
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "claude-client notify_claude",
-        input: Some((Input::Field("text"), Format::Markdown)),
-        output: Some(Output::Extract(mcp_markdown_output)),
-        list_input: true,
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "codex-manager start",
-        subject: Some(Subject::Field("name")),
-        input: Some((Input::Field("prompt"), Format::Markdown)),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "codex-manager send",
-        subject: Some(Subject::Field("threadId")),
-        input: Some((Input::Field("prompt"), Format::Markdown)),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "codex-manager list",
-        output: Some(Output::Extract(codex_thread_table)),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "codex-manager interrupt",
-        subject: Some(Subject::Field("threadId")),
-        ..DEFAULT_RULE
-    },
-    ToolRule {
-        name: "codex-manager detach",
-        subject: Some(Subject::ResultField {
-            result: "name",
-            input: "threadId",
-        }),
-        ..DEFAULT_RULE
-    },
-];
-
 pub(crate) fn rule(name: &str) -> &'static ToolRule {
+    if let Some((server, tool)) = super::mcp::parse(name) {
+        if let Some(server) = super::TOOL_RULES
+            .iter()
+            .flat_map(|rules| rules.servers)
+            .find(|candidate| candidate.name == server)
+        {
+            return server
+                .tools
+                .iter()
+                .find(|rule| rule.name == tool || rule.aliases.contains(&tool))
+                .unwrap_or(&DEFAULT_RULE);
+        }
+        if name.starts_with("mcp__") || name.contains(' ') {
+            return &DEFAULT_RULE;
+        }
+    }
     let name = tool_name(name);
-    TOOL_RULES
+    super::TOOL_RULES
         .iter()
+        .flat_map(|rules| rules.native)
         .find(|rule| rule.name == name || rule.aliases.contains(&name.as_str()))
         .unwrap_or(&DEFAULT_RULE)
 }
@@ -498,13 +325,8 @@ pub(crate) fn tool_hidden(name: &str) -> bool {
     rule(name).hidden
 }
 
-fn text<'a>(input: &'a Value, field: &str) -> Option<&'a str> {
+pub(crate) fn text<'a>(input: &'a Value, field: &str) -> Option<&'a str> {
     input[field].as_str().filter(|text| !text.trim().is_empty())
-}
-
-/// A message's named recipient; a peer session's socket address names nobody.
-fn recipient(input: &Value) -> Option<&str> {
-    text(input, "to").filter(|to| !to.starts_with("uds:"))
 }
 
 /// A human description stands alone; shell calls use their declared command subject.
@@ -518,7 +340,10 @@ pub(crate) fn list_label(
     let rule = rule(name);
     let subject = subject.filter(|subject| !subject.trim().is_empty());
     let input_text = match rule.input {
-        Some((Input::Field(field), _)) => text(input, field),
+        Some((Pick::Field(Source::Input, field), _)) => input
+            .pointer(field)
+            .and_then(Value::as_str)
+            .filter(|text| !text.trim().is_empty()),
         _ => None,
     };
     let mut label = if let Some(description) = text(input, "description") {
@@ -555,151 +380,231 @@ pub(crate) fn list_title(
     groups.finish().unwrap()
 }
 
-pub(crate) fn event_detail_titles(name: &str, subject: Option<&str>) -> (String, String) {
-    let display = display_tool_name(name);
-    match subject.filter(|subject| !subject.trim().is_empty()) {
-        Some(subject) => (display, subject.to_owned()),
-        None => (String::new(), display),
-    }
-}
-
-/// Read a declared subject from JSON output, leaving the input subject as fallback.
-pub(crate) fn result_subject(name: &str, output: Option<&[Section]>) -> Option<String> {
-    let Subject::ResultField { result, .. } = rule(name).subject? else {
-        return None;
-    };
-    output?.iter().find_map(|section| {
-        let source = match section {
-            Section::Text { text, .. } | Section::Structured { text, .. } => text,
-            _ => return None,
-        };
-        let value: Value = serde_json::from_str(source).ok()?;
-        text(&value, result).map(str::to_owned)
-    })
-}
-
-fn shell_command(input: &Value) -> Option<&str> {
+pub(crate) fn shell_command(input: &Value) -> Option<&str> {
     text(input, "command").or_else(|| text(input, "cmd"))
 }
 
-pub(crate) fn presentation(name: &str, input: &Value) -> (String, Option<String>, Vec<Section>) {
-    let raw_name = name;
-    let name = display_tool_name(name);
-    let mut remaining = input.clone();
-    let subject = match rule(raw_name).subject {
-        Some(Subject::Field(field) | Subject::ResultField { input: field, .. }) => remaining
-            .as_object_mut()
-            .and_then(|object| object.remove(field))
-            .and_then(|value| {
-                value
-                    .as_str()
-                    .filter(|text| !text.trim().is_empty())
-                    .map(str::to_owned)
-            }),
-        Some(Subject::Shell { description }) => description
-            .then(|| text(input, "description"))
-            .flatten()
-            .map(str::to_owned)
-            .or_else(|| {
-                let summary = shell_summary::summarize_shell_commands(shell_command(input)?);
-                (!summary.is_empty()).then_some(summary)
-            }),
-        Some(Subject::Recipient) => {
-            let to = recipient(input).map(str::to_owned);
-            if let Some(object) = remaining.as_object_mut() {
-                object.remove("to");
-            }
-            to
-        }
-        Some(Subject::QuestionHeaders) => Some(
-            input["questions"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|question| text(question, "header"))
-                .collect::<Vec<_>>()
-                .join(" · "),
-        )
-        .filter(|headers| !headers.is_empty()),
-        None => None,
-    };
-    let input_rule = rule(raw_name).input;
-    let sections = match input_rule {
-        Some((Input::Field(""), _)) => Vec::new(),
-        Some((method, format)) => {
-            let (body, mut sections) = match method {
-                Input::Shell => (shell_command(input).unwrap_or("").to_owned(), Vec::new()),
-                Input::Field(field) => (
-                    remaining
-                        .get(field)
-                        .map(|value| {
-                            value
-                                .as_str()
-                                .map(str::to_owned)
-                                .unwrap_or_else(|| value.to_string())
-                        })
-                        .unwrap_or_default(),
-                    Vec::new(),
-                ),
-                Input::QuestionList => (String::new(), question_sections(input)),
-                Input::Arguments => (input["args"].as_str().unwrap_or("").to_owned(), Vec::new()),
-                Input::FetchPrompt => (
-                    text(input, "prompt").unwrap_or("").to_owned(),
-                    text(input, "url")
-                        .map(|url| {
-                            vec![Section::Text {
-                                label: String::new(),
-                                text: format!("url: {url}"),
-                            }]
-                        })
-                        .unwrap_or_default(),
-                ),
-            };
-            if !body.trim().is_empty() {
-                let section = match format {
-                    _ if matches!(method, Input::Shell) => Section::Shell {
-                        text: body,
-                        prefix: 0,
-                    },
-                    Format::Text if matches!(method, Input::Arguments) => Section::Text {
-                        label: "args".into(),
-                        text: body,
-                    },
-                    Format::Text => Section::Prose {
-                        text: body,
-                        markdown: false,
-                    },
-                    Format::Markdown => Section::Markdown {
-                        label: match method {
-                            Input::Field(field) => field,
-                            _ => "",
-                        }
-                        .into(),
-                        text: body,
-                    },
-                };
-                sections.push(section);
-            }
-            sections
-        }
-        None => json_input(&remaining),
-    };
-    let sections = if matches!(rule(raw_name).output, Some(Output::Write)) {
-        match (text(input, "file_path"), input["content"].as_str()) {
-            (Some(path), Some(content)) => vec![file_section("input", path, content)],
-            _ => sections,
-        }
-    } else {
-        sections
-    };
-    (name, subject, sections)
+fn field<'a>(data: &'a ToolData<'_>, source: Source, pointer: &str) -> Option<&'a Value> {
+    match source {
+        Source::Input => data.input.pointer(pointer),
+        Source::Result => data.result?.structured.pointer(pointer),
+    }
 }
 
-pub(crate) struct ToolResult<'a> {
-    pub content: &'a Value,
-    pub value: &'a Value,
-    pub text: &'a str,
-    pub error: bool,
+pub(crate) fn raw_input(input: &Value) -> Vec<Section> {
+    match input.as_str() {
+        Some(text) if !text.is_empty() => vec![text_section("input", text)],
+        Some(_) => Vec::new(),
+        None => json_input(input),
+    }
+}
+
+pub(crate) fn picked_sections(
+    value: &Value,
+    pointer: &str,
+    format: Format,
+    output: bool,
+) -> Vec<Section> {
+    let label = pointer.rsplit('/').next().unwrap_or("");
+    if let Format::Table = format {
+        return markdown_table(value, label)
+            .map(|text| Section::Markdown {
+                label: label.into(),
+                text,
+            })
+            .into_iter()
+            .collect();
+    }
+    let text = value
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| value.to_string());
+    if text.trim().is_empty() {
+        return Vec::new();
+    }
+    vec![match format {
+        Format::Code(lang) => code_section(
+            label,
+            lang,
+            &Language::from_extension(lang)
+                .and_then(|l| l.format(&text))
+                .unwrap_or(text),
+        ),
+        Format::Markdown => Section::Markdown {
+            label: label.into(),
+            text,
+        },
+        Format::Text if output => text_section("output", &text),
+        Format::Text | Format::Table => Section::Prose {
+            text,
+            markdown: false,
+        },
+    }]
+}
+
+/// A string or number, or a list of them joined with commas.
+fn title_text(value: &Value) -> Option<String> {
+    let scalar = |value: &Value| match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    };
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .map(scalar)
+            .collect::<Option<Vec<_>>>()
+            .map(|items| items.join(", ")),
+        _ => scalar(value),
+    }
+}
+
+pub(crate) fn presentation(name: &str, data: &ToolData<'_>) -> Presentation {
+    let rule = rule(name);
+    let title = rule.title.iter().find_map(|pick| {
+        let title = match pick {
+            Pick::Field(source, pointer) => title_text(field(data, *source, pointer)?)?,
+            Pick::With(function) => function(data)?,
+        };
+        (!title.trim().is_empty()).then_some(title)
+    });
+    let mut remaining = data.input.clone();
+    for pick in rule.title {
+        if let Pick::Field(Source::Input, pointer) = pick
+            && let Some((parent, key)) = pointer.rsplit_once('/')
+        {
+            let key = key.replace("~1", "/").replace("~0", "~");
+            if let Some(object) = remaining.pointer_mut(parent).and_then(Value::as_object_mut) {
+                object.shift_remove(&key);
+            }
+        }
+    }
+    let input = match rule.input {
+        Some((Pick::Field(source, pointer), format)) => {
+            field(data, source, pointer).map(|value| picked_sections(value, pointer, format, false))
+        }
+        Some((Pick::With(function), _)) => function(data),
+        None => None,
+    }
+    .unwrap_or_else(|| match rule.remaining_input {
+        Some(format) => picked_sections(&remaining, "/input", format, false),
+        None => raw_input(&remaining),
+    });
+    let output = if data.result.is_some() {
+        Some(output(rule.output, data))
+    } else {
+        match rule.output {
+            Some((Pick::With(function), _)) => function(data),
+            _ => None,
+        }
+    };
+    Presentation {
+        title,
+        input,
+        output,
+    }
+}
+
+pub(crate) fn shell_title(data: &ToolData<'_>) -> Option<String> {
+    let title = shell_summary::summarize_shell_commands(shell_command(data.input)?);
+    (!title.is_empty()).then_some(title)
+}
+
+pub(crate) fn question_title(data: &ToolData<'_>) -> Option<String> {
+    let title = data.input["questions"]
+        .as_array()?
+        .iter()
+        .filter_map(|question| text(question, "header"))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    (!title.is_empty()).then_some(title)
+}
+
+/// The file path of a file title, without its `:start-end` line range.
+pub(crate) fn title_path(title: &str) -> &str {
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    title
+        .rsplit_once(':')
+        .filter(|(_, lines)| {
+            lines
+                .split_once('-')
+                .is_some_and(|(start, end)| digits(start) && digits(end))
+        })
+        .map_or(title, |(path, _)| path)
+}
+pub(crate) fn empty_input(_: &ToolData<'_>) -> Option<Vec<Section>> {
+    Some(Vec::new())
+}
+pub(crate) fn questions_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    Some(question_sections(data.input))
+}
+fn formatted_shell(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for script in scripts(text) {
+        let ScriptKind::Heredoc {
+            literal: true,
+            strip_tabs,
+        } = script.kind
+        else {
+            continue;
+        };
+        let language = match script.syntax {
+            SyntaxSource::Interpreter(name) => Language::from_interpreter(name),
+            SyntaxSource::Extension(extension) => Language::from_extension(extension),
+        };
+        let Some(language) = language else {
+            continue;
+        };
+        let body = &text[script.range.clone()];
+        let tabs = if strip_tabs {
+            body.lines()
+                .filter(|line| !line.is_empty())
+                .map(|line| line.bytes().take_while(|&byte| byte == b'\t').count())
+                .min()
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let prefix = "\t".repeat(tabs);
+        let source = if strip_tabs {
+            body.split_inclusive('\n')
+                .map(|line| line.trim_start_matches('\t'))
+                .collect()
+        } else {
+            body.to_owned()
+        };
+        let Some(mut formatted) = language.format(&source) else {
+            continue;
+        };
+        if !formatted.ends_with('\n') {
+            formatted.push('\n');
+        }
+        output.push_str(&text[cursor..script.range.start]);
+        for line in formatted.split_inclusive('\n') {
+            if line != "\n" {
+                output.push_str(&prefix);
+            }
+            output.push_str(line);
+        }
+        cursor = script.range.end;
+    }
+    output.push_str(&text[cursor..]);
+    output
+}
+
+pub(crate) fn shell_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    Some(
+        shell_command(data.input)
+            .filter(|text| !text.trim().is_empty())
+            .map(|text| {
+                vec![Section::Shell {
+                    text: formatted_shell(text),
+                    prefix: 0,
+                }]
+            })
+            .unwrap_or_default(),
+    )
 }
 
 #[derive(Default)]
@@ -758,195 +663,159 @@ pub(crate) fn result_kind(kind: crate::event::Kind, state: &ResultState) -> crat
     }
 }
 
-pub(crate) fn text_output(text: &str, mode: Option<Output>, input: &Value) -> Vec<Section> {
-    let value = serde_json::from_str(text).unwrap_or(Value::Null);
+#[cfg(test)]
+pub(crate) fn text_output(
+    text: &str,
+    mode: Option<(Pick<Body>, Format)>,
+    input: &Value,
+) -> Vec<Section> {
+    let value: Value = serde_json::from_str(text).unwrap_or(Value::Null);
     let content = if value["content"].is_array() {
         value["content"].clone()
     } else {
-        Value::String(text.to_owned())
+        Value::String(text.into())
     };
-    let state = result_state(text, &Value::Null, value["isError"] == true);
-    output(
+    let error = result_state(text, &value, false).is_error;
+    let structured = if value.is_object() {
+        value
+    } else {
+        Value::Null
+    };
+    let result = ToolResult {
+        source: None,
+        content,
+        structured,
+        error,
+    };
+    match output(
         mode,
-        input,
-        &ToolResult {
-            content: &content,
-            value: &value,
-            text,
-            error: state.is_error,
+        &ToolData {
+            input,
+            result: Some(&result),
         },
-    )
-}
-
-/// Only recorded launch states suppress an agent's result body.
-pub(crate) fn output_hidden(mode: Option<Output>, value: &Value) -> bool {
-    match mode {
-        Some(Output::Hidden) => true,
-        Some(Output::Agent) => {
-            value["isAsync"] == true
-                || matches!(
-                    value["status"].as_str(),
-                    Some("async_launched" | "teammate_spawned")
-                )
-        }
-        _ => false,
+    ) {
+        Body::Sections(sections) => sections,
+        Body::Hidden => Vec::new(),
     }
 }
 
-pub(crate) fn output(mode: Option<Output>, input: &Value, result: &ToolResult<'_>) -> Vec<Section> {
-    match mode {
-        _ if !result.error && output_hidden(mode, result.value) => return Vec::new(),
-        Some(Output::Empty) if !result.error => return Vec::new(),
-        Some(Output::Wait) if !result.error => {
-            let value = serde_json::from_str::<Value>(result.text).unwrap_or(Value::Null);
-            let text = if value["timed_out"] == true {
-                "(timed out)"
-            } else {
-                value["message"].as_str().unwrap_or(result.text)
-            };
-            return mcp_content(&Value::String(text.to_owned()));
-        }
-        _ => {}
+pub(crate) fn raw_output(result: &ToolResult) -> Vec<Section> {
+    let mut content = result.content.clone();
+    if let Some(text) = content
+        .as_str()
+        .filter(|text| text.starts_with("Exit code "))
+    {
+        content = text.split_once('\n').map_or("", |(_, body)| body).into();
     }
+    mcp_content(&content, result.source.as_ref())
+        .into_iter()
+        .map(|section| match section {
+            Section::Text { label, text } if serde_json::from_str::<Value>(&text).is_ok() => {
+                Section::Structured { label, text }
+            }
+            section => section,
+        })
+        .collect()
+}
 
-    let value = result.value;
-    let generic = || {
-        let mut content = result.content.clone();
-        if let Some(text) = content
-            .as_str()
-            .filter(|text| text.starts_with("Exit code "))
-        {
-            content = text.split_once('\n').map_or("", |(_, body)| body).into();
+pub(crate) fn output(mode: Option<(Pick<Body>, Format)>, data: &ToolData<'_>) -> Body {
+    let result = data
+        .result
+        .expect("output requires a completed tool result");
+    let picked = match mode {
+        Some((Pick::Field(source, pointer), format)) if !result.error => {
+            field(data, source, pointer)
+                .map(|value| Body::Sections(picked_sections(value, pointer, format, true)))
         }
-        mcp_content(&content)
+        Some((Pick::With(function), _)) => function(data),
+        _ => None,
     };
-    if let Some(Output::Questions) = mode {
-        let listed = if result.error {
-            rejected_answers(&input["questions"], result.text)
-                .or_else(|| rejected_questions(result.text))
-        } else {
-            serde_json::from_value(value["answers"].clone())
-                .ok()
-                .map(|answers| answer_list(&value["questions"], &answers))
-        };
-        if let Some(output) = listed {
-            return vec![text_section("output", &output)];
-        }
-    }
-    if result.error {
-        return generic();
-    }
-    match mode {
-        Some(Output::Extract(extract)) => extract(input, result).unwrap_or_else(generic),
-        Some(Output::Field(field, format)) if value[field].is_string() => {
-            let text = value[field].as_str().unwrap().to_owned();
-            vec![match format {
-                Format::Text => text_section("output", &text),
-                Format::Markdown => Section::Markdown {
-                    label: "output".into(),
-                    text,
-                },
-            }]
-        }
-        Some(Output::Agent) => markdown_output(input, result).unwrap(),
-        Some(Output::Read) if value["type"] == "image" => {
-            vec![Section::Placeholder(format!(
-                "[image {}]",
-                value["file"]["type"].as_str().unwrap_or("unknown")
-            ))]
-        }
-        Some(Output::Read) if value["file"]["content"].is_string() => {
-            vec![file_section(
-                "output",
-                value["file"]["filePath"].as_str().unwrap_or(""),
-                value["file"]["content"].as_str().unwrap(),
-            )]
-        }
-        Some(Output::Patch) => patch_section(value)
-            .map(|section| vec![section])
-            .unwrap_or_else(generic),
-        Some(Output::Write) if value["type"] == "update" => patch_section(value)
-            .map(|section| vec![section])
-            .unwrap_or_else(generic),
-        Some(Output::Shell) if value.get("stdout").is_some() || value.get("stderr").is_some() => {
+    picked.unwrap_or_else(|| Body::Sections(raw_output(result)))
+}
+
+pub(crate) fn questions_output(data: &ToolData<'_>) -> Option<Body> {
+    let result = data.result?;
+    let value = &result.structured;
+    let listed = if result.error {
+        rejected_answers(&data.input["questions"], &result.text())
+            .or_else(|| rejected_questions(&result.text()))
+    } else {
+        serde_json::from_value(value["answers"].clone())
+            .ok()
+            .map(|answers| answer_list(&value["questions"], &answers))
+    }?;
+    Some(Body::Sections(vec![text_section("output", &listed)]))
+}
+
+pub(crate) fn shell_sections(data: &ToolData<'_>, stream: Stream) -> Option<Body> {
+    let result = data.result?;
+    let value = &result.structured;
+    let sections =
+        if !result.error && (value.get("stdout").is_some() || value.get("stderr").is_some()) {
             ["stdout", "stderr"]
                 .into_iter()
-                .filter_map(|key| {
-                    value[key]
-                        .as_str()
-                        .filter(|text| !text.is_empty())
-                        .map(|text| text_section(key, text))
-                })
+                .filter_map(|key| text(value, key).map(|text| text_section(key, text)))
                 .collect()
-        }
-        Some(Output::Matches) if value["matches"].is_array() => {
-            vec![text_section(
-                "output",
-                &value["matches"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .filter_map(|name| name.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            )]
-        }
-        _ => generic(),
+        } else {
+            raw_output(result)
+        };
+    let Some(command) = shell_command(data.input) else {
+        return Some(Body::Sections(sections));
+    };
+    let state = result_state(&result.text(), value, result.error);
+    Some(Body::Sections(
+        sections
+            .into_iter()
+            .flat_map(|section| {
+                if let Section::Text { label, text } = &section
+                    && matches!(label.as_str(), "stdout" | "output")
+                    && let Some(sections) = shell_output_sections(
+                        command,
+                        label,
+                        text,
+                        Stream {
+                            exit_code: state.exit_code,
+                            is_error: result.error,
+                            ..stream
+                        },
+                    )
+                {
+                    return sections;
+                }
+                vec![section]
+            })
+            .collect(),
+    ))
+}
+
+pub(crate) fn markdown_output(data: &ToolData<'_>) -> Option<Body> {
+    let result = data.result?;
+    if result.error {
+        return None;
     }
-}
-
-fn markdown_output(_: &Value, result: &ToolResult<'_>) -> Option<Vec<Section>> {
-    Some(vec![Section::Markdown {
+    Some(Body::Sections(vec![Section::Markdown {
         label: "output".into(),
-        text: result.text.to_owned(),
-    }])
+        text: result.text(),
+    }]))
 }
-
-fn mcp_markdown_output(_: &Value, result: &ToolResult<'_>) -> Option<Vec<Section>> {
-    Some(
-        mcp_content(result.content)
+pub(crate) fn mcp_markdown_output(data: &ToolData<'_>) -> Option<Body> {
+    let result = data.result?;
+    if result.error {
+        return None;
+    }
+    Some(Body::Sections(
+        mcp_content(&result.content, result.source.as_ref())
             .into_iter()
             .map(|section| match section {
                 Section::Text { label, text } => Section::Markdown { label, text },
                 section => section,
             })
             .collect(),
-    )
-}
-
-fn web_search_output(_: &Value, result: &ToolResult<'_>) -> Option<Vec<Section>> {
-    #[derive(serde::Deserialize)]
-    struct SearchLink {
-        title: String,
-        url: String,
-    }
-
-    let (_, links) = result.text.split_once("\n\nLinks: ")?;
-    let mut stream = serde_json::Deserializer::from_str(links).into_iter::<Vec<SearchLink>>();
-    let links_found = stream.next()?.ok()?;
-    let mut text = String::from("| Title |\n| --- |\n");
-    for link in links_found {
-        let title = table_cell(&link.title);
-        let url = link
-            .url
-            .replace('<', "%3C")
-            .replace('>', "%3E")
-            .replace('\n', "%0A")
-            .replace('\r', "%0D")
-            .replace('|', "%7C");
-        text.push_str(&format!("| [{title}](<{url}>) |\n"));
-    }
-    // The decoder stops at the array boundary; preserve all following Markdown.
-    text.pop();
-    text.push_str(&links[stream.byte_offset()..]);
-    Some(vec![Section::Markdown {
-        label: "output".into(),
-        text,
-    }])
+    ))
 }
 
 /// Literal text inside a Markdown table cell.
-fn table_cell(text: &str) -> String {
+pub(crate) fn table_cell(text: &str) -> String {
     text.chars()
         .flat_map(|character| {
             if character.is_ascii_punctuation() {
@@ -960,20 +829,47 @@ fn table_cell(text: &str) -> String {
         .collect()
 }
 
-fn codex_thread_table(_: &Value, result: &ToolResult<'_>) -> Option<Vec<Section>> {
-    let value: Value = serde_json::from_str(result.content[0]["text"].as_str()?).ok()?;
-    let mut text = String::from("| Name | State |\n| --- | --- |");
-    for thread in value["threads"].as_array()? {
-        text.push_str(&format!(
-            "\n| {} | {} |",
-            table_cell(thread["name"].as_str()?),
-            table_cell(thread["state"].as_str()?)
-        ));
+/// A Markdown table of a JSON array: objects give one column per field, in first-seen order;
+/// scalars give a single column headed `name`.
+pub(crate) fn markdown_table(value: &Value, name: &str) -> Option<String> {
+    let rows = match value {
+        Value::Object(object) if !object.is_empty() => std::slice::from_ref(value),
+        _ => value.as_array().filter(|rows| !rows.is_empty())?.as_slice(),
+    };
+    let cell = |value: &Value| {
+        table_cell(
+            &value
+                .as_str()
+                .map_or_else(|| value.to_string(), str::to_owned),
+        )
+    };
+    let mut columns: Vec<&str> = Vec::new();
+    for row in rows {
+        for key in row.as_object().into_iter().flat_map(|object| object.keys()) {
+            if !columns.contains(&key.as_str()) {
+                columns.push(key);
+            }
+        }
     }
-    Some(vec![Section::Markdown {
-        label: "output".into(),
-        text,
-    }])
+    let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
+    if columns.is_empty() {
+        let mut lines = vec![line(vec![table_cell(name)]), "| --- |".to_owned()];
+        lines.extend(rows.iter().map(|row| line(vec![cell(row)])));
+        return Some(lines.join("\n"));
+    }
+    let mut lines = vec![
+        line(columns.iter().map(|column| table_cell(column)).collect()),
+        line(vec!["---".to_owned(); columns.len()]),
+    ];
+    lines.extend(rows.iter().map(|row| {
+        line(
+            columns
+                .iter()
+                .map(|column| row.get(column).map_or_else(String::new, cell))
+                .collect(),
+        )
+    }));
+    Some(lines.join("\n"))
 }
 
 pub(crate) fn code_section(label: &str, lang: &str, text: &str) -> Section {
@@ -984,7 +880,7 @@ pub(crate) fn code_section(label: &str, lang: &str, text: &str) -> Section {
     }
 }
 
-fn file_language(path: &str) -> &str {
+pub(crate) fn file_language(path: &str) -> &str {
     let path = std::path::Path::new(path);
     path.extension()
         .or_else(|| path.file_name())
@@ -1004,34 +900,7 @@ pub(crate) fn file_section(label: &str, path: &str, text: &str) -> Section {
     }
 }
 
-fn patch_section(value: &serde_json::Value) -> Option<Section> {
-    let hunks = value["structuredPatch"].as_array()?;
-    let text = hunks
-        .iter()
-        .map(|hunk| {
-            std::iter::once(format!(
-                "@@ -{},{} +{},{} @@",
-                hunk["oldStart"], hunk["oldLines"], hunk["newStart"], hunk["newLines"]
-            ))
-            .chain(
-                hunk["lines"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|line| line.as_str().map(str::to_owned)),
-            )
-            .collect::<Vec<_>>()
-            .join("\n")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    Some(Section::Diff {
-        label: String::new(),
-        text,
-    })
-}
-
-fn text_section(label: &str, text: &str) -> Section {
+pub(crate) fn text_section(label: &str, text: &str) -> Section {
     Section::Text {
         label: label.to_owned(),
         text: text.to_owned(),
@@ -1059,18 +928,34 @@ pub(crate) fn answer_list(questions: &Value, answers: &BTreeMap<String, String>)
     {
         blocks.push("You have not answered all questions".to_owned());
     }
-    let lines: Vec<String> = questions
+    let lines = answered_lines(questions, answers);
+    if !lines.is_empty() {
+        blocks.push(lines.join("\n"));
+    }
+    blocks.join("\n\n")
+}
+
+/// One `● header → answer` line per answered question.
+fn answered_lines(questions: &[Value], answers: &BTreeMap<String, String>) -> Vec<String> {
+    questions
         .iter()
         .filter_map(|question| {
             let answer = answers.get(question["question"].as_str()?)?;
             let header = text(question, "header").or_else(|| text(question, "question"))?;
             Some(format!("● {header} → {answer}"))
         })
-        .collect();
-    if !lines.is_empty() {
-        blocks.push(lines.join("\n"));
+        .collect()
+}
+
+/// Shows an ask the user chose to chat about as `Chat about this`, followed by the
+/// answers given before they did.
+fn chat_about_this(questions: &Value, answers: &BTreeMap<String, String>) -> String {
+    let questions = questions.as_array().map(Vec::as_slice).unwrap_or_default();
+    let lines = answered_lines(questions, answers);
+    if lines.is_empty() {
+        return "Chat about this".to_owned();
     }
-    blocks.join("\n\n")
+    format!("Chat about this\n\n{}", lines.join("\n"))
 }
 
 /// Shows a rejected ask as `Rejected` with the user's note, or as `Chat about this` with
@@ -1081,7 +966,10 @@ pub(crate) fn rejected_answers(questions: &Value, text: &str) -> Option<String> 
     let dismissed = |reason: &str| {
         reason.starts_with("The user dismissed these questions because the message you sent with them was not shown.")
     };
-    let said = if let Some(reason) = text.strip_prefix("PreToolUse:AskUserQuestion hook error: ") {
+    let said = if let Some(reason) = text
+        .strip_prefix("PreToolUse:")
+        .and_then(|text| text.split_once(" hook error: ").map(|(_, reason)| reason))
+    {
         if !dismissed(reason) && !reason.starts_with("The user wants to clarify these questions.") {
             return None;
         }
@@ -1094,10 +982,7 @@ pub(crate) fn rejected_answers(questions: &Value, text: &str) -> Option<String> 
         said
     };
     if dismissed(said) {
-        return Some(format!(
-            "Chat about this\n\n{}",
-            answer_list(questions, &BTreeMap::new())
-        ));
+        return Some(chat_about_this(questions, &BTreeMap::new()));
     }
     if !said.starts_with("The user wants to clarify these questions.") {
         return Some(format!("Rejected\n\n{}", said.trim()));
@@ -1116,10 +1001,7 @@ pub(crate) fn rejected_answers(questions: &Value, text: &str) -> Option<String> 
             answers.insert(question.to_owned(), answer.to_owned());
         }
     }
-    Some(format!(
-        "Chat about this\n\n{}",
-        answer_list(questions, &answers)
-    ))
+    Some(chat_about_this(questions, &answers))
 }
 
 pub(crate) fn rejected_questions(text: &str) -> Option<String> {
@@ -1132,7 +1014,7 @@ pub(crate) fn rejected_questions(text: &str) -> Option<String> {
 }
 
 /// One titled section per question: its text, then its numbered options.
-fn question_sections(input: &Value) -> Vec<Section> {
+pub(crate) fn question_sections(input: &Value) -> Vec<Section> {
     let mut sections = Vec::new();
     for question in input["questions"].as_array().into_iter().flatten() {
         let Some(asked) = text(question, "question") else {
@@ -1206,51 +1088,8 @@ fn printf_separator(format: &str, args: &[&str]) -> Option<String> {
     }
 }
 
-fn highlight_shell_output(call: &mut ToolCall) {
-    if !matches!(rule(&call.name).output, Some(Output::Shell)) {
-        return;
-    }
-    let Some(command) = call.input.iter().find_map(|section| match section {
-        Section::Shell { text, .. } => Some(text.as_str()),
-        _ => None,
-    }) else {
-        return;
-    };
-    if let Some(output) = &mut call.output {
-        *output = std::mem::take(output)
-            .into_iter()
-            .flat_map(|section| {
-                if let Section::Text { label, text } = &section
-                    && matches!(label.as_str(), "stdout" | "output")
-                    && let Some(sections) = shell_output_sections(
-                        command,
-                        label,
-                        text,
-                        Stream {
-                            exit_code: call.exit_code,
-                            is_error: call.is_error,
-                            ..rule(&call.name).shell_stream
-                        },
-                    )
-                {
-                    return sections;
-                }
-                vec![section]
-            })
-            .collect();
-    }
-}
-
-/// Highlight shell file reads and add headings for separately reported stderr output.
+/// Add headings for separately reported stderr output.
 pub(super) fn annotate(call: &mut ToolCall) {
-    highlight_shell_output(call);
-    if !call.is_error {
-        match rule(&call.name).output {
-            Some(Output::Hidden) => call.hide_output = true,
-            Some(Output::Empty) => call.output = Some(Vec::new()),
-            _ => {}
-        }
-    }
     if let Some(output) = &mut call.output {
         *output = std::mem::take(output)
             .into_iter()
@@ -1280,82 +1119,143 @@ fn label_section(section: Section) -> Vec<Section> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn hook_rejected_questions_show_chat_and_answers() {
-        let records: Vec<serde_json::Value> =
-            include_str!("../../tests/fixtures/claude-questions-hook-rejected.jsonl")
-                .lines()
-                .map(|line| serde_json::from_str(line).unwrap())
-                .collect();
-        let questions = &records[0]["message"]["content"][0]["input"]["questions"];
-        let result = records[1]["message"]["content"][0]["content"]
+    fn recorded_heredoc_command() -> String {
+        let record: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/claude-shell-heredoc.jsonl"
+        ))
+        .unwrap();
+        record["message"]["content"][0]["input"]["command"]
             .as_str()
-            .unwrap();
-        assert_eq!(
-            super::rejected_answers(questions, result).as_deref(),
-            Some("Chat about this\n\nYou have not answered all questions")
-        );
-        assert_eq!(
-            super::rejected_answers(questions, records[1]["toolUseResult"].as_str().unwrap()),
-            super::rejected_answers(questions, result)
-        );
-        assert_eq!(
-            super::rejected_answers(
-                questions,
-                &result.replace("(No answer provided)", "Answer: Red")
-            )
-            .as_deref(),
-            Some("Chat about this\n\n● Color → Red")
-        );
-        assert_eq!(
-            super::rejected_answers(
-                questions,
-                "PreToolUse:AskUserQuestion hook error: unrelated error"
-            ),
-            None
-        );
+            .unwrap()
+            .to_owned()
+    }
+
+    fn shown_shell(command: &str) -> String {
+        let input = serde_json::json!({"command": command});
+        let sections = super::shell_input(&super::ToolData {
+            input: &input,
+            result: None,
+        })
+        .unwrap();
+        let [crate::event::Section::Shell { text, prefix: 0 }] = sections.as_slice() else {
+            panic!("expected shell section: {sections:?}");
+        };
+        text.clone()
     }
 
     #[test]
-    fn recorded_native_rejected_questions_show_chat_and_answers() {
-        for fixture in [
-            include_str!("../../tests/fixtures/claude-questions-rejected.jsonl"),
-            include_str!("../../tests/fixtures/claude-questions-hook-rejected.jsonl"),
+    fn shell_heredoc_formats_recorded_body_and_preserves_shell_bytes() {
+        let command = recorded_heredoc_command();
+        let script = crate::shell_commands::scripts(&command).remove(0);
+        let body = &command[script.range.clone()];
+        let formatted = crate::code_format::Language::JavaScript
+            .format(body)
+            .unwrap();
+        let expected = format!(
+            "{}{}{}",
+            &command[..script.range.start],
+            formatted,
+            &command[script.range.end..]
+        );
+        assert_ne!(expected, command);
+        assert_eq!(shown_shell(&command), expected);
+        let node = command.replacen("cat > render.mjs", "node", 1);
+        assert_eq!(
+            shown_shell(&node),
+            expected.replacen("cat > render.mjs", "node", 1)
+        );
+        assert_eq!(shown_shell(&expected), expected);
+    }
+
+    #[test]
+    fn shell_heredoc_keeps_expansion_arguments_and_invalid_code() {
+        let command = recorded_heredoc_command();
+        let script = crate::shell_commands::scripts(&command).remove(0);
+        let body = &command[script.range.clone()];
+        for changed in [
+            command
+                .replace("<<'EOF'", "<<EOF")
+                .replace(body, "console.log('$HOME')\n"),
+            format!("node -e '{}'", body.replace('\'', "\"")),
+            command.replace(body, "const broken = (\n"),
+            command.replace("render.mjs", "render.py"),
         ] {
-            let records: Vec<serde_json::Value> = fixture
+            assert_eq!(shown_shell(&changed), changed);
+        }
+    }
+
+    #[test]
+    fn shell_heredoc_formats_multiple_bodies_in_source_order() {
+        let command = recorded_heredoc_command();
+        let script = crate::shell_commands::scripts(&command).remove(0);
+        let body = &command[script.range.clone()];
+        let formatted = crate::code_format::Language::JavaScript
+            .format(body)
+            .unwrap();
+        let command = format!("node <<'EOF' <<'SECOND'\n{body}EOF\n{body}SECOND\necho done");
+        let expected =
+            format!("node <<'EOF' <<'SECOND'\n{formatted}EOF\n{formatted}SECOND\necho done");
+        assert_eq!(shown_shell(&command), expected);
+    }
+
+    #[test]
+    fn shell_heredoc_restores_shortest_tab_prefix() {
+        let command = recorded_heredoc_command();
+        let script = crate::shell_commands::scripts(&command).remove(0);
+        let body = format!("\n{}", &command[script.range.clone()]);
+        let formatted = crate::code_format::Language::JavaScript
+            .format(&body)
+            .unwrap();
+        for prefix in ["", "\t", "\t\t"] {
+            let indented = body
                 .lines()
-                .map(|line| serde_json::from_str(line).unwrap())
-                .collect();
-            let questions = &records[0]["message"]["content"][0]["input"]["questions"];
-            let header = questions[0]["header"].as_str().unwrap();
-            for result in [
-                records[1]["message"]["content"][0]["content"]
-                    .as_str()
-                    .unwrap(),
-                records[1]["toolUseResult"].as_str().unwrap(),
-            ] {
-                // Keep the recorded four-line explanation and its actual question list.
-                let (prefix, asked) = result
-                    .split_once("The user wants to clarify these questions.")
-                    .unwrap();
-                let (_, list) = asked.split_once("Questions asked:").unwrap();
-                let short = format!(
-                    "{prefix}The user wants to clarify these questions. Start by asking them what they would like to clarify.\n\n    Questions asked:{list}"
-                );
-                for text in [result, short.as_str()] {
-                    assert_eq!(
-                        super::rejected_answers(questions, text).as_deref(),
-                        Some("Chat about this\n\nYou have not answered all questions")
-                    );
-                    assert_eq!(
-                        super::rejected_answers(
-                            questions,
-                            &text.replace("(No answer provided)", "Answer: Red")
-                        ),
-                        Some(format!("Chat about this\n\n● {header} → Red"))
-                    );
-                }
-            }
+                .enumerate()
+                .map(|(index, line)| {
+                    if line.is_empty() {
+                        "\n".to_owned()
+                    } else {
+                        format!("{prefix}{}{line}\n", if index == 1 { "\t" } else { "" })
+                    }
+                })
+                .collect::<String>();
+            let expected = formatted
+                .lines()
+                .map(|line| {
+                    if line.is_empty() {
+                        "\n".to_owned()
+                    } else {
+                        format!("{prefix}{line}\n")
+                    }
+                })
+                .collect::<String>();
+            let command = format!("node <<-'EOF'\n{indented}\tEOF\necho done");
+            assert_eq!(
+                shown_shell(&command),
+                format!("node <<-'EOF'\n{expected}\tEOF\necho done")
+            );
+        }
+    }
+    #[test]
+    fn field_titles_accept_numbers_and_numbers_in_arrays() {
+        for (value, expected) in [
+            (serde_json::json!(400), "400"),
+            (serde_json::json!(-2), "-2"),
+            (serde_json::json!(2.5), "2.5"),
+            (
+                serde_json::json!([400, "wide", -2, 2.5]),
+                "400, wide, -2, 2.5",
+            ),
+        ] {
+            assert_eq!(super::title_text(&value).as_deref(), Some(expected));
+        }
+        for value in [
+            serde_json::json!(true),
+            serde_json::json!(null),
+            serde_json::json!({}),
+            serde_json::json!([400, false]),
+            serde_json::json!([[400]]),
+        ] {
+            assert_eq!(super::title_text(&value), None);
         }
     }
 
@@ -1379,178 +1279,6 @@ mod tests {
     }
 
     #[test]
-    fn claude_client_text_is_markdown_and_follows_the_list_tool_name() {
-        for source in [
-            include_str!("../../tests/fixtures/claude-client/ask_claude.jsonl"),
-            include_str!("../../tests/fixtures/claude-client/notify_claude.jsonl"),
-        ] {
-            let record: serde_json::Value = serde_json::from_str(source).unwrap();
-            let item = &record["payload"]["item"];
-            let input = &item["arguments"];
-            let text = input["text"].as_str().unwrap();
-            let tool = item["tool"].as_str().unwrap();
-            for name in [
-                format!("claude-client {tool}"),
-                format!("mcp__claude-client__{tool}"),
-                format!("mcp__plugin_claude_claude-client__{tool}"),
-            ] {
-                let (_, subject, sections) = super::presentation(&name, input);
-                assert_eq!(
-                    sections,
-                    vec![crate::event::Section::Markdown {
-                        label: "text".into(),
-                        text: text.into(),
-                    }]
-                );
-                assert_eq!(
-                    super::list_title(&name, subject.as_deref(), input, None),
-                    format!("{} {text}", super::display_tool_name(&name))
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn tool_detail_titles_center_the_tool_name_without_a_subject() {
-        for source in [
-            include_str!("../../tests/fixtures/claude-client/ask_claude.jsonl"),
-            include_str!("../../tests/fixtures/claude-client/notify_claude.jsonl"),
-            include_str!("../../tests/fixtures/tool-list/claude.jsonl"),
-        ] {
-            let record: serde_json::Value =
-                serde_json::from_str(source.lines().next().unwrap()).unwrap();
-            let name = record["payload"]["item"]["tool"]
-                .as_str()
-                .or_else(|| record["message"]["content"][0]["name"].as_str())
-                .unwrap();
-            let display = super::display_tool_name(name);
-            for subject in [None, Some(""), Some(" \t ")] {
-                assert_eq!(
-                    super::event_detail_titles(name, subject),
-                    (String::new(), display.clone())
-                );
-            }
-            assert_eq!(
-                super::event_detail_titles(name, Some("Inspect source")),
-                (display, "Inspect source".into())
-            );
-        }
-    }
-
-    #[test]
-    fn agent_and_task_share_the_spawn_rule() {
-        assert!(std::ptr::eq(super::rule("Agent"), super::rule("Task")));
-        for name in ["Agent", "Task", "spawn_agent"] {
-            let rule = super::rule(name);
-            assert!(rule.subject.is_none());
-            assert!(rule.input.is_none());
-        }
-    }
-
-    #[test]
-    fn tool_declarations_are_unique_and_keep_captured_agent_fields() {
-        let mut names = std::collections::HashSet::new();
-        for rule in super::TOOL_RULES {
-            assert!(
-                names.insert(rule.name),
-                "duplicate declaration: {}",
-                rule.name
-            );
-        }
-        for line in include_str!("../../tests/fixtures/codex-agent-names.jsonl").lines() {
-            let record: serde_json::Value = serde_json::from_str(line).unwrap();
-            let payload = &record["payload"];
-            let name = payload["name"].as_str().unwrap();
-            let input: serde_json::Value =
-                serde_json::from_str(payload["arguments"].as_str().unwrap()).unwrap();
-            let subject = input[if name == "spawn_agent" {
-                "task_name"
-            } else {
-                "target"
-            }]
-            .as_str()
-            .unwrap();
-            for raw in [
-                name.to_owned(),
-                format!("collaboration.{name}"),
-                format!("functions.collaboration.{name}"),
-            ] {
-                if name == "spawn_agent" {
-                    let message = crate::event::agent::tool_message(&raw, &input).unwrap();
-                    assert_eq!(message.recipient.as_deref(), Some(subject));
-                    assert_eq!(message.content.text(), input["message"].as_str().unwrap());
-                    continue;
-                }
-                let (_, actual, sections) = super::presentation(&raw, &input);
-                assert_eq!(actual.as_deref(), Some(subject));
-                assert_eq!(
-                    sections,
-                    vec![crate::event::Section::Markdown {
-                        label: "message".into(),
-                        text: input["message"].as_str().unwrap().to_owned(),
-                    }]
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn captured_wait_name_keeps_a_capitalized_tool_label() {
-        let record: serde_json::Value =
-            include_str!("../../tests/fixtures/codex-perspective/beta.jsonl")
-                .lines()
-                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-                .find(|record| record["payload"]["name"] == "wait")
-                .unwrap();
-        let name = record["payload"]["name"].as_str().unwrap();
-        assert_eq!(super::display_tool_name(name), "Wait");
-    }
-
-    #[test]
-    fn captured_mcp_names_preserve_server_and_tool_case() {
-        let record: serde_json::Value =
-            serde_json::from_str(include_str!("../../tests/fixtures/mcp-codex/image.json"))
-                .unwrap();
-        let item = &record["payload"]["item"];
-        let server = item["server"].as_str().unwrap();
-        let tool = item["tool"].as_str().unwrap();
-        let raw = format!("mcp__{server}__{tool}");
-        assert_eq!(
-            super::display_tool_name(&raw),
-            format!("{server} {}", tool.replace('_', " "))
-        );
-        assert_eq!(
-            super::display_tool_name("mcp__claude-client__ask_claude"),
-            "claude-client ask claude"
-        );
-    }
-
-    #[test]
-    fn captured_tool_names_share_one_display_rule() {
-        let record: serde_json::Value = serde_json::from_str(
-            include_str!("../../tests/fixtures/codex-agent-names.jsonl")
-                .lines()
-                .nth(1)
-                .unwrap(),
-        )
-        .unwrap();
-        let name = record["payload"]["name"].as_str().unwrap();
-        assert_eq!(super::display_tool_name(name), "Send message");
-        assert_eq!(
-            super::display_tool_name(&format!("collaboration.{name}")),
-            "Send message"
-        );
-        for line in include_str!("../../tests/fixtures/claude-tool-calls.jsonl").lines() {
-            let record: serde_json::Value = serde_json::from_str(line).unwrap();
-            if let Some(name @ ("WebFetch" | "Bash" | "Read" | "Skill")) =
-                record["message"]["content"][0]["name"].as_str()
-            {
-                assert_eq!(super::display_tool_name(name), name);
-            }
-        }
-    }
-
-    #[test]
     fn empty_captured_output_has_no_sections() {
         let record: serde_json::Value = serde_json::from_str(
             include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
@@ -1561,77 +1289,7 @@ mod tests {
         .unwrap();
         let mut content = record["message"]["content"][0]["content"].clone();
         content = serde_json::Value::String(content.as_str().unwrap().chars().take(0).collect());
-        assert!(super::mcp_content(&content).is_empty());
-    }
-
-    #[test]
-    fn codex_manager_list_shows_a_thread_table() {
-        let records: Vec<serde_json::Value> =
-            include_str!("../../tests/fixtures/claude-manager-list.jsonl")
-                .lines()
-                .map(|line| serde_json::from_str(line).unwrap())
-                .collect();
-        let name = records[0]["message"]["content"][0]["name"]
-            .as_str()
-            .unwrap();
-        let content = &records[1]["message"]["content"][0]["content"];
-        let output = super::output(
-            super::rule(name).output,
-            &serde_json::Value::Null,
-            &super::ToolResult {
-                content,
-                value: &serde_json::Value::Null,
-                text: "",
-                error: false,
-            },
-        );
-        let [crate::event::Section::Markdown { text, .. }] = output.as_slice() else {
-            panic!("expected one Markdown table, got {output:?}");
-        };
-        let rows: Vec<&str> = text.lines().collect();
-        assert_eq!(rows[..2], ["| Name | State |", "| --- | --- |"]);
-        assert_eq!(rows[2], r"| 规则\:拆逗号 | completed |");
-        assert_eq!(rows.last().unwrap(), &"| 框架补三处 | inProgress |");
-        assert_eq!(rows.len(), 11);
-    }
-
-    #[test]
-    fn result_subject_follows_the_declared_fields() {
-        let records: Vec<serde_json::Value> =
-            include_str!("../../tests/fixtures/claude-manager-detach-name.jsonl")
-                .lines()
-                .map(|line| serde_json::from_str(line).unwrap())
-                .collect();
-        let input = &records[0]["message"]["content"][0]["input"];
-        let content = &records[1]["message"]["content"][0]["content"];
-        let output = super::mcp_content(content);
-        assert_eq!(
-            super::result_subject("mcp__codex-manager__detach", Some(&output)).as_deref(),
-            Some("模型和new挪位")
-        );
-        assert_eq!(
-            super::presentation("mcp__codex-manager__detach", input)
-                .1
-                .as_deref(),
-            input["threadId"].as_str()
-        );
-        let mut value: serde_json::Value =
-            serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
-        for name in [
-            serde_json::Value::Null,
-            serde_json::json!(" "),
-            serde_json::json!(42),
-        ] {
-            value["name"] = name;
-            let output = vec![crate::event::Section::Structured {
-                label: "output".into(),
-                text: value.to_string(),
-            }];
-            assert_eq!(
-                super::result_subject("mcp__codex-manager__detach", Some(&output)),
-                None
-            );
-        }
+        assert!(super::mcp_content(&content, None).is_empty());
     }
 
     #[test]
@@ -1641,68 +1299,39 @@ mod tests {
                 .unwrap();
         let image = &record["payload"]["item"]["result"]["content"][1];
         // These types were absent from local transcripts; vary a captured media block.
-        for kind in ["image", "audio", "resource_link", "future_content"] {
+        for kind in ["audio", "resource_link", "future_content"] {
             let mut block = image.clone();
             block["type"] = kind.into();
             assert_eq!(
-                super::mcp_content(&serde_json::Value::Array(vec![block])),
+                super::mcp_content(&serde_json::Value::Array(vec![block]), None),
                 vec![crate::event::Section::Placeholder(format!(
                     "[{kind} image/png]"
                 ))]
             );
         }
     }
+}
 
+#[cfg(test)]
+mod f4_tests {
     #[test]
-    fn mcp_presentation_uses_shared_tables_and_removes_title_fields() {
-        let record: serde_json::Value =
-            include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
+    fn identical_mcp_images_are_emitted_once() {
+        let value: serde_json::Value = serde_json::from_str(
+            include_str!("../../tests/fixtures/claude-read-image.jsonl")
                 .lines()
-                .map(|line| serde_json::from_str(line).unwrap())
-                .find(|record: &serde_json::Value| {
-                    record["message"]["content"][0]["name"]
-                        == "mcp__plugin_codex_codex-manager__start"
-                })
-                .unwrap();
-        let call = &record["message"]["content"][0];
-        for name in [call["name"].as_str().unwrap(), "codex-manager.start"] {
-            let (name, subject, input) = super::presentation(name, &call["input"]);
-            assert_eq!(name, "codex-manager start");
-            assert_eq!(subject.as_deref(), Some("tool-calls"));
-            assert_eq!(
-                input,
-                vec![crate::event::Section::Markdown {
-                    label: "prompt".into(),
-                    text: call["input"]["prompt"].as_str().unwrap().into(),
-                }]
-            );
-        }
-    }
-
-    #[test]
-    fn mcp_titles_show_server_and_tool() {
-        for (name, expected) in [
-            (
-                "mcp__plugin_codex_codex-manager__send",
-                "codex-manager send",
-            ),
-            (
-                "mcp__plugin_codex_codex-manager__start",
-                "codex-manager start",
-            ),
-            (
-                "mcp__claude-in-chrome__navigate",
-                "claude-in-chrome navigate",
-            ),
-            ("mcp__context7__query-docs", "context7 query-docs"),
-            ("mcp__tool", "mcp__tool"),
-            ("mcp____send", "mcp____send"),
-            ("mcp__server__", "mcp__server__"),
-            ("mcp__plugin_codex__send", "mcp__plugin_codex__send"),
-            ("mcp__plugin__server__send", "mcp__plugin__server__send"),
-            ("mcp__plugin_codex___send", "mcp__plugin_codex___send"),
-        ] {
-            assert_eq!(super::display_tool_name(name), expected);
-        }
+                .nth(1)
+                .unwrap(),
+        )
+        .unwrap();
+        let block = value["message"]["content"][0]["content"][0].clone();
+        let source = (
+            crate::event::SourceRecord {
+                path: std::path::PathBuf::from("unused"),
+                offset: 0,
+            },
+            "/message/content/0/content".to_owned(),
+        );
+        let sections = super::mcp_content(&serde_json::json!([block, block]), Some(&source));
+        assert_eq!(sections.len(), 1);
     }
 }

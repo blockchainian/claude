@@ -39,7 +39,13 @@ fn multiline_tool_view() -> (View, chrono::DateTime<Utc>, String, String) {
     let Section::Shell { text, .. } = &mut call.input[0] else {
         panic!("Bash command")
     };
-    *text = text.lines().skip(1).take(2).collect::<Vec<_>>().join("\n");
+    *text = text
+        .lines()
+        .skip(1)
+        .filter(|line| !line.is_empty())
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("\n");
     let input = text.clone();
     let Section::Text { text, .. } = &mut call.output.as_mut().unwrap()[0] else {
         panic!("Bash output")
@@ -51,7 +57,7 @@ fn multiline_tool_view() -> (View, chrono::DateTime<Utc>, String, String) {
         .collect::<Vec<_>>()
         .join("\n");
     let output = text.clone();
-    assert_eq!(input, "import json,sys\nlast=None");
+    assert_eq!(input, "import json, sys\nlast = None");
     assert!(output.starts_with("Traceback"));
     view.select_fixture_event(Some(event));
     (view, now, input, output)
@@ -72,10 +78,7 @@ fn event_detail_centers_multiline_sections_and_arrow_on_panel_midline() {
         let buf = event_detail_buffer(&view, width, now);
         let viewport = view.viewport.borrow();
         let region = &viewport.event_text;
-        let columns = super::super::event_detail::event_detail_columns(
-            viewport.event_detail,
-            viewport.event_panel,
-        );
+        let columns = super::super::event_detail::EventDetailColumns::new(viewport.event_detail);
         for text in [&input, &output] {
             let source = region
                 .sources
@@ -139,11 +142,8 @@ fn event_detail_centers_all_output_fragments_with_one_offset() {
             .unwrap();
         let output_parts = &parts[output_start..];
         assert!(output_parts.len() >= 4);
-        let columns = super::super::event_detail::event_detail_columns(
-            Rect::new(2, 1, width, 40),
-            view.center_layout(Rect::new(0, 0, width + 4, 42))
-                .event_panel,
-        );
+        let columns =
+            super::super::event_detail::EventDetailColumns::new(Rect::new(2, 1, width, 40));
         let content_width = columns.text.width;
         let widest = output_parts
             .iter()
@@ -248,11 +248,8 @@ fn multiline_json_block_keeps_section_offset_and_copies_displayed_text() {
                 .join("\n"),
             include_str!("../../tests/ui_snapshots/manager_await_json.txt").trim_end_matches('\n')
         );
-        let columns = super::super::event_detail::event_detail_columns(
-            Rect::new(2, 1, width, 40),
-            view.center_layout(Rect::new(0, 0, width + 4, 42))
-                .event_panel,
-        );
+        let columns =
+            super::super::event_detail::EventDetailColumns::new(Rect::new(2, 1, width, 40));
         let content_width = columns.text.width;
         let lines = part.lines(
             content_width.into(),
@@ -342,17 +339,17 @@ fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
     *text = text.replacen("decks.txt", "output/decks.txt", 1);
     view.rows[view.selected].cwd = directory.path().into();
     view.select_fixture_event(Some(event));
-    view.event_detail.search.query.set_text("decks.txt");
+    view.event_detail.search.input.set_text("decks.txt");
     let buf = event_detail_buffer(&view, 200, now);
     let (rect, target) = view
         .viewport
         .borrow()
         .event_links
         .iter()
-        .find(|(_, target)| target == &path)
+        .find(|(_, target)| target == &crate::ui::links::LinkTarget::Path(path.clone()))
         .unwrap()
         .clone();
-    assert_eq!(target, path);
+    assert_eq!(target, crate::ui::links::LinkTarget::Path(path.clone()));
     assert!(rect.x > view.viewport.borrow().event_text.area.x);
     assert_eq!(cell_text(buf[(rect.x, rect.y)].symbol()), "o");
     assert!(
@@ -365,7 +362,7 @@ fn shifted_detail_path_click_search_underline_and_copy_use_source_bytes() {
     release_click(&mut view, MouseButton::Left, rect.x + 2, rect.y);
     assert_eq!(
         view.flush_pending_click(Instant::now() + std::time::Duration::from_secs(1)),
-        Some(Action::OpenPath(path))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(path)))
     );
     view.handle_mouse(mouse(
         MouseEventKind::Down(MouseButton::Left),
@@ -419,10 +416,9 @@ fn open_background(view: &mut View, now: chrono::DateTime<Utc>) {
     let screen = event_screen(view, 160, 40, now);
     let (x, y) = rendered_cell(&screen, "Real background");
     assert_eq!(release_click(view, MouseButton::Left, x, y), None);
-    assert_eq!(release_click(view, MouseButton::Left, x, y), None);
     assert!(
         view.event_list.cursor.is_some(),
-        "Background double click must open its full log"
+        "Background click must open its full log"
     );
     assert!(
         super::super::event_list::open_text(view.visible_event().unwrap()).contains("globalState")
@@ -431,7 +427,7 @@ fn open_background(view: &mut View, now: chrono::DateTime<Utc>) {
 }
 
 #[test]
-fn background_double_click_returns_to_previous_list() {
+fn background_click_returns_to_previous_list() {
     let (mut view, now, _output) = with_background();
     open_background(&mut view, now);
     release_click(&mut view, MouseButton::Right, 1, 1);
@@ -439,7 +435,7 @@ fn background_double_click_returns_to_previous_list() {
 }
 
 #[test]
-fn background_double_click_restores_previous_detail_and_scroll() {
+fn background_click_restores_previous_detail_and_scroll() {
     let (mut view, now, _output) = with_background();
     let previous = view
         .event_panel
@@ -471,7 +467,7 @@ fn selected_detail_refreshes_and_event_wheel_changes_it() {
     let area = view.viewport.borrow().event_panel;
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, area.x + 22, area.y + 3));
     assert_eq!(view.visible_event(), view.event_panel.get(1));
-    release_click(&mut view, MouseButton::Right, area.x + 22, area.y + 3);
+    release_click(&mut view, MouseButton::Right, 1, 1);
     assert_eq!(view.visible_event(), view.event_panel.last());
 }
 
@@ -495,9 +491,9 @@ fn event_detail_slash_search_jumps_and_highlights_without_closing() {
     for ch in "globalState".chars() {
         assert_eq!(key(&mut view, KeyCode::Char(ch)), None);
     }
-    assert!(view.event_detail.search.editing);
+    assert!(view.event_detail.search.input.focused());
     assert!(
-        !view.event_list.search.active(),
+        !view.event_list.search.input.applied(),
         "detail search must not filter the list"
     );
     // Wide enough that the matching line is not truncated before the match.
@@ -522,7 +518,7 @@ fn event_detail_slash_search_jumps_and_highlights_without_closing() {
     );
     assert_eq!(view.event_list.cursor, expected);
     key(&mut view, KeyCode::Enter);
-    assert!(!view.event_detail.search.editing);
+    assert!(!view.event_detail.search.input.focused());
     assert_eq!(view.event_list.cursor, expected);
 }
 
@@ -539,9 +535,9 @@ fn right_click_cancels_innermost_modal_before_open_event_detail() {
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert!(!view.help);
     assert_eq!(view.visible_event(), Some(&event));
-    view.searching = true;
+    view.search.focus();
     release_click(&mut view, MouseButton::Right, 1, 1);
-    assert!(!view.searching);
+    assert!(!view.search.focused());
     assert_eq!(view.visible_event(), Some(&event));
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert_eq!(view.visible_event(), view.event_panel.last());
@@ -574,11 +570,11 @@ fn background_return_restores_detail_search() {
     view.select_fixture_event(Some(previous.clone()));
     let text = event_list::open_text(&previous);
     let query = text.split_whitespace().next().unwrap();
-    view.event_detail.search.query.set_text(query);
+    view.event_detail.search.input.set_text(query);
     open_background(&mut view, now);
     release_click(&mut view, MouseButton::Right, 1, 1);
     assert_eq!(view.visible_event(), Some(&previous));
-    assert_eq!(view.event_detail.search.query.text(), query);
+    assert_eq!(view.event_detail.search.input.text(), query);
 }
 
 #[test]
@@ -590,7 +586,7 @@ fn manager_detach_detail_centers_thread_and_has_no_input() {
         .remove(0);
     let thread_id = "01a1489e-5020-7f40-90e8-c9413012630b";
     assert_eq!(
-        event.calls[0].title,
+        event.calls[0].summary,
         format!("codex-manager detach {thread_id}")
     );
     assert!(event.calls[0].input.is_empty());
@@ -608,10 +604,7 @@ fn manager_detach_detail_centers_thread_and_has_no_input() {
         .expect("detail must retain the tool name beside its subject");
     let left = title.find(thread_id).unwrap();
     let viewport = view.viewport.borrow();
-    let columns = super::super::event_detail::event_detail_columns(
-        viewport.event_detail,
-        view.center_layout(buf.area).event_panel,
-    );
+    let columns = super::super::event_detail::EventDetailColumns::new(viewport.event_detail);
     assert_eq!(
         left,
         usize::from(super::super::centering::centered_x(
@@ -625,12 +618,11 @@ fn manager_detach_detail_centers_thread_and_has_no_input() {
         Some(usize::from(columns.text.x))
     );
     assert_eq!(
-        rows.iter()
-            .filter(|row| row.contains("\"threadId\": \"01a1489e"))
-            .count(),
+        rows.iter().filter(|row| row.trim() == thread_id).count(),
         1,
-        "the thread ID remains only in the generic output"
+        "the output contains only the thread ID"
     );
+    assert!(!rows.iter().any(|row| row.contains("\"threadId\"")));
     let snapshot = rows
         .iter()
         .map(|row| row.trim_end())

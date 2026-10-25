@@ -203,8 +203,8 @@ fn failed_prompt_restores_submitted_text_without_losing_the_next_draft() {
         };
         assert_eq!(view.input_box.editor.text(), expected);
         assert_eq!(
-            view.notice.as_ref().map(|(text, _)| text.as_str()),
-            Some("attach timed out")
+            view.feedback.clone().map(|(feedback, _)| feedback),
+            Some(footer::Feedback::Error("attach timed out".into()))
         );
         assert_eq!(
             view.input_box.state,
@@ -299,11 +299,11 @@ fn prompt_grows_with_its_text_up_to_the_layout_mode_share() {
     assert!(layout.event_detail.height >= 5, "{:?}", layout.event_detail);
     let rendered = event_screen(&view, 120, 40, now);
     assert!(rendered.contains("No reply needed."), "{rendered}");
-    // Wide mode puts the event list beside the panels, so the prompt may take two thirds.
-    let wide = view.center_layout(Rect::new(0, 0, 200, 40));
-    assert_eq!(wide.prompt.height, (40 - 3 - 2) * 2 / 3);
-    assert!(wide.top.height >= 4, "{:?}", wide.top);
-    assert!(wide.event_detail.height >= 3, "{:?}", wide.event_detail);
+    // Large mode puts the event list beside the panels, so the prompt may take two thirds.
+    let large = view.center_layout(Rect::new(0, 0, 200, 40));
+    assert_eq!(large.prompt.height, (40 - 3 - 2) * 2 / 3);
+    assert!(large.top.height >= 4, "{:?}", large.top);
+    assert!(large.event_detail.height >= 3, "{:?}", large.event_detail);
 }
 
 #[test]

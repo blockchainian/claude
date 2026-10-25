@@ -74,9 +74,15 @@ fn event_content_centered_links_click_and_underline_exactly_the_path() {
             event_panel.x + (event_panel.width / 2 - 19 / 2).min(event_panel.width - 11 - 19);
         let expected = Rect::new(start + 5, event_panel.y, 9, 1);
         let links = view.viewport.borrow().event_links.clone();
-        assert!(links.contains(&(expected, target.clone())), "{links:?}");
+        assert!(
+            links.contains(&(expected, crate::ui::links::LinkTarget::Path(target.clone()))),
+            "{links:?}"
+        );
         let before = buf.clone();
-        super::super::links::underline(&mut buf, &[(expected, target.clone())]);
+        super::super::links::underline(
+            &mut buf,
+            &[(expected, crate::ui::links::LinkTarget::Path(target.clone()))],
+        );
         for x in event_panel.x..event_panel.right() {
             assert_eq!(
                 buf[(x, event_panel.y)] != before[(x, event_panel.y)],
@@ -93,7 +99,7 @@ fn event_content_centered_links_click_and_underline_exactly_the_path() {
                 )
             )
             .or_else(|| view.flush_pending_click(Instant::now() + view.double_click_interval)),
-            Some(Action::OpenPath(target))
+            Some(Action::Open(crate::ui::links::LinkTarget::Path(target)))
         );
     }
 }
@@ -139,7 +145,7 @@ fn event_content_centered_search_highlights_the_shifted_match() {
         let event = view.event_panel[7].clone();
         view.set_event(vec![event]);
         view.event_list.cursor = None;
-        view.event_list.search.query.set_text("tests");
+        view.event_list.search.input.set_text("tests");
         view.rematch_event();
         view.event_list.cursor = None;
         let area = Rect::new(0, 0, width, 40);

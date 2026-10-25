@@ -52,6 +52,9 @@ mod task_details_footer;
 #[path = "thread_clock_tests.rs"]
 mod thread_clock_tests;
 
+#[path = "time_alignment_tests.rs"]
+mod time_alignment_tests;
+
 use super::*;
 
 #[path = "ask_question_tests.rs"]
@@ -248,8 +251,9 @@ fn mouse_tabs_ignore_modals_but_save_title_on_blur() {
             )
             .is_none()
         );
-        if overlay == 2 {
+        if overlay == 1 || overlay == 2 {
             assert!(view.rename_target.is_none());
+            assert!(!view.search.focused());
             assert_eq!(view.status_filter, 1);
             continue;
         }
@@ -526,8 +530,8 @@ fn new_events_keep_rows_still_off_the_newest_row() {
     let body = rendered_cell(&after, "run a background job");
     assert_eq!(body, rendered_cell(&before, "run a background job"));
     let jump = rendered_cell(&after, "↓ 1 New");
-    let label = " ↓ 1 New ".width() as u16;
-    assert_eq!((jump.0, jump.1), (rect.right() + 2 - label, rect.y - 1));
+    let label = " ↓ 1 New".width() as u16;
+    assert_eq!((jump.0, jump.1), (rect.right() - label, rect.bottom()));
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 25));
     view.render_at(Rect::new(0, 0, 100, 25), &mut buf, now);
     assert_eq!(buf[jump].fg, Color::Reset);
@@ -601,10 +605,10 @@ fn task_search_returns_but_selected_detail_resets_to_newest() {
     view.event_detail.scroll.borrow_mut().offset = 5;
     event_screen(&view, 100, 25, now);
     show_task_event(&mut view, other, Vec::new());
-    assert!(!view.event_list.search.active());
+    assert!(!view.event_list.search.input.applied());
     assert!(view.event_list.cursor.is_none());
     show_task_event(&mut view, event_panel, events);
-    assert_eq!(view.event_list.search.query.text(), "tool");
+    assert_eq!(view.event_list.search.input.text(), "tool");
     assert_eq!(view.visible_event(), view.event_panel.last());
     assert_eq!(view.event_detail.scroll.borrow().offset, 0);
     assert_eq!(view.event_scroll(), 0);
@@ -820,7 +824,7 @@ fn task_details_scroll_preserves_background_cells_and_hyperlinks() {
     let (pr, _) = viewport
         .task_details_links
         .iter()
-        .find(|(_, path)| path == &PathBuf::from("https://example.com/pull/833"))
+        .find(|(_, path)| path == &LinkTarget::Path(PathBuf::from("https://example.com/pull/833")))
         .unwrap();
     let pr = *pr;
     assert!(cell_text(before[(pr.x, pr.y)].symbol()).contains("https://example.com/pull/833"));
@@ -955,7 +959,8 @@ fn mouse_list_group_and_gap_clicks_do_nothing() {
             line.chars()
                 .take(usize::from(list.right()))
                 .collect::<String>()
-                .contains("/tmp/project")
+                .trim()
+                == "project"
         })
         .unwrap() as u16;
     for row in [y, next_group - 1] {
@@ -1105,12 +1110,13 @@ fn mouse_list_ignores_modals_but_saves_title_on_blur() {
         key(&mut view, overlay);
         screen(&view, 160, 40);
         let selected = view.selected;
-        if overlay == KeyCode::Char('r') {
+        if matches!(overlay, KeyCode::Char('r' | '/')) {
             click_mouse(
                 &mut view,
                 mouse(MouseEventKind::Down(MouseButton::Left), x, y),
             );
             assert!(view.rename_target.is_none());
+            assert!(!view.search.focused());
             assert_eq!(view.selected, second);
             continue;
         }
@@ -1129,7 +1135,7 @@ fn session(id: &str, title: &str, status: SessionStatus, age: i64) -> Session {
     Session {
         id: session_key(id),
         parent: None,
-        cwd: "/tmp/project".into(),
+        cwd: crate::test_project(),
         name: None,
         title: title.into(),
         prompt: title.into(),
@@ -1208,7 +1214,10 @@ fn fixture() -> View {
         ],
         false,
     );
-    view.set_pinned(&[session_key("42"), session_key("44")]);
+    view.set_pinned(&crate::state::TaskPins {
+        active: vec![session_key("42"), session_key("44")],
+        inactive: vec![],
+    });
     let selected = view
         .rows
         .iter()
@@ -1240,13 +1249,23 @@ fn live_center_columns_without_voice_and_with_needs_input_error_delta() {
 fn live_center_help_two_columns_with_pin_and_narrow_tabs_delta() {
     let mut view = simple_fixture();
     key(&mut view, KeyCode::Char('?'));
+    if std::env::var_os("UPDATE_HELP_SNAPSHOTS").is_some() {
+        std::fs::write(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/ui_snapshots/live_center_help_two_columns.txt"
+            ),
+            screen(&view, 60, 24),
+        )
+        .unwrap();
+    }
     assert_eq!(
         screen(&view, 60, 24),
         include_str!("../../tests/ui_snapshots/live_center_help_two_columns.txt")
     );
     // Both widths fit the task tabs and shortcut columns.
     let narrow = screen(&view, 60, 24);
-    let wide = screen(&view, 64, 24);
+    let wide = screen(&view, 62, 24);
     assert_eq!(
         narrow.lines().skip(3).collect::<Vec<_>>(),
         wide.lines().skip(3).collect::<Vec<_>>()
@@ -1552,6 +1571,45 @@ fn needs_input_queue_continues_after_sending_and_returns_to_original_tab() {
 }
 
 #[test]
+fn needs_input_task_left_waiting_stays_behind_after_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut view = test_view(Grouping::Project, false);
+    let original = session("original", "Original", SessionStatus::Ready, 300);
+    let mut first = session("first", "First", SessionStatus::Working, 120);
+    let mut second = session("second", "Second", SessionStatus::Working, 60);
+    let select = |view: &mut View, id: &SessionKey| {
+        view.select(view.rows.iter().position(|row| &row.id == id).unwrap());
+    };
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    select(&mut view, &original.id);
+    first.status = SessionStatus::NeedsInput;
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    assert_eq!(view.selected_id(), Some(&first.id));
+    select(&mut view, &original.id);
+    view.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+
+    let mut preferences = crate::state::Preferences::default();
+    let mut actions = vec![view.take_pending_action().unwrap()];
+    while let Some(action) = actions.pop() {
+        match action {
+            Action::Batch(batch) => actions.extend(batch),
+            Action::PersistSkip { id, skipped_at } => preferences
+                .save_task_skipped_at(dir.path(), &id, skipped_at)
+                .unwrap(),
+            _ => {}
+        }
+    }
+    let mut restarted = test_view(Grouping::Project, false);
+    restarted.restore_attention_skips(&crate::state::Preferences::load(dir.path()));
+    restarted.set_sessions(vec![original.clone(), first.clone(), second.clone()], false);
+    assert_eq!(restarted.selected_id(), Some(&original.id));
+    second.status = SessionStatus::NeedsInput;
+    second.updated_at = Utc::now() + Duration::seconds(1);
+    restarted.set_sessions(vec![original, first, second.clone()], false);
+    assert_eq!(restarted.selected_id(), Some(&second.id));
+}
+
+#[test]
 fn needs_input_task_left_waiting_queues_behind_tasks_that_start_waiting_later() {
     let mut view = test_view(Grouping::Project, false);
     let original = session("original", "Original", SessionStatus::Ready, 300);
@@ -1595,6 +1653,72 @@ fn needs_input_task_left_waiting_queues_behind_tasks_that_start_waiting_later() 
     first.status = SessionStatus::Working;
     view.set_sessions(vec![original.clone(), first, second], false);
     assert_eq!(view.selected_id(), Some(&original.id));
+}
+
+#[test]
+fn needs_input_tasks_lead_their_group_and_siblings_in_queue_order() {
+    for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
+        let mut view = test_view(grouping, false);
+        let mut other = session("other", "Other", SessionStatus::NeedsInput, 900);
+        other.cwd = "/tmp/another".into();
+        let ready = session("ready", "Ready", SessionStatus::Ready, 0);
+        let newer = session("newer", "Newer", SessionStatus::NeedsInput, 60);
+        let older = session("older", "Older", SessionStatus::NeedsInput, 300);
+        let left = session("left", "Left", SessionStatus::NeedsInput, 600);
+        let child = |id: &str, status, age| {
+            let mut child = session(id, id, status, age);
+            child.parent = Some(ready.id.clone());
+            child
+        };
+        let busy_child = child("busy-child", SessionStatus::Working, 0);
+        let newer_child = child("newer-child", SessionStatus::NeedsInput, 60);
+        let older_child = child("older-child", SessionStatus::NeedsInput, 300);
+        view.attention_skips
+            .insert(left.id.clone(), Utc::now() - Duration::seconds(30));
+        view.set_sessions(
+            vec![
+                other,
+                ready,
+                newer,
+                older,
+                left,
+                busy_child,
+                newer_child,
+                older_child,
+            ],
+            false,
+        );
+
+        let order: Vec<_> = view
+            .visible_indices()
+            .into_iter()
+            .map(|index| view.rows[index].id.id.clone())
+            .collect();
+        let project = [
+            "older",
+            "newer",
+            "left",
+            "ready",
+            "older-child",
+            "newer-child",
+            "busy-child",
+        ];
+        let expected: Vec<_> = match grouping {
+            Grouping::Project => ["other"].into_iter().chain(project).collect(),
+            _ => [
+                "other",
+                "older",
+                "newer",
+                "left",
+                "ready",
+                "older-child",
+                "newer-child",
+                "busy-child",
+            ]
+            .into(),
+        };
+        assert_eq!(order, expected, "{grouping:?}");
+    }
 }
 
 #[test]
@@ -1651,15 +1775,12 @@ fn needs_input_queue_uses_question_time_before_session_update() {
 }
 
 #[test]
-fn needs_input_skips_hidden_children_and_search_mismatches() {
-    for excluded in ["hidden", "child", "search"] {
+fn needs_input_skips_children_and_search_mismatches() {
+    for excluded in ["child", "search"] {
         let mut view = test_view(Grouping::Project, false);
         let original = session("original", "Visible original", SessionStatus::Ready, 300);
         let mut waiting = session("waiting", "Visible waiting", SessionStatus::Working, 60);
         match excluded {
-            "hidden" => {
-                view.hidden.insert(waiting.id.clone());
-            }
             "child" => waiting.parent = Some(original.id.clone()),
             "search" => {
                 view.search.set_text("original");
@@ -1904,11 +2025,37 @@ fn live_center_search_active() {
             .collect(),
     );
     assert_eq!(
-        screen(&view, 88, 16),
+        screen(&view, 100, 16),
         include_str!("../../tests/ui_snapshots/live_center_search_active.txt")
     );
-    assert_eq!(view.cursor_pos(Rect::new(0, 0, 88, 16)), Some((14, 13)));
+    assert_eq!(view.cursor_pos(Rect::new(0, 0, 100, 16)), Some((14, 11)));
 }
+#[test]
+fn live_center_search_blurred_keeps_input_row() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let mut view = simple_fixture();
+    key(&mut view, KeyCode::Char('/'));
+    for c in "Current".chars() {
+        key(&mut view, KeyCode::Char(c));
+    }
+    assert!(key(&mut view, KeyCode::Enter).is_none());
+    assert!(!view.search.focused());
+    assert!(!view.search_focused());
+    assert!(view.search.applied());
+    assert_eq!(view.search.text(), "Current");
+    let area = Rect::new(0, 0, 100, 16);
+    let mut buf = Buffer::empty(area);
+    view.render(area, &mut buf);
+    let row = view.viewport.borrow().search;
+    assert_eq!(row.height, 1);
+    assert!(row.width >= 16);
+    let text: String = (row.x..row.right())
+        .map(|x| cell_text(buf[(x, row.y)].symbol()))
+        .collect();
+    assert_eq!(text.trim_end(), "Search ❯ Current");
+    assert!(view.cursor_pos(area).is_none());
+}
+
 #[test]
 fn show_more_is_only_listed_on_inactive() {
     let mut view = fixture();
@@ -2078,12 +2225,12 @@ fn live_center_show_more() {
     key(&mut view, KeyCode::Home);
     key(&mut view, KeyCode::Down);
     assert_eq!(
-        screen(&view, 80, 12),
+        screen(&view, 100, 12),
         include_str!("../../tests/ui_snapshots/live_center_show_more.txt")
     );
     assert_eq!(key(&mut view, KeyCode::Enter), Some(Action::ShowMore));
     assert_eq!(key(&mut view, KeyCode::Enter), None);
-    let rendered = screen(&view, 80, 12);
+    let rendered = screen(&view, 100, 12);
     assert!(rendered.contains("Show more"));
     assert!(!rendered.contains("Loading more…"));
 }
@@ -2101,7 +2248,10 @@ fn group_headers_have_no_count() {
                     false,
                 );
                 if pinned {
-                    view.set_pinned(&[session_key("ready"), session_key("working")]);
+                    view.set_pinned(&crate::state::TaskPins {
+                        active: vec![session_key("ready"), session_key("working")],
+                        inactive: vec![],
+                    });
                 }
                 view.status_filter = filter;
                 let area = Rect::new(0, 0, 80, 12);
@@ -2118,7 +2268,7 @@ fn group_headers_have_no_count() {
                         "Pinned".to_owned()
                     } else {
                         match grouping {
-                            Grouping::Project => "/tmp/project".to_owned(),
+                            Grouping::Project => "project".to_owned(),
                             Grouping::Status => view.rows[*index].status.label().to_owned(),
                             Grouping::Model => view.session_model_text(&view.rows[*index]).unwrap(),
                         }
@@ -2189,7 +2339,7 @@ fn agents_overview_recent_sessions_twelve_rows_delta() {
         true,
     );
     key(&mut view, KeyCode::Home);
-    let rendered = screen(&view, 80, 60);
+    let rendered = screen(&view, 100, 60);
     assert!(rendered.contains("Active 0"));
     assert!(rendered.contains("Inactive 12"));
     assert_eq!(
@@ -2250,14 +2400,26 @@ fn search_text_wins_and_refresh_preserves_selection_and_state() {
     let id = view.selected_id().unwrap().to_owned();
     view.set_sessions(view.rows.clone(), false);
     assert_eq!(view.selected_id(), Some(&id));
-    assert!(view.searching);
+    assert!(view.search.focused());
     assert_eq!(view.search.text(), "task");
     key(&mut view, KeyCode::Esc);
-    assert!(!view.searching);
+    assert!(!view.search.focused());
     assert_eq!(key(&mut view, KeyCode::Esc), None);
 }
 #[test]
-fn actions_and_hide_move_to_next_visible_row() {
+fn task_search_matches_only_the_shown_title() {
+    let mut row = session("hidden", "图像显示", SessionStatus::Ready, 0);
+    row.prompt = "the tmux probe must select its own pane".into();
+    row.cwd = PathBuf::from("/tmp/flux");
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(vec![row], false);
+    view.search.set_text("ux");
+    assert!(view.visible_indices().is_empty());
+    view.search.set_text("图像");
+    assert_eq!(view.visible_indices().len(), 1);
+}
+#[test]
+fn task_list_actions() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Char('o')), None);
     assert_eq!(view.active_panel, Panel::Prompt);
@@ -2266,7 +2428,7 @@ fn actions_and_hide_move_to_next_visible_row() {
         key(&mut view, KeyCode::Char('f')),
         Some(Action::Fork(session_key("42")))
     );
-    assert_eq!(key(&mut view, KeyCode::Right), None);
+    assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert_eq!(view.active_panel, Panel::Prompt);
     view.set_active_panel(Panel::TaskList);
     assert_eq!(
@@ -2276,18 +2438,16 @@ fn actions_and_hide_move_to_next_visible_row() {
     assert_eq!(
         key(&mut view, KeyCode::Char('p')),
         Some(Action::TogglePin {
+            tab: 0,
             id: session_key("42"),
             pinned: false
         })
     );
-    assert_eq!(
-        key(&mut view, KeyCode::Char('h')),
-        Some(Action::Hide(session_key("42")))
-    );
+    key(&mut view, KeyCode::Down);
     assert_eq!(view.selected_id(), Some(&session_key("44")));
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
     view.set_active_panel(Panel::TaskDetails);
-    assert!(!screen(&view, 88, 16).contains("Rename ❯"));
+    assert!(!screen(&view, 100, 16).contains("Rename ❯"));
     assert_eq!(view.rename.text(), "Needs an answer");
     key(&mut view, KeyCode::Esc);
     view.set_active_panel(Panel::TaskList);
@@ -2299,7 +2459,7 @@ fn actions_and_hide_move_to_next_visible_row() {
     assert_eq!(
         key(&mut view, KeyCode::Char('n')),
         Some(Action::NewDraft {
-            cwd: "/tmp/project".into()
+            cwd: crate::test_project()
         })
     );
 }
@@ -2319,7 +2479,7 @@ fn paging_tracks_headings_and_never_wraps() {
                     i,
                 );
                 if i >= 10 {
-                    row.cwd = "/tmp/second-project".into();
+                    row.cwd = crate::test_project().with_file_name("second-project");
                 }
                 row
             })
@@ -2329,8 +2489,10 @@ fn paging_tracks_headings_and_never_wraps() {
     key(&mut view, KeyCode::Home);
     screen(&view, 110, 18);
     key(&mut view, KeyCode::PageDown);
-    assert_eq!(view.selected_id(), Some(&session_key("11")));
+    assert_eq!(view.selected_id(), Some(&session_key("10")));
     key(&mut view, KeyCode::PageUp);
+    assert_eq!(view.selected_id(), Some(&session_key("1")));
+    key(&mut view, KeyCode::Home);
     assert_eq!(view.selected_id(), Some(&session_key("0")));
     for _ in 0..40 {
         key(&mut view, KeyCode::PageDown);
@@ -2344,6 +2506,7 @@ fn paging_tracks_headings_and_never_wraps() {
 }
 #[test]
 fn styles_and_unicode_clipping() {
+    super::highlight::use_theme(true, None).unwrap();
     use super::style::selection_style_for;
     assert_eq!(
         selection_style_for(false, true, true),
@@ -2352,6 +2515,7 @@ fn styles_and_unicode_clipping() {
             .fg(Color::Indexed(18))
             .bg(Color::Indexed(111))
     );
+    super::highlight::use_theme(false, None).unwrap();
     assert_eq!(
         selection_style_for(false, true, false),
         Style::default()
@@ -2423,7 +2587,7 @@ fn task_details_include_attention_and_clip_messages() {
     let folder = viewport
         .task_details_links
         .iter()
-        .find(|(_, path)| path == &PathBuf::from("/tmp/project"))
+        .find(|(_, path)| path == &LinkTarget::Path(crate::test_project()))
         .unwrap()
         .0;
     assert_eq!(folder.y, viewport.task_details.bottom());
@@ -2443,25 +2607,22 @@ fn empty_states_notices_and_help_only_handle_close_keys() {
     assert_empty_task_list(&view);
     view.set_loading(true);
     assert_empty_task_list(&view);
-    view.set_sessions(vec![session("a", "Alpha", SessionStatus::Ready, 1)], false);
+    let mut alpha = session("a", "Alpha", SessionStatus::Ready, 1);
+    // Search also matches the directory, so it must not contain the query.
+    alpha.cwd = "/tmp/project".into();
+    view.set_sessions(vec![alpha], false);
     key(&mut view, KeyCode::Char('/'));
     key(&mut view, KeyCode::Char('z'));
     assert_empty_task_list(&view);
     key(&mut view, KeyCode::Esc);
-    view.set_notice(Some("Notice".into()));
-    let lines = screen(&view, 80, 12);
-    let lines = lines.lines().collect::<Vec<_>>();
-    let notice_row = view.center_layout(Rect::new(0, 0, 80, 12)).list.bottom() - 1;
-    assert_eq!(
-        lines[usize::from(notice_row)]
-            .split(['│', '├'])
-            .next()
-            .unwrap()
-            .trim_end(),
-        " Notice"
+    view.show_error("Notice".into());
+    let lines = screen(&view, 100, 12);
+    assert!(
+        lines.lines().last().unwrap().trim_end().ends_with("Notice"),
+        "{lines}"
     );
     key(&mut view, KeyCode::Left);
-    assert!(view.notice.is_none());
+    assert!(view.feedback.is_none());
     key(&mut view, KeyCode::Char('?'));
     assert_eq!(key(&mut view, KeyCode::Char('n')), None);
     assert_eq!(
@@ -2484,7 +2645,7 @@ fn marker_pos_follows_the_selected_row_and_clears_on_help() {
         false,
     );
     key(&mut view, KeyCode::Home);
-    let area = Rect::new(0, 0, 80, 12);
+    let area = Rect::new(0, 0, 100, 12);
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     let (x, y) = view.marker_pos().unwrap();
@@ -2513,11 +2674,11 @@ fn rename_edits_title_and_commits_trimmed_text() {
     let mut view = fixture();
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
     view.set_active_panel(Panel::TaskDetails);
-    let rendered = screen(&view, 88, 16);
+    let rendered = screen(&view, 100, 16);
     assert!(!rendered.contains("Rename ❯"));
     let title = view.viewport.borrow().task_details_title;
     assert_eq!(
-        view.cursor_pos(Rect::new(0, 0, 88, 16)),
+        view.cursor_pos(Rect::new(0, 0, 100, 16)),
         Some((title.right() - 1, title.y))
     );
     for c in " updated  ".chars() {
@@ -2530,7 +2691,7 @@ fn rename_edits_title_and_commits_trimmed_text() {
             name: "Current task updated".into()
         })
     );
-    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+    assert!(view.cursor_pos(Rect::new(0, 0, 100, 16)).is_none());
 }
 
 #[test]
@@ -2539,10 +2700,7 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
     let hints = view.center_footer_hints().to_string();
     key(&mut view, KeyCode::Char('r'));
     view.set_active_panel(Panel::TaskDetails);
-    assert_eq!(
-        view.center_footer_hints().to_string(),
-        "esc back  enter rename"
-    );
+    assert_eq!(view.center_footer_hints().to_string(), "? help");
     for code in [
         KeyCode::Up,
         KeyCode::Down,
@@ -2565,16 +2723,16 @@ fn rename_locks_navigation_cancels_and_ignores_empty_enter() {
         key(&mut view, KeyCode::Char(c));
     }
     key(&mut view, KeyCode::Backspace);
-    assert!(!screen(&view, 88, 16).contains("Rename ❯"));
+    assert!(!screen(&view, 100, 16).contains("Rename ❯"));
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     key(&mut view, KeyCode::Esc);
     assert_eq!(view.center_footer_hints().to_string(), hints);
     assert_eq!(view.rows[view.selected].display_title(), "Current task");
-    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+    assert!(view.cursor_pos(Rect::new(0, 0, 100, 16)).is_none());
 }
 
 #[test]
-fn rename_parks_inactive_or_hidden_target_and_drops_removed_target() {
+fn rename_parks_inactive_target_and_drops_removed_target() {
     let mut view = fixture();
     view.status_filter = TASK_FILTERS
         .iter()
@@ -2589,21 +2747,10 @@ fn rename_parks_inactive_or_hidden_target_and_drops_removed_target() {
         .status = SessionStatus::Inactive;
     view.set_sessions(rows, false);
     assert_eq!(view.selected_id(), Some(&session_key("46")));
-    assert!(!screen(&view, 88, 16).contains("Rename ❯"));
+    assert!(!screen(&view, 100, 16).contains("Rename ❯"));
     assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
     assert!(
         view.task_uis[&draft_controls::TaskKey::Session(session_key("42"))]
-            .task_details
-            .title
-            .is_some()
-    );
-    view.set_active_panel(Panel::TaskList);
-    key(&mut view, KeyCode::Char('r'));
-    view.set_active_panel(Panel::TaskDetails);
-    view.hide(&session_key("46"));
-    assert_ne!(view.rename_target.as_ref(), Some(&session_key("46")));
-    assert!(
-        view.task_uis[&draft_controls::TaskKey::Session(session_key("46"))]
             .task_details
             .title
             .is_some()
@@ -2612,10 +2759,10 @@ fn rename_parks_inactive_or_hidden_target_and_drops_removed_target() {
     key(&mut view, KeyCode::Char('r'));
     view.set_active_panel(Panel::TaskDetails);
     view.set_sessions(vec![], true);
-    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+    assert!(view.cursor_pos(Rect::new(0, 0, 100, 16)).is_none());
     assert_eq!(key(&mut view, KeyCode::Char('r')), None);
     view.set_active_panel(Panel::TaskDetails);
-    assert!(view.cursor_pos(Rect::new(0, 0, 88, 16)).is_none());
+    assert!(view.cursor_pos(Rect::new(0, 0, 100, 16)).is_none());
 }
 
 #[test]
@@ -2628,10 +2775,10 @@ fn live_center_rename_active() {
     key(&mut view, KeyCode::Char('r'));
     view.set_active_panel(Panel::TaskDetails);
     assert_eq!(
-        screen(&view, 88, 16),
+        screen(&view, 100, 16),
         include_str!("../../tests/ui_snapshots/live_center_rename_active.txt")
     );
-    let area = Rect::new(0, 0, 88, 16);
+    let area = Rect::new(0, 0, 100, 16);
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     assert!(view.center_layout(area).search.is_empty());
@@ -2654,8 +2801,8 @@ fn double_clicking_the_name_edits_on_the_rule_and_escape_keeps_the_title() {
         vec![session("42", "Task to find", SessionStatus::Ready, 120)],
         false,
     );
-    let area = Rect::new(0, 0, 88, 16);
-    screen(&view, 88, 16);
+    let area = Rect::new(0, 0, 100, 16);
+    screen(&view, 100, 16);
     let title = view.viewport.borrow().task_details_title;
     let press = mouse(
         MouseEventKind::Down(MouseButton::Left),
@@ -2667,7 +2814,7 @@ fn double_clicking_the_name_edits_on_the_rule_and_escape_keeps_the_title() {
     assert_eq!(click_mouse(&mut view, press), None);
     assert_eq!(view.rename_target, Some(session_key("42")));
     assert_eq!(view.rename.text(), "Task to find");
-    let rendered = screen(&view, 88, 16);
+    let rendered = screen(&view, 100, 16);
     assert!(!rendered.contains("Rename ❯"));
     assert!(view.center_layout(area).search.is_empty());
     let title = view.viewport.borrow().title_input;
@@ -2701,10 +2848,7 @@ fn delete_dialog_defaults_to_cancel_and_requires_enter() {
     assert!(!view.confirm_dialog.as_ref().unwrap().confirm);
     let rendered = screen(&view, 120, 48);
     assert!(rendered.find("1. Cancel").unwrap() < rendered.find("2. Permanently delete").unwrap());
-    assert_eq!(
-        view.center_footer_hints().to_string(),
-        "↑/↓ move  enter select  esc back"
-    );
+    assert_eq!(view.center_footer_hints().to_string(), "? help");
     assert_eq!(key(&mut view, KeyCode::Enter), None);
     assert!(view.confirm_dialog.is_none());
     key(&mut view, KeyCode::Backspace);
@@ -2924,22 +3068,26 @@ fn live_center_delete_dialog() {
     );
     key(&mut view, KeyCode::Backspace);
     assert_eq!(
-        screen(&view, 88, 16),
+        screen(&view, 100, 16),
         include_str!("../../tests/ui_snapshots/live_center_delete_dialog.txt")
     );
-    let area = Rect::new(0, 0, 88, 16);
+    let area = Rect::new(0, 0, 100, 16);
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     assert!(
-        buf[(6, 5)]
+        buf[(12, 4)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
-    assert!(buf[(6, 7)].modifier.contains(ratatui::style::Modifier::DIM));
+    assert!(
+        buf[(12, 6)]
+            .modifier
+            .contains(ratatui::style::Modifier::DIM)
+    );
     // A painted cell reports unset colours as Reset, so compare against a painted default cell.
     let mut expected = ratatui::buffer::Cell::default();
     expected.set_style(super::style::selection_style());
-    assert_eq!(buf[(6, 9)].style(), expected.style());
+    assert_eq!(buf[(12, 8)].style(), expected.style());
     for width in 0..100 {
         for height in 0..16 {
             let area = Rect::new(5, 8, width, height);
@@ -2972,7 +3120,9 @@ fn removal_dialog_centers_on_the_panels_above_the_prompt() {
         let mut buf = Buffer::empty(area);
         view.render(area, &mut buf);
         let layout = view.center_layout(area);
-        let right = if width >= super::render::WIDE_LAYOUT_COLUMNS {
+        let right = if super::render::ScreenLayout::for_width(width)
+            == super::render::ScreenLayout::Large
+        {
             layout.event_panel.right()
         } else {
             layout.task_details.right()
@@ -3060,11 +3210,11 @@ fn task_details_folder_and_pr_use_rule_styles_and_keep_links() {
         drop(viewport);
         let (folder, _) = links
             .iter()
-            .find(|(_, path)| path == &PathBuf::from("/tmp/project"))
+            .find(|(_, path)| path == &LinkTarget::Path(crate::test_project()))
             .unwrap();
         let (pr, url) = links
             .iter()
-            .find(|(_, path)| path != &PathBuf::from("/tmp/project"))
+            .find(|(_, path)| path != &LinkTarget::Path(crate::test_project()))
             .unwrap();
         assert_eq!(folder.y, y);
         assert_eq!(pr.y, y);
@@ -3082,7 +3232,9 @@ fn task_details_folder_and_pr_use_rule_styles_and_keep_links() {
             assert_eq!(cell.style(), reference.style());
             if x == pr.x {
                 assert!(cell.symbol().contains("\x1b]8;;"));
-                assert!(cell_text(cell.symbol()).contains(url.to_str().unwrap()));
+                assert!(
+                    cell_text(cell.symbol()).contains(crate::ui::link_path(url).to_str().unwrap())
+                );
             }
         }
         assert!(buf[(folder.x, y)].symbol().contains("\x1b[4:4m"));
@@ -3096,14 +3248,16 @@ fn task_details_folder_and_pr_use_rule_styles_and_keep_links() {
                 &mut view,
                 mouse(MouseEventKind::Down(MouseButton::Left), folder.x, y)
             ),
-            Some(Action::OpenPath("/tmp/project".into()))
+            Some(Action::Open(crate::ui::links::LinkTarget::Path(
+                crate::test_project()
+            )))
         );
         assert_eq!(
             click_mouse(
                 &mut view,
                 mouse(MouseEventKind::Down(MouseButton::Left), pr.x, y)
             ),
-            Some(Action::OpenPath(url.clone()))
+            Some(Action::Open(url.clone()))
         );
     }
 }
@@ -3133,11 +3287,7 @@ fn event_model_and_effort_use_dim_style_and_picker_targets() {
                 let mut buf = Buffer::empty(area);
                 view.render(area, &mut buf);
                 let layout = view.center_layout(area);
-                let y = if width >= 150 {
-                    layout.event_panel.bottom()
-                } else {
-                    layout.event_panel.y - 1
-                };
+                let y = layout.list.bottom();
                 let targets = view.viewport.borrow().field_targets.clone();
                 for (field, text) in [
                     (Field::Model, human_name.unwrap_or("claude-opus-5-5")),
@@ -3145,23 +3295,19 @@ fn event_model_and_effort_use_dim_style_and_picker_targets() {
                 ] {
                     let rect = targets.iter().find(|(_, value)| *value == field).unwrap().0;
                     assert_eq!(rect.y, y);
-                    assert_eq!(rect.width as usize, text.len());
+                    let available = (layout.gap.x + 2) / 2 - 4;
+                    let text = crate::ui::line_truncation::truncate_line_with_ellipsis_if_overflow(
+                        Line::from(text),
+                        usize::from(available),
+                    )
+                    .to_string();
+                    assert_eq!(rect.width as usize, text.width());
                     assert_eq!(
                         rect.x,
                         if field == Field::Model {
-                            (if width >= 150 {
-                                layout.event_panel.x - 2
-                            } else {
-                                layout.gap.x + 1
-                            }) + 2
+                            2
                         } else {
-                            targets
-                                .iter()
-                                .find(|(_, value)| *value == Field::Model)
-                                .unwrap()
-                                .0
-                                .right()
-                                + 3
+                            layout.gap.x - rect.width
                         }
                     );
                     for (offset, symbol) in text.chars().enumerate() {
@@ -3172,10 +3318,10 @@ fn event_model_and_effort_use_dim_style_and_picker_targets() {
                     }
                 }
                 if use_colors && width == 120 && human_name.is_none() {
-                    let text: String = (layout.event_panel.x..layout.event_panel.right())
+                    let text: String = (0..layout.gap.x + 2)
                         .map(|x| cell_text(buf[(x, y)].symbol()))
                         .collect();
-                    let styles: String = (layout.event_panel.x..layout.event_panel.right())
+                    let styles: String = (0..layout.gap.x + 2)
                         .map(|x| {
                             if buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM) {
                                 'd'
@@ -3286,8 +3432,8 @@ fn task_details_activity_and_message_are_independent() {
             .to_owned()
     };
     let rendered = render(&view);
-    assert!(rendered.contains("             Last activity        7s ago"));
-    assert!(rendered.contains("                 Update           1h ago"));
+    assert!(rendered.contains("             Last activity       7s ago"));
+    assert!(rendered.contains("                 Update          1h ago"));
     assert!(rendered.find("Run checks").unwrap() < rendered.find("Update").unwrap());
     assert!(rendered.contains("Checking the project"));
     assert_eq!(
@@ -3304,7 +3450,7 @@ fn task_details_activity_and_message_are_independent() {
     row.activity.as_mut().unwrap().label = "Run checks".into();
     row.status = SessionStatus::Ready;
     view.set_sessions(vec![row.clone()], false);
-    assert!(render(&view).contains("             Last activity        7s ago"));
+    assert!(render(&view).contains("             Last activity       7s ago"));
     assert_eq!(
         render(&view),
         include_str!("../../tests/ui_snapshots/task_details_activity_ready.txt")
@@ -3313,8 +3459,8 @@ fn task_details_activity_and_message_are_independent() {
     row.last_message_at = Some(now - Duration::seconds(3));
     view.set_sessions(vec![row.clone()], false);
     let replied = render(&view);
-    assert!(replied.contains("             Last activity        7s ago"));
-    assert!(replied.contains("                 Update           3s ago"));
+    assert!(replied.contains("             Last activity       7s ago"));
+    assert!(replied.contains("                 Update          3s ago"));
     assert_eq!(
         replied,
         include_str!("../../tests/ui_snapshots/task_details_activity_replied.txt")
@@ -3371,12 +3517,16 @@ fn task_details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
         );
         assert_eq!(
             click_text(&mut view, &rendered, path),
-            Some(Action::OpenPath(dir.path().join(path)))
+            Some(Action::Open(crate::ui::links::LinkTarget::Path(
+                dir.path().join(path)
+            )))
         );
     }
     assert_eq!(
         click_text(&mut view, &rendered, "reports/queued.md"),
-        Some(Action::OpenPath(dir.path().join("reports/queued.md")))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            dir.path().join("reports/queued.md")
+        )))
     );
     view.rows[view.selected].queued.clear();
     view.rows[view.selected].prompt = "Prompt row  \n".repeat(20);
@@ -3417,7 +3567,7 @@ fn task_details_activity_uses_tool_color() {
     let area = Rect::new(0, 0, 60, 24);
     let mut buf = Buffer::empty(area);
     view.render_task_details(area, &mut buf, now);
-    let header = "                       Last activity                  2m ago";
+    let header = "                       Last activity                 2m ago";
     let y = (0..area.height)
         .find(|y| {
             header
@@ -3433,7 +3583,7 @@ fn task_details_activity_uses_tool_color() {
         assert!(cell.modifier.contains(Modifier::DIM));
     }
     for (offset, character) in "Run checks".chars().enumerate() {
-        let cell = &buf[(offset as u16, y + 1)];
+        let cell = &buf[(25 + offset as u16, y + 1)];
         assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(cell.fg, crate::theme::text_accent_color());
         assert!(!cell.modifier.contains(Modifier::DIM));
@@ -3460,7 +3610,7 @@ fn task_details_message_uses_model_color_under_markdown() {
     let area = Rect::new(0, 0, 60, 24);
     let mut buf = Buffer::empty(area);
     view.render_task_details(area, &mut buf, now);
-    let header = "                           Update                     2m ago";
+    let header = "                           Update                    2m ago";
     let y = (0..area.height)
         .find(|y| {
             header
@@ -3476,7 +3626,7 @@ fn task_details_message_uses_model_color_under_markdown() {
         assert!(cell.modifier.contains(Modifier::DIM));
     }
     for (offset, character) in "Plain code bold italic".chars().enumerate() {
-        let cell = &buf[(offset as u16, y + 1)];
+        let cell = &buf[(19 + offset as u16, y + 1)];
         assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(
             cell.fg,
@@ -3495,7 +3645,7 @@ fn task_details_message_uses_model_color_under_markdown() {
         }
     }
     for (offset, character) in "Second paragraph".chars().enumerate() {
-        let cell = &buf[(offset as u16, y + 3)];
+        let cell = &buf[(19 + offset as u16, y + 3)];
         assert_eq!(cell_text(cell.symbol()), character.to_string());
         assert_eq!(cell.fg, Color::Yellow);
     }
@@ -3510,21 +3660,21 @@ fn prompt_header_omits_message_counts_and_clamps_elapsed_time() {
             Some(now - Duration::seconds(45)),
             None,
             1,
-            "                 Prompt              45s",
+            "                 Prompt             45s",
         ),
         (
             SessionStatus::Ready,
             Some(now),
             Some(now - Duration::seconds(1)),
             0,
-            "                 Prompt               0s",
+            "                 Prompt              0s",
         ),
         (
             SessionStatus::Working,
             Some(now + Duration::seconds(1)),
             None,
             0,
-            "                 Prompt               0s",
+            "                 Prompt              0s",
         ),
         (
             SessionStatus::Ready,
@@ -3579,13 +3729,19 @@ mod task_details_header {
     fn rule_at_width(view: &View, now: chrono::DateTime<Utc>, width: u16) -> (Buffer, Rect) {
         let area = Rect::new(0, 0, width, 25);
         let layout = view.center_layout(area);
-        let y = layout.header.y + 1;
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        (
-            buf,
-            Rect::new(layout.task_details.x, y, layout.task_details.width, 1),
-        )
+        let rule = if layout.kind == render::ScreenLayout::Small {
+            Rect::new(area.x, layout.gap.y, area.width, 1)
+        } else {
+            Rect::new(
+                layout.task_details.x,
+                layout.header.y + 1,
+                layout.task_details.width,
+                1,
+            )
+        };
+        (buf, rule)
     }
 
     fn label(buf: &Buffer, rule: Rect) -> String {
@@ -3700,7 +3856,7 @@ mod task_details_header {
     }
 
     #[test]
-    fn status_is_on_top_and_the_title_below_in_wide_and_narrow_layouts() {
+    fn status_is_on_top_and_the_title_below_in_large_and_medium_layouts() {
         let row = session("header", "Header task", SessionStatus::Working, 0);
         let mut view = test_view(Grouping::Project, true);
         view.set_sessions(vec![row], false);
@@ -3715,7 +3871,7 @@ mod task_details_header {
     }
 
     #[test]
-    fn narrow_and_wide_truncate_the_title_below_the_status() {
+    fn medium_and_large_truncate_the_title_below_the_status() {
         let now = "2026-10-13T12:00:00Z".parse().unwrap();
         let mut row = session(
             "header",
@@ -3795,11 +3951,62 @@ mod task_details_header {
                 .find(|&x| buf[(x, y)].symbol() == "H")
                 .unwrap();
             assert_eq!(buf[(x, y)].fg, color);
+            assert!(buf[(x, y)].modifier.contains(Modifier::BOLD));
             assert!(!buf[(x, y)].modifier.contains(Modifier::DIM));
             let marker = (x..prompt.right())
                 .find(|&x| buf[(x, y)].symbol() == PROMPT_MARKER)
                 .unwrap();
             assert_ne!(buf[(marker, y)].fg, color);
+        }
+    }
+
+    #[test]
+    fn prompt_rules_turn_heavy_in_the_attention_color_only_when_attention_takes_the_prompt() {
+        let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+        let ready = session("ready", "Ready task", SessionStatus::Ready, 0);
+        let waiting = session("waiting", "Waiting task", SessionStatus::NeedsInput, 1);
+        let prompt_rules = |view: &View, symbol: &str| {
+            let (buf, _) = rule(view, Utc::now());
+            let layout = view.center_layout(buf.area);
+            [layout.prompt_top_rule, layout.prompt_bottom_rule]
+                .into_iter()
+                .flat_map(|rule| {
+                    (rule.x..rule.right())
+                        .filter(|&x| buf[(x, rule.y)].symbol() == symbol)
+                        .map(|x| buf[(x, rule.y)].style())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let attention = style::attention_title_style();
+
+        let mut view = test_view(Grouping::Project, true);
+        view.set_sessions(vec![ready.clone()], false);
+        view.set_sessions(vec![ready.clone(), waiting.clone()], false);
+        assert_eq!(view.attention_selection, Some(session_key("waiting")));
+        for light in ["─", "╴", "╶", "┬", "┴", "┼", "├", "┤"] {
+            assert!(prompt_rules(&view, light).is_empty(), "{light}");
+        }
+        let rules = prompt_rules(&view, "━");
+        assert!(!rules.is_empty());
+        for style in rules {
+            assert_eq!(style.fg, attention.fg);
+            assert!(!style.add_modifier.contains(Modifier::DIM));
+        }
+
+        let mut view = test_view(Grouping::Project, true);
+        view.set_sessions(vec![ready, waiting], false);
+        let index = view
+            .rows
+            .iter()
+            .position(|row| row.id == session_key("waiting"))
+            .unwrap();
+        view.select(index);
+        assert_eq!(view.selected_id(), Some(&session_key("waiting")));
+        assert!(view.attention_selection.is_none());
+        assert!(prompt_rules(&view, "━").is_empty());
+        for style in prompt_rules(&view, "─") {
+            assert!(style.add_modifier.contains(Modifier::DIM));
         }
     }
 
@@ -3848,12 +4055,11 @@ mod task_details_header {
         );
     }
     #[test]
-    fn borders_keep_title_status_elapsed_activity_and_event_jump_separate() {
+    fn borders_keep_title_status_elapsed_and_event_jump_separate() {
         let (mut view, now) = event_fixture();
         view.select_fixture_event(Some(view.event_panel[6].clone()));
         view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
         view.event_list.unseen.set(1);
-        view.set_activity([crate::usage::bin_of(now)].into());
         for width in [112, 200] {
             for with_event in [true, false] {
                 view.rows[view.selected].transcript =
@@ -3864,7 +4070,14 @@ mod task_details_header {
                 let expected = " Working ";
                 // The status centers on the whole segment between the separator's joint and the
                 // event list's joint or the screen's edge, not the space left of the time.
-                let segment = top.width + if width >= 150 { 4 } else { 3 };
+                let segment = top.width
+                    + if crate::ui::render::ScreenLayout::for_width(width)
+                        == crate::ui::render::ScreenLayout::Large
+                    {
+                        4
+                    } else {
+                        3
+                    };
                 let start = top.x + (segment - expected.width() as u16) / 2 - 2;
                 for (offset, symbol) in expected.chars().enumerate() {
                     assert_eq!(
@@ -3874,7 +4087,11 @@ mod task_details_header {
                 }
                 assert!((top.x..start).all(|x| buf[(x, top.y)].symbol() == "─"));
                 // The time ends a space before the event list's joint or the screen's edge.
-                let time_end = top.right() - u16::from(width < 150);
+                let time_end = top.right()
+                    - u16::from(
+                        crate::ui::render::ScreenLayout::for_width(width)
+                            != crate::ui::render::ScreenLayout::Large,
+                    );
                 assert!(
                     (start + expected.width() as u16..time_end - " 3h 12m ".len() as u16)
                         .all(|x| buf[(x, top.y)].symbol() == "─")
@@ -3902,13 +4119,15 @@ mod task_details_header {
                 assert!(!bottom_text.contains("3h 12m"));
                 assert!(!label(&buf, top).contains("Task log example"));
                 if !layout.event_panel.is_empty() {
-                    let strip = &buf[(layout.list.right() - 1, bottom)];
+                    let rule = &buf[(layout.list.right() - 1, bottom)];
                     assert!(
-                        cell_text(strip.symbol())
+                        !cell_text(rule.symbol())
                             .chars()
                             .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
                     );
-                    if width >= super::super::render::WIDE_LAYOUT_COLUMNS {
+                    if super::super::render::ScreenLayout::for_width(width)
+                        == super::super::render::ScreenLayout::Large
+                    {
                         assert_eq!(
                             view.viewport.borrow().event_jump.y,
                             layout.event_panel.bottom()
@@ -3933,6 +4152,9 @@ mod task_details_header {
                 1,
             );
             let width = rule.width;
+            let small = render::ScreenLayout::for_width(columns) == render::ScreenLayout::Small;
+            let segment_width = width + if small { 0 } else { 3 };
+            let content_offset = if small { 0 } else { 2 };
             let text = (rule.x..rule.right())
                 .map(|x| cell_text(buf[(x, rule.y)].symbol()))
                 .collect::<String>();
@@ -3943,8 +4165,9 @@ mod task_details_header {
             // The centered status keeps elapsed's width and its spaces clear on both sides, plus
             // a status cell, two spaces and two rule cells.
             let elapsed_width = " 3h 12m ".len() as u16;
-            let reserved = if width + 3 >= 2 * elapsed_width + 7 {
-                assert!(top_text.ends_with(" 3h 12m╶"), "width {width}: {top_text}");
+            let reserved = if segment_width >= 2 * elapsed_width + 7 {
+                let elapsed_end = if small { " 3h 12m╶─" } else { " 3h 12m╶" };
+                assert!(top_text.ends_with(elapsed_end), "width {width}: {top_text}");
                 2 * elapsed_width
             } else {
                 assert!(!top_text.contains("3h 12m"), "width {width}: {top_text}");
@@ -3952,7 +4175,7 @@ mod task_details_header {
             };
             // The rule runs from the separator's joint to the screen's edge or the event list's joint,
             // a cell beyond the task details panel on each side.
-            let available = usize::from(width + 3).saturating_sub(6 + usize::from(reserved));
+            let available = usize::from(segment_width).saturating_sub(6 + usize::from(reserved));
             if available >= 1 {
                 let title = "Working";
                 let expected = if title.len() > available {
@@ -3961,7 +4184,8 @@ mod task_details_header {
                     title.to_owned()
                 };
                 let expected = format!(" {expected} ");
-                let start = (usize::from(width) + 3 - expected.chars().count()) / 2 - 2;
+                let start =
+                    (usize::from(segment_width) - expected.chars().count()) / 2 - content_offset;
                 let chars: Vec<_> = top_text.chars().collect();
                 assert_eq!(
                     chars[start..start + expected.chars().count()]
@@ -3982,13 +4206,20 @@ mod task_details_header {
         let layout = view.center_layout(area);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let top = Rect::new(
-            layout.task_details.x,
-            layout.header.y + 1,
-            layout.task_details.width,
-            1,
+        let top = Rect::new(area.x, layout.gap.y, area.width, 1);
+        let text = (top.x..top.right())
+            .map(|x| cell_text(buf[(x, top.y)].symbol()))
+            .collect::<String>();
+        let expected = " Worki… ";
+        let start = (usize::from(top.width) - expected.chars().count()) / 2;
+        assert_eq!(
+            text.chars()
+                .skip(start)
+                .take(expected.chars().count())
+                .collect::<String>(),
+            expected
         );
-        assert!(label(&buf, top).contains("Working"), "{}", label(&buf, top));
+        assert!(text.ends_with(" 3h 12m╶─"), "{text}");
     }
 }
 
@@ -4001,6 +4232,36 @@ fn task_details_prompt_shows_queued_entries_in_order() {
         queued_task_details(row, 15),
         include_str!("../../tests/ui_snapshots/task_details_queued.txt")
     );
+}
+
+#[test]
+fn task_details_queued_entries_are_bold_and_the_current_prompt_is_not() {
+    let mut row = session("queue", "Queue task", SessionStatus::Working, 0);
+    row.prompt = "Current prompt".into();
+    row.queued = vec!["Queued prompt".into()];
+    let mut view = test_view(Grouping::Project, true);
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 40, 15);
+    let mut buf = Buffer::empty(area);
+    view.render_task_details(area, &mut buf, Utc::now());
+    let bold = |text: &str| {
+        let rows = buf.content.chunks(40);
+        let cells = rows
+            .into_iter()
+            .find(|row| {
+                row.iter()
+                    .map(|cell| cell_text(cell.symbol()))
+                    .collect::<String>()
+                    .contains(text)
+            })
+            .unwrap();
+        cells
+            .iter()
+            .filter(|cell| !cell.symbol().trim().is_empty())
+            .all(|cell| cell.modifier.contains(ratatui::style::Modifier::BOLD))
+    };
+    assert!(bold("Queued prompt"));
+    assert!(!bold("Current prompt"));
 }
 
 #[test]
@@ -4088,20 +4349,20 @@ fn task_details_queued_messages_render_all_paragraphs_and_message_style() {
     assert_eq!(
         &rows[1..11],
         &[
-            "Current prompt",
+            "             Current prompt",
             "",
-            "First queued line",
-            "Second queued line",
+            " First queued line",
+            " Second queued line",
             "",
-            "Another paragraph with words that wrap",
-            "across the panel width",
+            " Another paragraph with words that wrap",
+            " across the panel width",
             "",
-            "Next queued message",
+            "          Next queued message",
             "",
         ]
     );
     for y in [3, 4, 6, 7, 9] {
-        for x in 0..rows[y].len() {
+        for x in rows[y].len() - rows[y].trim_start().len()..rows[y].len() {
             assert_eq!(
                 buf[(x as u16, y as u16)]
                     .modifier
@@ -4114,7 +4375,7 @@ fn task_details_queued_messages_render_all_paragraphs_and_message_style() {
         }
     }
     assert!(
-        !buf[(0, 1)]
+        !buf[(13, 1)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
@@ -4130,7 +4391,9 @@ fn task_details_queued_messages_keep_links_selection_and_copy() {
     let rendered = screen(&view, 120, 50);
     assert_eq!(
         click_text(&mut view, &rendered, "report"),
-        Some(Action::OpenPath("https://example.com/report".into()))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            "https://example.com/report".into()
+        )))
     );
     assert_eq!(
         double_click_text(&mut view, &rendered, "Queued first"),
@@ -4147,7 +4410,7 @@ fn task_details_queued_messages_keep_links_selection_and_copy() {
     assert_eq!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end_x, end_y)),
         Some(Action::Copy {
-            text: queued[..queued.find("finish").unwrap()].into(),
+            text: "Queued first line\n\nRead report and ".into(),
             label: "Copied prompt".into(),
         })
     );
@@ -4362,13 +4625,13 @@ fn task_details_background_includes_only_working_subagents() {
         .iter()
         .map(|cell| cell_text(cell.symbol()))
         .collect::<String>();
-    assert!(text.contains("──────────── Worker command ───────── 0s"));
+    assert!(text.contains("● Worker command"));
     assert!(text.contains("Nested agent"));
     assert!(!text.contains("Review files"));
 }
 
 #[test]
-fn background_box_dims_title_rule_but_not_output() {
+fn background_box_dims_title_but_not_indicator_or_output() {
     use ratatui::style::Modifier;
     use std::io::Write;
     let mut output = tempfile::NamedTempFile::new().unwrap();
@@ -4385,31 +4648,37 @@ fn background_box_dims_title_rule_but_not_output() {
     let mut buf = Buffer::empty(area);
     view.render_task_details(area, &mut buf, Utc::now());
     let top = (0..20)
-        .find(|y| buf[(0, *y)].symbol() == "─")
-        .expect("box top border");
-    assert!(buf[(0, top)].modifier.contains(Modifier::DIM));
-    assert!(buf[(30, top)].modifier.contains(Modifier::DIM));
-    assert_eq!(cell_text(buf[(15, top)].symbol()), "R");
-    assert!(buf[(15, top)].modifier.contains(Modifier::DIM));
+        .find(|y| buf[(14, *y)].symbol() == "●")
+        .expect("background indicator");
+    assert!(!buf[(14, top)].modifier.contains(Modifier::DIM));
+    assert_eq!(
+        buf[(14, top)].fg,
+        View::status_indicator(SessionStatus::Working)
+            .style
+            .fg
+            .unwrap()
+    );
+    assert_eq!(cell_text(buf[(16, top)].symbol()), "R");
+    assert!(buf[(16, top)].modifier.contains(Modifier::DIM));
     let (tool_view, _) = open_tool_fixture();
     let mut event = tool_view.event_panel[7].clone();
+    event.calls[0].summary = "Run checks".into();
     event.calls[0].title = "Run checks".into();
-    event.calls[0].event_detail_title = "Run checks".into();
     let detail =
         super::tool_detail::event_detail_content(&event, String::new(), Style::new().dim());
     let mut title_buf = Buffer::empty(Rect::new(0, 0, 40, 1));
-    let columns = super::event_detail::event_detail_columns(title_buf.area, title_buf.area);
+    let columns = super::event_detail::EventDetailColumns::new(title_buf.area);
     (&detail.sections[0].title.line(columns).0).render(title_buf.area, &mut title_buf);
     let title_x = (0..40)
         .find(|x| cell_text(title_buf[(*x, 0)].symbol()) == "R")
         .unwrap();
-    assert_eq!(title_buf[(0, 0)].modifier, buf[(0, top)].modifier);
+    assert!(title_buf[(0, 0)].modifier.contains(Modifier::DIM));
     assert_eq!(
         title_buf[(title_x, 0)].fg,
         detail.sections[0].title.title_style.fg.unwrap()
     );
-    assert_eq!(cell_text(buf[(0, top + 1)].symbol()), "t");
-    assert!(!buf[(0, top + 1)].modifier.contains(Modifier::DIM));
+    assert_eq!(cell_text(buf[(18, top + 1)].symbol()), "t");
+    assert!(!buf[(18, top + 1)].modifier.contains(Modifier::DIM));
 }
 
 #[test]
@@ -4494,21 +4763,33 @@ fn task_details_markdown_snapshot() {
         .position(|line| line.trim() == "Update")
         .unwrap() as u16;
     assert_eq!(
-        buffer[(4, prompt_y + 1)].fg,
+        buffer[(14, prompt_y + 1)].fg,
         crate::theme::inline_code_color()
     );
     assert!(
-        buffer[(14, prompt_y + 1)]
+        buffer[(24, prompt_y + 1)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );
     assert!(
-        buffer[(2, prompt_y + 3)]
+        buffer[(14, prompt_y + 3)]
             .modifier
             .contains(ratatui::style::Modifier::ITALIC)
     );
-    assert_eq!(buffer[(6, update_y + 3)].fg, Color::Yellow);
-    assert_eq!(buffer[(0, update_y + 5)].fg, Color::Cyan);
+    assert_eq!(buffer[(19, update_y + 3)].fg, Color::Yellow);
+    assert_eq!(buffer[(13, update_y + 5)].fg, Color::Cyan);
+}
+
+#[test]
+fn kind_labels_are_kind_names_as_capitalized_words() {
+    use crate::event::Kind;
+    for (kind, label) in [
+        (Kind::Assistant, "Assistant"),
+        (Kind::QueuedUser, "Queued User"),
+        (Kind::QueuedSystem, "Queued System"),
+    ] {
+        assert_eq!(super::event_list::kind_label(&kind), label);
+    }
 }
 
 #[test]
@@ -4591,6 +4872,55 @@ fn event_fixture() -> (View, chrono::DateTime<Utc>) {
     }
     view.set_event(view.event_panel.clone());
     (view, now)
+}
+
+#[test]
+fn prose_detail_keeps_its_body_while_the_event_list_is_hidden() {
+    for (width, height_zoom, width_zoom) in [
+        (200, None, Some(Panel::TaskList)),
+        (120, Some(Panel::EventDetail), None),
+    ] {
+        let (mut view, now) = event_fixture();
+        view.select_fixture_event(Some(view.event_panel[1].clone()));
+        assert!(event_screen(&view, width, 50, now).contains("I will check the files"));
+        view.height_zoom = height_zoom;
+        view.width_zoom = width_zoom;
+        let rendered = event_screen(&view, width, 50, now);
+        let viewport = view.viewport.borrow();
+        assert!(viewport.event_panel.is_empty());
+        let detail = viewport.event_detail;
+        assert!(
+            rendered
+                .lines()
+                .skip(usize::from(detail.y))
+                .take(usize::from(detail.height))
+                .any(|line| line.contains("I will check the files")),
+            "width {width}"
+        );
+    }
+}
+
+#[test]
+fn detail_wrap_ignores_event_list_zoom() {
+    let (mut view, now) = event_fixture();
+    view.select_fixture_event(Some(view.event_panel[6].clone()));
+    let before = event_screen(&view, 200, 50, now);
+    let columns = view.viewport.borrow().event_detail_columns.unwrap();
+    view.width_zoom = Some(Panel::EventList);
+    let after = event_screen(&view, 200, 50, now);
+    assert_eq!(
+        view.viewport.borrow().event_detail_columns.unwrap(),
+        columns
+    );
+    let body = |screen: &str| {
+        screen
+            .lines()
+            .skip(usize::from(columns.panel.y))
+            .take(usize::from(columns.panel.height))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(body(&after), body(&before));
 }
 
 fn event_screen(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) -> String {
@@ -4729,17 +5059,17 @@ fn task_rows_start_at_left_padding_without_marker_and_click_correctly() {
 }
 
 #[test]
-fn task_metadata_narrow_100_columns() {
+fn task_metadata_medium_100_columns() {
     assert_task_metadata(100, true, true);
 }
 
 #[test]
-fn task_metadata_wide_150_columns() {
+fn task_metadata_large_150_columns() {
     assert_task_metadata(150, true, false);
 }
 
 #[test]
-fn task_metadata_wide_200_columns() {
+fn task_metadata_large_200_columns() {
     assert_task_metadata(200, true, true);
 }
 
@@ -4774,7 +5104,7 @@ fn task_metadata_drops_rightmost_columns_at_title_limit() {
             "updated at {width}: {text}"
         );
         assert_eq!(
-            buf[(area.x + 2 + title_width - 1, y)].symbol(),
+            buf[(area.x + 2 + title_width - 1 - u16::from(show_status), y)].symbol(),
             "…",
             "title at {width}: {text}"
         );
@@ -4944,7 +5274,10 @@ fn dashboard_event_bodies_center_on_the_panel() {
                         .unwrap_or(Color::Reset)
                 );
             }
-            if width >= 150 && event.kind == crate::event::Kind::Assistant {
+            if crate::ui::render::ScreenLayout::for_width(width)
+                == crate::ui::render::ScreenLayout::Large
+                && event.kind == crate::event::Kind::Assistant
+            {
                 let detail = view.center_layout(area).event_detail;
                 let header: String = (detail.x..detail.right())
                     .map(|x| cell_text(buf[(x, detail.y + 1)].symbol()))
@@ -4967,7 +5300,11 @@ fn dashboard_event_list_fills_rows_next_to_rules() {
                 .find(|event| event.kind == crate::event::Kind::Tool)
                 .unwrap()
                 .clone();
-            view.event_list.search.editing = search;
+            if search {
+                view.event_list.search.input.focus()
+            } else {
+                view.event_list.search.input.blur()
+            };
             let body_event = event.clone();
             view.set_event(vec![event; 100]);
             let area = Rect::new(0, 0, width, 60);
@@ -5002,14 +5339,23 @@ fn dashboard_event_list_fills_rows_next_to_rules() {
                 view.viewport.borrow().event_rows.len(),
                 usize::from(last - first + 1)
             );
-            assert_eq!(view.event_count(area), usize::from(last - first + 1));
-            if width >= 150 {
+            assert_eq!(
+                view.event_read_count(area),
+                if search {
+                    crate::event::ALL_EVENTS
+                } else {
+                    100
+                }
+            );
+            if crate::ui::render::ScreenLayout::for_width(width)
+                == crate::ui::render::ScreenLayout::Large
+            {
                 let rule_y = layout.prompt.y - 1;
                 assert_eq!(layout.list.bottom(), rule_y);
                 assert_eq!(layout.task_details.bottom(), rule_y);
                 assert_eq!(event_panel.bottom(), rule_y);
                 assert_eq!(buf[(event_panel.x - 2, rule_y)].symbol(), "┴");
-                assert_eq!(buf[(event_panel.x - 1, rule_y)].symbol(), "╴");
+                assert_eq!(buf[(event_panel.x - 1, rule_y)].symbol(), "─");
                 assert_ne!(buf[(event_panel.x, rule_y)].symbol(), " ");
             }
         }
@@ -5033,6 +5379,10 @@ fn dashboard_event_detail_starts_directly_below_rule() {
     }
 }
 
+fn text_row_has_background_rule(buf: &Buffer, width: u16, y: u16) -> bool {
+    width >= 2 && buf[(width - 2, y)].symbol() == "╶" && buf[(width - 1, y)].symbol() == "─"
+}
+
 #[test]
 fn dashboard_screen_padding_is_one_cell() {
     for width in [100, 149, 150, 200] {
@@ -5049,8 +5399,10 @@ fn dashboard_screen_padding_is_one_cell() {
         assert_eq!(view.viewport.borrow().tab_bar.x, 1);
         for x in 1..width - 1 {
             if x < layout.task_details.x || x >= layout.task_details.right() {
-                let joint =
-                    x == layout.gap.x + 1 || (width >= 150 && x == layout.event_panel.x - 2);
+                let joint = x == layout.gap.x + 1
+                    || (crate::ui::render::ScreenLayout::for_width(width)
+                        == crate::ui::render::ScreenLayout::Large
+                        && x == layout.event_panel.x - 2);
                 assert_eq!(
                     cell_text(buf[(x, 1)].symbol()),
                     if joint { "┬" } else { "─" }
@@ -5061,12 +5413,18 @@ fn dashboard_screen_padding_is_one_cell() {
             // Rules run edge to edge; everything else keeps the padding cell.
             let rule = buf[(0, y)].symbol() == "─";
             assert_eq!(buf[(0, y)].symbol() == "─", rule, "row {y}");
-            assert_eq!(buf[(width - 1, y)].symbol() == "─", rule, "row {y}");
+            let background_rule = width < 150 && text_row_has_background_rule(&buf, width, y);
+            assert_eq!(
+                buf[(width - 1, y)].symbol() == "─",
+                rule || background_rule,
+                "row {y}"
+            );
             if !rule {
                 assert_eq!(buf[(0, y)].symbol(), " ", "row {y}");
                 let right = buf[(width - 1, y)].symbol();
                 assert!(
                     right == " "
+                        || background_rule && right == "─"
                         || (layout.event_panel.y..layout.event_panel.bottom()).contains(&y)
                             && ["┌", "│", "└"].contains(&right),
                     "row {y}: {right}"
@@ -5120,7 +5478,7 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
             if label == "Update" || label == "Prompt" {
                 assert_eq!(
                     (left + 1..right).rfind(|&x| buf[(x, y)].symbol() != " "),
-                    Some(right - 2),
+                    Some(right - 2 - u16::from(width < 150)),
                     "{label} right at {width}"
                 );
             }
@@ -5128,16 +5486,29 @@ fn dashboard_column_padding_matches_separators_in_buffer() {
         let y = (2..35)
             .find(|&y| text(y, left + 1, right).contains("Run checks"))
             .unwrap();
-        assert!(text(y, left + 1, right).trim_end().ends_with("25s"));
+        assert!(
+            text(y, left + 1, right)
+                .trim_end_matches([' ', '╶', '─'])
+                .ends_with("25s")
+        );
         assert_eq!(
-            text(y, left + 1, right).trim_end().chars().count() as u16,
-            right - left - 2,
+            text(y, left + 1, right)
+                .trim_end_matches([' ', '╶', '─'])
+                .chars()
+                .count() as u16,
+            right - left - 2 - u16::from(width < 150),
             "background time at {width}"
         );
         // Wrapped bodies, selections and links stay inside the same content bounds.
         for y in 3..view.center_layout(area).task_details.bottom() {
             for x in [left + 1, right - 1] {
-                assert_eq!(buf[(x, y)].symbol(), " ", "padding ({x}, {y}) at {width}");
+                let background_tail = x == right - 1 && ["╶", "─"].contains(&buf[(x, y)].symbol());
+                assert!(
+                    buf[(x, y)].symbol() == " "
+                        || background_tail
+                        || x == left + 1 && buf[(x, y)].symbol() == "╴",
+                    "padding ({x}, {y}) at {width}"
+                );
             }
         }
         let viewport = view.viewport.borrow();
@@ -5164,11 +5535,12 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
             let area = Rect::new(0, 0, width, 60);
             let mut buf = Buffer::empty(area);
             view.render_at(area, &mut buf, now);
-            let wide = width >= 150;
+            let large =
+                super::render::ScreenLayout::for_width(width) == super::render::ScreenLayout::Large;
             let separators: Vec<_> = (0..width)
                 .filter(|&x| buf[(x, 2)].symbol() == "│")
                 .collect();
-            let left = if wide { separators[1] + 2 } else { 1 };
+            let left = if large { separators[1] + 2 } else { 1 };
             let y = view.viewport.borrow().event_panel.y
                 + view
                     .viewport
@@ -5189,7 +5561,7 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
             );
             assert!((width - 11..width - 1).all(|x| buf[(x, y)].symbol() == " "));
             assert!(!event_panel.trim().is_empty(), "log body at {width}");
-            if wide {
+            if large {
                 assert_eq!(buf[(left - 1, y)].symbol(), " ");
             }
             let selected = {
@@ -5213,11 +5585,10 @@ fn dashboard_event_padding_and_edge_clicks_use_rendered_rows() {
                 Some(selected),
                 "edge click at {width}"
             );
-            if wide {
+            if large {
                 let detail = view.viewport.borrow().event_text.area;
-                let columns = super::event_detail::event_detail_columns(
+                let columns = super::event_detail::EventDetailColumns::new(
                     view.viewport.borrow().event_detail,
-                    view.center_layout(buf.area).event_panel,
                 );
                 assert_eq!(detail.x, columns.text.x);
                 assert_eq!(detail.right(), columns.text.right());
@@ -5231,12 +5602,14 @@ fn dashboard_event_search_uses_the_row_padding() {
     for width in [100, 149, 150, 200] {
         let (mut view, now) = column_padding_fixture();
         view.set_active_panel(Panel::EventList);
-        view.event_list.search.editing = true;
-        view.event_list.search.query.set_text("Tool");
+        view.event_list.search.input.focus();
+        view.event_list.search.input.set_text("Tool");
         let area = Rect::new(0, 0, width, 60);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let left = if width >= 150 {
+        let left = if crate::ui::render::ScreenLayout::for_width(width)
+            == crate::ui::render::ScreenLayout::Large
+        {
             2 * ((width - 8) / 4) + 7
         } else {
             1
@@ -5247,13 +5620,12 @@ fn dashboard_event_search_uses_the_row_padding() {
             .collect();
         assert_eq!(input, "Search ❯ Tool");
         assert_eq!(view.cursor_pos(area), Some((left + 13, y)));
-        view.event_list.search.editing = false;
+        view.event_list.search.input.blur();
         view.render_at(area, &mut buf, now);
-        let query: String = (width - 5..width - 1)
+        let blurred: String = (left..left + 13)
             .map(|x| cell_text(buf[(x, y)].symbol()))
             .collect();
-        assert_eq!(query, "Tool");
-        assert_eq!(buf[(width - 1, y)].symbol(), " ");
+        assert_eq!(blurred, input);
     }
 }
 
@@ -5373,10 +5745,7 @@ fn codex_inner_task_event_snapshot() {
     view.rows[0].id.provider = crate::providers::ProviderId::Codex;
     view.event_session = Some(view.rows[0].id.clone());
     let dir = tempfile::tempdir().unwrap();
-    let provider = crate::providers::codex::CodexProvider::new(
-        dir.path().to_owned(),
-        dir.path().join("manager"),
-    );
+    let provider = crate::providers::codex::CodexProvider::new(dir.path().to_owned());
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex-inner");
     view.event_panel.clear();
     for (index, fixture) in [
@@ -5420,12 +5789,12 @@ fn codex_inner_task_event_snapshot() {
     update_event_snapshot_body(&path, &rendered);
     assert_eq!(rendered, std::fs::read_to_string(path).unwrap());
     view.prepare_event_search();
-    view.event_list.search.query.set_text("ImageView");
+    view.event_list.search.input.set_text("ImageView");
     view.rematch_event();
     assert_eq!(view.matching_event_count(), 1);
     assert!(view.event_matches(4));
     for query in ["type", "exec_command"] {
-        view.event_list.search.query.set_text(query);
+        view.event_list.search.input.set_text(query);
         view.rematch_event();
         assert_eq!(view.matching_event_count(), 1, "{query}");
         assert!(view.event_matches(0));
@@ -5611,7 +5980,14 @@ fn task_event_last_message_uses_relative_time_and_missing_transcript_keeps_panel
     view.rows[view.selected].transcript = None;
     let rendered = event_screen(&view, 100, 25, now);
     assert!(!rendered.contains("Please inspect"));
-    assert!(rendered.lines().nth(10).unwrap().contains("╴opus "));
+    let model_y = view.center_layout(Rect::new(0, 0, 100, 25)).list.bottom();
+    assert!(
+        rendered
+            .lines()
+            .nth(usize::from(model_y))
+            .unwrap()
+            .contains("╴opus ")
+    );
 }
 
 #[test]
@@ -5659,9 +6035,9 @@ fn non_current_event_time_matches_unselected_task_and_task_details_times() {
                 .contains("Update")
         })
         .expect("message header");
-    assert_ne!(task_details[(99, task_details_y)].symbol(), " ");
+    assert_ne!(task_details[(98, task_details_y)].symbol(), " ");
     assert_eq!(
-        task_details[(99, task_details_y)].style(),
+        task_details[(98, task_details_y)].style(),
         task_time.style()
     );
 }
@@ -5706,7 +6082,7 @@ fn selected_event_row_preserves_foreground_and_adds_bold() {
                         older.started_at -= Duration::seconds(1);
                         view.set_event(vec![older, event]);
                         if search {
-                            view.event_list.search.query.set_text("Read");
+                            view.event_list.search.input.set_text("Read");
                             view.rematch_event();
                         }
                         let area = Rect::new(0, 0, width, 60);
@@ -5786,6 +6162,8 @@ fn text_and_tool_styles_follow_neovim_accent_in_both_modes() {
 
 #[test]
 fn task_event_uses_cctail_colours_and_highlights_latest_time() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    super::highlight::use_theme(false, None).unwrap();
     use crate::event::Kind;
     use ratatui::style::Modifier;
     let (mut view, now) = event_fixture();
@@ -5795,12 +6173,12 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
     let top = view.center_layout(area).event_panel.y;
-    for (offset, colour) in [
-        (0, Color::Reset),
-        (1, Color::Yellow),
-        (2, crate::theme::text_accent_color()),
-        (3, Color::Red),
-        (4, Color::Reset),
+    for (offset, colour, queued) in [
+        (0, Color::Reset, false),
+        (1, Color::Yellow, false),
+        (2, crate::theme::text_accent_color(), false),
+        (3, Color::Rgb(160, 99, 93), false),
+        (4, Color::Reset, true),
     ] {
         let y = top + offset;
         let x = (1..89).find(|&x| buf[(x, y)].symbol() != " ").unwrap();
@@ -5808,10 +6186,12 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
         let body = &buf[(x, y)];
         assert_eq!(label.fg, colour, "label row {y}");
         assert_eq!(body.fg, colour, "body row {y}");
-        assert!(!label.modifier.contains(Modifier::BOLD), "row {y}");
+        assert_eq!(label.modifier.contains(Modifier::BOLD), queued, "row {y}");
         assert!(!label.modifier.contains(Modifier::DIM), "label row {y}");
-        assert!(
-            !body.modifier.intersects(Modifier::DIM | Modifier::BOLD),
+        assert!(!body.modifier.contains(Modifier::DIM), "body row {y}");
+        assert_eq!(
+            body.modifier.contains(Modifier::BOLD),
+            queued,
             "body row {y}"
         );
     }
@@ -5825,8 +6205,8 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
         (Kind::Agent, Color::Yellow),
         (Kind::Session, Color::Yellow),
         (Kind::Tool, crate::theme::text_accent_color()),
-        (Kind::Error, Color::Red),
-        (Kind::Denied, Color::Red),
+        (Kind::Error, Color::Rgb(160, 99, 93)),
+        (Kind::Denied, Color::Rgb(160, 99, 93)),
         (Kind::QueuedUser, Color::Reset),
         (Kind::QueuedSystem, crate::theme::text_accent_color()),
     ] {
@@ -5843,16 +6223,17 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
         assert_eq!(time_style, super::style::time_style());
         assert_eq!(time.fg, Color::Reset);
         assert_eq!(time.modifier, Modifier::DIM);
-        view.event_panel.last_mut().unwrap().kind = kind;
+        view.event_panel.last_mut().unwrap().kind = kind.clone();
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let x = (1..89)
             .find(|&x| buf[(x, top + 4)].symbol() != " ")
             .unwrap();
+        let queued = matches!(kind, Kind::QueuedUser | Kind::QueuedSystem);
         for x in [x, x + 10] {
             let cell = &buf[(x, top + 4)];
             assert_eq!(cell.fg, colour);
-            assert!(!cell.modifier.contains(Modifier::BOLD));
+            assert_eq!(cell.modifier.contains(Modifier::BOLD), queued);
             assert!(!cell.modifier.contains(Modifier::DIM));
         }
         let time = &buf[(97, top + 4)];
@@ -5970,7 +6351,7 @@ fn task_event_shows_only_visible_events_and_hides_without_selection() {
 }
 
 #[test]
-fn center_layout_narrow_buffer_ranges_at_120_columns() {
+fn center_layout_medium_buffer_ranges_at_120_columns() {
     let (view, now) = event_fixture();
     let area = Rect::new(0, 0, 120, 60);
     let mut buf = Buffer::empty(area);
@@ -5988,14 +6369,14 @@ fn center_layout_narrow_buffer_ranges_at_120_columns() {
 }
 
 #[test]
-fn center_layout_wide_splits_content_by_golden_ratio_across_sizes() {
+fn center_layout_large_splits_content_by_golden_ratio_across_sizes() {
     for (width, height) in [(200, 60), (200, 61), (180, 40), (160, 50), (150, 50)] {
         assert_content_shares_buffer(width, height, "");
     }
 }
 
 #[test]
-fn center_layout_wide_golden_content_buffer_at_200x45() {
+fn center_layout_large_golden_content_buffer_at_200x45() {
     assert_content_shares_buffer(200, 45, "");
 }
 
@@ -6021,14 +6402,14 @@ fn center_layout_content_shares_with_growing_input() {
 }
 
 #[test]
-fn center_layout_narrow_balances_inner_content_across_sizes() {
+fn center_layout_medium_balances_inner_content_across_sizes() {
     for (width, height) in [(120, 60), (120, 61), (100, 40), (149, 50)] {
         assert_content_shares_buffer(width, height, "");
     }
 }
 
 #[test]
-fn center_layout_narrow_equal_content_buffer_at_100x45() {
+fn center_layout_medium_equal_content_buffer_at_100x45() {
     assert_content_shares_buffer(100, 45, "");
 }
 
@@ -6042,27 +6423,27 @@ fn assert_content_shares_buffer(width: u16, height: u16, input: &str) {
     let top = (0..height)
         .filter(|&y| buf[(layout.gap.x + 1, y)].symbol() == "│")
         .count() as u16;
-    let wide = width >= super::render::WIDE_LAYOUT_COLUMNS;
+    let large = super::render::ScreenLayout::for_width(width) == super::render::ScreenLayout::Large;
     let available = height
         - layout.header.height
         - layout.footer.height
         - layout.prompt.height
         - 2
-        - u16::from(!wide);
+        - u16::from(!large);
     let detail = layout.event_detail.height.saturating_sub(1);
     // Count output content between its two rules.
     assert_eq!(detail, layout.footer.y - layout.event_detail.y - 2);
-    let heights = if wide {
+    let heights = if large {
         vec![top, detail]
     } else {
         vec![top, layout.event_panel.height, detail]
     };
     assert_eq!(heights.iter().sum::<u16>() + 1, available);
     assert!(heights.windows(2).all(|pair| pair[0] >= pair[1]));
-    if !wide {
+    if !large {
         assert!(heights[0] - heights[heights.len() - 1] <= 2);
     }
-    let expected = if wide {
+    let expected = if large {
         let upper = (u32::from(available) * 618 / 1000) as u16;
         (upper, upper, available - upper - 1)
     } else {
@@ -6080,7 +6461,7 @@ fn assert_content_shares_buffer(width: u16, height: u16, input: &str) {
     assert_eq!(layout.task_details.height, top);
     assert_eq!(layout.prompt.y, layout.task_details.bottom() + 1);
     let status_left = layout.gap.x + 1;
-    let status_right = if wide {
+    let status_right = if large {
         layout.event_panel.x - 1
     } else {
         area.right()
@@ -6097,7 +6478,7 @@ fn assert_content_shares_buffer(width: u16, height: u16, input: &str) {
         buf[(layout.task_details.x, layout.event_detail.y)].symbol(),
         "─"
     );
-    if wide {
+    if large {
         assert_eq!(layout.prompt.bottom(), layout.event_detail.y);
     } else {
         assert_eq!(layout.prompt.bottom() + 1, layout.event_panel.y);
@@ -6108,16 +6489,16 @@ fn assert_content_shares_buffer(width: u16, height: u16, input: &str) {
 }
 
 #[test]
-fn center_layout_wide_buffer_ranges_at_200_columns() {
-    assert_wide_buffer_ranges(200, [1..49, 52..100, 103..199]);
+fn center_layout_large_buffer_ranges_at_200_columns() {
+    assert_large_buffer_ranges(200, [1..49, 52..100, 103..199]);
 }
 
 #[test]
-fn center_layout_wide_buffer_ranges_at_151_columns() {
-    assert_wide_buffer_ranges(151, [1..36, 39..74, 77..150]);
+fn center_layout_large_buffer_ranges_at_151_columns() {
+    assert_large_buffer_ranges(151, [1..36, 39..74, 77..150]);
 }
 
-fn assert_wide_buffer_ranges(width: u16, expected: [std::ops::Range<u16>; 3]) {
+fn assert_large_buffer_ranges(width: u16, expected: [std::ops::Range<u16>; 3]) {
     let (view, now) = event_fixture();
     let area = Rect::new(0, 0, width, 60);
     let mut buf = Buffer::empty(area);
@@ -6148,16 +6529,18 @@ fn center_layout_golden_rects_follow_each_area() {
         body_height,
         list_height,
     ) in [
-        (80, 24, 17, 6, 38, 37, 6, 6),
+        (100, 24, 17, 6, 48, 47, 6, 6),
         (120, 40, 27, 12, 58, 57, 11, 11),
         (200, 60, 37, 22, 48, 48, 33, 33),
-        (80, 24, 17, 6, 38, 37, 6, 6),
+        (100, 24, 17, 6, 48, 47, 6, 6),
     ] {
         let area = Rect::new(5, 7, width, height);
         let layout = view.center_layout(area);
         assert_eq!(layout.header, Rect::new(5, 7, width, 2));
         assert_eq!(layout.list, Rect::new(6, 9, list_width, body_height));
-        let bottom = if width >= super::render::WIDE_LAYOUT_COLUMNS {
+        let bottom = if super::render::ScreenLayout::for_width(width)
+            == super::render::ScreenLayout::Large
+        {
             assert_eq!(layout.event_panel.y, layout.list.y);
             assert_eq!(layout.event_panel.width, width - 8 - 2 * list_width);
             layout.event_detail
@@ -6187,17 +6570,17 @@ fn center_layout_golden_rects_follow_each_area() {
 fn center_layout_event_and_task_details_hide_thresholds() {
     let (mut view, _) = event_fixture();
     for height in 0..19 {
-        let layout = view.center_layout(Rect::new(0, 0, 94, height));
+        let layout = view.center_layout(Rect::new(0, 0, 100, height));
         assert_eq!(layout.event_panel.height, 0, "height {height}");
     }
-    let layout = view.center_layout(Rect::new(0, 0, 94, 19));
+    let layout = view.center_layout(Rect::new(0, 0, 100, 19));
     assert_eq!(layout.event_panel.height, 4);
     assert_eq!(layout.list.height, 4);
     assert_eq!(layout.event_detail.height, 4);
     assert!(layout.task_details.width > 0);
     assert!(
         !view
-            .center_layout(Rect::new(0, 0, 93, 20))
+            .center_layout(Rect::new(0, 0, 100, 20))
             .task_details
             .is_empty()
     );
@@ -6260,10 +6643,9 @@ fn task_event_count_follows_height() {
 mod section_scroll_tests;
 
 #[test]
-fn task_details_status_uses_the_shared_home_directory_display() {
-    let mut task = session("path", "Path task", SessionStatus::Ready, 0);
-    let directory = PathBuf::from(std::env::var_os("HOME").unwrap()).join("Code/task");
-    task.cwd = directory.clone();
+fn task_details_status_shows_only_the_directory_name() {
+    let task = session("path", "Path task", SessionStatus::Ready, 0);
+    let directory = crate::test_project();
     let mut view = test_view(Grouping::Project, false);
     view.set_sessions(vec![task], false);
     let rendered = screen(&view, 200, 30);
@@ -6271,17 +6653,17 @@ fn task_details_status_uses_the_shared_home_directory_display() {
     let (rect, path) = viewport
         .task_details_links
         .iter()
-        .find(|(_, path)| **path == directory)
+        .find(|(_, path)| *path == crate::ui::links::LinkTarget::Path(directory.clone()))
         .unwrap();
     assert_eq!(rect.y, viewport.task_details.bottom());
-    assert_eq!(path, &directory);
+    assert_eq!(path, &crate::ui::links::LinkTarget::Path(directory));
     let rule = rendered.lines().nth(rect.y as usize).unwrap();
-    assert!(rule.contains("task"), "{rule}");
-    assert!(!rule.contains("/Users/"));
+    assert!(rule.contains("project"), "{rule}");
+    assert!(!rule.contains("agents-tests"));
 }
 
 #[test]
-fn path_abbreviation_in_group_header_preserves_last_component() {
+fn group_header_shows_the_directory_basename() {
     let mut task = session("path", "Path task", SessionStatus::Ready, 0);
     task.cwd = "/Users/visitor/Code/.worktrees/agents-panel".into();
     let mut view = test_view(Grouping::Project, false);
@@ -6299,9 +6681,9 @@ fn path_abbreviation_in_group_header_preserves_last_component() {
                 .trim_end()
                 .to_owned()
         })
-        .find(|row| row.trim_start().starts_with('/'))
+        .find(|row| row.contains("agents-panel"))
         .unwrap();
-    assert_eq!(heading.trim(), "/…/.worktrees/agents-panel");
+    assert_eq!(heading.trim(), "agents-panel");
 }
 
 mod event_path_abbrev {
@@ -6336,12 +6718,28 @@ mod event_help {
     use super::*;
 
     #[test]
-    fn help_has_event_column_right_of_view() {
+    fn help_has_tasks_events_and_navigation_columns() {
         let mut view = simple_fixture();
         key(&mut view, KeyCode::Char('?'));
-        let rendered = screen(&view, 100, 24);
-        let headings = rendered.lines().find(|line| line.contains("View")).unwrap();
-        assert!(headings.find("Events").unwrap() > headings.find("View").unwrap());
+        let rendered = screen(&view, 120, 24);
+        let headings = rendered
+            .lines()
+            .find(|line| line.contains("Tasks"))
+            .unwrap();
+        assert_eq!(
+            headings.split_whitespace().collect::<Vec<_>>(),
+            ["Tasks", "Events", "Navigate"]
+        );
+        if std::env::var_os("UPDATE_HELP_SNAPSHOTS").is_some() {
+            std::fs::write(
+                concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/ui_snapshots/live_center_help_event.txt"
+                ),
+                &rendered,
+            )
+            .unwrap();
+        }
         assert_eq!(
             rendered,
             include_str!("../../tests/ui_snapshots/live_center_help_event.txt")
@@ -6375,7 +6773,7 @@ mod event_search {
     }
 
     #[test]
-    fn leaving_list_search_preserves_event_and_detail_search() {
+    fn leaving_list_search_blurs_and_preserves_query_on_click() {
         for mouse_exit in [false, true] {
             let (mut view, now) = event_fixture();
             view.select_event(Some(1));
@@ -6400,8 +6798,12 @@ mod event_search {
                 key(&mut view, KeyCode::Esc);
                 view.active_panel = Panel::EventDetail;
             }
-            assert_eq!(view.event_list.search.active(), mouse_exit);
-            assert_eq!(view.event_list.search.editing, mouse_exit);
+            assert_eq!(view.event_list.search.input.applied(), mouse_exit);
+            assert!(!view.event_list.search.input.focused());
+            assert_eq!(
+                view.event_list.search.input.text(),
+                if mouse_exit { "files" } else { "" }
+            );
             assert_eq!(view.visible_event(), Some(&selected));
             let area = Rect::new(0, 0, 100, 40);
             let mut buf = Buffer::empty(area);
@@ -6411,7 +6813,7 @@ mod event_search {
             for c in "files".chars() {
                 key(&mut view, KeyCode::Char(c));
             }
-            assert!(view.event_detail.search.editing);
+            assert!(view.event_detail.search.input.focused());
             let mut buf = Buffer::empty(area);
             view.render_event_detail(area, &mut buf, now);
             assert!(text(&buf).contains("I will check the files"));
@@ -6437,13 +6839,13 @@ mod event_search {
         .to_vec();
         open(&mut view);
         assert!(text(&panel(&view, now)).contains("Search ❯ "));
-        assert!(
-            view.center_footer_hints()
-                .to_string()
-                .contains("enter keep")
-        );
+        assert_eq!(view.center_footer_hints().to_string(), "? help");
         for c in "time out".chars() {
-            key(&mut view, KeyCode::Char(c));
+            if c == ' ' {
+                view.handle_paste(" ");
+            } else {
+                key(&mut view, KeyCode::Char(c));
+            }
         }
         let buf = panel(&view, now);
         assert!(text(&buf).contains("plain timeout bold"));
@@ -6452,13 +6854,14 @@ mod event_search {
         let start = text(&buf).find("plain timeout bold").unwrap() as u16;
         for x in start + 6..start + 13 {
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buf[(x, 0)].fg, crate::theme::inline_code_color());
+            assert_eq!(
+                buf[(x, 0)].fg,
+                crate::ui::style::assistant_style().fg.unwrap()
+            );
         }
         key(&mut view, KeyCode::Enter);
         let buf = panel(&view, now);
-        assert!(text(&buf).contains("timeout"));
-        assert!(buf[(99, 11)].modifier.contains(Modifier::DIM));
-        assert!(!text(&buf).contains("Search ❯ "));
+        assert!(text(&buf).contains("Search ❯ time out"));
         open(&mut view);
         assert!(text(&panel(&view, now)).contains("Search ❯ time out"));
         key(&mut view, KeyCode::Backspace);
@@ -6505,9 +6908,7 @@ mod event_search {
             ("user café", vec![3]),
         ] {
             open(&mut view);
-            for c in query.chars() {
-                key(&mut view, KeyCode::Char(c));
-            }
+            view.handle_paste(query);
             let matches: Vec<_> = (0..view.event_panel.len())
                 .filter(|&i| view.event_matches(i))
                 .collect();
@@ -6522,7 +6923,10 @@ mod event_search {
         assert!(text(&buf).contains("plain café link"));
         let start = text(&buf).find("plain café link").unwrap() as u16;
         for x in start + 6..start + 10 {
-            assert_eq!(buf[(x, 0)].fg, crate::theme::inline_code_color());
+            assert_eq!(
+                buf[(x, 0)].fg,
+                crate::ui::style::assistant_style().fg.unwrap()
+            );
             assert!(buf[(x, 0)].modifier.contains(Modifier::BOLD));
         }
         assert!(!buf[(start + 11, 0)].modifier.contains(Modifier::UNDERLINED));
@@ -6554,17 +6958,7 @@ mod event_search {
         view.event_session = Some(session_key("second"));
         let buf = panel(&view, now);
         assert!(!text(&buf).contains("Search ❯ "));
-        assert_eq!(
-            view.center_footer_hints().to_string(),
-            super::super::hints::hint_line(&[
-                ("?", "help"),
-                ("esc", "previous"),
-                ("↑/↓", "move"),
-                ("enter", "open"),
-                ("n", "new"),
-            ])
-            .to_string()
-        );
+        assert_eq!(view.center_footer_hints().to_string(), "? help");
     }
 }
 
@@ -6591,18 +6985,17 @@ mod line_edit {
     }
 
     #[test]
-    fn task_search_kill_stays_on_selected_row() {
+    fn task_search_kill_selects_first_match() {
         let mut view = fixture();
         key(&mut view, KeyCode::Char('/'));
         for c in "task".chars() {
             key(&mut view, KeyCode::Char(c));
         }
         key(&mut view, KeyCode::Down);
-        let selected = view.selected;
         key(&mut view, KeyCode::Left);
         view.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
         assert_eq!(view.search.text(), "tas");
-        assert_eq!(view.selected, selected);
+        assert_eq!(view.selected, view.selectable_indices()[0]);
     }
 
     #[test]
@@ -6657,19 +7050,25 @@ mod input_row {
             event_panel.active_panel = Panel::EventList;
             event_panel.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
         };
-        event_panel.event_list.search.query.set_text(query);
+        event_panel.event_list.search.input.set_text(query);
         if left {
-            task.search.left();
-            event_panel.event_list.search.query.left();
+            let mut kills = crate::line_edit::KillBuffer::default();
+            kills.begin_stroke();
+            task.search.handle_key(KeyCode::Left.into(), &mut kills);
+            kills.begin_stroke();
+            event_panel
+                .event_list
+                .search
+                .input
+                .handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), &mut kills);
         }
         let mut task_buf = Buffer::empty(area);
         task.render_at(area, &mut task_buf, now);
         let mut event_buf = Buffer::empty(area);
         event_panel.render_at(area, &mut event_buf, now);
         let task_row = task.center_layout(area).search;
-        let event_row = super::super::event_list::search_input_rect(
-            event_panel.center_layout(area).event_panel,
-        );
+        let event_row =
+            super::super::search_input::search_row(event_panel.center_layout(area).event_panel);
         (task_buf, task_row, event_buf, event_row, task, event_panel)
     }
 
@@ -6688,12 +7087,11 @@ mod input_row {
                         rendered_inputs(width, "你好 query", false);
                     Clear.render(event_row, &mut event_panel);
                     event_row.width = task_row.width;
-                    super::super::render::render_input_row(
-                        "Search ❯ ",
-                        &event_view.event_list.search.query,
-                        event_row,
-                        &mut event_panel,
-                    );
+                    event_view
+                        .event_list
+                        .search
+                        .input
+                        .render(event_row, &mut event_panel);
                     assert_eq!(task_row.x, event_row.x);
                     for x in 0..task_row.width {
                         let task_cell = &task[(task_row.x + x, task_row.y)];
@@ -6727,21 +7125,29 @@ mod input_row {
                     let (_, task_row, _, event_row, task, event_panel) =
                         rendered_inputs(width, query, left);
                     let area = Rect::new(3, 2, width, 40);
-                    let expected = (9 + task
-                        .search
+                    let mut editor: crate::line_edit::Editor =
+                        super::super::line_edit::Editor::default();
+                    editor.set_text(query);
+                    if left {
+                        editor.move_caret(crate::line_edit::Motion::Left);
+                    }
+                    let expected = (9 + editor
                         .window(usize::from(task_row.width.saturating_sub(9)))
-                        .1)
+                        .caret_column)
                         .min(task_row.width.saturating_sub(1));
                     assert_eq!(
                         task.cursor_pos(area),
                         Some((task_row.x + expected, task_row.y))
                     );
-                    let event_expected = (9 + event_panel
-                        .event_list
-                        .search
-                        .query
+                    let mut editor: crate::line_edit::Editor =
+                        super::super::line_edit::Editor::default();
+                    editor.set_text(query);
+                    if left {
+                        editor.move_caret(crate::line_edit::Motion::Left);
+                    }
+                    let event_expected = (9 + editor
                         .window(usize::from(event_row.width.saturating_sub(9)))
-                        .1)
+                        .caret_column)
                         .min(event_row.width.saturating_sub(1));
                     assert_eq!(
                         event_panel.cursor_pos(area),
@@ -6964,7 +7370,7 @@ mod subagent_rows {
         view.set_sessions(rows, false);
         assert_eq!(view.status_filter, 0);
         assert_eq!(view.selected_id(), Some(&session_key("agent-older")));
-        assert_eq!(ids(&view), ["parent", "agent-newer", "agent-older"]);
+        assert_eq!(ids(&view), ["parent", "agent-older", "agent-newer"]);
     }
 
     #[test]
@@ -7176,7 +7582,10 @@ mod subagent_rows {
         for grouping in [Grouping::Project, Grouping::Status, Grouping::Model] {
             view.grouping = grouping;
             for pins in [vec![], vec![session_key("parent")]] {
-                view.set_pinned(&pins);
+                view.set_pinned(&crate::state::TaskPins {
+                    active: pins.clone(),
+                    inactive: vec![],
+                });
                 let expected = vec!["parent", "agent-newer", "agent-older"];
                 assert_eq!(ids(&view), expected);
                 let entries = view.center_rows(&view.visible_indices(), grouping);
@@ -7212,7 +7621,10 @@ mod subagent_rows {
             assert_eq!(ids(&view), expected);
         }
         view.grouping = Grouping::Project;
-        view.set_pinned(&[session_key("parent")]);
+        view.set_pinned(&crate::state::TaskPins {
+            active: vec![session_key("parent")],
+            inactive: vec![],
+        });
         assert_eq!(
             ids(&view),
             ["parent", "agent-newer", "agent-older", "other"]
@@ -7231,23 +7643,27 @@ mod subagent_rows {
         view.set_sessions(rows, false);
         for grouping in [Grouping::Project, Grouping::Model] {
             view.grouping = grouping;
-            view.set_pinned(&[]);
+            view.set_pinned(&crate::state::TaskPins {
+                active: vec![],
+                inactive: vec![],
+            });
             set_filter(&mut view, 0);
             assert_eq!(
                 ids(&view),
                 ["other", "parent", "agent-newer", "agent-older"]
             );
-            view.set_pinned(&[session_key("parent")]);
+            view.set_pinned(&crate::state::TaskPins {
+                active: vec![session_key("parent")],
+                inactive: vec![],
+            });
             assert_eq!(
                 ids(&view),
                 ["parent", "agent-newer", "agent-older", "other"]
             );
             set_filter(&mut view, 1);
             assert_eq!(ids(&view), ["parent"]);
-            assert!(screen(&view, 120, 30).contains("Pinned"));
+            assert!(!screen(&view, 120, 30).contains("Pinned"));
         }
-        view.hide(&session_key("agent-older"));
-        assert_eq!(ids(&view), ["parent"]);
     }
 
     #[test]
@@ -7300,11 +7716,8 @@ mod subagent_rows {
     }
 
     #[test]
-    fn children_disappear_with_hidden_or_missing_parent() {
+    fn children_disappear_with_missing_parent() {
         let mut view = fixture();
-        view.hide(&session_key("parent"));
-        assert!(ids(&view).is_empty());
-        view.hidden.clear();
         let rows = view
             .rows
             .iter()
@@ -7369,9 +7782,8 @@ mod subagent_actions {
         assert!(view.rename_target.is_none());
         assert!(view.rename.text().is_empty());
         assert!(view.confirm_dialog.is_none());
-        assert!(view.hidden.is_empty());
-        assert!(view.pinned.is_empty());
-        assert!(!view.searching);
+        assert!(view.pinned.active.is_empty());
+        assert!(!view.search.focused());
         assert!(!view.help);
         assert_eq!(subagent_rows::screen(view, 120, 30), before);
     }
@@ -7382,13 +7794,18 @@ mod subagent_actions {
             fn $name() {
                 for notice in [None, Some("Keep this notice".to_owned())] {
                     let mut view = fixture();
-                    view.set_notice(notice.clone());
+                    if let Some(notice) = &notice {
+                        view.show_error(notice.clone());
+                    }
                     let before = subagent_rows::screen(&view, 120, 30);
                     assert_eq!(
                         view.handle_key(KeyEvent::new($code, $modifiers)),
                         Some(Action::Unsupported($label))
                     );
-                    assert_eq!(view.notice.clone().map(|(text, _)| text), notice);
+                    assert_eq!(
+                        view.feedback.clone().map(|(feedback, _)| feedback),
+                        notice.map(footer::Feedback::Error)
+                    );
                     assert_unchanged(&view, &before);
                 }
             }
@@ -7399,13 +7816,18 @@ mod subagent_actions {
     fn control_l() {
         for notice in [None, Some("Keep this notice".to_owned())] {
             let mut view = fixture();
-            view.set_notice(notice.clone());
+            if let Some(notice) = &notice {
+                view.show_error(notice.clone());
+            }
             let before = subagent_rows::screen(&view, 120, 30);
             assert_eq!(
                 view.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
                 None
             );
-            assert_eq!(view.notice.clone().map(|(text, _)| text), notice);
+            assert_eq!(
+                view.feedback.clone().map(|(feedback, _)| feedback),
+                notice.map(footer::Feedback::Error)
+            );
             assert_unchanged(&view, &before);
         }
     }
@@ -7414,12 +7836,22 @@ mod subagent_actions {
     unsupported_key!(stop, KeyCode::Char('x'), KeyModifiers::NONE, "Stop");
     unsupported_key!(delete, KeyCode::Backspace, KeyModifiers::NONE, "Delete");
     unsupported_key!(archive, KeyCode::Char('a'), KeyModifiers::NONE, "Archive");
-    unsupported_key!(hide, KeyCode::Char('h'), KeyModifiers::NONE, "Hide");
-    unsupported_key!(pin, KeyCode::Char('p'), KeyModifiers::NONE, "Pin");
+    #[test]
+    fn pin() {
+        let mut view = fixture();
+        assert_eq!(
+            key(&mut view, KeyCode::Char('p')),
+            Some(Action::TogglePin {
+                tab: 0,
+                id: session_key("agent-older"),
+                pinned: true,
+            })
+        );
+    }
 
     #[test]
     fn open_keys_leave_disabled_subagent_on_list() {
-        for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+        for code in [KeyCode::Enter, KeyCode::Char('o')] {
             let mut view = fixture();
             assert_eq!(key(&mut view, code), None);
             assert_eq!(view.active_panel, Panel::TaskList);
@@ -7455,23 +7887,22 @@ mod subagent_actions {
             KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL),
         ] {
             let mut view = fixture();
-            view.searching = true;
+            view.search.focus();
             view.search.set_text("Parent task");
             let before = subagent_rows::screen(&view, 120, 30);
             assert_eq!(view.handle_key(event), None);
-            assert!(view.searching);
+            assert_eq!(view.search.focused(), event.code != KeyCode::Enter);
             assert_eq!(view.search.text(), "Parent task");
-            assert_eq!(subagent_rows::screen(&view, 120, 30), before);
+            if event.code != KeyCode::Enter {
+                assert_eq!(subagent_rows::screen(&view, 120, 30), before);
+            }
         }
     }
 
     #[test]
     fn footer_snapshot() {
         let view = fixture();
-        assert_eq!(
-            view.center_footer_hints().to_string(),
-            "? help  esc previous  ↑/↓ move  n new"
-        );
+        assert_eq!(view.center_footer_hints().to_string(), "? help");
         assert_eq!(
             subagent_rows::screen(&view, 120, 30),
             include_str!("../../tests/ui_snapshots/agents_overview_subagent_selected.txt")
@@ -7486,7 +7917,7 @@ fn unsupported_provider_actions_do_not_open_dialogs_or_emit_actions() {
         ProviderId::Claude,
         Capabilities::default(),
     )]));
-    for code in [KeyCode::Enter, KeyCode::Right, KeyCode::Char('o')] {
+    for code in [KeyCode::Enter, KeyCode::Char('o')] {
         assert_eq!(key(&mut view, code), None);
         assert_eq!(view.active_panel, Panel::Prompt);
         view.set_active_panel(Panel::TaskList);
@@ -7597,7 +8028,7 @@ fn ask_user_question_details_snapshot() {
             "Needs input\n{}",
             row.pending_questions
                 .iter()
-                .map(|question| question.replace('`', ""))
+                .map(|question| format!("                {}", question.replace('`', "")))
                 .collect::<Vec<_>>()
                 .join("\n")
         )),
@@ -7611,7 +8042,7 @@ fn ask_user_question_details_snapshot() {
     row.pending_questions.clear();
     view.set_sessions(vec![row.clone()], false);
     let answered = render(&view);
-    assert!(answered.contains("Needs input\nOpen task to review.\nWaiting for your response."));
+    assert!(answered.contains("Needs input\n                                                                   Open task to review.\n                                                                   Waiting for your response."));
     assert_eq!(
         answered,
         include_str!("../../tests/ui_snapshots/task_details_questions_answered.txt")
@@ -7622,8 +8053,120 @@ fn ask_user_question_details_snapshot() {
     assert!(!render(&view).contains("Needs input"));
 }
 
+fn assert_question_details_snapshot(name: &str, rendered: &str) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/ui_snapshots")
+        .join(name);
+    let rendered = rendered
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end()
+        .to_owned()
+        + "\n";
+    if std::env::var_os("UPDATE_EVENT_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &rendered).unwrap();
+    }
+    assert_eq!(rendered, std::fs::read_to_string(path).unwrap());
+}
+
 #[test]
-fn pending_question_details_use_model_color_and_bold_attention_title() {
+fn supervised_question_details_show_the_complete_ask() {
+    let ask: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/supervision-ask.json")).unwrap();
+    let state =
+        crate::providers::SupervisionState::Asking(vec![ask["text"].as_str().unwrap().to_owned()]);
+    let crate::providers::SupervisionState::Asking(questions) = state else {
+        unreachable!();
+    };
+    let mut row = session("questions", "Question task", SessionStatus::NeedsInput, 0);
+    row.pending_questions = questions;
+    let mut view = test_view(Grouping::Project, false);
+    view.status_filter = 0;
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 60, 40);
+    let mut buf = Buffer::empty(area);
+    view.render_task_details(area, &mut buf, Utc::now());
+    let rendered = buf
+        .content
+        .chunks(60)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell_text(cell.symbol()))
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("May I update the shared render file?"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("The pending questions need to wrap in full."),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("Open task to review."), "{rendered}");
+    assert!(
+        !rendered.contains("Waiting for your response."),
+        "{rendered}"
+    );
+    assert_question_details_snapshot("task_details_supervised_questions_pending.txt", &rendered);
+}
+
+#[test]
+fn pending_question_details_wrap_the_complete_question() {
+    let record: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/claude-questions-pending.jsonl"
+    ))
+    .unwrap();
+    let question = record["message"]["content"][0]["input"]["questions"][0]["question"]
+        .as_str()
+        .unwrap();
+    let mut row = session("questions", "Question task", SessionStatus::NeedsInput, 0);
+    row.pending_questions = vec![question.to_owned()];
+    let mut view = test_view(Grouping::Project, false);
+    view.status_filter = 0;
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 60, 40);
+    let mut buf = Buffer::empty(area);
+    view.render_task_details(area, &mut buf, Utc::now());
+    let rendered = buf
+        .content
+        .chunks(60)
+        .map(|row| {
+            let mut text = String::new();
+            let mut cells = row.iter();
+            while let Some(cell) = cells.next() {
+                text.push_str(cell_text(cell.symbol()));
+                for _ in 1..cell_text(cell.symbol()).width() {
+                    cells.next();
+                }
+            }
+            text.trim_end().to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("怎么判断命令后面那个词是子命令？"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.split_whitespace().collect::<String>().contains(
+            &question
+                .replace('`', "")
+                .split_whitespace()
+                .collect::<String>()
+        ),
+        "{rendered}"
+    );
+    assert!(!rendered.contains('…'), "{rendered}");
+    assert!(!rendered.contains("Open task to review."), "{rendered}");
+    assert_question_details_snapshot("task_details_questions_wrapped.txt", &rendered);
+}
+
+#[test]
+fn pending_question_details_use_body_style_and_bold_attention_title() {
     let mut row = session("questions", "Question task", SessionStatus::NeedsInput, 0);
     row.pending_questions = vec!["Pick a color?".into()];
     row.activity = Some(crate::model::Activity {
@@ -7640,6 +8183,7 @@ fn pending_question_details_use_model_color_and_bold_attention_title() {
     let mut buf = Buffer::empty(area);
     view.render_task_details(area, &mut buf, Utc::now());
     let mut questions = 0;
+    let mut needs_input = false;
     for cells in buf.content.chunks(100) {
         let text = cells
             .iter()
@@ -7647,11 +8191,25 @@ fn pending_question_details_use_model_color_and_bold_attention_title() {
             .collect::<String>();
         if text.trim_start().starts_with("Pick a color?") {
             questions += 1;
-            assert_eq!(cells[0].fg, Color::Yellow);
+            let column = text.find("Pick a color?").unwrap();
+            assert_eq!(
+                cells[column].fg,
+                if needs_input {
+                    Color::Reset
+                } else {
+                    Color::Yellow
+                }
+            );
         }
-        if text.starts_with("Needs input") {
-            assert_eq!(cells[0].fg, Color::LightRed);
-            assert!(cells[0].modifier.contains(ratatui::style::Modifier::BOLD));
+        if text.trim_start().starts_with("Needs input") {
+            needs_input = true;
+            let column = text.find("Needs input").unwrap();
+            assert_eq!(cells[column].fg, Color::LightRed);
+            assert!(
+                cells[column]
+                    .modifier
+                    .contains(ratatui::style::Modifier::BOLD)
+            );
         }
     }
     assert_eq!(questions, 2);
@@ -7662,10 +8220,7 @@ fn pending_question_event_uses_model_color() {
     use crate::providers::Provider;
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let dir = tempfile::tempdir().unwrap();
-    let codex = crate::providers::codex::CodexProvider::new(
-        dir.path().to_owned(),
-        dir.path().join("manager"),
-    );
+    let codex = crate::providers::codex::CodexProvider::new(dir.path().to_owned());
     for fixture in [
         "tests/fixtures/claude-questions-pending.jsonl",
         "tests/fixtures/codex-input/default-pending.jsonl",
@@ -7747,7 +8302,11 @@ fn task_event_click_keeps_list_and_detail_right_click_keeps_selection() {
     assert_eq!(view.visible_event(), view.event_panel.get(6));
     let selected = event_screen(&view, 100, 45, now);
     assert!(selected.contains("A second paragraph"));
-    click_event_text(&mut view, &list, "A long response", MouseButton::Right);
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 1, 1))
+            .is_none()
+    );
+    view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 1, 1));
     assert_eq!(view.visible_event(), view.event_panel.last());
     click_event_text(&mut view, &list, "A long response", MouseButton::Left);
     let open = event_screen(&view, 100, 45, now);
@@ -7789,11 +8348,10 @@ fn tool_calls() -> Vec<crate::event::ToolCall> {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Bash".into(),
-            event_detail_title: "Bash".into(),
+            title: "Bash".into(),
             show_event_detail: false,
             id: "Bash-fixture".into(),
-            title: "Bash".into(),
+            summary: "Bash".into(),
             name: "Bash".into(),
             input: vec![Section::Shell {
                 prefix: 0,
@@ -7814,11 +8372,10 @@ fn tool_calls() -> Vec<crate::event::ToolCall> {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Read".into(),
-            event_detail_title: "Read".into(),
+            title: "Read".into(),
             show_event_detail: false,
             id: "Read-fixture".into(),
-            title: "Read".into(),
+            summary: "Read".into(),
             name: "Read".into(),
             input: vec![Section::Text {
                 label: "path".into(),
@@ -7862,10 +8419,11 @@ fn merged_tool_titles_copy_only_titles_and_arrows_center_on_panel() {
     ] {
         let (mut view, now) = open_tool_fixture();
         let mut event = view.event_panel[7].clone();
+        event.calls[0].summary = title.into();
         event.calls[0].title = title.into();
-        event.calls[0].event_detail_title = title.into();
         view.select_fixture_event(Some(event));
-        let mut buf = Buffer::empty(Rect::new(0, 0, width, 48));
+        let height = if width < 100 { 90 } else { 48 };
+        let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
         view.render_at(buf.area, &mut buf, now);
         for title in [title, "Read"] {
             let (rows, body) = {
@@ -7940,7 +8498,11 @@ fn merged_tool_titles_copy_only_titles_and_arrows_center_on_panel() {
             assert_eq!(
                 view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2, row.y)),
                 Some(Action::Copy {
-                    text: title.into(),
+                    text: row
+                        .cells
+                        .iter()
+                        .map(|(columns, _)| buf[(body.x + columns.start, row.y)].symbol())
+                        .collect(),
                     label: "Copied message".into()
                 })
             );
@@ -7949,7 +8511,7 @@ fn merged_tool_titles_copy_only_titles_and_arrows_center_on_panel() {
 }
 
 #[test]
-fn shell_commands_share_center_and_copy_original_without_connector_hits() {
+fn shell_commands_share_center_and_copy_display_lines_without_connector_hits() {
     let command = "cat /workspace/a && printf longer && echo done; pwd\n";
     let (mut view, now) = open_tool_fixture();
     let mut event = view.event_panel[7].clone();
@@ -8036,11 +8598,11 @@ fn shell_commands_share_center_and_copy_original_without_connector_hits() {
     view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x1, first.y));
     view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x2, last.y));
     view.render_at(buf.area, &mut buf, now);
-    // A drag covers visible bytes; a whole-section copy also retains its trailing newline.
+    // A drag copies display lines; a whole-section copy also retains its trailing newline.
     assert_eq!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x2, last.y)),
         Some(Action::Copy {
-            text: command.trim_end_matches('\n').into(),
+            text: "cat /workspace/a\nprintf longer\necho done\npwd".into(),
             label: "Copied message".into(),
         })
     );
@@ -8180,9 +8742,9 @@ fn task_event_selected_tool_layout_is_cached_until_selection_or_width_changes() 
     let open = event_screen(&view, 100, 28, now);
     assert!(view.viewport.borrow().event_detail_layout.is_some());
     assert_eq!(event_screen(&view, 100, 28, now), open);
-    let narrow = event_screen(&view, 60, 28, now);
-    assert_ne!(narrow, open);
-    assert!(narrow.contains('…'));
+    let small = event_screen(&view, 60, 28, now);
+    assert_ne!(small, open);
+    assert!(small.contains('…'));
     assert!(
         view.viewport
             .borrow()
@@ -8251,10 +8813,7 @@ fn task_event_selected_event_header_centers_kind_and_keeps_time_right() {
         click_event_text(&mut view, &list, body, MouseButton::Left);
         let open = event_screen(&view, 100, 25, now);
         let detail = view.viewport.borrow().event_detail;
-        let columns = super::event_detail::event_detail_columns(
-            detail,
-            view.center_layout(Rect::new(0, 0, 100, 25)).event_panel,
-        );
+        let columns = super::event_detail::EventDetailColumns::new(detail);
         let header = open.lines().nth(usize::from(detail.y + 1)).unwrap();
         assert_eq!(
             header.find("Assistant"),
@@ -8360,6 +8919,15 @@ fn temp_event_path(filename: &str) -> (tempfile::TempDir, PathBuf) {
     (dir, target)
 }
 
+fn file_image_source(path: PathBuf) -> crate::images::ImageSource {
+    let metadata = std::fs::metadata(&path).unwrap();
+    crate::images::ImageSource::File {
+        path,
+        len: metadata.len(),
+        modified: metadata.modified().unwrap(),
+    }
+}
+
 #[test]
 fn task_event_click_on_a_shortened_tool_path_opens_the_full_path() {
     let (mut view, now) = event_fixture();
@@ -8374,7 +8942,9 @@ fn task_event_click_on_a_shortened_tool_path_opens_the_full_path() {
     assert!(!list.contains(path), "{list}");
     assert_eq!(
         click_text(&mut view, &list, "report.md"),
-        Some(Action::OpenPath(path.into()))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            path.into()
+        )))
     );
     assert_eq!(view.visible_event(), view.event_panel.get(7));
     let (x, y) = rendered_cell(&list, "report.md");
@@ -8405,24 +8975,36 @@ fn task_event_click_on_a_path_in_free_tool_text_opens_the_full_path() {
     assert!(!list.contains(path), "{list}");
     assert_eq!(
         click_text(&mut view, &list, "plan.md"),
-        Some(Action::OpenPath(path.into()))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            path.into()
+        )))
     );
 }
 
 #[test]
 fn task_event_click_on_an_image_placeholder_opens_the_image() {
     let (mut view, now) = event_fixture();
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-read-image.jsonl");
+    let bytes = std::fs::read(&path).unwrap();
+    let source = crate::images::ImageSource::Record {
+        record: crate::event::SourceRecord {
+            path,
+            offset: (bytes.iter().position(|byte| *byte == b'\n').unwrap() + 1) as u64,
+        },
+        pointer: "/message/content/0/content/0/source/data".into(),
+    };
     view.event_panel[0].body = "Please look at [Image #1] and [Image #2]".into();
-    view.event_panel[0].images = vec![crate::event::Image {
+    view.event_panel[0].images = vec![crate::images::Image {
         label: "[Image #2]".into(),
-        path: "/tmp/images/2.png".into(),
+        source: source.clone(),
     }];
     let list = event_screen(&view, 100, 40, now);
     assert!(list.contains("[Image #1] and [Image #2]"), "{list}");
     assert_eq!(click_text(&mut view, &list, "[Image #1]"), None);
     assert_eq!(
         click_text(&mut view, &list, "[Image #2]"),
-        Some(Action::OpenPath("/tmp/images/2.png".into()))
+        Some(Action::Open(LinkTarget::Image(source)))
     );
 }
 
@@ -8440,7 +9022,9 @@ fn open_event_links_its_wrapped_path() {
     assert!(open.contains("another-long-directory"), "{open}");
     assert_eq!(
         click_text(&mut view, &open, "another-long-directory"),
-        Some(Action::OpenPath(path.into()))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            path.into()
+        )))
     );
     assert_eq!(click_text(&mut view, &open, "see"), None);
 }
@@ -8450,22 +9034,26 @@ fn task_details_prompt_links_its_shortened_path_and_image_placeholder() {
     let mut view = fixture();
     let (_dir, target) = temp_event_path("report.md");
     let path = target.to_str().unwrap();
+    let image = target.with_file_name("1.png");
+    std::fs::write(&image, "").unwrap();
     let selected = &mut view.rows[view.selected];
     selected.prompt = format!("Look at [Image #1] and the report in {path} please");
-    selected.prompt_images = vec![crate::event::Image {
+    selected.prompt_images = vec![crate::images::Image {
         label: "[Image #1]".into(),
-        path: "/tmp/images/1.png".into(),
+        source: file_image_source(image.clone()),
     }];
     let rendered = screen(&view, 120, 40);
     assert!(!rendered.contains(path), "{rendered}");
     assert!(rendered.contains("report.md"), "{rendered}");
     assert_eq!(
         click_text(&mut view, &rendered, "report.md"),
-        Some(Action::OpenPath(path.into()))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            path.into()
+        )))
     );
     assert_eq!(
         click_text(&mut view, &rendered, "[Image #1]"),
-        Some(Action::OpenPath("/tmp/images/1.png".into()))
+        Some(Action::Open(LinkTarget::Image(file_image_source(image))))
     );
     assert_eq!(click_text(&mut view, &rendered, "Look at"), None);
     assert_eq!(
@@ -8489,7 +9077,9 @@ fn task_details_relative_paths_link_only_when_they_exist() {
     let rendered = screen(&view, 120, 40);
     assert_eq!(
         click_text(&mut view, &rendered, "src/main.rs"),
-        Some(Action::OpenPath(dir.path().join("src/main.rs")))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            dir.path().join("src/main.rs")
+        )))
     );
     assert_eq!(click_text(&mut view, &rendered, "and/or"), None);
     view.last_copy_click = None;
@@ -8517,7 +9107,12 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
         .borrow()
         .task_details_links
         .iter()
-        .find(|(_, target)| target.to_str().unwrap().starts_with("vscode://"))
+        .find(|(_, target)| {
+            crate::ui::link_path(target)
+                .to_str()
+                .unwrap()
+                .starts_with("vscode://")
+        })
         .unwrap()
         .clone();
     let (x, y) = (rect.x, rect.y);
@@ -8526,14 +9121,14 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
             &mut view,
             mouse(MouseEventKind::Down(MouseButton::Left), x, y)
         ),
-        Some(Action::OpenPath(
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
             super::vscode::pull_request_link(
                 "https://github.com/0xbabedead/chadwallet/pull/833",
                 dir.path()
             )
             .unwrap()
             .into()
-        ))
+        )))
     );
     assert!(!rendered.contains("main"));
     // The folder link stays on the status rule.
@@ -8543,8 +9138,14 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
         .task_details_links
         .iter()
         .find(|(_, target)| {
-            !target.to_str().unwrap().starts_with("vscode://")
-                && !target.to_str().unwrap().ends_with("todo.md")
+            !crate::ui::link_path(target)
+                .to_str()
+                .unwrap()
+                .starts_with("vscode://")
+                && !crate::ui::link_path(target)
+                    .to_str()
+                    .unwrap()
+                    .ends_with("todo.md")
         })
         .unwrap()
         .clone();
@@ -8554,11 +9155,13 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
             &mut view,
             mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1)
         ),
-        Some(Action::OpenPath(dir.path().to_owned()))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            dir.path().to_owned()
+        )))
     );
     assert_eq!(
         click_text(&mut view, &rendered, "todo.md"),
-        Some(Action::OpenPath(todo))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(todo)))
     );
     assert_eq!(click_text(&mut view, &rendered, "Then read"), None);
 }
@@ -8578,8 +9181,14 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
         .task_details_links
         .iter()
         .find(|(_, target)| {
-            !target.to_str().unwrap().starts_with("vscode://")
-                && !target.to_str().unwrap().ends_with("todo.md")
+            !crate::ui::link_path(target)
+                .to_str()
+                .unwrap()
+                .starts_with("vscode://")
+                && !crate::ui::link_path(target)
+                    .to_str()
+                    .unwrap()
+                    .ends_with("todo.md")
         })
         .unwrap()
         .clone();
@@ -8587,18 +9196,31 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
     let cwd_cell = mouse(MouseEventKind::Down(MouseButton::Left), x + 3, y + 1);
     assert_eq!(
         click_mouse(&mut view, cwd_cell),
-        Some(Action::OpenPath("/tmp/project".into()))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            crate::test_project()
+        )))
     );
-    // Under 90 columns the task details panel is gone and the list spans its cells.
-    screen(&view, 80, 40);
+    // Below 100 columns task details move below the task list.
+    screen(&view, 99, 40);
     assert_eq!(click_mouse(&mut view, cwd_cell), None);
+}
+
+#[test]
+fn project_group_header_of_a_missing_directory_is_not_a_link() {
+    let mut task = session("gone", "Gone task", SessionStatus::Ready, 0);
+    task.cwd = "/nonexistent/build".into();
+    let mut view = test_view(Grouping::Project, false);
+    view.set_sessions(vec![task], false);
+    let rendered = screen(&view, 120, 40);
+    assert!(rendered.contains(" build "), "{rendered}");
+    assert!(view.viewport.borrow().list_links.is_empty());
 }
 
 #[test]
 fn project_group_header_opens_its_directory() {
     let mut view = fixture();
     let rendered = screen(&view, 120, 40);
-    let (x, y) = rendered_cell(&rendered, "/tmp/project  ");
+    let (x, y) = rendered_cell(&rendered, " project  ");
     assert_eq!(
         click_mouse(
             &mut view,
@@ -8608,7 +9230,9 @@ fn project_group_header_opens_its_directory() {
     );
     assert_eq!(
         view.flush_pending_click(Instant::now() + view.double_click_interval),
-        Some(Action::OpenPath("/tmp/project".into()))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(
+            crate::test_project()
+        )))
     );
     let selected = view.selected;
     assert_eq!(
@@ -8665,9 +9289,9 @@ fn double_click_on_open_event_body_copies_the_whole_event() {
     let (mut view, now) = event_fixture();
     let body = "A long response with **bold** words whose body must be cut before the right edge of the log\n\nA second paragraph";
     view.event_panel[6].body = body.into();
-    let list = event_screen(&view, 100, 25, now);
+    let list = event_screen(&view, 100, 45, now);
     click_event_text(&mut view, &list, "A long response", MouseButton::Left);
-    let open = event_screen(&view, 100, 25, now);
+    let open = event_screen(&view, 100, 45, now);
     assert_eq!(
         double_click_text(&mut view, &open, "A second paragraph"),
         Some(Action::Copy {
@@ -8708,9 +9332,9 @@ fn event_detail_left_click_has_no_deadline() {
 fn double_click_event_detail_copies_the_message() {
     let (mut view, now) = event_fixture();
     view.event_panel[6].body = "A long response with **bold** words whose body must be cut before the right edge of the log\n\nA second paragraph".into();
-    let list = event_screen(&view, 100, 25, now);
+    let list = event_screen(&view, 100, 45, now);
     click_event_text(&mut view, &list, "A long response", MouseButton::Left);
-    let open = event_screen(&view, 100, 25, now);
+    let open = event_screen(&view, 100, 45, now);
     assert_eq!(
         double_click_text(&mut view, &open, "A second paragraph"),
         Some(Action::Copy {
@@ -8788,45 +9412,81 @@ fn copy_confirmation_sits_at_footer_right_for_one_second() {
 }
 
 #[test]
-fn notice_sits_at_task_list_bottom_left_for_one_second() {
+fn error_sits_at_footer_right_in_the_error_color_for_five_seconds() {
     let (mut view, now) = event_fixture();
+    // Keep logical time behind wall time so mixing the clocks fails deterministically.
+    let start = Instant::now() - std::time::Duration::from_secs(10);
+    view.show_feedback_at(
+        footer::Feedback::Error("Resume is not supported".into()),
+        start,
+    );
     let area = Rect::new(0, 0, 100, 25);
-    let list = view.center_layout(area).list;
+    let mut buffer = Buffer::empty(area);
+    view.render_at(area, &mut buffer, now);
+    let footer = (0..area.width)
+        .map(|x| buffer[(x, area.bottom() - 1)].symbol().to_owned())
+        .collect::<String>();
+    assert!(
+        footer.trim_end().ends_with("Resume is not supported"),
+        "{footer}"
+    );
+    let x = footer.trim_end().width() as u16 - 1;
+    assert_eq!(
+        buffer[(x, area.bottom() - 1)].fg,
+        style::error_style().fg.unwrap()
+    );
+    assert_eq!(
+        view.expire_messages(start + std::time::Duration::from_secs(1)),
+        Some(std::time::Duration::from_secs(4))
+    );
+    assert_eq!(
+        view.expire_messages(start + std::time::Duration::from_secs(5)),
+        None
+    );
+    assert!(!event_screen(&view, 100, 25, now).contains("Resume is not supported"));
+}
+
+#[test]
+fn footer_feedback_grows_over_the_hints_and_stays_on_one_row() {
+    let (mut view, now) = event_fixture();
     let hints = event_screen(&view, 100, 25, now)
         .lines()
         .last()
         .unwrap()
+        .trim_end()
         .to_owned();
-    // Keep logical time behind wall time so mixing the clocks fails deterministically.
-    let start = Instant::now() - std::time::Duration::from_secs(2);
-    view.set_notice_at(Some("Resume is not supported".into()), start);
+    let long = "x".repeat(95);
+    view.show_error(long.clone());
     let rendered = event_screen(&view, 100, 25, now);
-    let lines = rendered.lines().collect::<Vec<_>>();
-    let notice_row = lines[usize::from(list.bottom() - 1)];
-    let notice_cells = notice_row
-        .chars()
-        .skip(usize::from(list.x))
-        .take(usize::from(list.width))
-        .collect::<String>();
-    assert_eq!(
-        notice_cells.trim_end(),
-        "Resume is not supported",
+    let footer = rendered.lines().last().unwrap();
+    assert!(footer.trim_end().ends_with(&long), "{footer}");
+    assert!(!footer.contains(&hints), "{footer}");
+    view.show_error("y".repeat(200));
+    let rendered = event_screen(&view, 100, 25, now);
+    let footer = rendered.lines().last().unwrap();
+    assert!(
+        footer.trim().starts_with('y') && footer.trim_end().ends_with('…'),
+        "{footer}"
+    );
+    assert_eq!(rendered.lines().count(), 25);
+}
+
+#[test]
+fn selected_prompt_failure_shows_at_footer_right() {
+    let (mut view, now) = event_fixture();
+    view.input_box.state = prompt_box::SendState::Failed("attach timed out".into());
+    let rendered = event_screen(&view, 100, 25, now);
+    assert!(
+        rendered
+            .lines()
+            .last()
+            .unwrap()
+            .trim_end()
+            .ends_with("attach timed out"),
         "{rendered}"
     );
-    assert_eq!(*lines.last().unwrap(), hints);
-    assert_eq!(
-        view.expire_messages(start),
-        Some(std::time::Duration::from_secs(1))
-    );
-    assert_eq!(
-        view.expire_messages(start + std::time::Duration::from_millis(400)),
-        Some(std::time::Duration::from_millis(600))
-    );
-    assert_eq!(
-        view.expire_messages(start + std::time::Duration::from_secs(1)),
-        None
-    );
-    assert!(!event_screen(&view, 100, 25, now).contains("Resume is not supported"));
+    view.input_box.state = prompt_box::SendState::Ready;
+    assert!(!event_screen(&view, 100, 25, now).contains("attach timed out"));
 }
 
 #[test]
@@ -8873,8 +9533,8 @@ fn review_cached_layout_shares_source_bytes() {
 fn open_tool_layout_titles_and_arrows() {
     let (mut view, now) = open_tool_fixture();
     view.event_panel[7].calls.truncate(1);
+    view.event_panel[7].calls[0].summary = "Run tests".into();
     view.event_panel[7].calls[0].title = "Run tests".into();
-    view.event_panel[7].calls[0].event_detail_title = "Run tests".into();
     view.select_fixture_event(Some(view.event_panel[7].clone()));
     let open = event_screen(&view, 100, 48, now);
     assert!(
@@ -8997,8 +9657,8 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
         let call = event.calls.iter().find(|call| call.name == name).unwrap();
         let mut event = event.clone();
         event.calls = vec![call.clone()];
-        let title = call.event_detail_title.clone();
-        let left = call.event_detail_left.clone();
+        let title = call.title.clone();
+        let left = call.detail_left();
         for kind in [
             crate::event::Kind::Tool,
             crate::event::Kind::Error,
@@ -9023,7 +9683,7 @@ fn real_tool_headers_show_description_agent_skill_and_recipient() {
 }
 
 #[test]
-fn real_tabs_survive_copy_and_expanded_cell_selection() {
+fn real_tabs_copy_as_displayed_spaces_and_allow_partial_selection() {
     let record: serde_json::Value = serde_json::from_str(
         include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
             .lines()
@@ -9060,39 +9720,46 @@ fn real_tabs_survive_copy_and_expanded_cell_selection() {
     assert_eq!(
         view.finish_text_selection(x + source.replace('\t', "    ").len() as u16, y),
         Some(Action::Copy {
-            text: source.into(),
+            text: source.replace('\t', "    "),
             label: "Copied message".into()
         })
     );
     view.begin_text_selection(x + 2, y);
     view.extend_text_selection(x + 4, y);
-    assert_eq!(view.finish_text_selection(x + 4, y), None);
-    // All four display cells refer to one byte, and crossing the tab's end copies it once.
+    assert_eq!(
+        view.finish_text_selection(x + 4, y),
+        Some(Action::Copy {
+            text: "  ".into(),
+            label: "Copied message".into(),
+        })
+    );
+    // Each space is selectable even though all four map to the same source byte.
     view.begin_text_selection(x + 2, y);
     view.extend_text_selection(x + 6, y);
     assert_eq!(
         view.finish_text_selection(x + 6, y),
         Some(Action::Copy {
-            text: "\t".into(),
+            text: "    ".into(),
             label: "Copied message".into()
         })
     );
 }
 
 #[test]
-fn narrow_scrolled_tool_label_drag_stays_inside_the_buffer() {
+fn small_scrolled_tool_label_drag_stays_inside_the_buffer() {
     let (mut view, now) = open_tool_fixture();
     let mut event = view.event_panel[7].clone();
     event.calls[0].input = vec![crate::event::Section::Diff {
+        lang: "rs".into(),
         label: "/workspace/very/long/path/to/source.rs".repeat(6),
         text: "+中文".into(),
     }];
     view.select_fixture_event(Some(event));
-    let open = event_screen(&view, 30, 25, now);
+    let open = event_screen(&view, 30, 60, now);
     let (x, y) = rendered_cell(&open, "/workspace");
     view.begin_text_selection(x, y);
     view.extend_text_selection(29, y + 4);
-    event_screen(&view, 30, 25, now);
+    event_screen(&view, 30, 60, now);
     let viewport = view.viewport.borrow();
     for row in &viewport.event_text.rows {
         assert!(
@@ -9189,7 +9856,7 @@ fn pretty_json_body_remaps_provider_path_ranges() {
             .borrow()
             .event_links
             .iter()
-            .any(|(_, target)| target == &path)
+            .any(|(_, target)| target == &LinkTarget::Path(path.clone()))
     );
 }
 
@@ -9255,7 +9922,7 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
                 .borrow()
                 .event_links
                 .iter()
-                .any(|(_, url)| url == &target)
+                .any(|(_, url)| url == &LinkTarget::Path(target.clone()))
             {
                 break rendered;
             }
@@ -9274,7 +9941,9 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
         }
         assert_eq!(
             click_text(&mut view, &rendered, sha),
-            Some(Action::OpenPath(target.clone()))
+            Some(Action::Open(crate::ui::links::LinkTarget::Path(
+                target.clone()
+            )))
         );
         assert_eq!(view.visible_event(), view.event_panel.get(7));
         assert_eq!(click_text(&mut view, &rendered, "deadbeef"), None);
@@ -9282,14 +9951,16 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
         let rendered = event_screen(&view, 120, 40, now);
         assert_eq!(
             click_text(&mut view, &rendered, sha),
-            Some(Action::OpenPath(target.clone()))
+            Some(Action::Open(crate::ui::links::LinkTarget::Path(
+                target.clone()
+            )))
         );
         view.select_fixture_event(None);
     }
     let rendered = screen(&view, 120, 40);
     assert_eq!(
         click_text(&mut view, &rendered, sha),
-        Some(Action::OpenPath(target))
+        Some(Action::Open(crate::ui::links::LinkTarget::Path(target)))
     );
     // Open the layout before the full SHA has been checked; it must gain the link later.
     view.event_panel[7].body = format!("commit {full}");
@@ -9302,7 +9973,12 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
             .borrow()
             .event_links
             .iter()
-            .find(|(_, url)| url.to_str().unwrap().ends_with(&format!("&sha={full}")))
+            .find(|(_, url)| {
+                crate::ui::link_path(url)
+                    .to_str()
+                    .unwrap()
+                    .ends_with(&format!("&sha={full}"))
+            })
             .cloned();
         if let Some((rect, target)) = link {
             // The tool title repeats the SHA; click its linked body occurrence.
@@ -9323,7 +9999,7 @@ fn commit_sha_links_open_vscode_from_event_and_task_details() {
                     .or_else(
                         || view.flush_pending_click(Instant::now() + view.double_click_interval)
                     ),
-                Some(Action::OpenPath(target))
+                Some(Action::Open(target))
             );
             break;
         }
@@ -9449,14 +10125,10 @@ fn event_new_button_keeps_right_alignment_and_target() {
             let layout = view.center_layout(Rect::new(0, 0, width, 40));
             let viewport = view.viewport.borrow();
             let latest = viewport.event_jump;
-            let border_y = if width >= 150 {
-                layout.event_panel.bottom()
-            } else {
-                layout.event_panel.y - 1
-            };
-            assert_eq!(latest.right() - 1, layout.event_panel.right());
+            let border_y = layout.event_panel.bottom();
+            assert_eq!(latest.right() - 1, layout.event_panel.right() - 2);
             assert_eq!(latest.y, border_y);
-            let label = format!(" ↓ {unseen} New ");
+            let label = format!(" ↓ {unseen} New");
             assert_eq!(
                 rendered_cell(&screen, label.trim_end()),
                 (latest.x, latest.y)
@@ -9512,10 +10184,7 @@ fn wrapped_senders_stay_in_list_and_move_to_open_header() {
             .lines()
             .nth(usize::from(view.viewport.borrow().event_detail.y + 1))
             .unwrap();
-        assert!(
-            header.trim_start().starts_with("Message"),
-            "sender: {header}"
-        );
+        assert!(!header.contains("Message"), "sender: {header}");
         assert!(header.contains(sender), "kind: {header}");
         assert!(header.ends_with(&clock), "time: {header}");
         assert!(
@@ -9540,7 +10209,7 @@ fn wrapped_messages_keep_list_text_and_open_paragraphs() {
     for event in &events[6..12] {
         view.event_panel = vec![event.clone()];
         view.select_fixture_event(Some(event.clone()));
-        let area = Rect::new(0, 0, 2000, 25);
+        let area = Rect::new(0, 0, 2000, 100);
         let mut buffer = Buffer::empty(area);
         view.render_event_detail(area, &mut buffer, now);
         let lines: Vec<String> = buffer
@@ -9637,7 +10306,7 @@ fn usage_chart_rises_in_braille_below_the_task_rows_and_keeps_its_bins_as_time_p
 }
 
 #[test]
-fn usage_chart_and_activity_strip_share_the_same_style() {
+fn usage_chart_uses_assistant_color_for_selected_usage() {
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     use crate::usage::{Bin, bin_of};
 
@@ -9655,7 +10324,6 @@ fn usage_chart_and_activity_strip_share_the_same_style() {
         )]
         .into(),
     );
-    view.set_activity([bin].into());
     let area = Rect::new(0, 0, 100, 25);
 
     for use_colors in [true, false] {
@@ -9665,39 +10333,195 @@ fn usage_chart_and_activity_strip_share_the_same_style() {
         let layout = view.center_layout(area);
         let x = layout.list.right() - 1;
         let chart = &buf[(x, layout.list.bottom() - 1)];
-        let strip = &buf[(x, layout.prompt.y - 1)];
-        for cell in [chart, strip] {
-            assert!(
-                cell_text(cell.symbol())
-                    .chars()
-                    .all(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
-            );
-        }
-        assert_eq!(chart.fg, strip.fg, "use_colors={use_colors}");
-        assert_eq!(chart.style(), strip.style(), "use_colors={use_colors}");
+        assert!(
+            cell_text(chart.symbol())
+                .chars()
+                .all(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
+        );
+        assert_eq!(
+            chart.fg,
+            if use_colors {
+                Color::Yellow
+            } else {
+                Color::Reset
+            },
+            "use_colors={use_colors}"
+        );
     }
 }
 
 #[test]
-fn activity_strip_dots_the_event_rule_where_a_task_worked_in_the_inline_code_color() {
+fn usage_chart_stacks_cells_at_rounded_boundaries_and_preserves_both_segments() {
+    use crate::usage::Bin;
     let _guard = crate::theme::TEST_LOCK.lock().unwrap();
     let (mut view, now) = event_fixture();
-    view.use_colors = true;
+    view.cell_aspect = 1.0;
+    let area = Rect::new(0, 0, 8, 4);
+    let [left, right] = super::timeline::cell_bins(area, 7, now);
+    for (tokens, others, blue_rows) in [(16, 10, 3), (16, 9, 2), (1600, 1599, 3), (1600, 1, 1)] {
+        view.set_usage_totals(
+            [(left, tokens / 2), (right, tokens / 2)]
+                .map(|(bin, input)| (bin, Bin { input, output: 0 }))
+                .into(),
+            [
+                (left, others.min(tokens / 2)),
+                (right, others.saturating_sub(tokens / 2)),
+            ]
+            .map(|(bin, input)| (bin, Bin { input, output: 0 }))
+            .into(),
+        );
+        for use_colors in [true, false] {
+            view.use_colors = use_colors;
+            let mut buf = Buffer::empty(area);
+            view.render_usage_chart(area, &mut buf, now);
+            for y in 0..4 {
+                assert_eq!(
+                    buf[(7, y)].symbol(),
+                    "⣿",
+                    "both columns fill the same height"
+                );
+                assert_eq!(
+                    buf[(7, y)].fg,
+                    if !use_colors {
+                        Color::Reset
+                    } else if y >= 4 - blue_rows {
+                        crate::theme::inline_code_color()
+                    } else {
+                        Color::Yellow
+                    },
+                    "tokens={tokens}, others={others}, y={y}, use_colors={use_colors}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn usage_chart_combines_bin_pairs_and_keeps_its_outline_when_selection_changes() {
+    use crate::usage::Bin;
+    let (mut view, now) = event_fixture();
+    view.cell_aspect = 1.0;
+    let area = Rect::new(0, 0, 8, 4);
+    let [left, right] = super::timeline::cell_bins(area, 7, now);
+    let totals = [(left, 8), (right, 4), (left - 1, 1), (left - 2, 3)]
+        .map(|(bin, input)| (bin, Bin { input, output: 0 }));
+    let mut outlines = Vec::new();
+    for others in [0_u64, 1, 4, 12] {
+        view.set_usage_totals(
+            totals.into(),
+            [(left, others.min(8)), (right, others.saturating_sub(8))]
+                .map(|(bin, input)| (bin, Bin { input, output: 0 }))
+                .into(),
+        );
+        let mut buf = Buffer::empty(area);
+        view.render_usage_chart(area, &mut buf, now);
+        assert_eq!(buf[(7, 0)].symbol(), "⣿");
+        assert_eq!(buf[(6, 2)].symbol(), "⣤");
+        assert_eq!(buf[(6, 3)].symbol(), "⣿");
+        for cell in &buf.content {
+            if let Some(ch) = cell
+                .symbol()
+                .chars()
+                .next()
+                .filter(|ch| ('\u{2800}'..='\u{28ff}').contains(ch))
+            {
+                let bits = ch as u32 - 0x2800;
+                for (left_bit, right_bit) in
+                    [(0x40, 0x80), (0x04, 0x20), (0x02, 0x10), (0x01, 0x08)]
+                {
+                    assert_eq!(
+                        bits & left_bit != 0,
+                        bits & right_bit != 0,
+                        "{}",
+                        cell.symbol()
+                    );
+                }
+            }
+        }
+        outlines.push(
+            buf.content
+                .iter()
+                .map(|cell| cell.symbol().to_owned())
+                .collect::<Vec<_>>(),
+        );
+    }
+    assert!(outlines.windows(2).all(|pair| pair[0] == pair[1]));
+}
+
+#[test]
+fn usage_chart_keeps_paired_heights_and_colors_when_time_advances_five_seconds() {
+    use crate::usage::Bin;
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let (mut view, _) = event_fixture();
+    view.cell_aspect = 1.0;
+    let now = chrono::DateTime::from_timestamp(1000, 0).unwrap();
+    let area = Rect::new(0, 0, 8, 4);
+    let [left, right] = super::timeline::cell_bins(area, 7, now);
+    view.set_usage_totals(
+        [(left, 8), (right, 4), (left - 1, 1), (left - 2, 3)]
+            .map(|(bin, input)| (bin, Bin { input, output: 0 }))
+            .into(),
+        [(left, 8), (left - 1, 1)]
+            .map(|(bin, input)| (bin, Bin { input, output: 0 }))
+            .into(),
+    );
+    let render = |at| {
+        let mut buf = Buffer::empty(area);
+        view.render_usage_chart(area, &mut buf, at);
+        buf
+    };
+    let first = render(now);
+    assert_eq!(first, render(now + Duration::seconds(5)));
+    let moved = render(now + Duration::seconds(10));
+    for y in 0..area.height {
+        for x in 1..area.width {
+            assert_eq!(first[(x, y)], moved[(x - 1, y)]);
+        }
+    }
+}
+
+#[test]
+fn usage_chart_shows_total_usage_without_a_selected_task() {
+    let (mut view, now) = event_fixture();
+    view.set_sessions(Vec::new(), false);
+    let bin = crate::usage::bin_of(now);
+    let bins = [(
+        bin,
+        crate::usage::Bin {
+            input: 1,
+            output: 0,
+        },
+    )]
+    .into();
+    view.set_usage_totals(bins, Default::default());
+    assert!(view.shows_usage());
+    let area = Rect::new(0, 0, 8, 2);
+    let mut buf = Buffer::empty(area);
+    view.render_usage_chart(area, &mut buf, now);
+    assert!(buf.content.iter().any(|cell| cell.symbol() != " "));
+    view.set_usage_totals(
+        [(bin, crate::usage::Bin::default())].into(),
+        Default::default(),
+    );
+    assert!(!view.shows_usage());
+}
+
+#[test]
+fn task_rule_has_no_activity_dots_without_usage() {
+    let (view, now) = event_fixture();
     let area = Rect::new(0, 0, 100, 25);
     let layout = view.center_layout(area);
-    let (y, right) = (layout.prompt.y - 1, layout.list.right() - 1);
-    let [left_bin, right_bin] = super::timeline::cell_bins(layout.list, right, now);
-    // The newest cell's both bins, then a gap, then a cell's left bin only.
-    view.set_activity([left_bin, right_bin, left_bin - 4].into());
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
-    let cell = |x: u16| &buf[(x, y)];
-    assert_eq!(cell(right).symbol(), "⠒");
-    assert_eq!(cell(right).fg, crate::theme::inline_code_color());
-    assert!(!cell(right).modifier.contains(ratatui::style::Modifier::DIM));
-    assert_eq!(cell(right - 1).symbol(), "─");
-    assert_eq!(cell(right - 2).symbol(), "⠂");
-    assert!(view.timeline_redraw_in(now).is_some());
+    for x in layout.list.x..layout.list.right() {
+        assert!(
+            !buf[(x, layout.prompt_top_rule.y)]
+                .symbol()
+                .chars()
+                .any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
+        );
+    }
+    assert!(view.timeline_redraw_in(now).is_none());
 }
 
 #[path = "click_event_tests.rs"]
@@ -9713,17 +10537,17 @@ mod task_details_group_tests;
 mod task_details_order;
 
 #[test]
-fn task_details_activity_double_click_selects_source() {
+fn task_details_activity_click_selects_source() {
     task_details_click_selects_source(7, "Copied last activity");
 }
 
 #[test]
-fn task_details_update_double_click_selects_source() {
+fn task_details_update_click_selects_source() {
     task_details_click_selects_source(6, "Copied update");
 }
 
 #[test]
-fn task_details_prompt_double_click_selects_source() {
+fn task_details_prompt_click_selects_source() {
     task_details_click_selects_source(0, "Copied prompt");
 }
 
@@ -9764,16 +10588,9 @@ fn task_details_click_selects_source(index: usize, label: &'static str) {
         .start;
     let x = view.viewport.borrow().task_details.x;
     let click = mouse(MouseEventKind::Down(MouseButton::Left), x, y);
-    let previous = view.event_panel[1].clone();
-    assert_eq!(click_mouse(&mut view, click), None);
-    assert_eq!(
-        view.flush_pending_click(Instant::now() + view.double_click_interval),
-        None
-    );
-    assert_eq!(view.visible_event(), Some(&previous), "{label}\n{rendered}");
-    assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(view.visible_event(), Some(&expected), "{label}\n{rendered}");
+    assert!(view.pending_click.is_none());
     event_screen(&view, 160, 45, now);
     assert!(
         view.viewport
@@ -9784,7 +10601,6 @@ fn task_details_click_selects_source(index: usize, label: &'static str) {
     assert_eq!(view.visible_event() == view.event_panel.last(), index == 7);
     view.set_event(Vec::new());
     event_screen(&view, 160, 45, now);
-    assert_eq!(click_mouse(&mut view, click), None);
     assert_eq!(click_mouse(&mut view, click), None);
     assert!(view.event_list.cursor.is_none());
 }
@@ -9863,7 +10679,7 @@ mod codex_exit_tests;
 mod task_details_tasks;
 
 #[test]
-fn wide_separators_join_the_rules_above_and_below() {
+fn large_separators_join_the_rules_above_and_below() {
     let (view, now) = column_padding_fixture();
     for width in [150, 200, 240] {
         let area = Rect::new(0, 0, width, 60);
@@ -9917,12 +10733,14 @@ fn border_labels_use_dim_half_lines_beside_separator_joints() {
         assert_eq!(cell.symbol(), "╴", "width {width}");
         assert_eq!(cell.style(), buf[(joint, y)].style());
         assert!(cell.modifier.contains(ratatui::style::Modifier::DIM));
-        if width >= 150 {
+        if crate::ui::render::ScreenLayout::for_width(width)
+            == crate::ui::render::ScreenLayout::Large
+        {
             let joint = layout.event_panel.x - 2;
             for (x, y, symbol) in [
                 (joint - 1, layout.event_panel.y - 1, "╶"),
                 (joint - 1, layout.event_panel.bottom(), "╶"),
-                (joint + 1, layout.event_panel.bottom(), "╴"),
+                (joint + 1, layout.event_panel.bottom(), "─"),
             ] {
                 let cell = &buf[(x, y)];
                 assert_eq!(
@@ -9966,7 +10784,7 @@ fn border_labels_use_half_lines_beside_screen_edge_corners() {
         let row: String = (0..width)
             .map(|x| cell_text(buf[(x, model.y)].symbol()))
             .collect();
-        assert!(row.contains("opus · medium "), "{row}");
+        assert!(row.contains("opus ") && row.contains(" medium"), "{row}");
         for x in [model.x - 1, width - 2] {
             assert!(
                 buf[(x, model.y)]
@@ -9991,9 +10809,13 @@ mod event_navigation {
                 view.active_panel = Panel::EventList;
                 if search {
                     view.prepare_event_search();
-                    view.event_list.search.query.set_text("a");
+                    view.event_list.search.input.set_text("a");
                     view.rematch_event();
-                    view.event_list.search.editing = editing;
+                    if editing {
+                        view.event_list.search.input.focus()
+                    } else {
+                        view.event_list.search.input.blur()
+                    };
                 }
                 screen(&view, 200, 45);
                 let rect = view.viewport.borrow().event_panel;
@@ -10010,12 +10832,15 @@ mod event_navigation {
                 let current = events.len() / 2;
                 view.select_fixture_event(Some(events[current].clone()));
                 let key = KeyEvent::new(code, modifiers);
-                let mut editor = super::super::line_edit::LineEdit::default();
+                let mut editor: crate::line_edit::Editor =
+                    super::super::line_edit::Editor::default();
                 editor.set_text("a");
-                let consumed = editing && editor.handle(key);
+                let mut kills = crate::line_edit::KillBuffer::default();
+                kills.begin_stroke();
+                let consumed = view.search_focused() && editor.handle_key(key, &mut kills);
                 if consumed {
                     view.handle_key(key);
-                    assert_eq!(view.event_list.search.query.text(), editor.text());
+                    assert_eq!(view.event_list.search.input.text(), editor.text());
                     continue;
                 }
                 let target = if edge {
@@ -10195,7 +11020,7 @@ fn event_border_double_clicks_respect_shared_output_border() {
         click(&mut view, event_panel.bottom());
         assert_eq!(view.visible_event(), Some(&oldest));
         click(&mut view, event_panel.bottom());
-        if width < super::render::WIDE_LAYOUT_COLUMNS {
+        if super::render::ScreenLayout::for_width(width) != super::render::ScreenLayout::Large {
             assert_eq!(view.visible_event(), Some(&oldest));
             assert_eq!(view.event_scroll(), 0);
             assert!(view.active_panel == Panel::EventDetail);
@@ -10302,20 +11127,11 @@ fn event_border_hides_missing_model_and_effort() {
 }
 
 #[test]
-fn event_border_help_entries_fit() {
+fn help_lines_fit() {
     let view = View::default();
     for width in [40, 54, 58, 100, 200] {
         let lines = view.center_help_lines(width);
         assert!(lines.iter().all(|line| line.width() <= usize::from(width)));
-        let text = lines
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(text.contains("2× click top border"));
-        assert!(text.contains("Latest"));
-        assert!(text.contains("2× click bottom border"));
-        assert!(text.contains("Earliest"));
     }
 }
 
@@ -10333,7 +11149,7 @@ fn event_border_bottom_double_click_selects_latest_only_when_not_shared() {
         );
         click_mouse(&mut view, mouse);
         click_mouse(&mut view, mouse);
-        if width < super::render::WIDE_LAYOUT_COLUMNS {
+        if super::render::ScreenLayout::for_width(width) != super::render::ScreenLayout::Large {
             assert_eq!(
                 view.visible_event(),
                 view.event_panel.first(),
@@ -10381,7 +11197,7 @@ fn claude_agent_display_from_real_records() {
             .find(|e| e.calls.iter().any(|c| c.id == id))
             .unwrap();
         assert_eq!(event.summary(), label);
-        assert_eq!(event.calls[0].title, label);
+        assert_eq!(event.calls[0].summary, label);
         let (mut view, now) = event_fixture();
         view.select_fixture_event(Some(event.clone()));
         let screen = event_screen(&view, 200, 45, now);
@@ -10394,9 +11210,7 @@ fn claude_agent_display_from_real_records() {
             "{screen}"
         );
         assert!(!label.is_empty());
-        let description = view.display_event(event).calls[0]
-            .event_detail_title
-            .clone();
+        let description = view.display_event(event).calls[0].title.clone();
         assert!(
             rows[header]
                 .replace(' ', "")
@@ -10422,9 +11236,19 @@ fn claude_agent_display_from_real_records() {
                 .text
                 .to_string();
             assert_eq!(title, description);
-            assert!((0..200).any(|x| cell_text(buffer[(x, header as u16)].symbol()) == "S"));
+            assert_eq!(
+                super::tool_detail::event_detail_content(
+                    view.visible_event().unwrap(),
+                    String::new(),
+                    Style::new().dim()
+                )
+                .sections[0]
+                    .title
+                    .left,
+                None
+            );
         }
-        let description = event.calls[0].event_detail_title.clone();
+        let description = event.calls[0].title.clone();
         assert!(
             description.is_empty()
                 || !rows[header + 1..]
@@ -10433,6 +11257,68 @@ fn claude_agent_display_from_real_records() {
             "{screen}"
         );
     }
+}
+
+fn assert_session_search_keeps_model_on_border(focused: bool) {
+    for width in [120, 200] {
+        let mut row = session("model", "Model task", SessionStatus::Ready, 0);
+        row.model = Some("claude-opus-5-5".into());
+        row.effort = Some("medium".into());
+        let mut view = test_view(Grouping::Project, false);
+        view.set_sessions(vec![row], false);
+        let area = Rect::new(0, 0, width, 40);
+        let now = Utc::now();
+        let border_y = view.center_layout(area).list.bottom();
+        let mut before = Buffer::empty(area);
+        view.render_at(area, &mut before, now);
+        let targets = view
+            .viewport
+            .borrow()
+            .field_targets
+            .iter()
+            .filter(|(_, field)| matches!(field, Field::Model | Field::Effort))
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(targets.len(), 2);
+        for (rect, _) in &targets {
+            assert_eq!(rect.y, border_y);
+        }
+
+        view.search.focus();
+        view.search.insert("a");
+        if !focused {
+            view.search.blur();
+        }
+        let search = view.center_layout(area).search;
+        assert_eq!(search.bottom(), border_y);
+        let mut after = Buffer::empty(area);
+        view.render_at(area, &mut after, now);
+        let query: String = (search.x..search.right())
+            .map(|x| cell_text(after[(x, search.y)].symbol()))
+            .collect();
+        assert_eq!(query.trim(), "Search ❯ a");
+        for (rect, field) in targets {
+            assert!(
+                view.viewport
+                    .borrow()
+                    .field_targets
+                    .contains(&(rect, field))
+            );
+            for x in rect.x..rect.right() {
+                assert_eq!(after[(x, rect.y)], before[(x, rect.y)]);
+            }
+        }
+    }
+}
+
+#[test]
+fn session_search_blurred_keeps_model_on_border() {
+    assert_session_search_keeps_model_on_border(false);
+}
+
+#[test]
+fn session_search_focused_keeps_model_on_border() {
+    assert_session_search_keeps_model_on_border(true);
 }
 
 #[test]
@@ -10463,10 +11349,15 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
                 })
             })
             .unwrap_or(baseline.bottom());
-        view.searching = true;
+        view.search.focus();
         view.search.insert("Task");
         let layout = view.center_layout(area);
         assert_eq!(layout.usage_chart, baseline);
+        if baseline.is_empty() {
+            assert!(layout.search.is_empty());
+            assert!(layout.list.is_empty());
+            continue;
+        }
         assert_eq!(layout.search.y, baseline.bottom() - 1, "{width}x{height}");
         assert_eq!(layout.search.bottom(), baseline.bottom());
         assert_eq!(layout.list.y, baseline.y);
@@ -10486,14 +11377,8 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
             }),
             "search row must not contain chart dots: {width}x{height}"
         );
-        view.set_notice(Some("Notice".into()));
+        view.show_error("Notice".into());
         view.render_at(area, &mut after, now);
-        if !layout.list.is_empty() {
-            let notice: String = (layout.list.x..layout.list.right())
-                .map(|x| cell_text(after[(x, layout.list.bottom() - 1)].symbol()))
-                .collect();
-            assert!(notice.contains("Notice"));
-        }
         let input: String = (layout.search.x..layout.search.right())
             .map(|x| cell_text(after[(x, layout.search.y)].symbol()))
             .collect();
@@ -10506,7 +11391,7 @@ fn session_search_overlays_bottom_of_unchanged_usage_chart() {
                 .list_rows
                 .contains((layout.search.x, layout.search.y).into())
         );
-        view.searching = false;
+        view.search.blur();
         key(&mut view, KeyCode::Char('r'));
         view.set_active_panel(Panel::TaskDetails);
         let rename = view.center_layout(area);
@@ -10542,7 +11427,7 @@ fn session_search_keeps_selection_visible_and_mouse_rows_aligned() {
     let mut buf = Buffer::empty(area);
     view.render(area, &mut buf);
     let baseline = view.center_layout(area).list;
-    view.searching = true;
+    view.search.focus();
     view.render(area, &mut buf);
     let layout = view.center_layout(area);
     assert_eq!(layout.search.y, baseline.bottom() - 1);
@@ -10575,7 +11460,7 @@ fn session_search_keeps_selection_visible_and_mouse_rows_aligned() {
             target.1,
         ),
     );
-    assert_eq!(view.selected, 19);
+    assert_eq!(view.selected, target.0);
     click_mouse(
         &mut view,
         mouse(
@@ -10584,7 +11469,7 @@ fn session_search_keeps_selection_visible_and_mouse_rows_aligned() {
             layout.search.y,
         ),
     );
-    assert_eq!(view.selected, 19);
+    assert_eq!(view.selected, target.0);
 }
 
 #[path = "reading_interaction_tests.rs"]
@@ -10594,7 +11479,7 @@ mod reading_interaction_tests;
 mod terminal_panel_tests;
 
 #[test]
-fn archive_hiding_preserves_tab_and_nearby_selection_after_refresh() {
+fn pending_archive_preserves_tab_and_nearby_selection_after_refresh() {
     for provider in [ProviderId::Claude, ProviderId::Codex] {
         for position in 0..3 {
             let mut view = fixture();
@@ -10608,7 +11493,7 @@ fn archive_hiding_preserves_tab_and_nearby_selection_after_refresh() {
             let visible = view.selectable_indices();
             let target = view.rows[visible[position]].id.clone();
             view.select(visible[position]);
-            view.hide(&target);
+            view.begin_removal(&target);
             let next = view.selected_id().cloned();
             assert!(next.is_some());
             let mut rows = view.rows.clone();
@@ -10616,7 +11501,7 @@ fn archive_hiding_preserves_tab_and_nearby_selection_after_refresh() {
             // Filesystem refreshes can arrive before the worker completion.
             view.set_sessions(rows.clone(), false);
             assert_eq!(view.selected_id(), next.as_ref());
-            view.unhide(&target);
+            view.finish_removal(&target);
             view.set_sessions(rows, false);
             assert_eq!(TASK_FILTERS[view.status_filter].0, "Active");
             assert_eq!(view.selected_id(), next.as_ref());
@@ -10663,7 +11548,9 @@ fn task_details_model_has_no_prefix() {
         })
         .collect::<Vec<_>>();
     assert!(
-        lines.iter().any(|line| line.contains("claude-opus · high")),
+        lines
+            .iter()
+            .any(|line| line.contains("claude-opus ") && line.contains(" high")),
         "{lines:?}"
     );
 }
@@ -10671,10 +11558,7 @@ fn task_details_model_has_no_prefix() {
 fn weekly_usage_view() -> View {
     let mut view = fixture();
     let hub = crate::sessions::Hub::new(vec![
-        Box::new(crate::providers::codex::CodexProvider::new(
-            PathBuf::new(),
-            PathBuf::new(),
-        )),
+        Box::new(crate::providers::codex::CodexProvider::new(PathBuf::new())),
         Box::new(crate::providers::claude::ClaudeProvider::new(PathBuf::new())),
     ]);
     view.provider_names = hub.display_names();
@@ -10736,11 +11620,12 @@ fn task_header_weekly_usage_mirrored_modes_and_widths() {
             if mode == crate::state::UsageView::Compact {
                 assert!(text.contains("Claude · Codex"), "{text}");
                 assert!(text.contains("21%") && text.contains("5%"), "{text}");
-                let budget = if width >= render::WIDE_LAYOUT_COLUMNS {
-                    width / 2
-                } else {
-                    width * 3 / 4
-                };
+                let budget =
+                    if render::ScreenLayout::for_width(width) == render::ScreenLayout::Large {
+                        width / 2
+                    } else {
+                        width * 3 / 4
+                    };
                 assert!(target.width <= budget);
                 assert_eq!(target.x + target.width / 2, width / 2);
                 if width >= 149 {
@@ -11054,8 +11939,11 @@ fn task_details_weekly_usage_keeps_model_and_effort_targets() {
     let mut buffer = Buffer::empty(area);
     view.render_at(area, &mut buffer, Utc::now());
     let targets = &view.viewport.borrow().field_targets;
-    // The narrow layout starts them at the midline, under the task's folder.
-    for (field, x, width) in [(Field::Model, 57, 11), (Field::Effort, 71, 4)] {
+    let layout = view.center_layout(area);
+    for (field, x, width) in [
+        (Field::Model, area.x + 2, 11),
+        (Field::Effort, layout.gap.x - 4, 4),
+    ] {
         let rect = targets
             .iter()
             .find(|(_, candidate)| *candidate == field)
@@ -11065,7 +11953,10 @@ fn task_details_weekly_usage_keeps_model_and_effort_targets() {
         let line = (area.x..area.right())
             .map(|x| cell_text(buffer[(x, rect.y)].symbol()))
             .collect::<String>();
-        assert!(line.contains("claude-opus · high"), "{line}");
+        assert!(
+            line.contains("claude-opus ") && line.contains(" high"),
+            "{line}"
+        );
         assert!(
             !line.contains("weekly") && !line.contains("Model:"),
             "{line}"
@@ -11169,10 +12060,7 @@ fn recorded_agent_settings_use_the_picker_catalog_and_shared_effort() {
         include_str!("../../tests/fixtures/codex-models-cache.json"),
     )
     .unwrap();
-    let provider = crate::providers::codex::CodexProvider::new(
-        directory.path().into(),
-        directory.path().join("manager"),
-    );
+    let provider = crate::providers::codex::CodexProvider::new(directory.path().into());
     let mut row = session("settings", "Settings", SessionStatus::Ready, 0);
     row.id.provider = ProviderId::Codex;
     row.transcript = Some(
@@ -11197,13 +12085,13 @@ fn recorded_agent_settings_use_the_picker_catalog_and_shared_effort() {
         .unwrap();
     let settings = call.model_settings.as_ref().unwrap();
     assert_eq!(settings.model.as_deref(), Some("gpt-6.1-sol"));
-    assert!(!call.event_detail_title.contains("GPT-6.1-Sol"));
+    assert!(!call.title.contains("GPT-6.1-Sol"));
     let display = view.display_event(event);
     assert!(
         display
             .calls
             .iter()
-            .any(|call| call.event_detail_title.contains("GPT-6.1-Sol · low"))
+            .any(|call| call.title.contains("GPT-6.1-Sol · low"))
     );
     let mut missing = event.clone();
     for call in &mut missing.calls {
@@ -11216,7 +12104,7 @@ fn recorded_agent_settings_use_the_picker_catalog_and_shared_effort() {
         display
             .calls
             .iter()
-            .any(|call| call.event_detail_title.ends_with("GPT-6.1-Sol"))
+            .any(|call| call.title.ends_with("GPT-6.1-Sol"))
     );
 }
 
@@ -11239,7 +12127,7 @@ fn context_usage_on_task_details_border_keeps_status_and_elapsed() {
         let mut usage = crate::usage::Series::default();
         usage.update(&path, provider).unwrap();
         view.set_context_usage(&id, usage.context_percent());
-        for width in [80, 120, 200] {
+        for width in [100, 120, 200] {
             let area = Rect::new(0, 0, width, 40);
             let mut buf = Buffer::empty(area);
             view.render_at(area, &mut buf, now);
@@ -11308,3 +12196,243 @@ mod task_tree_collapse_tests;
 
 #[path = "transcript_tests.rs"]
 mod transcript_tests;
+
+#[test]
+fn selector_hides_task_details_rules_through_panel_padding() {
+    use super::draft_controls::{Selector, SelectorKind, TaskKey};
+    for width in [100, 120, 149, 150] {
+        for effort in [false, true] {
+            let mut view = View::new(Grouping::Project, false);
+            let parent = session("parent", "Parent", SessionStatus::Working, 0);
+            let mut child = session("child", "Child", SessionStatus::Working, 0);
+            child.parent = Some(parent.id.clone());
+            child.started_at = Some(parent.updated_at);
+            view.set_sessions(vec![parent.clone(), child], false);
+            view.selected = view
+                .rows
+                .iter()
+                .position(|row| row.id == parent.id)
+                .unwrap();
+            let area = Rect::new(0, 0, width, 40);
+            let now = parent.updated_at;
+            let mut buffer = Buffer::empty(area);
+            view.render_at(area, &mut buffer, now);
+            let details = view.center_layout(area).task_details;
+            let rules: Vec<_> = (details.y..details.bottom())
+                .filter(|&y| (details.x..details.right()).any(|x| buffer[(x, y)].symbol() == "●"))
+                .collect();
+            if width < 150 {
+                assert!(
+                    !rules.is_empty(),
+                    "fixture must draw a background indicator at {width}"
+                );
+            }
+            let values = vec![
+                "low".into(),
+                "medium".into(),
+                "high".into(),
+                "xhigh".into(),
+                "max".into(),
+            ];
+            let target = TaskKey::Session(parent.id.clone());
+            view.selector = Some(Selector::new(
+                if effort {
+                    SelectorKind::Effort {
+                        target,
+                        labels: values.clone(),
+                        values,
+                    }
+                } else {
+                    SelectorKind::Model {
+                        target,
+                        labels: values.clone(),
+                        families: vec!["Models".into(); values.len()],
+                        values,
+                    }
+                },
+                0,
+            ));
+            view.render_at(area, &mut buffer, now);
+            for y in rules {
+                assert_eq!(
+                    buffer[(details.right(), y)].symbol(),
+                    " ",
+                    "residue at ({}, {y}), width {width}, effort {effort}",
+                    details.right()
+                );
+            }
+            assert!(view.viewport.borrow().task_details_text.rows.is_empty());
+        }
+    }
+}
+
+#[test]
+fn background_title_joints_preserve_every_existing_column() {
+    for (width, joints) in [
+        (160, [40, 41, 80, 81]),
+        (120, [60, 61, 118, 119]),
+        (90, [0, 1, 88, 89]),
+    ] {
+        let (mut view, now) = column_padding_fixture();
+        let mut child = session("joint-child", "Working child", SessionStatus::Working, 0);
+        child.cwd = view.rows[view.selected].cwd.clone();
+        child.parent = Some(view.rows[view.selected].id.clone());
+        child.started_at = Some(now - Duration::seconds(65));
+        child.last_message = Some("Child output".into());
+        let parent_id = view.rows[view.selected].id.clone();
+        let mut rows = view.rows.clone();
+        rows.push(child);
+        view.set_sessions(rows, false);
+        view.selected = view
+            .rows
+            .iter()
+            .position(|row| row.id == parent_id)
+            .unwrap();
+        let area = Rect::new(0, 0, width, 60);
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, now);
+        let details = view.center_layout(area).task_details;
+        let title_rows: Vec<_> = (details.y..details.bottom())
+            .filter(|&y| {
+                let text: String = (details.x..details.right())
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect();
+                text.contains("Working child") || text.contains("Run checks")
+            })
+            .collect();
+        assert_eq!(
+            title_rows.len(),
+            2,
+            "width {width}: {}",
+            buf.content
+                .chunks(width as usize)
+                .map(|r| r.iter().map(|c| c.symbol()).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "tests/ui_snapshots/background_title_baseline_{width}.txt"
+        ));
+        let baseline: Vec<String> =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        for y in 0..area.height {
+            for x in 0..width {
+                let joint = title_rows
+                    .contains(&y)
+                    .then(|| joints.iter().position(|&column| column == x))
+                    .flatten();
+                let expected = joint.map(|index| {
+                    [
+                        if width == 90 { "─" } else { "├" },
+                        "╴",
+                        "╶",
+                        if width == 160 { "┤" } else { "─" },
+                    ][index]
+                });
+                assert_eq!(
+                    buf[(x, y)].symbol(),
+                    expected.unwrap_or(&baseline[usize::from(y * width + x)]),
+                    "width {width}, ({x},{y})"
+                );
+                if expected.is_some() {
+                    assert!(buf[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
+                    assert_eq!(buf[(x, y)].fg, Color::Reset);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn tool_image_caption_click_opens_transcript_image_without_graphics() {
+    use crate::providers::Provider;
+    for fixture in [
+        "claude-read-image.jsonl",
+        "mcp-claude/image.jsonl",
+        "codex-images/tool-mcp.jsonl",
+        "codex-images/tool-view.jsonl",
+    ] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(fixture);
+        let (mut view, now) = event_fixture();
+        let events = if fixture.starts_with("codex-images/") {
+            let directory = tempfile::tempdir().unwrap();
+            let provider = crate::providers::codex::CodexProvider::new(directory.path().into());
+            let mut session = view.rows[view.selected].clone();
+            session.transcript = Some(path.clone());
+            provider.event_panel(&session, usize::MAX, false).unwrap()
+        } else {
+            crate::providers::claude::event_reader::tail(&path, usize::MAX).unwrap()
+        };
+        let event = events
+            .into_iter()
+            .find(|event| {
+                event.calls.iter().any(|call| {
+                    call.output
+                        .iter()
+                        .flatten()
+                        .any(|section| matches!(section, crate::event::Section::Image(_)))
+                })
+            })
+            .expect("captured tool image");
+        let image = event
+            .calls
+            .iter()
+            .flat_map(|call| call.output.iter().flatten())
+            .find_map(|section| {
+                if let crate::event::Section::Image(image) = section {
+                    Some(image.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert!(view.inline_images.borrow().is_none());
+        view.select_fixture_event(Some(event));
+        let height = if fixture == "claude-read-image.jsonl" {
+            50
+        } else {
+            300
+        };
+        let rendered = event_screen(&view, 160, height, now);
+        let target = LinkTarget::Image(image.source.clone());
+        let (rect, _) = view
+            .viewport
+            .borrow()
+            .event_links
+            .iter()
+            .find(|(_, link)| *link == target)
+            .cloned()
+            .unwrap_or_else(|| panic!("{fixture}: image label has no drawn link\n{rendered}"));
+        assert_eq!(
+            click_mouse(
+                &mut view,
+                mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y)
+            )
+            .or_else(|| view.flush_pending_click(Instant::now() + view.double_click_interval)),
+            Some(Action::Open(LinkTarget::Image(image.source.clone()))),
+            "{fixture}"
+        );
+
+        if fixture == "claude-read-image.jsonl" {
+            assert!(image.source.bytes().is_some());
+            let snapshot = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/ui_snapshots/tool_image_caption.txt");
+            if std::env::var_os("UPDATE_EVENT_DETAIL_SNAPSHOT").is_some() {
+                std::fs::write(&snapshot, &rendered).unwrap();
+            }
+            assert_eq!(rendered, std::fs::read_to_string(snapshot).unwrap());
+            view.set_inline_images(true, Some((8, 16)));
+            event_screen(&view, 160, 50, now);
+            let viewport = view.viewport.borrow();
+            assert!(
+                viewport
+                    .event_detail_images
+                    .iter()
+                    .any(|drawn| drawn.image == image.source)
+            );
+            assert!(!viewport.event_links.iter().any(|(_, link)| *link == target));
+        }
+    }
+}

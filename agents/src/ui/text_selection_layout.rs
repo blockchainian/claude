@@ -25,7 +25,7 @@ pub(super) fn map_lines_in(
     markdown: bool,
     cwd: Option<&std::path::Path>,
 ) -> Vec<Vec<CellMap>> {
-    let mut tokens = source_tokens(source, markdown);
+    let mut tokens = source_tokens(source, markdown, lines);
     if let Some(cwd) = cwd {
         for range in super::paths::text_paths(source, cwd) {
             if let Some(relative) = super::paths::relative_path(&source[range.clone()], cwd) {
@@ -241,19 +241,22 @@ fn path_tokens(tokens: &[Token], path: &Range<usize>, display: &str) -> Option<V
                 (token.text == "/" && index + 1 < form.len()).then_some(index + 1)
             })
             .collect();
-        for &start in &starts {
-            if start <= anchor {
-                continue;
+        let heads = std::iter::once(anchor).chain(starts.iter().copied());
+        for head in heads {
+            for &start in &starts {
+                if start <= head.max(anchor) {
+                    continue;
+                }
+                let mut candidate = form[..head].to_vec();
+                let omitted_start = form[head].source.as_ref()?.start;
+                let omitted_end = form[start - 1].source.as_ref()?.start;
+                candidate.push(Token {
+                    text: "…".into(),
+                    source: Some(omitted_start..omitted_end),
+                });
+                candidate.extend_from_slice(&form[start - 1..]);
+                consider(candidate);
             }
-            let mut candidate = form[..anchor].to_vec();
-            let omitted_start = form[anchor].source.as_ref()?.start;
-            let omitted_end = form[start - 1].source.as_ref()?.start;
-            candidate.push(Token {
-                text: "…".into(),
-                source: Some(omitted_start..omitted_end),
-            });
-            candidate.extend_from_slice(&form[start - 1..]);
-            consider(candidate);
         }
         let basename = starts.last().copied().unwrap_or(0);
         let mut tail = form[basename..].to_vec();
@@ -276,7 +279,7 @@ fn path_tokens(tokens: &[Token], path: &Range<usize>, display: &str) -> Option<V
     best.map(|(_, tokens)| tokens)
 }
 
-fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
+fn source_tokens(source: &str, markdown: bool, lines: &[Line<'_>]) -> Vec<Token> {
     let mut tokens = Vec::new();
     if !markdown {
         push_text(&mut tokens, source, 0..source.len(), source, false);
@@ -285,6 +288,10 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
     let mut lists = Vec::new();
     let mut code = false;
     let mut table_cells = 0;
+    let mut table_start = 0;
+    let mut cell_start = 0;
+    let mut table_rows: Vec<Vec<Vec<Token>>> = Vec::new();
+    let mut display_cursor = 0;
     for (event, range) in Parser::new_ext(
         source,
         Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES,
@@ -292,7 +299,28 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
     .into_offset_iter()
     {
         match event {
-            Event::Start(Tag::TableHead | Tag::TableRow) => table_cells = 0,
+            Event::Start(Tag::Table(_)) => {
+                table_start = tokens.len();
+                table_rows.clear();
+            }
+            Event::Start(Tag::TableHead | Tag::TableRow) => {
+                table_cells = 0;
+                table_rows.push(Vec::new());
+            }
+            Event::End(TagEnd::TableCell) => {
+                table_rows
+                    .last_mut()
+                    .expect("table row")
+                    .push(tokens[cell_start..].to_vec());
+            }
+            Event::End(TagEnd::Table) => {
+                if let Some((displayed, end)) = table_tokens(&table_rows, &lines[display_cursor..])
+                {
+                    tokens.truncate(table_start);
+                    tokens.extend(displayed);
+                    display_cursor += end;
+                }
+            }
             Event::Start(Tag::TableCell) => {
                 if table_cells > 0 {
                     tokens.extend(" │ ".graphemes(true).map(|text| Token {
@@ -301,6 +329,7 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
                     }));
                 }
                 table_cells += 1;
+                cell_start = tokens.len();
             }
             Event::Start(Tag::CodeBlock(_)) => code = true,
             Event::End(TagEnd::CodeBlock) => code = false,
@@ -339,6 +368,98 @@ fn source_tokens(source: &str, markdown: bool) -> Vec<Token> {
         }
     }
     tokens
+}
+
+/// Reorder cell tokens into display order, retaining each cell's original source bytes.
+fn table_tokens(rows: &[Vec<Vec<Token>>], lines: &[Line<'_>]) -> Option<(Vec<Token>, usize)> {
+    use super::content::{Cell, Table};
+    let table = Table::new(
+        rows.iter()
+            .map(|row| {
+                row.iter()
+                    .map(|cell| {
+                        Line::from(
+                            cell.iter()
+                                .map(|token| token.text.as_str())
+                                .collect::<String>(),
+                        )
+                    })
+                    .collect()
+            })
+            .collect(),
+        Default::default(),
+    );
+    // Source bytes by offset into the concatenated plain cells; every grapheme of a
+    // preformatted cell maps to the whole cell it was formatted from.
+    let mut offset = 0;
+    let mut cells: std::collections::HashMap<usize, Option<Range<usize>>> = Default::default();
+    for (cells_of_row, tokens_of_row) in table.rows.iter().zip(rows) {
+        for (cell, tokens) in cells_of_row.iter().zip(tokens_of_row) {
+            match cell {
+                Cell::Prose(_) => {
+                    for token in tokens {
+                        cells.insert(offset, token.source.clone());
+                        offset += token.text.len();
+                    }
+                }
+                Cell::Preformatted(_) => {
+                    let source = tokens
+                        .iter()
+                        .filter_map(|token| token.source.clone())
+                        .reduce(|whole, next| whole.start.min(next.start)..whole.end.max(next.end));
+                    let plain = cell.plain();
+                    for (byte, _) in plain.grapheme_indices(true) {
+                        cells.insert(offset + byte, source.clone());
+                    }
+                    offset += plain.len();
+                }
+            }
+        }
+    }
+    for (rule_index, rule) in lines.iter().enumerate() {
+        let text = rule.to_string();
+        let trimmed = text.trim_start();
+        if trimmed.is_empty() || !trimmed.chars().all(|ch| matches!(ch, '─' | '┼')) {
+            continue;
+        }
+        let indent = text.len() - trimmed.len();
+        let layout = table.layout(indent, textwrap::Options::new(rule.width()));
+        let header_height = layout.lines.iter().position(|line| {
+            let text = line.to_string();
+            let text = text.trim_start();
+            !text.is_empty() && text.chars().all(|ch| matches!(ch, '─' | '┼'))
+        })?;
+        let Some(start) = rule_index.checked_sub(header_height) else {
+            continue;
+        };
+        let end = start + layout.lines.len();
+        if end > lines.len()
+            || !layout
+                .lines
+                .iter()
+                .zip(&lines[start..end])
+                .all(|(expected, actual)| expected.to_string() == actual.to_string())
+        {
+            continue;
+        }
+        let mut tokens = Vec::new();
+        for (line, sources) in layout.lines.iter().zip(layout.sources) {
+            let mut x = 0;
+            for grapheme in line.to_string().graphemes(true) {
+                let source = sources
+                    .iter()
+                    .find(|(columns, _)| usize::from(columns.start) == x)
+                    .and_then(|(_, bytes)| cells.get(&bytes.start).cloned().flatten());
+                tokens.push(Token {
+                    text: grapheme.to_owned(),
+                    source,
+                });
+                x += grapheme.width();
+            }
+        }
+        return Some((tokens, end));
+    }
+    None
 }
 
 fn push_text(
@@ -420,7 +541,7 @@ mod tests {
             .find(|text| text.starts_with("/Users/"))
             .unwrap();
         let basename = path.rsplit('/').next().unwrap();
-        let parent = path.rsplitn(3, '/').nth(1).unwrap();
+        let parent = path.rsplit('/').nth(1).unwrap();
         let home = std::env::var("HOME").unwrap();
         let fixture_cwd = std::path::Path::new(fixture["cwd"].as_str().unwrap())
             .parent()
@@ -464,7 +585,7 @@ mod tests {
                     .iter()
                     .map(|range| super::super::links::Link {
                         range: range.clone(),
-                        target: path.into(),
+                        target: crate::ui::links::LinkTarget::Path(path.into()),
                     })
                     .collect();
                 let drawn = super::super::links::row_links(&maps[0], &links);
@@ -473,8 +594,14 @@ mod tests {
                 assert_eq!(
                     drawn,
                     [
-                        (first..first + label.width() as u16, path.into()),
-                        (second..second + label.width() as u16, path.into()),
+                        (
+                            first..first + label.width() as u16,
+                            crate::ui::links::LinkTarget::Path(path.into())
+                        ),
+                        (
+                            second..second + label.width() as u16,
+                            crate::ui::links::LinkTarget::Path(path.into())
+                        ),
                     ],
                     "{cwd}: {label}"
                 );
@@ -505,11 +632,14 @@ mod tests {
         assert_eq!(maps[0].len(), display.chars().count());
         let links = [super::super::links::Link {
             range: 0..source.len(),
-            target: target.clone(),
+            target: crate::ui::links::LinkTarget::Path(target.clone()),
         }];
         assert_eq!(
             super::super::links::row_links(&maps[0], &links),
-            [(0..display.width() as u16, target)]
+            [(
+                0..display.width() as u16,
+                crate::ui::links::LinkTarget::Path(target)
+            )]
         );
         assert_eq!(maps[0].first().unwrap().1.start, 0);
         assert_eq!(maps[0].last().unwrap().1.end, source.len());
@@ -523,8 +653,8 @@ mod tests {
                 "See /a/b/src/lib.rs:272-274 done",
                 "See src/lib.rs:272-274 done",
             ),
-            ("/a/b", "."),
-            ("/a/b/", "."),
+            ("/a/b", "b"),
+            ("/a/b/", "b"),
             (
                 "/a/b/src/lib.rs and /a/bc/other.rs",
                 "src/lib.rs and /a/bc/other.rs",
@@ -547,7 +677,7 @@ mod tests {
     fn shortened_filename_preserves_following_cjk_punctuation() {
         let source = "报告已写到 /private/tmp/claude-501/-Users-satoshi-Code-blockchainian-claude/0ed4978e-9ece-4b9d-9bc5-04bf44fedacb/scratchpad/background-research/report.md，并已发给 team-lead。";
         for markdown in [false, true] {
-            let shortened = super::super::line_truncation::abbreviate_paths_for_wrap(
+            let shortened = super::super::line_truncation::fit_paths_to_wrap_width(
                 source,
                 &crate::ui::paths::text_paths(source, std::path::Path::new("/")),
                 25,
@@ -601,7 +731,7 @@ mod tests {
     fn home_replacement_after_wrapped_whitespace_maps_original_home() {
         let home = std::env::var("HOME").expect("HOME");
         let source = format!("before {home}/workspace/report.md after");
-        let shortened = super::super::line_truncation::abbreviate_paths_for_wrap(
+        let shortened = super::super::line_truncation::fit_paths_to_wrap_width(
             &source,
             &crate::ui::paths::text_paths(&source, std::path::Path::new("/")),
             15,
@@ -693,7 +823,7 @@ mod tests {
     #[test]
     fn abbreviated_paths_map_omitted_bytes_and_preserve_following_text() {
         let source = "before /private/workspace/reports/report.md after";
-        let shortened = super::super::line_truncation::abbreviate_paths_for_wrap(
+        let shortened = super::super::line_truncation::fit_paths_to_wrap_width(
             source,
             &crate::ui::paths::text_paths(source, std::path::Path::new("/")),
             20,
@@ -704,7 +834,7 @@ mod tests {
         assert!(
             maps.iter()
                 .flatten()
-                .any(|(_, bytes)| source[bytes.clone()].contains("private/workspace"))
+                .any(|(_, bytes)| &source[bytes.clone()] == "workspace/reports")
         );
         let last = maps.last().unwrap().last().unwrap();
         assert_eq!(&source[last.1.clone()], "r");

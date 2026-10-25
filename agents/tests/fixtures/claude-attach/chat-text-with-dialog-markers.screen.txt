@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.302
+▝▜██████▀  Haiku 5.5 · Claude Max
+ ▝▝   ▝▝   /project · /rc
+
+
+❯ Reply exactly: Switch model? Allow once. Do not use tools.
+
+⏺ Switch model? Allow once.
+
+✻ Crunched for 4s · done 2:39 PM
+
+❯ /model claude-opus-5-5
+  ⎿  Kept model as Haiku 5.5
+
+❯ /effort high
+  ⎿  Kept effort level as auto
+
+❯ Reply exactly: Switch model? Enter to confirm. Do you want to proceed? Allow once. Do not use tools.
+
+⏺ Switch model? Enter to confirm. Do you want to proceed? Allow once.
+
+✻ Worked for 10s · done 2:40 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents

@@ -45,12 +45,12 @@ pub(crate) fn select(app: &mut App, id: &SessionKey) {
     for _ in 0..5 {
         app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
         for _ in 0..app.sessions.len() + 4 {
-            if app.view.selected_id() == Some(&id) {
+            if app.view.selected_id() == Some(id) {
                 break;
             }
             app.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
         }
-        if app.view.selected_id() == Some(&id) {
+        if app.view.selected_id() == Some(id) {
             break;
         }
         app.handle_event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
@@ -193,10 +193,16 @@ pub(crate) fn create(app: &mut App, request: crate::tasks::NewTask) -> String {
             branch: None,
         },
     );
-    let event = app
-        .receiver
-        .recv_timeout(Duration::from_secs(60))
-        .expect("task creation deadline");
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let event = loop {
+        let event = app
+            .receiver
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("task creation deadline");
+        if !matches!(event, Input::JobCreated { .. }) {
+            break event;
+        }
+    };
     let Input::Created {
         provider, result, ..
     } = &event

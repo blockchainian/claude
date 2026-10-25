@@ -9,54 +9,6 @@ pub(super) struct SessionRefresh {
     pub deletes: Vec<(u64, SessionKey)>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn refresh_burst_runs_once_then_runs_one_merged_request() {
-        let home = tempfile::tempdir().unwrap();
-        let mut app = App::new(Hub::new(Vec::new()), home.path().into());
-        assert_eq!(app.request_refresh(), 1);
-        for index in 0..50 {
-            app.request_sessions(RefreshRequest::paths(vec![PathBuf::from(format!(
-                "{index}.jsonl"
-            ))]));
-        }
-        assert!(app.session_refresh.idle.is_none());
-        assert!(
-            matches!(&app.session_refresh.pending, Some(RefreshRequest::Paths(paths)) if paths.len() == 50)
-        );
-        app.request_refresh();
-        assert_eq!(app.session_refresh.pending, Some(RefreshRequest::Full));
-        let Input::Sessions {
-            refresh,
-            generation,
-            result,
-        } = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap()
-        else {
-            panic!("expected the initial real Hub refresh");
-        };
-        assert_eq!(generation, 1);
-        app.finish_sessions(*refresh, generation, result).unwrap();
-        assert!(app.session_refresh.pending.is_none());
-        assert!(app.session_refresh.idle.is_none());
-        let Input::Sessions {
-            refresh,
-            generation,
-            result,
-        } = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap()
-        else {
-            panic!("expected one merged Hub refresh");
-        };
-        assert_eq!(generation, 52);
-        app.finish_sessions(*refresh, generation, result).unwrap();
-        assert!(app.session_refresh.idle.is_some());
-        assert!(app.session_refresh.pending.is_none());
-        assert!(app.receiver.try_recv().is_err());
-    }
-}
-
 impl SessionRefresh {
     pub fn new(refresh: Refresh) -> Self {
         Self {
@@ -153,7 +105,7 @@ impl App {
                 return;
             }
         }
-        self.view.set_notice(Some("Nothing to delete".into()));
+        self.view.show_info("Nothing to delete".into());
     }
 
     /// Applies completed real-provider refreshes for synchronous fixture assertions.
@@ -191,5 +143,53 @@ impl App {
                 return input;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refresh_burst_runs_once_then_runs_one_merged_request() {
+        let home = tempfile::tempdir().unwrap();
+        let mut app = App::new(Hub::new(Vec::new()), home.path().into());
+        assert_eq!(app.request_refresh(), 1);
+        for index in 0..50 {
+            app.request_sessions(RefreshRequest::paths(vec![PathBuf::from(format!(
+                "{index}.jsonl"
+            ))]));
+        }
+        assert!(app.session_refresh.idle.is_none());
+        assert!(
+            matches!(&app.session_refresh.pending, Some(RefreshRequest::Paths(paths)) if paths.len() == 50)
+        );
+        app.request_refresh();
+        assert_eq!(app.session_refresh.pending, Some(RefreshRequest::Full));
+        let Input::Sessions {
+            refresh,
+            generation,
+            result,
+        } = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap()
+        else {
+            panic!("expected the initial real Hub refresh");
+        };
+        assert_eq!(generation, 1);
+        app.finish_sessions(*refresh, generation, result).unwrap();
+        assert!(app.session_refresh.pending.is_none());
+        assert!(app.session_refresh.idle.is_none());
+        let Input::Sessions {
+            refresh,
+            generation,
+            result,
+        } = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap()
+        else {
+            panic!("expected one merged Hub refresh");
+        };
+        assert_eq!(generation, 52);
+        app.finish_sessions(*refresh, generation, result).unwrap();
+        assert!(app.session_refresh.idle.is_some());
+        assert!(app.session_refresh.pending.is_none());
+        assert!(app.receiver.try_recv().is_err());
     }
 }

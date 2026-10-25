@@ -20,9 +20,9 @@ impl PromptBox {
         } else {
             let draft = std::mem::take(&mut self.editor);
             if !draft.is_empty() {
-                sent.end();
+                sent.move_caret(crate::line_edit::Motion::TextEnd);
                 sent.insert("\n");
-                sent.append_editor(draft);
+                sent.append(draft);
             }
             self.editor = sent;
         }

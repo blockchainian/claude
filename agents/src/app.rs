@@ -2,20 +2,22 @@
 
 #[path = "app_transcript.rs"]
 mod transcript_cache;
-use transcript_cache::{ActivityCache, FileStamp};
+use transcript_cache::{FileStamp, UsageCache};
 
+use crate::event::ALL_EVENTS;
 use crate::model::Action;
 use crate::model::{DraftKey, Session, SessionStatus};
 use crate::providers::Snapshot;
-use crate::providers::{Job, ProviderId, SessionInput, SessionKey};
+use crate::providers::{ProviderId, SessionAction, SessionInput, SessionKey};
 use crate::refresh::{FALLBACK_INTERVAL, POLLING_INTERVAL, RefreshSchedule};
 use crate::sessions::Hub;
 use crate::state::Preferences;
-use crate::terminal_background;
+use crate::terminal;
 use crate::ui::View;
+use crossterm::SynchronizedUpdate;
 use crossterm::event::Event;
 use crossterm::event::Theme;
-use crossterm::terminal;
+use crossterm::terminal as crossterm_terminal;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::ffi::OsStr;
@@ -46,6 +48,7 @@ enum Input {
     },
     Terminal(io::Result<Event>),
     Filesystem(notify::Result<notify::Event>),
+    EventOutput(notify::Result<notify::Event>),
     Sessions {
         refresh: Box<crate::sessions::Refresh>,
         generation: u64,
@@ -60,6 +63,10 @@ enum Input {
         draft_key: DraftKey,
         provider: ProviderId,
         result: io::Result<std::process::Output>,
+    },
+    JobCreated {
+        draft_key: DraftKey,
+        job: String,
     },
     /// A new task's worktree, with the task request to create in it.
     WorktreeCreated {
@@ -143,9 +150,12 @@ pub struct App {
     view: View,
     clipboard: crate::clipboard::Clipboard,
     sessions: Vec<Session>,
+    /// The latest supervision relationships, used to route archive actions.
+    supervisions: Vec<crate::providers::Supervision>,
     /// Set when the user chose to hand the terminal to a provider process; the dashboard
     /// returns once it exits.
     launch: Option<Command>,
+    terminal_report: terminal::Report,
     /// The session program running in the event detail panel.
     terminal: Option<crate::session_terminal::SessionTerminal>,
     /// The task whose terminal opens once that task's previous client has closed.
@@ -161,13 +171,8 @@ pub struct App {
     transcript_request: u64,
     transcript_has_older: bool,
     transcript_parsed_bytes: u64,
-    /// Token usage of each transcript the user has selected, kept up to date while selected.
-    usage: std::collections::HashMap<PathBuf, crate::usage::Series>,
-    /// When each recently active transcript's turns ran.
-    activity: ActivityCache,
-    usage_stamps: std::collections::HashMap<PathBuf, FileStamp>,
-    #[cfg(test)]
-    usage_reads: usize,
+    /// Visible token usage, refreshed independently of paints.
+    usage: UsageCache,
 }
 
 #[derive(PartialEq, Eq)]
@@ -187,7 +192,6 @@ struct PendingTranscript {
     token: u64,
     session: SessionKey,
     path: PathBuf,
-    visible: usize,
 }
 
 /// A new task's directory and branch: the repository's current branch, or none outside git.
@@ -231,8 +235,11 @@ impl App {
         view.set_pinned(&preferences.pinned);
         view.set_drafts(&preferences.drafts);
         view.restore_question_answers(&preferences);
-        if !preferences.draft_notices.is_empty() {
-            view.set_notice(Some(preferences.draft_notices.join("; ")));
+        view.restore_attention_skips(&preferences);
+        if let Some(notice) = preferences.configuration_notice() {
+            view.show_error(notice);
+        } else if !preferences.draft_notices.is_empty() {
+            view.show_error(preferences.draft_notices.join("; "));
         }
         view.set_double_click_ms(preferences.double_click_ms);
         view.set_loading(true);
@@ -242,7 +249,7 @@ impl App {
             if let Some((_, defaults)) = hub.task_defaults(&draft.cwd) {
                 match defaults {
                     Ok(defaults) => view.set_draft_defaults(&draft.cwd, defaults),
-                    Err(error) => view.set_notice(Some(format!("Cannot create draft: {error}"))),
+                    Err(error) => view.show_error(format!("Cannot create draft: {error}")),
                 }
             }
         }
@@ -260,7 +267,9 @@ impl App {
             view,
             clipboard: crate::clipboard::Clipboard::new(),
             sessions: Vec::new(),
+            supervisions: Vec::new(),
             launch: None,
+            terminal_report: terminal::Report::default(),
             terminal: None,
             terminal_task: None,
             waiting_terminal: None,
@@ -272,11 +281,7 @@ impl App {
             transcript_request: 0,
             transcript_has_older: false,
             transcript_parsed_bytes: 0,
-            usage: std::collections::HashMap::new(),
-            activity: ActivityCache::default(),
-            usage_stamps: std::collections::HashMap::new(),
-            #[cfg(test)]
-            usage_reads: 0,
+            usage: UsageCache::default(),
         }
     }
 
@@ -284,10 +289,16 @@ impl App {
         loop {
             let mut terminal = enter_terminal()?;
             // Raw mode is on, so the terminal's reply reaches us instead of the screen.
-            let background = terminal_background::query(terminal_background::DEFAULT_TIMEOUT)
-                .ok()
-                .flatten();
-            self.apply_background(background.is_some_and(terminal_background::is_light));
+            self.terminal_report = terminal::query(terminal::DEFAULT_TIMEOUT).unwrap_or_default();
+            self.apply_background(
+                self.terminal_report
+                    .background
+                    .is_some_and(terminal::is_light),
+            );
+            self.view.set_inline_images(
+                self.terminal_report.supports_images,
+                self.terminal_report.cell_pixels,
+            );
             let result = self.event_loop(&mut terminal);
             self.close_terminal();
             leave_terminal(terminal)?;
@@ -304,7 +315,9 @@ impl App {
                 )),
                 Err(error) => Some(format!("Cannot start {:?}: {error}", command.get_program())),
             };
-            self.view.set_notice(notice);
+            if let Some(notice) = notice {
+                self.view.show_error(notice);
+            }
         }
     }
 
@@ -322,14 +335,12 @@ impl App {
                     let _ = filesystem.send(Input::Filesystem(event));
                 })
             });
-        let mut watcher = match watch {
-            Ok(watcher) => Some(watcher),
-            Err(error) => {
-                self.view
-                    .set_notice(Some(format!("Falling back to polling: {error}")));
-                None
-            }
-        };
+        let mut watcher = watch.ok();
+        let output = self.sender.clone();
+        let mut output_watcher = crate::sessions::OutputWatcher::new(move |event| {
+            let _ = output.send(Input::EventOutput(event));
+        })
+        .map_err(io::Error::other)?;
         let _reader = InputReader::start(self.sender.clone())?;
         let mut schedule = RefreshSchedule::new(
             Instant::now(),
@@ -367,13 +378,30 @@ impl App {
             if self.handle_action(action) {
                 return Ok(());
             }
-            self.draw(terminal)?;
+            match output_watcher.set_path(self.view.event_output_path()) {
+                Ok(true) => self.view.refresh_event_output(),
+                Ok(false) => {}
+                Err(error) => self.view.show_error(error.to_string()),
+            }
+            // Publish placeholder cells as one frame; tmux otherwise forwards partial rows.
+            io::stdout().sync_update(|out| {
+                self.draw_frame(terminal, chrono::Utc::now(), |commands| {
+                    terminal::send_image_commands(out, commands)
+                })
+            })??;
             if self.wait_for_input(&mut watcher, &mut schedule, selection_tick)? {
                 return Ok(());
             }
         }
     }
 
+    #[cfg(test)]
+    fn refresh_event_for_list_rows(&mut self, rows: usize) {
+        self.initialize_selected_event_list();
+        self.refresh_event(self.view.event_read_count_for(rows, true));
+    }
+
+    #[cfg(test)]
     fn draw<B: ratatui::backend::Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
@@ -381,23 +409,36 @@ impl App {
         self.draw_at(terminal, chrono::Utc::now())
     }
 
+    #[cfg(test)]
     fn draw_at<B: ratatui::backend::Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), B::Error> {
+        self.draw_frame(terminal, now, |_| Ok(()))
+    }
+
+    fn draw_frame<B: ratatui::backend::Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        now: chrono::DateTime<chrono::Utc>,
+        send_commands: impl FnOnce(&[u8]) -> Result<(), B::Error>,
+    ) -> Result<(), B::Error> {
         // Keep the drawing cursor hidden until the frame's input cursor is in place.
         terminal.hide_cursor()?;
         let mut cursor = None;
-        terminal.draw(|frame| {
+        terminal.try_draw(|frame| {
             let area = frame.area();
-            self.refresh_event(self.view.event_count(area));
-            self.refresh_usage();
-            self.refresh_activity(area.width, now);
+            self.initialize_selected_event_list();
+            self.refresh_event(self.view.event_read_count(area));
+            self.refresh_usage(self.view.usage_width(area), now);
             self.view.render_at(area, frame.buffer_mut(), now);
             cursor = self.view.cursor_pos(area);
+            // try_draw flushes cells only after this callback returns successfully.
+            send_commands(&self.view.take_image_commands())
         })?;
         self.terminal_drawn();
+        self.view.begin_image_frame();
         if let Some(position) = cursor {
             terminal.set_cursor_position(position)?;
             terminal.show_cursor()?;
@@ -512,19 +553,25 @@ impl App {
                     };
                     schedule.paths_changed(Instant::now(), request);
                 }
-                Input::Filesystem(Err(error)) if watcher.is_some() => {
-                    self.view
-                        .set_notice(Some(format!("Falling back to polling: {error}")));
+                Input::Filesystem(Err(_)) if watcher.is_some() => {
                     *watcher = None;
                     *schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
                 }
                 Input::Filesystem(_) => {}
+                Input::EventOutput(Ok(_)) => self.view.refresh_event_output(),
+                Input::EventOutput(Err(error)) => {
+                    self.view.show_error(error.to_string());
+                }
                 Input::EventsLoaded {
                     token,
                     reader,
                     result,
                 } => {
                     self.finish_event_load(token, reader, result);
+                }
+                Input::JobCreated { draft_key, job } => {
+                    self.view.draft_job_created(draft_key, job);
+                    schedule.changed(Instant::now());
                 }
                 Input::Created {
                     draft_key,
@@ -533,6 +580,9 @@ impl App {
                 } => {
                     let result =
                         result.and_then(|output| self.hub.provider(provider).created_job(&output));
+                    if let Err(error) = &result {
+                        self.view.show_error(error.to_string());
+                    }
                     self.view.draft_created(draft_key, result);
                     schedule.changed(Instant::now());
                 }
@@ -579,12 +629,10 @@ impl App {
         if let Some(path) = &self.preferences.theme
             && let Err(error) = crate::theme::use_theme_file(path, light)
         {
-            self.view
-                .set_notice(Some(format!("Theme not loaded: {error}")));
+            self.view.show_error(format!("Theme not loaded: {error}"));
         }
         if let Err(error) = crate::ui::use_highlight_theme(light, self.highlight_theme(light)) {
-            self.view
-                .set_notice(Some(format!("Theme not loaded: {error}")));
+            self.view.show_error(format!("Theme not loaded: {error}"));
         }
     }
 
@@ -604,6 +652,11 @@ impl App {
             Event::Key(key) => self.view.handle_key(key),
             Event::Mouse(mouse) => self.view.handle_mouse(mouse),
             Event::Paste(text) => return self.paste(&text),
+            Event::Resize(width, height) => {
+                self.refresh_cell_pixels();
+                self.view.resize(width, height);
+                return false;
+            }
             Event::ThemeChanged(theme) => {
                 self.apply_background(theme == Theme::Light);
                 return false;
@@ -624,32 +677,37 @@ impl App {
         if let Some(action) = self.view.terminal_paste(text) {
             return self.handle_action(Some(action));
         }
-        if self.view.pasting_prompt() {
-            match crate::images::ImageAttachment::from_paste(text) {
-                Ok(Some(image)) => self.view.attach_image(image),
-                Ok(None) => self.view.handle_paste(text),
-                Err(error) => self.view.set_notice(Some(error.to_string())),
+        if !self.view.pasting_prompt() {
+            if self.view.handle_paste(text) {
+                return false;
             }
-        } else {
-            self.view.handle_paste(text);
+            if !self.view.prepare_paste_prompt() {
+                self.view.show_error("Cannot paste here".into());
+                return false;
+            }
+            return self.paste(text);
+        }
+        match crate::images::ImageAttachment::from_paste(text) {
+            Ok(Some(image)) => self.view.attach_image(image),
+            Ok(None) => {
+                self.view.handle_paste(text);
+            }
+            Err(error) => self.view.show_error(error.to_string()),
         }
         false
     }
 
-    fn refresh_event(&mut self, visible: usize) {
+    /// Loads the selected task's saved sort and filter into the event list.
+    fn initialize_selected_event_list(&mut self) {
         if let Some(id) = self.view.selected_id() {
             let sorting = self.preferences.task_sort(id);
-            self.view.initialize_event_sort(sorting);
-        }
-        let count = if self.view.event_list.start_requested
-            || self.view.transcript_fully_loaded()
-            || self.view.restoring_event_position()
-        {
-            usize::MAX
-        } else {
             self.view
-                .event_read_count(visible, self.transcript_has_older)
-        };
+                .initialize_event_list(sorting, self.preferences.task_filter(id));
+        }
+    }
+
+    /// Reads the newest `count` events; `ALL_EVENTS` reads in the background.
+    fn refresh_event(&mut self, count: usize) {
         let selected = self
             .view
             .selected_id()
@@ -694,15 +752,12 @@ impl App {
                     }
                 }
                 Err(error) => {
-                    self.apply_event_result(Err(error), visible);
+                    self.apply_event_result(Err(error));
                     return;
                 }
             }
         }
-        if first_load
-            || ((self.view.transcript_fully_loaded() || self.view.restoring_event_position())
-                && self.transcript_has_older)
-        {
+        if first_load || (count == ALL_EVENTS && self.transcript_has_older) {
             let (session, path, mut reader) = self.transcript.take().expect("reader checked");
             self.transcript_request += 1;
             let token = self.transcript_request;
@@ -710,7 +765,6 @@ impl App {
                 token,
                 session: session.clone(),
                 path: path.clone(),
-                visible,
             });
             let pinned = if first_load && !self.view.has_pinned_events(&session) {
                 let pinned = self.preferences.task_pinned_events(&session);
@@ -779,7 +833,7 @@ impl App {
                     && previous.file == stamp.file
                     && (previous.count >= count || !self.transcript_has_older)
             }) {
-                self.finish_event_refresh(stamp, visible);
+                self.finish_event_refresh(stamp);
                 return Ok(None);
             }
             let update = self
@@ -792,8 +846,8 @@ impl App {
         })();
         match result {
             Ok(None) => {}
-            Ok(Some(result)) => self.apply_event_result(Ok(result), visible),
-            Err(error) => self.apply_event_result(Err(error), visible),
+            Ok(Some(result)) => self.apply_event_result(Ok(result)),
+            Err(error) => self.apply_event_result(Err(error)),
         }
     }
 
@@ -823,7 +877,7 @@ impl App {
                 }
                 loaded.transcript
             });
-            self.apply_event_result(result, pending.visible);
+            self.apply_event_result(result);
         }
     }
 
@@ -863,11 +917,7 @@ impl App {
         self.view.set_pinned_events(task, rows);
     }
 
-    fn apply_event_result(
-        &mut self,
-        result: io::Result<(TranscriptStamp, crate::event::Update)>,
-        visible: usize,
-    ) {
+    fn apply_event_result(&mut self, result: io::Result<(TranscriptStamp, crate::event::Update)>) {
         match result {
             Ok((stamp, update)) => {
                 self.transcript_parsed_bytes += update.parsed_bytes;
@@ -880,7 +930,7 @@ impl App {
                 if changed {
                     self.view.apply_event_update(update);
                 }
-                self.finish_event_refresh(stamp, visible);
+                self.finish_event_refresh(stamp);
             }
             Err(error) => {
                 self.transcript = None;
@@ -893,23 +943,15 @@ impl App {
                     self.view.event_session = None;
                 }
                 self.view
-                    .set_notice(Some(format!("Cannot read task events: {error}")));
+                    .show_error(format!("Cannot read task events: {error}"));
             }
         }
     }
 
-    fn finish_event_refresh(&mut self, stamp: TranscriptStamp, visible: usize) {
-        self.view.event_list.has_older = self.transcript_has_older;
-        if self.view.event_list.restoring {
-            self.view.prepare_event_search();
-            self.view.restore_event_list();
-        }
-        self.view.event_list.pending_older = 0;
-        self.view.finish_event_start();
+    fn finish_event_refresh(&mut self, stamp: TranscriptStamp) {
+        self.view.finish_event_load(self.transcript_has_older);
         self.view.event_session = Some(stamp.session.clone());
-        self.view
-            .clamp_event_scroll(self.view.event_max_scroll_for(visible));
-        if self.view.transcript_fully_loaded() {
+        if stamp.count == ALL_EVENTS {
             self.full_transcript_stamp = Some(stamp);
             self.transcript_stamp = None;
         } else {
@@ -918,53 +960,18 @@ impl App {
         }
     }
 
-    /// Updates file inputs on session changes and polling ticks, and bins when time moves.
-    fn refresh_activity(&mut self, width: u16, now: chrono::DateTime<chrono::Utc>) {
-        if let Some(bins) = self.activity.update(&self.sessions, width, now) {
-            self.view.set_activity(bins);
+    /// Updates the active tasks' usage and splits out the selected task without rereading it.
+    fn refresh_usage(&mut self, width: u16, now: chrono::DateTime<chrono::Utc>) {
+        let selected = self.view.selected_id().cloned();
+        if let Some((total, others)) =
+            self.usage
+                .update(&self.sessions, selected.as_ref(), width, now)
+        {
+            self.view.set_usage_totals(total, others);
         }
-    }
-
-    /// Reads what the selected task's transcript gained and hands its usage to the view.
-    fn refresh_usage(&mut self) {
-        let Some(session) = self
-            .view
-            .selected_id()
-            .and_then(|id| self.sessions.iter().find(|session| &session.id == id))
-        else {
-            return;
-        };
-        let Some(path) = &session.transcript else {
-            return;
-        };
-        let Ok(stamp) = FileStamp::read(path) else {
-            return;
-        };
-        let previous = self.usage_stamps.get(path);
-        if previous == Some(&stamp) && self.view.usage_session() == Some(&session.id) {
-            return;
-        }
-        let series = self.usage.entry(path.clone()).or_default();
-        let changed = if previous == Some(&stamp) {
-            false
-        } else {
-            if previous.is_some_and(|previous| !stamp.appended_to(previous)) {
-                *series = Default::default();
-            }
-            #[cfg(test)]
-            {
-                self.usage_reads += 1;
-            }
-            let Ok(changed) = series.update(path, session.id.provider) else {
-                return;
-            };
-            self.usage_stamps.insert(path.clone(), stamp);
-            changed
-        };
-        self.view
-            .set_context_usage(&session.id, series.context_percent());
-        if changed || self.view.usage_session() != Some(&session.id) {
-            self.view.set_usage(&session.id, series.bins.clone());
+        if let Some(id) = selected.as_ref() {
+            self.view
+                .set_context_usage(id, self.usage.context_percent(id));
         }
     }
 
@@ -1020,8 +1027,7 @@ impl App {
             .redeem_reset_credit(request.clone())
         else {
             self.view.reset_credit_completed(provider);
-            self.view
-                .set_notice(Some(io::ErrorKind::Unsupported.to_string()));
+            self.view.show_error(io::ErrorKind::Unsupported.to_string());
             return;
         };
         let sender = self.sender.clone();
@@ -1058,42 +1064,64 @@ impl App {
                 };
                 if let Some(failure) = failure {
                     self.view
-                        .set_notice(Some(redemption.reason.unwrap_or_else(|| failure.into())));
+                        .show_error(redemption.reason.unwrap_or_else(|| failure.into()));
                 }
             }
             Err(error) => {
                 self.view.reset_credit_failed(provider, &request);
-                self.view.set_notice(Some(error.to_string()));
+                self.view.show_error(error.to_string());
             }
         }
     }
 
-    fn apply_sessions(&mut self, Snapshot { sessions, has_more }: Snapshot) {
+    fn apply_sessions(
+        &mut self,
+        Snapshot {
+            sessions,
+            has_more,
+            supervisions,
+        }: Snapshot,
+    ) {
         self.forget_inactive_state(&sessions);
         self.sessions = sessions.clone();
+        self.supervisions = supervisions;
         self.view.set_loading(false);
         self.view.set_sessions(sessions, has_more);
     }
 
-    /// Finished tasks leave the Pinned group and discard their saved interface state.
+    /// Finished tasks discard saved interface state except event pins; task pins last while they or their root are active.
     fn forget_inactive_state(&mut self, sessions: &[Session]) {
         for session in sessions
             .iter()
             .filter(|session| session.status == SessionStatus::Inactive)
         {
-            if self.preferences.tasks.contains_key(&session.id) {
-                let saved = self.preferences.forget_task(&self.config_dir, &session.id);
-                self.report_save(saved);
-            }
-            self.view.clear_pinned_events(&session.id);
+            let saved = self
+                .preferences
+                .keep_only_task_event_pins(&self.config_dir, &session.id);
+            self.report_save(saved);
         }
-        let pinned = self.preferences.pinned.len();
-        self.preferences.pinned.retain(|id| {
-            !sessions
-                .iter()
-                .any(|session| &session.id == id && session.status == SessionStatus::Inactive)
+        let pinned = self.preferences.pinned.active.len();
+        self.preferences.pinned.active.retain(|id| {
+            let Some(session) = sessions.iter().find(|session| &session.id == id) else {
+                return true;
+            };
+            if session.status != SessionStatus::Inactive {
+                return true;
+            }
+            let mut root = session;
+            for _ in 0..sessions.len() {
+                let Some(parent) = root
+                    .parent
+                    .as_ref()
+                    .and_then(|id| sessions.iter().find(|session| &session.id == id))
+                else {
+                    break;
+                };
+                root = parent;
+            }
+            root.parent.is_none() && root.status != SessionStatus::Inactive
         });
-        if self.preferences.pinned.len() != pinned {
+        if self.preferences.pinned.active.len() != pinned {
             let saved = self.preferences.save_pinned(&self.config_dir);
             self.report_save(saved);
             self.view.set_pinned(&self.preferences.pinned);
@@ -1118,7 +1146,7 @@ impl App {
             .closing_terminals
             .get_mut(&id)
             .and_then(session_terminal::TerminalClose::take);
-        let job: Job = match closing {
+        let job: SessionAction = match closing {
             Some(close) => Box::new(move || {
                 close
                     .join()
@@ -1132,13 +1160,13 @@ impl App {
 
     fn input_error(&mut self, input: &SessionInput, error: String) {
         if matches!(input, SessionInput::Interrupt) {
-            self.view.set_notice(Some(format!("Cannot stop: {error}")));
+            self.view.show_error(format!("Cannot stop: {error}"));
         } else {
             self.view.input_failed(error);
         }
     }
 
-    fn start_input_job(&mut self, id: SessionKey, input: SessionInput, job: Job) -> bool {
+    fn start_input_job(&mut self, id: SessionKey, input: SessionInput, job: SessionAction) -> bool {
         if !self.pending_inputs.insert(id.clone()) {
             return false;
         }
@@ -1164,7 +1192,7 @@ impl App {
             Err(error) => {
                 self.pending_inputs.remove(&id);
                 if interrupt {
-                    self.view.set_notice(Some(format!("Cannot stop: {error}")));
+                    self.view.show_error(format!("Cannot stop: {error}"));
                 } else {
                     self.view.input_complete(&id, &input, Err(error));
                 }
@@ -1195,7 +1223,7 @@ impl App {
             }
             Err(error) => self
                 .view
-                .set_notice(Some(format!("Cannot create draft: {error}"))),
+                .show_error(format!("Cannot create draft: {error}")),
         }
     }
 
@@ -1205,10 +1233,16 @@ impl App {
         provider: ProviderId,
         request: crate::tasks::NewTask,
     ) {
+        let created_sender = self.sender.clone();
         let job = self
             .hub
             .provider(provider)
-            .create(&request)
+            .create(
+                &request,
+                Box::new(move |job| {
+                    let _ = created_sender.send(Input::JobCreated { draft_key, job });
+                }),
+            )
             .unwrap_or_else(|| Err(io::Error::other("Provider cannot create tasks")));
         let job = match job {
             Ok(job) => job,
@@ -1285,10 +1319,10 @@ impl App {
         }
     }
 
-    /// Hides the session at once and deletes it on a worker thread.
+    /// Removes the session from the list while its deletion runs on a worker thread.
     fn delete(&mut self, session: Session) {
         let id = session.id.clone();
-        self.view.hide(&id);
+        self.view.begin_removal(&id);
         let job = match self.hub.provider(id.provider).delete(&session) {
             Ok(job) => job,
             Err(error) => return self.deleted(&id, Err(error)),
@@ -1306,8 +1340,9 @@ impl App {
 
     fn archive(&mut self, session: Session) {
         let id = session.id.clone();
-        self.view.hide(&id);
-        let job = match self.hub.provider(id.provider).archive(&session) {
+        self.view.begin_removal(&id);
+        let supervision = self.supervisions.iter().find(|s| s.session == id);
+        let job = match self.hub.archive(&session, supervision) {
             Ok(job) => job,
             Err(error) => return self.archived(&id, Err(error)),
         };
@@ -1325,7 +1360,7 @@ impl App {
     fn run_session_job(
         &self,
         id: SessionKey,
-        job: Job,
+        job: SessionAction,
         name: &str,
         panic_message: &'static str,
         complete: fn(SessionKey, io::Result<()>) -> Input,
@@ -1340,11 +1375,10 @@ impl App {
     }
 
     fn archived(&mut self, id: &SessionKey, result: io::Result<()>) {
-        self.view.unhide(id);
+        self.view.finish_removal(id);
         self.request_refresh();
         if let Err(error) = result {
-            self.view
-                .set_notice(Some(format!("Cannot archive: {error}")));
+            self.view.show_error(format!("Cannot archive: {error}"));
         }
     }
 
@@ -1356,10 +1390,9 @@ impl App {
                 self.request_refresh();
             }
             Err(error) => {
-                self.view.unhide(id);
+                self.view.finish_removal(id);
                 self.request_refresh();
-                self.view
-                    .set_notice(Some(format!("Cannot delete: {error}")));
+                self.view.show_error(format!("Cannot delete: {error}"));
             }
         }
     }
@@ -1375,8 +1408,7 @@ impl App {
             | Action::Rename { id, .. }
             | Action::Delete(id)
             | Action::Archive(id)
-            | Action::Stop(id)
-            | Action::TogglePin { id, .. } => Some(id),
+            | Action::Stop(id) => Some(id),
             _ => None,
         };
         if let Some(session) = target.and_then(|id| self.session(id))
@@ -1433,6 +1465,12 @@ impl App {
                 let saved = self.preferences.save_task_ask(&self.config_dir, &id, ask);
                 self.report_save(saved);
             }
+            Action::PersistSkip { id, skipped_at } => {
+                let saved =
+                    self.preferences
+                        .save_task_skipped_at(&self.config_dir, &id, skipped_at);
+                self.report_save(saved);
+            }
             Action::AnswerQuestions { ask, answer } => {
                 let id = ask.session.clone();
                 if let Some(transcript) = self
@@ -1448,20 +1486,15 @@ impl App {
                         },
                     );
                 } else {
-                    self.view
-                        .set_notice(Some("Session has no transcript".into()));
+                    self.view.show_error("Session has no transcript".into());
                 }
             }
             Action::SendImages { id, text, images } => {
                 self.send_input(id, SessionInput::PromptWithImages { text, images })
             }
-            Action::PasteImage => match self.clipboard.image() {
-                Ok(image) => self.view.attach_image(image),
-                Err(error) => self.view.set_notice(Some(error.to_string())),
-            },
             Action::PasteText => match self.clipboard.text() {
                 Ok(text) => return self.paste(&text),
-                Err(error) => self.view.set_notice(Some(error.to_string())),
+                Err(error) => self.view.show_error(error.to_string()),
             },
             Action::ShowMore => {
                 self.hub.show_more();
@@ -1495,13 +1528,11 @@ impl App {
                             Ok(()) => {
                                 self.request_refresh();
                             }
-                            Err(error) => self
-                                .view
-                                .set_notice(Some(format!("Cannot rename: {error}"))),
+                            Err(error) => self.view.show_error(format!("Cannot rename: {error}")),
                         }
                     } else {
                         self.view
-                            .set_notice(Some("Cannot rename: session has no transcript".into()));
+                            .show_error("Cannot rename: session has no transcript".into());
                     }
                 }
             }
@@ -1517,11 +1548,11 @@ impl App {
             Action::Stop(id) => {
                 self.send_input(id, SessionInput::Interrupt);
             }
-            Action::Hide(_) => {}
-            Action::TogglePin { id, pinned } => {
-                self.preferences.pinned.retain(|pinned_id| pinned_id != &id);
+            Action::TogglePin { id, pinned, tab } => {
+                let pins = self.preferences.pinned.for_tab_mut(tab);
+                pins.retain(|pinned_id| pinned_id != &id);
                 if pinned {
-                    self.preferences.pinned.insert(0, id);
+                    pins.insert(0, id);
                 }
                 let saved = self.preferences.save_pinned(&self.config_dir);
                 self.report_save(saved);
@@ -1544,25 +1575,35 @@ impl App {
                     .save_task_sort(&self.config_dir, &id, sorting);
                 self.report_save(saved);
             }
+            Action::PersistFiltering { id, filter } => {
+                let saved = self
+                    .preferences
+                    .save_task_filter(&self.config_dir, &id, filter);
+                self.report_save(saved);
+            }
             Action::PersistGrouping(grouping) => {
                 self.preferences.grouping = grouping;
                 let saved = self.preferences.save_grouping(&self.config_dir);
                 self.report_save(saved);
             }
-            Action::Cut(text) => {
-                if let Err(error) = self.clipboard.copy(&text) {
-                    self.view.set_notice(Some(format!("Cannot copy: {error}")));
-                }
-            }
             Action::Copy { text, label } => match self.clipboard.copy(&text) {
                 Ok(()) => self.view.show_copied(label, Instant::now()),
-                Err(error) => self.view.set_notice(Some(format!("Cannot copy: {error}"))),
+                Err(error) => self.view.show_error(format!("Cannot copy: {error}")),
             },
             Action::Unsupported(what) => {
-                self.view
-                    .set_notice(Some(format!("{what} is not supported")));
+                self.view.show_error(format!("{what} is not supported"));
             }
-            Action::OpenPath(target) => {
+            Action::Open(target) => {
+                let target = match target {
+                    crate::ui::links::LinkTarget::Path(path) => path,
+                    crate::ui::links::LinkTarget::Image(source) => match source.local_file() {
+                        Ok(path) => path,
+                        Err(error) => {
+                            self.view.show_error(format!("Cannot open image: {error}"));
+                            return false;
+                        }
+                    },
+                };
                 let link = crate::ui::vscode::open_target(&target);
                 let opened = Command::new("open")
                     .arg(link.as_deref().map_or(target.as_os_str(), OsStr::new))
@@ -1577,7 +1618,7 @@ impl App {
                     }
                     Err(error) => self
                         .view
-                        .set_notice(Some(format!("Cannot open {}: {error}", target.display()))),
+                        .show_error(format!("Cannot open {}: {error}", target.display())),
                 }
             }
         }
@@ -1601,8 +1642,14 @@ impl App {
 
     fn report_save(&mut self, result: io::Result<()>) {
         if let Err(error) = result {
-            self.view
-                .set_notice(Some(format!("Cannot save preferences: {error}")));
+            let unsupported = error
+                .get_ref()
+                .is_some_and(|error| error.is::<crate::state::UnsupportedConfiguration>());
+            self.view.show_error(if unsupported {
+                error.to_string()
+            } else {
+                format!("Cannot save preferences: {error}")
+            });
         }
     }
 
@@ -1616,10 +1663,10 @@ impl App {
             return false;
         }
         if !session.cwd.is_dir() {
-            self.view.set_notice(Some(format!(
+            self.view.show_error(format!(
                 "Directory no longer exists: {}",
                 session.cwd.display()
-            )));
+            ));
             return false;
         }
         self.launch = self
@@ -1666,11 +1713,11 @@ mod keyboard;
 mod session_terminal;
 
 fn enter_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
-    terminal::enable_raw_mode()?;
+    crossterm_terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
     crossterm::execute!(
         stdout,
-        terminal::EnterAlternateScreen,
+        crossterm_terminal::EnterAlternateScreen,
         crossterm::event::EnableBracketedPaste,
         crossterm::event::PushKeyboardEnhancementFlags(
             crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
@@ -1689,8 +1736,11 @@ fn leave_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> io::R
         crossterm::event::DisableBracketedPaste,
         MouseReports::Disable
     );
-    terminal::disable_raw_mode()?;
-    crossterm::execute!(terminal.backend_mut(), terminal::LeaveAlternateScreen)?;
+    crossterm_terminal::disable_raw_mode()?;
+    crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm_terminal::LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     reports
 }

@@ -410,7 +410,7 @@ fn http_reader_rejects_wrong_routes_and_invalid_json() {
 }
 
 #[test]
-fn hook_rejected_questions_resend_message_without_answers() {
+fn hook_rejected_questions_resend_message_and_questions() {
     let config = tempfile::tempdir().unwrap();
     let job = config.path().join("jobs/recorded");
     std::fs::create_dir_all(&job).unwrap();
@@ -442,7 +442,7 @@ fn hook_rejected_questions_resend_message_without_answers() {
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
     let decoded: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
-    let reason = "The user dismissed these questions because the message you sent with them was not shown.\nResend that message verbatim, then end your turn. Ask nothing, in text or through AskUserQuestion, until the user replies.";
+    let reason = "The user dismissed these questions because the message you sent with them was not shown.\nResend that message verbatim, followed by the questions and their options as plain text, then end your turn. Ask nothing through AskUserQuestion until the user replies.";
     assert_eq!(
         decoded,
         json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}})
@@ -492,7 +492,7 @@ fn hook_rejected_questions_resend_message_without_answers() {
         assert_eq!(
             crate::providers::tool::rejected_answers(&body["tool_input"]["questions"], &result)
                 .as_deref(),
-            Some("Chat about this\n\nYou have not answered all questions")
+            Some("Chat about this")
         );
     }
 }

@@ -52,7 +52,7 @@ fn task_cursor_preserves_cell_colors_in_both_themes_and_color_modes() {
                         }
                     );
                     assert!(
-                        plain[(area.right() - 1, y)]
+                        plain[(area.right() - 2, y)]
                             .modifier
                             .contains(Modifier::DIM)
                     );

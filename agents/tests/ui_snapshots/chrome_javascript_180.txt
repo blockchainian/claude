@@ -1,0 +1,90 @@
+  Active 1                                                                                                                                                              Inactive 0
+─────────────────────────────────────────────┬────────────────── Working ──────────────────┬────────────────────────────────────────────────────────────────────────────────────────
+                   project                   │                   Prompt                    │                            claude-in-chrome javascript tool                  20:24:53
+ ● Task log example              Working     │              Task log example               │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+                                             │                                             │
+─────────────────────────────────────────────┴╴project ──── Task log example ──────────────┴────────────────────────────────────────────────────────────────────────────────────────
+ Task log example ❮ /bg
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ claude-in-chrome javascript tool                                                                                                                                         20:24:53
+
+                                                      [
+                                                        ...new Set(
+                                                          performance.getEntriesByType('resource').map(e => e.name).filter(n =>
+                                                            /usage|reset|limit|grant|credit/i.test(n)
+                                                          ).map(n => n.replace(/[=&?]/g, ' ')),
+                                                        ),
+                                                      ].join('\n');
+                                                                                          ↓
+                                      https://claude.ai/v1/environment_providers/private/organizations/ORGANIZATION_ID/environments limit LIMIT
+
+
+
+                                                Tab Context:
+                                                - Executed on tabId: 123456789
+                                                - Available tabs:
+                                                  • tabId 123456789: "New session - Claude" ("https://claude.ai/new#settings/usage")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ? help

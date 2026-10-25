@@ -56,11 +56,12 @@ fn text_style(usage: &WeeklyUsage) -> Style {
 }
 
 fn half_width(width: u16, available: [u16; 2]) -> u16 {
-    let budget = if width >= super::render::WIDE_LAYOUT_COLUMNS {
-        width / 2
-    } else {
-        (usize::from(width) * 3 / 4) as u16
-    };
+    let budget =
+        if super::render::ScreenLayout::for_width(width) == super::render::ScreenLayout::Large {
+            width / 2
+        } else {
+            (usize::from(width) * 3 / 4) as u16
+        };
     ((budget.saturating_sub(1)) / 2)
         .min(available[0].saturating_sub(1))
         .min(available[1].saturating_sub(1))
@@ -334,7 +335,11 @@ mod tests {
                 .collect::<Vec<_>>();
             assert!(!bar.is_empty());
             for cell in bar {
-                assert_eq!(cell.fg == ratatui::style::Color::Red, red, "{used}");
+                assert_eq!(
+                    cell.fg == ratatui::style::Color::Rgb(160, 99, 93),
+                    red,
+                    "{used}"
+                );
             }
         }
     }
@@ -366,7 +371,7 @@ mod tests {
                     let start = row[..start].chars().count();
                     for cell in &buf.content[start..start + name.len()] {
                         assert_eq!(
-                            cell.fg == ratatui::style::Color::Red,
+                            cell.fg == ratatui::style::Color::Rgb(160, 99, 93),
                             red,
                             "{view:?}, {used}, {name}"
                         );

@@ -47,22 +47,16 @@ pub(super) fn heading_rect(text: &str, area: Rect) -> Rect {
 
 impl View {
     pub(super) fn group_heading(&self, index: usize, width: u16) -> String {
-        let group = if self.is_pinned(index) {
+        if self.in_pinned_group(index) {
             "Pinned".to_owned()
         } else {
             match self.grouping {
-                Grouping::Project => self.project_groups[self.group_index(index).unwrap()]
-                    .directory()
-                    .map_or_else(
-                        || format_directory_display(Path::new(""), None),
-                        |path| {
-                            super::line_truncation::abbreviate_path(
-                                &path.to_string_lossy(),
-                                usize::MAX,
-                                None,
-                            )
-                        },
-                    ),
+                Grouping::Project => format_directory_display(
+                    self.project_groups[self.group_index(index).unwrap()]
+                        .directory()
+                        .unwrap_or(Path::new("")),
+                    Some(usize::from(width)),
+                ),
                 Grouping::Status => self.rows[self.group_index(index).unwrap()]
                     .status
                     .label()
@@ -71,11 +65,6 @@ impl View {
                     .session_model_text(&self.rows[self.group_index(index).unwrap()])
                     .unwrap_or_else(|| "Unknown".to_owned()),
             }
-        };
-        if self.grouping == Grouping::Project && !self.is_pinned(index) {
-            super::line_truncation::abbreviate_path(&group, usize::from(width).min(64), None)
-        } else {
-            group
         }
     }
 
@@ -115,7 +104,7 @@ impl View {
         let with_subtasks: std::collections::HashSet<_> = self
             .rows
             .iter()
-            .filter(|row| !self.hidden.contains(&row.id))
+            .filter(|row| !self.removing.contains(&row.id))
             .filter_map(|row| row.parent.as_ref())
             .collect();
         // Hand out accents top to bottom before drawing.
@@ -192,13 +181,14 @@ impl View {
                 let rect = heading_rect(&group, rect);
                 line(group.clone().dim(), rect, buf);
                 if self.grouping == Grouping::Project
-                    && !self.is_pinned(index)
-                    && let Some(directory) =
-                        self.project_groups[self.group_index(index).unwrap()].directory()
+                    && !self.in_pinned_group(index)
+                    && let Some(directory) = self.project_groups[self.group_index(index).unwrap()]
+                        .directory()
+                        .and_then(|directory| super::links::existing(directory.to_path_buf()))
                 {
                     let link =
                         Rect::new(rect.x, rect.y, group.width() as u16, 1).intersection(rect);
-                    let links = [(link, directory.to_path_buf())];
+                    let links = [(link, LinkTarget::Path(directory))];
                     state.list_links.extend(links);
                 }
                 continue;
@@ -221,10 +211,18 @@ impl View {
             if selected {
                 state.marker = Some((rect.x, rect.y));
             }
-            let depth = self.ancestors(index).count();
+            let root = self.tree_index(index).unwrap_or(index);
+            let depth = if index == root {
+                0
+            } else {
+                self.ancestors(index)
+                    .take_while(|&ancestor| ancestor != root)
+                    .count()
+                    + 1
+            };
             let indent = u16::try_from(depth).unwrap_or(u16::MAX).saturating_mul(3);
             if indent > 0 {
-                let ancestors: Vec<_> = self.ancestors(index).collect();
+                let ancestors: Vec<_> = self.ancestors(index).take(depth).collect();
                 let mut prefix = String::new();
                 for ancestor in ancestors.iter().rev().skip(1) {
                     prefix.push_str(if has_next_sibling[*ancestor] {
@@ -254,7 +252,15 @@ impl View {
             if !header && with_subtasks.contains(&task.id) {
                 state.fold_toggles.push((dot_area, task.id.clone()));
             }
-            let (title, status_area, updated) = columns(rect, indent);
+            let (mut title, mut status_area, mut updated) = columns(rect, indent);
+            if super::render::ScreenLayout::for_width(buf.area.width)
+                == super::render::ScreenLayout::Small
+                && !status_area.is_empty()
+            {
+                title.width = title.width.saturating_sub(1);
+                status_area.x = status_area.x.saturating_sub(1);
+                updated.x = updated.x.saturating_sub(1);
+            }
             let title_style = if header {
                 style
             } else {

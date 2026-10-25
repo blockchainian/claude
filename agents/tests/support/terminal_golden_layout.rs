@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_wide_golden_layout() {
+fn terminal_large_golden_layout() {
     let (_directory, tmux, _transcript) = start_probe("golden-layout");
     let mut measurements = Vec::new();
     for (width, height) in [(200, 60), (180, 40), (150, 50), (200, 61)] {

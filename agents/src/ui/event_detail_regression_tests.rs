@@ -46,11 +46,10 @@ fn tool_calls() -> Vec<crate::event::ToolCall> {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Bash".into(),
-            event_detail_title: "Bash".into(),
+            title: "Bash".into(),
             show_event_detail: false,
             id: "Bash-fixture".into(),
-            title: "Bash".into(),
+            summary: "Bash".into(),
             name: "Bash".into(),
             input: vec![Section::Shell {
                 prefix: 0,
@@ -71,11 +70,10 @@ fn tool_calls() -> Vec<crate::event::ToolCall> {
             model_settings: None,
             agent_thread_id: None,
             agent_path: None,
-            event_detail_left: "Read".into(),
-            event_detail_title: "Read".into(),
+            title: "Read".into(),
             show_event_detail: false,
             id: "Read-fixture".into(),
-            title: "Read".into(),
+            summary: "Read".into(),
             name: "Read".into(),
             input: vec![Section::Text {
                 label: "path".into(),
@@ -130,7 +128,7 @@ fn event_detail_body_uses_default_foreground_and_preserves_title_and_markdown_st
             Path::new("/"),
             now,
         );
-        let title = text_cell(&buffer, kind_label(&event.kind));
+        let title = text_cell(&buffer, &kind_label(&event.kind));
         assert_eq!(
             title.fg,
             super::super::style::event_styles(&event.kind).0.fg.unwrap()
@@ -163,7 +161,9 @@ fn event_detail_body_uses_default_foreground_and_preserves_title_and_markdown_st
                     .borrow()
                     .event_links
                     .iter()
-                    .any(|(_, target)| target.to_string_lossy().contains("example.com"))
+                    .any(|(_, target)| crate::ui::link_path(target)
+                        .to_string_lossy()
+                        .contains("example.com"))
             );
         }
         let mut list = Buffer::empty(Rect::new(0, 0, 120, 1));
@@ -181,8 +181,9 @@ fn event_detail_body_uses_default_foreground_and_preserves_title_and_markdown_st
             super::super::style::event_styles(&event.kind).1.fg.unwrap()
         );
         snapshot.push_str(&format!("{:?}\n", event.kind));
+        let label = kind_label(&event.kind);
         for text in [
-            kind_label(&event.kind),
+            label.as_str(),
             "plain",
             "bold",
             "link",
@@ -211,7 +212,7 @@ fn tool_detail_body_uses_default_foreground_and_preserves_syntax_highlighting() 
     let (mut view, now) = open_tool_fixture();
     let mut event = view.visible_event().unwrap().clone();
     event.calls.truncate(1);
-    event.calls[0].event_detail_title = "Run checks".into();
+    event.calls[0].title = "Run checks".into();
     event.calls[0].output = Some(vec![
         crate::event::Section::Text {
             label: String::new(),
@@ -374,7 +375,7 @@ fn assert_hidden_suffix_search(width: u16) {
         assert_eq!(view.event_detail.scroll.borrow().offset, 0);
         target
     };
-    view.event_detail.search.query.insert("HIDDEN_NEEDLE");
+    view.event_detail.search.input.insert("HIDDEN_NEEDLE");
     view.jump_event_detail_match();
     assert_eq!(view.event_detail.scroll.borrow().offset, target);
     view.render_at(area, &mut buf, now);
@@ -434,7 +435,7 @@ fn claude_write_content_uses_path_syntax_and_preserves_unknown_text() {
         let event = crate::providers::claude::event_reader::tail(transcript.path(), 1)
             .unwrap()
             .remove(0);
-        assert_eq!(event.calls[0].event_detail_title, path);
+        assert_eq!(event.calls[0].title, path);
         let view = View::new(Grouping::Project, false);
         let area = Rect::new(0, 0, 120, 24);
         let mut buffer = Buffer::empty(area);
@@ -463,6 +464,35 @@ fn claude_write_content_uses_path_syntax_and_preserves_unknown_text() {
     }
     snapshot.pop();
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/claude_write.txt");
+    if std::env::var_os("UPDATE_EVENT_DETAIL_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+}
+
+#[test]
+fn appium_session_table_detail_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let transcript = dir.path().join("transcript.jsonl");
+    std::fs::write(
+        &transcript,
+        include_str!("../../tests/fixtures/claude-appium.jsonl"),
+    )
+    .unwrap();
+    let event = crate::providers::claude::event_reader::tail(&transcript, 200)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(event.calls[0].title, "create");
+    let mut snapshot = String::new();
+    for line in
+        event_detail_layout(&event, 120, Path::new("/workspace"), DateTime::UNIX_EPOCH).lines
+    {
+        snapshot.push_str(line.to_string().trim_end());
+        snapshot.push('\n');
+    }
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/ui_snapshots/appium_session_event_detail.txt");
     if std::env::var_os("UPDATE_EVENT_DETAIL_SNAPSHOT").is_some() {
         std::fs::write(&path, &snapshot).unwrap();
     }

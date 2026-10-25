@@ -38,15 +38,17 @@ fn cwd_paths_match_in_tool_titles_bodies_and_links() {
             x: 0,
             y: 0,
             cells: layout.rows[0].1.clone(),
+            ..Default::default()
         }];
         let drawn = super::links::drawn_links(&rows, &links);
         assert!(!drawn.is_empty(), "{name}: title lost its link");
         assert_eq!(drawn[0].1, links[0].target);
         assert!(
-            links[0]
-                .target
-                .to_string_lossy()
-                .contains(file.to_str().unwrap())
+            match &links[0].target {
+                LinkTarget::Path(path) => path.to_string_lossy(),
+                LinkTarget::Image(_) => panic!("expected path link"),
+            }
+            .contains(file.to_str().unwrap())
         );
 
         let mut prose = event.clone();
@@ -109,6 +111,7 @@ fn markdown_path_labels_are_relative_and_keep_the_absolute_destination() {
                     x: 0,
                     y: row as u16,
                     cells: cells.clone(),
+                    ..Default::default()
                 }],
                 &layout.links[*id],
             )
@@ -117,7 +120,7 @@ fn markdown_path_labels_are_relative_and_keep_the_absolute_destination() {
     assert!(
         drawn
             .iter()
-            .any(|(rect, target)| rect.width == 10 && target == &file),
+            .any(|(rect, target)| rect.width == 10 && target == &LinkTarget::Path(file.clone())),
         "{drawn:?}"
     );
 }

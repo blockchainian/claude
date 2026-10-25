@@ -1,10 +1,10 @@
 //! Per-task interface state parked while another task is shown.
 
 use super::{
-    SectionScroll, draft_controls::Selector, event_search::EventSearch, line_edit::LineEdit,
-    prompt_box::PromptBox, question_view::QuestionView,
+    SectionScroll, draft_controls::Selector, event_search::EventMatches, prompt_box::PromptBox,
+    question_view::QuestionView,
 };
-use crate::{event::Event, model::EventSort};
+use crate::{event::Event, line_edit::Editor, model::EventSort};
 
 #[derive(Default)]
 pub(super) struct TaskUi {
@@ -23,9 +23,10 @@ pub(crate) struct EventList {
     pub(super) position: EventPosition,
     pub(super) selected: Option<(bool, EventId)>,
     pub pinned: Vec<PinnedRow>,
-    pub search: EventSearch,
+    pub search: EventMatches,
+    pub filter: crate::event::EventFilter,
     pub sort: EventSort,
-    pub sort_initialized: bool,
+    pub settings_initialized: bool,
     pub unseen: std::cell::Cell<usize>,
     pub pending_older: usize,
     pub has_older: bool,
@@ -48,7 +49,7 @@ pub(super) struct EventDetail {
     pub return_mode: EventDetailMode,
     pub transcript: Option<Transcript>,
     pub scroll: std::cell::RefCell<super::event_detail::EventDetailScroll>,
-    pub search: EventSearch,
+    pub search: EventMatches,
 }
 
 pub(super) struct Transcript {
@@ -58,8 +59,8 @@ pub(super) struct Transcript {
 
 #[derive(Default)]
 pub(super) struct TaskDetails {
-    pub title: Option<LineEdit>,
-    pub branch: Option<LineEdit>,
+    pub title: Option<Editor>,
+    pub branch: Option<Editor>,
     pub selector: Option<Selector>,
     pub scroll: SectionScroll,
 }

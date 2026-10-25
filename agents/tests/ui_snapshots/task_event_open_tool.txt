@@ -1,7 +1,7 @@
   Active 1                                                                              Inactive 0
 ──────────────────────────────────────────────────┬─────────────────── Working ─────────────────────
-                   /tmp/project                   │                     Prompt
- ● Task log example        Working            now │ Task log example
+                     project                      │                     Prompt
+ ● Task log example        Working            now │                Task log example
                                                   │
                                                   │
                                                   │
@@ -32,17 +32,17 @@
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
- Bash                                           Bash                                           12s
+╴Bash                                           Bash                                           12s ╶
 
                                              cargo test
                                                   ↓
                                            running 3 tests
                                            ...
 
- Read                                           Read
+╴Read                                           Read                                               ╶
 
                                        agents/src/log.rs:1-40
                                                   ↓
                                                  •··
 ────────────────────────────────────────────────────────────────────────────────────────────────────
- ? help  esc previous  ↑/↓ move  enter open  n new
+ ? help

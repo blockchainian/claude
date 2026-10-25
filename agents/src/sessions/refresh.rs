@@ -49,6 +49,7 @@ impl Refresh {
         self.snapshot = Some(Snapshot {
             sessions: snapshot.sessions.clone(),
             has_more: snapshot.has_more,
+            supervisions: snapshot.supervisions.clone(),
         });
         snapshot
     }

@@ -119,6 +119,11 @@ fn active_panel_detail_boundaries_do_not_navigate_lists() {
                 let bottom = task_details_position(&view, panel);
                 assert!(bottom > 0);
                 view.handle_key(forward);
+                // Like the wheel, the event detail's step keys leave for the next event.
+                if panel == Panel::EventDetail && forward.code != KeyCode::End {
+                    assert_eq!(view.event_list.cursor, event.map(|e| e + 1));
+                    continue;
+                }
                 assert_eq!(task_details_position(&view, panel), bottom);
                 assert_lists_unchanged(&view, selected, event, scroll);
                 key(&mut view, KeyCode::Home);
@@ -133,7 +138,7 @@ fn active_panel_detail_boundaries_do_not_navigate_lists() {
 }
 
 #[test]
-fn active_panel_short_event_detail_does_not_change_event() {
+fn active_panel_short_event_detail_steps_between_events() {
     for width in [100, 200] {
         for (forward, backward) in navigation_pairs() {
             let (mut view, now) = panel_fixture(width);
@@ -149,6 +154,10 @@ fn active_panel_short_event_detail_does_not_change_event() {
             let event = view.event_list.cursor;
             let scroll = view.event_list.scroll.get();
             view.handle_key(forward);
+            if forward.code != KeyCode::End {
+                assert_eq!(view.event_list.cursor, event.map(|e| e + 1));
+                event_screen(&view, width, 45, now);
+            }
             view.handle_key(backward);
             assert_lists_unchanged(&view, selected, event, scroll);
         }
@@ -325,7 +334,9 @@ fn active_panel_unsupported_task_keys_do_not_fall_through() {
                 KeyCode::Backspace,
             ] {
                 let action = key(&mut view, code);
-                if panel == Panel::EventList && code == KeyCode::Char('p') {
+                if matches!(panel, Panel::EventList | Panel::EventDetail)
+                    && code == KeyCode::Char('p')
+                {
                     let selected = view.visible_event().unwrap();
                     assert!(matches!(
                         action,
@@ -485,27 +496,9 @@ fn mouse_activation_every_event_routes_subsequent_paging() {
                 } else {
                     Panel::TaskList
                 });
-                let selected = view.selected_id().cloned();
                 view.handle_mouse(mouse(kind, area.x, area.y + (area.height - 1).min(1)));
-                let expected = if panel == Panel::TaskList
-                    && matches!(
-                        kind,
-                        MouseEventKind::ScrollUp
-                            | MouseEventKind::ScrollDown
-                            | MouseEventKind::ScrollLeft
-                            | MouseEventKind::ScrollRight
-                            | MouseEventKind::Down(MouseButton::Left)
-                    ) {
-                    if view.selected_id() == selected.as_ref() {
-                        Panel::EventDetail
-                    } else {
-                        Panel::Prompt
-                    }
-                } else {
-                    panel
-                };
-                assert_eq!(view.active_panel, expected, "width={width} kind={kind:?}");
-                assert_mouse_panel_paging(&mut view, expected);
+                assert_eq!(view.active_panel, panel, "width={width} kind={kind:?}");
+                assert_mouse_panel_paging(&mut view, panel);
             }
         }
     }
@@ -534,14 +527,7 @@ fn mouse_activation_double_click_and_drag_keep_the_pressed_panel() {
                     area.x,
                     area.y + (area.height - 1).min(1),
                 ));
-                assert_eq!(
-                    view.active_panel,
-                    if panel == Panel::TaskList {
-                        Panel::EventDetail
-                    } else {
-                        panel
-                    }
-                );
+                assert_eq!(view.active_panel, panel);
                 if double {
                     view.handle_mouse(mouse(
                         MouseEventKind::Up(MouseButton::Left),
@@ -579,12 +565,7 @@ fn mouse_activation_double_click_and_drag_keep_the_pressed_panel() {
                         other.y + 1,
                     ));
                 }
-                let expected = if panel == Panel::TaskList && double {
-                    Panel::EventDetail
-                } else {
-                    panel
-                };
-                assert_mouse_panel_paging(&mut view, expected);
+                assert_mouse_panel_paging(&mut view, panel);
             }
         }
     }
@@ -725,4 +706,25 @@ fn mouse_activation_covers_panel_rules_and_side_padding() {
             }
         }
     }
+}
+
+#[test]
+fn event_detail_p_toggles_pin_except_in_terminal_mode() {
+    use super::task_ui::EventDetailMode;
+    for mode in [EventDetailMode::Event, EventDetailMode::Transcript] {
+        let (mut view, _) = panel_fixture(200);
+        view.set_active_panel(Panel::EventDetail);
+        view.event_detail.mode = mode;
+        let pinned = |action| match action {
+            Some(Action::ToggleEventPin { pinned, .. }) => pinned.len(),
+            other => panic!("mode={mode:?} action={other:?}"),
+        };
+        assert_eq!(pinned(key(&mut view, KeyCode::Char('p'))), 1);
+        assert_eq!(pinned(key(&mut view, KeyCode::Char('p'))), 0);
+    }
+    let (mut view, _) = panel_fixture(200);
+    view.set_active_panel(Panel::EventDetail);
+    view.event_detail.mode = EventDetailMode::Terminal;
+    key(&mut view, KeyCode::Char('p'));
+    assert!(view.event_list.pinned.is_empty());
 }

@@ -95,7 +95,7 @@ impl AskUserQuestion {
             .filter(|entry| entry.ask == *ask)
             .ok_or_else(|| io::Error::other("Claude AskUserQuestion is no longer pending"))?;
         let body = if answer.rejected {
-            let reason = "The user dismissed these questions because the message you sent with them was not shown.\nResend that message verbatim, then end your turn. Ask nothing, in text or through AskUserQuestion, until the user replies.";
+            let reason = "The user dismissed these questions because the message you sent with them was not shown.\nResend that message verbatim, followed by the questions and their options as plain text, then end your turn. Ask nothing through AskUserQuestion until the user replies.";
             json!({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":reason}})
         } else {
             json!({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"questions":entry.questions,"answers":answers}}})

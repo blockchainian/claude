@@ -25,7 +25,6 @@ fn family_view(provider: ProviderId) -> (tempfile::TempDir, View) {
             .unwrap();
             crate::providers::codex::CodexProvider::new(
                 directory.path().into(),
-                directory.path().into(),
             )
             .input_choices()
         }
@@ -185,7 +184,6 @@ fn codex_models_without_a_tier_keep_their_display_name_as_a_family() {
     )
     .unwrap();
     let provider = crate::providers::codex::CodexProvider::new(
-        directory.path().into(),
         directory.path().into(),
     );
     let choices = provider.input_choices();

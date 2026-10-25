@@ -15,12 +15,12 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
         let area = Rect::new(0, 0, width, 50);
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
-        let wide = width >= super::super::render::WIDE_LAYOUT_COLUMNS;
+        let large = super::super::render::ScreenLayout::for_width(width)
+            == super::super::render::ScreenLayout::Large;
         assert_eq!(
             view.viewport.borrow().event_text.area.x,
-            super::super::event_detail::event_detail_columns(
-                view.viewport.borrow().event_detail,
-                view.viewport.borrow().event_panel
+            super::super::event_detail::EventDetailColumns::new(
+                view.viewport.borrow().event_detail
             )
             .text
             .x
@@ -42,7 +42,7 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
         };
         assert_maps(&view, &buf);
         // Search invalidates the cached layout before jumping to a match.
-        view.event_detail.search.query.set_text("必须");
+        view.event_detail.search.input.set_text("必须");
         view.viewport.borrow_mut().event_detail_layout = None;
         view.jump_event_detail_match();
         view.render_at(area, &mut buf, now);
@@ -81,21 +81,20 @@ fn reading_column_maps_original_bytes_after_search_scroll_and_resize() {
                 .unwrap();
             (row.x + row.cells[0].0.start, row.y)
         };
-        assert!(x >= if wide { width / 4 } else { 1 });
+        assert!(x >= if large { width / 4 } else { 1 });
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, x, y));
         view.render_at(area, &mut buf, now);
         assert_maps(&view, &buf);
         if view.viewport.borrow().event_detail_max > 0 {
             assert!(view.event_detail.scroll.borrow().offset > 0);
         }
-        let resized = Rect::new(0, 0, if wide { 120 } else { 200 }, 50);
+        let resized = Rect::new(0, 0, if large { 120 } else { 200 }, 50);
         let mut buf = Buffer::empty(resized);
         view.render_at(resized, &mut buf, now);
         assert_eq!(
             view.viewport.borrow().event_text.area.x,
-            super::super::event_detail::event_detail_columns(
-                view.viewport.borrow().event_detail,
-                view.viewport.borrow().event_panel
+            super::super::event_detail::EventDetailColumns::new(
+                view.viewport.borrow().event_detail
             )
             .text
             .x
@@ -154,10 +153,7 @@ fn start_event_detail_header(
         .collect::<Vec<_>>()
         .join("\n");
     let detail = view.viewport.borrow().event_detail;
-    let columns = super::super::event_detail::event_detail_columns(
-        detail,
-        view.center_layout(area).event_panel,
-    );
+    let columns = super::super::event_detail::EventDetailColumns::new(detail);
     let header = rendered
         .lines()
         .nth(usize::from(detail.y + 1))
@@ -245,10 +241,7 @@ fn preformatted_detail_rows_stay_in_content_column() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let viewport = view.viewport.borrow();
-        let columns = super::super::event_detail::event_detail_columns(
-            viewport.event_detail,
-            view.center_layout(area).event_panel,
-        );
+        let columns = super::super::event_detail::EventDetailColumns::new(viewport.event_detail);
         let limit = columns.text.width;
         let left = columns.text.x;
         for row in &viewport.event_text.rows {
@@ -270,7 +263,7 @@ fn preformatted_detail_rows_stay_in_content_column() {
 }
 
 #[test]
-fn event_detail_without_subject_centers_tool_name_without_duplicate_metadata() {
+fn event_detail_without_subject_shows_tool_name_once_on_the_left() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-agent-names.jsonl");
     let event = crate::providers::claude::event_reader::tail(&path, 200)
@@ -288,18 +281,14 @@ fn event_detail_without_subject_centers_tool_name_without_duplicate_metadata() {
         view.select_fixture_event(Some(event.clone()));
         let screen = event_screen(&view, width, 50, now);
         let detail = view.viewport.borrow().event_detail;
-        let columns = super::super::event_detail::event_detail_columns(
-            detail,
-            view.center_layout(Rect::new(0, 0, width, 50)).event_panel,
-        );
+        let columns = super::super::event_detail::EventDetailColumns::new(detail);
         let header = screen.lines().nth(usize::from(detail.y + 1)).unwrap();
         let title = "SubagentHandback";
-        assert_eq!(
-            header[..header.rfind(title).unwrap()].width(),
-            usize::from(columns.panel.x) + (usize::from(columns.panel.width) - title.width()) / 2
+        assert!(
+            header[..header.find(title).unwrap()].width()
+                < usize::from(columns.panel.x) + usize::from(columns.panel.width) / 4
         );
         assert_eq!(header.matches(title).count(), 1);
-        assert!(header[..header.find(title).unwrap()].trim().is_empty());
         assert!(
             screen
                 .lines()
@@ -327,10 +316,7 @@ fn event_detail_event_and_tool_times_share_the_list_clock_column() {
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let viewport = view.viewport.borrow();
-        let columns = super::super::event_detail::event_detail_columns(
-            viewport.event_detail,
-            viewport.event_panel,
-        );
+        let columns = super::super::event_detail::EventDetailColumns::new(viewport.event_detail);
         let (_, list_time) = super::super::event_list::event_row_areas(viewport.event_panel);
         assert_eq!(columns.time.width, list_time.width);
         assert_eq!(
@@ -366,9 +352,18 @@ fn event_detail_event_and_tool_times_share_the_list_clock_column() {
                 .unwrap();
             let duration = title.time.as_ref().unwrap();
             assert_eq!(clock(row.y).trim(), duration);
-            for x in columns.time.right()..width {
+            // Merged calls' titles end in the padding's edge rule.
+            for x in columns.time.right()..width - 1 {
                 assert_eq!(buf[(x, row.y)].symbol(), " ");
             }
+            assert_eq!(
+                buf[(width - 1, row.y)].symbol(),
+                if detail.sections.len() > 1 {
+                    "╶"
+                } else {
+                    " "
+                }
+            );
             assert_ne!(buf[(columns.time.right() - 1, row.y)].symbol(), " ");
             assert!(!title.line(columns).0.to_string().contains(duration));
         }
@@ -406,10 +401,8 @@ fn clipped_command_and_output_keep_time_empty_and_double_click_copies_original()
         view.render_at(buf.area, &mut buf, now);
         let (x, ys) = {
             let viewport = view.viewport.borrow();
-            let columns = super::super::event_detail::event_detail_columns(
-                viewport.event_detail,
-                viewport.event_panel,
-            );
+            let columns =
+                super::super::event_detail::EventDetailColumns::new(viewport.event_detail);
             assert!(command.width() > columns.text.width.into());
             let rows: Vec<_> = viewport
                 .event_text

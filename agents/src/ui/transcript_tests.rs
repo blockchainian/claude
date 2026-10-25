@@ -25,7 +25,7 @@ fn transcript_space_switches_only_in_details_outside_search_and_terminal() {
     view.handle_key(KeyCode::Char('/').into());
     view.handle_key(KeyCode::Char(' ').into());
     assert_eq!(view.event_detail.mode, EventDetailMode::Transcript);
-    assert_eq!(view.event_detail.search.query.text(), " ");
+    assert_eq!(view.event_detail.search.input.text(), " ");
     view.handle_key(KeyCode::Esc.into());
     let screen = std::sync::Arc::new(std::sync::Mutex::new(
         crate::session_terminal::TerminalScreen::new(10, 40),
@@ -56,6 +56,7 @@ fn transcript_multiline_json_matches_event_document_lines() {
     let content = super::super::tool_detail::transcript_content(
         &Ok(raw.into()),
         crate::providers::ProviderId::Claude,
+        &crate::event::Kind::Assistant,
     );
     let (view, now) = event_fixture();
     let mut event = view.event_panel[0].clone();
@@ -161,12 +162,9 @@ fn transcript_records_have_their_own_titles_and_pretty_json_in_file_order() {
     view.render_at(buf.area, &mut buf, now);
     let sources = view.viewport.borrow().event_text.sources.clone();
     assert_eq!(sources.len(), 4);
-    for (index, (source, title)) in [
-        (claude, "assistant"),
-        (codex, "response_item / custom_tool_call"),
-    ]
-    .into_iter()
-    .enumerate()
+    for (index, (source, title)) in [(claude, "Assistant"), (codex, "Custom Tool Call")]
+        .into_iter()
+        .enumerate()
     {
         let value: serde_json::Value = serde_json::from_str(source).unwrap();
         let at = chrono::DateTime::parse_from_rfc3339(value["timestamp"].as_str().unwrap())
@@ -183,8 +181,8 @@ fn transcript_records_have_their_own_titles_and_pretty_json_in_file_order() {
             .find(|line| {
                 line.contains(title)
                     && line
-                        .trim_start()
-                        .starts_with(&super::super::formatting::clock_text(at))
+                        .trim_end_matches(['▕', ' '])
+                        .ends_with(&super::super::formatting::clock_text(at))
             })
             .unwrap_or_else(|| panic!("missing record clock: {rendered}"));
         assert!(drawn_header.contains(title));
@@ -234,6 +232,7 @@ fn transcript_json_uses_shared_path_rendering() {
     let content = super::super::tool_detail::transcript_content(
         &Ok(serde_json::json!({"type":"user", "path":absolute}).to_string()),
         crate::providers::ProviderId::Claude,
+        &crate::event::Kind::Assistant,
     );
     let part = &content.sections[0].groups[0].parts[0];
     let expected = super::super::tool_detail::Part::text(
@@ -278,23 +277,58 @@ fn transcript_refresh_reloads_rewritten_records_at_the_same_offset() {
 
 #[test]
 fn transcript_titles_use_provider_fields_and_leave_missing_metadata_empty() {
+    use crate::event::Kind;
     use crate::providers::ProviderId;
     let raw = Ok(r#"{"type":"assistant","payload":{"type":"nested"}}"#.to_owned());
-    let claude = super::super::tool_detail::transcript_content(&raw, ProviderId::Claude);
-    assert_eq!(claude.sections[0].title.title, "assistant");
+    let claude =
+        super::super::tool_detail::transcript_content(&raw, ProviderId::Claude, &Kind::Assistant);
+    assert_eq!(claude.sections[0].title.title, "Assistant");
+    let mode = Ok(r#"{"type":"permission-mode"}"#.to_owned());
+    let mode =
+        super::super::tool_detail::transcript_content(&mode, ProviderId::Claude, &Kind::Assistant);
+    assert_eq!(mode.sections[0].title.title, "Permission Mode");
     assert_eq!(claude.sections[0].title.left, None);
     for (raw, title) in [
         (
             r#"{"type":"session_meta","payload":{"cwd":"/tmp"}}"#,
-            "session_meta",
+            "Session Meta",
         ),
         ("{}", ""),
     ] {
-        let content =
-            super::super::tool_detail::transcript_content(&Ok(raw.into()), ProviderId::Codex);
+        let content = super::super::tool_detail::transcript_content(
+            &Ok(raw.into()),
+            ProviderId::Codex,
+            &Kind::Assistant,
+        );
         assert_eq!(content.sections[0].title.title, title);
         assert_eq!(content.sections[0].title.left, None);
     }
+}
+
+#[test]
+fn transcript_titles_match_the_event_title_with_the_record_time_in_the_time_column() {
+    use crate::event::Kind;
+    let raw = Ok(
+        r#"{"timestamp":"2026-10-22T08:15:30Z","type":"response_item","payload":{"type":"message"}}"#
+            .to_owned(),
+    );
+    let content = super::super::tool_detail::transcript_content(
+        &raw,
+        crate::providers::ProviderId::Codex,
+        &Kind::Assistant,
+    );
+    let title = &content.sections[0].title;
+    assert_eq!(title.left, None);
+    assert_eq!(
+        title.time,
+        Some(super::super::formatting::clock_text(
+            "2026-10-22T08:15:30Z".parse().unwrap()
+        ))
+    );
+    assert_eq!(
+        title.title_style,
+        super::super::style::event_styles(&Kind::Assistant).0
+    );
 }
 
 #[test]
@@ -306,6 +340,7 @@ fn transcript_long_json_lines_wrap_without_losing_text_or_syntax_styles() {
     let content = super::super::tool_detail::transcript_content(
         &Ok(raw.to_owned()),
         crate::providers::ProviderId::Codex,
+        &crate::event::Kind::Assistant,
     );
     let part = &content.sections[0].groups[0].parts[0];
     let lines = part.lines(33, Style::default(), Utc::now());
@@ -433,4 +468,149 @@ fn transcript_records_scroll_as_one_complete_document_without_fold_markers() {
             .collect::<Vec<_>>()
             .join("\n\n")
     );
+}
+
+#[test]
+fn transcript_claude_titles_show_content_types_in_order_else_the_role() {
+    use crate::providers::ProviderId;
+    for (fixture, line, expected) in [
+        (
+            include_str!("../../tests/fixtures/claude-todos.jsonl"),
+            0,
+            "Tool Use",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-subagent-model-history.jsonl"),
+            1,
+            "Thinking",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-bg-metadata.jsonl"),
+            3,
+            "Text",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-advisor.jsonl"),
+            0,
+            "Server Tool Use",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-todos.jsonl"),
+            1,
+            "Tool Result",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-equal-timestamps.jsonl"),
+            0,
+            "Text",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-prompt-images.jsonl"),
+            0,
+            "Text, Image",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-prompt-images.jsonl"),
+            4,
+            "Text, Image, Image",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-prompt-images.jsonl"),
+            7,
+            "Text, Text",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-bg-metadata.jsonl"),
+            0,
+            "User",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-subagent-model-history.jsonl"),
+            0,
+            "Attachment",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-queued-dequeue.jsonl"),
+            3,
+            "System",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-model-command.jsonl"),
+            0,
+            "Assistant",
+        ),
+    ] {
+        let raw = fixture.lines().nth(line).unwrap();
+        assert_eq!(transcript_title(ProviderId::Claude, raw), expected);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("record.jsonl");
+        std::fs::write(&path, raw).unwrap();
+        let (mut view, now) = event_fixture();
+        let mut event = view.event_panel[0].clone();
+        event.source_records = vec![crate::event::SourceRecord { path, offset: 0 }];
+        view.set_event(vec![event]);
+        event_screen(&view, 240, 90, now);
+        transcript(&mut view);
+        let rendered = event_screen(&view, 240, 90, now);
+        assert!(
+            rendered.contains(expected),
+            "missing {expected}: {rendered}"
+        );
+    }
+}
+
+#[test]
+fn transcript_codex_titles_prefer_item_then_content_then_payload_type() {
+    use crate::providers::ProviderId;
+    for (fixture, line, expected) in [
+        (
+            include_str!("../../tests/fixtures/codex-shell-truncated.jsonl"),
+            0,
+            "Command Execution",
+        ),
+        (
+            include_str!("../../tests/fixtures/codex-rollout.jsonl"),
+            5,
+            "Agent Message",
+        ),
+        (
+            include_str!("../../tests/fixtures/codex-rollout.jsonl"),
+            1,
+            "Input Text, Input Text",
+        ),
+        (
+            include_str!("../../tests/fixtures/codex-rollout.jsonl"),
+            6,
+            "Output Text",
+        ),
+        (
+            include_str!("../../tests/fixtures/codex-rollout.jsonl"),
+            3,
+            "Custom Tool Call",
+        ),
+        (
+            include_str!("../../tests/fixtures/codex-rollout.jsonl"),
+            0,
+            "Task Started",
+        ),
+    ] {
+        assert_eq!(
+            transcript_title(ProviderId::Codex, fixture.lines().nth(line).unwrap()),
+            expected
+        );
+    }
+}
+
+/// The title the transcript gives one raw record.
+fn transcript_title(provider: crate::providers::ProviderId, raw: &str) -> String {
+    super::super::tool_detail::transcript_content(
+        &Ok(raw.into()),
+        provider,
+        &crate::event::Kind::Assistant,
+    )
+    .sections[0]
+        .title
+        .title
+        .clone()
 }

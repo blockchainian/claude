@@ -178,12 +178,39 @@ fn event_scroll_keyboard_uses_list_bindings_inside_event_detail() {
     assert_ne!(panel(&view, now), initial);
     view.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
     assert_eq!(panel(&view, now), initial);
-    view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
-    assert_eq!(view.event_list.cursor, Some(1));
-    assert_eq!(panel(&view, now), initial);
     view.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
     assert_eq!(view.event_list.cursor, Some(1));
     assert_ne!(panel(&view, now), initial);
+    view.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+    assert_eq!(view.event_list.cursor, Some(1));
+    assert_eq!(panel(&view, now), initial);
+}
+
+#[test]
+fn event_scroll_keyboard_changes_event_at_boundaries_like_the_wheel() {
+    for (down, up) in [
+        (KeyCode::Char('j'), KeyCode::Char('k')),
+        (KeyCode::PageDown, KeyCode::PageUp),
+    ] {
+        let (mut view, now) = fixture(false);
+        panel(&view, now);
+        view.handle_key(KeyEvent::new(down, KeyModifiers::NONE));
+        assert_eq!(view.event_list.cursor, Some(2), "{down:?}");
+        panel(&view, now);
+        view.handle_key(KeyEvent::new(up, KeyModifiers::NONE));
+        assert_eq!(view.event_list.cursor, Some(1), "{up:?}");
+
+        let (mut view, now) = fixture(true);
+        panel(&view, now);
+        for _ in 0..60 {
+            view.handle_key(KeyEvent::new(down, KeyModifiers::NONE));
+            panel(&view, now);
+            if view.event_list.cursor == Some(2) {
+                break;
+            }
+        }
+        assert_eq!(view.event_list.cursor, Some(2), "{down:?}");
+    }
 }
 
 fn tool_fixture() -> (View, DateTime<Utc>) {
@@ -196,8 +223,8 @@ fn tool_fixture() -> (View, DateTime<Utc>) {
         .unwrap();
     event.calls.truncate(1);
     let mut call = event.calls[0].clone();
-    call.event_detail_left = "Second tool".into();
-    call.event_detail_title = "Second tool".into();
+    call.name = "Second tool".into();
+    call.title = "Second tool".into();
     event.calls[0].input = vec![crate::event::Section::Text {
         label: String::new(),
         text: (1..=20)
@@ -218,19 +245,52 @@ fn tool_fixture() -> (View, DateTime<Utc>) {
 }
 
 #[test]
-fn event_scroll_sections_reveal_under_pointer_and_keep_later_sections_visible() {
+fn event_scroll_multiple_sections_keep_full_bodies_and_scroll_as_document() {
     let (mut view, now) = tool_fixture();
     let before = panel_at(&view, now, 14);
-    assert!(before.contains("Second tool"), "{before}");
-    assert!(before.contains('…'));
+    let bodies = view.event_detail.scroll.borrow().state.bodies.clone();
+    assert!(bodies[0].len() >= 20, "first body was cut: {bodies:?}");
+    assert!(!before.contains('…'), "body must not be folded: {before}");
+    assert!(!before.contains("Second tool"), "{before}");
+    assert!(view.event_detail.scroll.borrow().state.hidden.is_empty());
+
+    wheel(&mut view, true);
+    let after = panel_at(&view, now, 14);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 3);
+    assert_eq!(view.event_detail.scroll.borrow().state.reveal, [0, 0]);
+    assert_eq!(view.event_detail.scroll.borrow().state.bodies, bodies);
+    let before_rows: Vec<_> = before.lines().collect();
+    let after_rows: Vec<_> = after.lines().collect();
+    assert_eq!(after_rows[1..10], before_rows[4..13]);
+    wheel(&mut view, false);
+    assert_eq!(panel_at(&view, now, 14), before);
+
+    let mut seen = after;
+    for _ in 0..40 {
+        if seen.contains("Second tool") {
+            break;
+        }
+        wheel(&mut view, true);
+        seen = panel_at(&view, now, 14);
+    }
+    assert!(seen.contains("Second tool"), "{seen}");
+    assert!(seen.contains("first body 20"), "{seen}");
+}
+
+#[test]
+fn event_scroll_sections_move_together_under_pointer() {
+    let (mut view, now) = tool_fixture();
+    let before = panel_at(&view, now, 14);
+    assert!(!before.contains("Second tool"), "{before}");
+    assert!(!before.contains('…'));
     let pointer = view.event_detail.scroll.borrow().state.content_top
         + view.event_detail.scroll.borrow().state.bodies[0].start as u16;
     view.scroll_content_row(true, true, pointer);
     let after = panel_at(&view, now, 14);
     assert_ne!(before, after);
-    assert_eq!(view.event_detail.scroll.borrow().state.reveal, vec![1, 0]);
-    assert!(after.contains("Second tool"), "{after}");
-    assert!(after.contains("second body"), "{after}");
+    assert_eq!(view.event_detail.scroll.borrow().state.reveal, vec![0, 0]);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 1);
+    assert!(!after.contains("Second tool"), "{after}");
 }
 
 #[test]
@@ -253,22 +313,28 @@ fn event_scroll_changed_body_folds_when_returning() {
 }
 
 #[test]
-fn event_scroll_keeps_scrolling_window_when_pointer_section_is_exhausted() {
+fn event_scroll_later_section_uses_document_offset() {
     let (mut view, now) = tool_fixture();
     panel_at(&view, now, 14);
-    assert_eq!(view.event_detail.scroll.borrow().state.hidden[1], 0);
+    assert!(view.event_detail.scroll.borrow().state.hidden.is_empty());
+    let max = view.viewport.borrow().event_detail_max;
+    view.event_detail.scroll.borrow_mut().offset = max - 1;
+    panel_at(&view, now, 14);
     let pointer = {
         let detail = view.event_detail.scroll.borrow();
-        detail.state.content_top + detail.state.bodies[1].start as u16
+        detail.state.content_top + (detail.state.bodies[1].start - detail.offset) as u16
     };
     view.scroll_content_row(true, true, pointer);
     panel_at(&view, now, 14);
-    assert_eq!(view.event_detail.scroll.borrow().state.reveal, vec![1, 0]);
+    assert_eq!(view.event_detail.scroll.borrow().state.reveal, vec![0, 0]);
+    assert_eq!(view.event_detail.scroll.borrow().offset, max);
 }
 
 #[test]
-fn event_scroll_visible_running_section_keeps_animating_after_folded_section() {
+fn event_scroll_visible_running_section_keeps_animating_after_scrolled_section() {
     let (view, now) = tool_fixture();
+    panel_at(&view, now, 14);
+    view.event_detail.scroll.borrow_mut().offset = usize::MAX;
     let text = panel_at(&view, now, 14);
     assert!(text.contains("Second tool"));
     assert!(text.contains(super::tool_detail::running_frame(now)));
@@ -396,7 +462,7 @@ fn event_scroll_new_rows_do_not_consume_short_entry_navigation() {
 }
 
 #[test]
-fn event_scroll_wheel_pauses_at_title_before_changing_event() {
+fn event_scroll_wheel_leaves_from_the_title_at_once() {
     let (mut view, now) = fixture(true);
     panel(&view, now);
     view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
@@ -410,15 +476,6 @@ fn event_scroll_wheel_pauses_at_title_before_changing_event() {
     );
     panel(&view, now);
     assert_eq!(view.event_detail.scroll.borrow().offset, 0);
-    for _ in 0..2 {
-        wheel(&mut view, false);
-        panel(&view, now);
-        assert_eq!(
-            view.event_list.cursor,
-            Some(1),
-            "the title holds two wheels"
-        );
-    }
     wheel(&mut view, false);
     assert_eq!(view.event_list.cursor, Some(0));
 }
@@ -479,7 +536,7 @@ fn event_scroll_wheel_stops_at_bottom_before_changing_event() {
 }
 
 #[test]
-fn event_scroll_wheel_entering_from_above_pauses_at_title_and_leaves_bottom_at_once() {
+fn event_scroll_wheel_entering_from_above_scrolls_and_leaves_bottom_at_once() {
     let (mut view, now) = fixture(true);
     for _ in 0..2 {
         view.select_event(Some(0));
@@ -488,15 +545,9 @@ fn event_scroll_wheel_entering_from_above_pauses_at_title_and_leaves_bottom_at_o
         panel(&view, now);
         assert_eq!(view.event_list.cursor, Some(1));
         assert_eq!(view.event_detail.scroll.borrow().offset, 0);
-        for _ in 0..2 {
-            wheel(&mut view, true);
-            panel(&view, now);
-            assert_eq!(
-                view.event_detail.scroll.borrow().offset,
-                0,
-                "the title holds two wheels"
-            );
-        }
+        wheel(&mut view, true);
+        panel(&view, now);
+        assert!(view.event_detail.scroll.borrow().offset > 0);
         let max = view.viewport.borrow().event_detail_max;
         while view.event_detail.scroll.borrow().offset < max {
             wheel(&mut view, true);
@@ -524,15 +575,6 @@ fn event_scroll_wheel_entering_from_below_starts_at_bottom() {
         wheel(&mut view, false);
         panel(&view, now);
         assert_eq!(view.event_list.cursor, Some(1));
-    }
-    for _ in 0..2 {
-        wheel(&mut view, false);
-        panel(&view, now);
-        assert_eq!(
-            view.event_list.cursor,
-            Some(1),
-            "the title holds two wheels"
-        );
     }
     wheel(&mut view, false);
     assert_eq!(view.event_list.cursor, Some(0));
@@ -594,66 +636,43 @@ fn column_of(row: &str, needle: &str) -> Option<usize> {
 }
 
 #[test]
-fn event_detail_footer_shows_the_scrolled_off_title() {
-    for width in [100, 160] {
+fn event_detail_top_edge_shows_only_a_scrolled_off_title() {
+    for width in [90, 120, 160] {
         let (mut view, _) = fixture(true);
         let rows = screen_rows(&view, width, 40);
-        let footer = rows.last().unwrap().clone();
-        let event_detail_y = usize::from(view.viewport.borrow().event_detail.y);
-        let title = rows[event_detail_y + 1]
-            .trim()
-            .split("  ")
-            .next()
-            .unwrap()
-            .to_owned();
-        assert!(!title.is_empty(), "{}", rows.join("\n"));
-        assert!(!footer.contains(&title), "title on screen: {footer}");
-        let title_x = column_of(&rows[event_detail_y + 1], &title).unwrap();
-        let time_x = view
-            .viewport
-            .borrow()
-            .event_detail_columns
-            .map(|columns| usize::from(columns.time.x))
-            .unwrap();
-
+        let y = usize::from(view.viewport.borrow().output_borders[0].y);
+        assert!(!rows[y].contains("Assistant"));
         event_detail_wheel(&mut view, true);
         let rows = screen_rows(&view, width, 40);
-        let scrolled = rows.last().unwrap();
-        assert!(
-            !rows[event_detail_y + 1].contains(&title),
-            "{}",
-            rows.join("\n")
+        assert_eq!(
+            column_of(&rows[y], "Assistant"),
+            Some((usize::from(width) - 11) / 2 + 1)
         );
-        assert!(
-            scrolled.starts_with(footer.trim_end()),
-            "hints stay: {scrolled}"
-        );
-        let x = column_of(scrolled, &title).unwrap_or_else(|| panic!("{scrolled}"));
-        if width >= super::render::WIDE_LAYOUT_COLUMNS {
-            assert_eq!(
-                x, title_x,
-                "wide layouts center the footer title: {scrolled}"
-            );
-        } else {
-            assert_eq!(
-                x + title.width() + 2,
-                time_x,
-                "narrow layouts end it before the time column: {scrolled}"
-            );
-        }
-        assert!(scrolled[..].chars().skip(time_x).all(|c| c == ' '));
-
+        assert!(!rows.last().unwrap().contains("Assistant"));
         event_detail_wheel(&mut view, false);
         let rows = screen_rows(&view, width, 40);
-        assert!(
-            !rows.last().unwrap().contains(&title),
-            "title back on screen"
-        );
+        assert!(!rows[y].contains("Assistant"));
     }
 }
 
 #[test]
-fn event_detail_footer_shows_the_title_of_the_section_on_the_top_row() {
+fn footer_feedback_preserves_the_section_title_on_its_edge() {
+    for width in [100, 160] {
+        let (mut view, _) = fixture(true);
+        screen_rows(&view, width, 40);
+        event_detail_wheel(&mut view, true);
+        let titled = screen_rows(&view, width, 40);
+        let y = usize::from(view.viewport.borrow().output_borders[0].y);
+        assert!(titled[y].contains("Assistant"));
+        view.show_copied("Copied message".into(), std::time::Instant::now());
+        let rows = screen_rows(&view, width, 40);
+        assert!(rows.last().unwrap().trim_end().ends_with("Copied message"));
+        assert_eq!(rows[y], titled[y]);
+    }
+}
+
+#[test]
+fn event_detail_top_edge_tracks_the_section_on_the_top_row() {
     let (mut view, _) = tool_fixture();
     let mut events = view.event_panel.clone();
     events[0].calls[0].input = vec![crate::event::Section::Text {
@@ -667,7 +686,7 @@ fn event_detail_footer_shows_the_title_of_the_section_on_the_top_row() {
             .collect::<Vec<_>>()
             .join("\n"),
     }];
-    let first = events[0].calls[0].event_detail_title.replace(' ', "");
+    let first = events[0].calls[0].title.replace(' ', "");
     view.set_event(events);
     view.select_event(Some(0));
     screen_rows(&view, 100, 40);
@@ -677,7 +696,7 @@ fn event_detail_footer_shows_the_title_of_the_section_on_the_top_row() {
         event_detail_wheel(&mut view, true);
         let rows = screen_rows(&view, 100, 40);
         let detail = rows[event_detail_y + 1..rows.len() - 1].join("\n");
-        let footer = rows.last().unwrap().clone();
+        let footer = rows[usize::from(view.viewport.borrow().output_borders[0].y)].clone();
         if detail.contains("Second tool") {
             assert!(!footer.contains("Second tool"), "{footer}");
         } else {
@@ -696,32 +715,45 @@ fn event_detail_footer_shows_the_title_of_the_section_on_the_top_row() {
 }
 
 #[test]
-fn event_detail_footer_title_is_muted() {
+fn event_detail_top_edge_title_preserves_the_panel_title_style() {
     let (mut view, _) = fixture(true);
-    screen_rows(&view, 100, 40);
-    event_detail_wheel(&mut view, true);
     let area = Rect::new(0, 0, 100, 40);
-    let mut buffer = Buffer::empty(area);
-    view.render(area, &mut buffer);
-    let footer = (0..100)
-        .map(|x| buffer[(x, 39)].symbol())
+    let draw = |view: &View| {
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer);
+        buffer
+    };
+    let initial = draw(&view);
+    let detail = view.viewport.borrow().event_detail;
+    let title_cell = (detail.y..detail.bottom())
+        .find_map(|y| {
+            let row = (0..area.width)
+                .map(|x| initial[(x, y)].symbol())
+                .collect::<String>();
+            column_of(&row, "Assistant").map(|x| initial[(x as u16, y)].clone())
+        })
+        .expect("the title is visible inside the panel");
+    assert!(title_cell.modifier.contains(ratatui::style::Modifier::BOLD));
+    assert_ne!(title_cell.fg, ratatui::style::Color::Reset);
+    event_detail_wheel(&mut view, true);
+    let buffer = draw(&view);
+    let y = view.viewport.borrow().output_borders[0].y;
+    let edge = (0..area.width)
+        .map(|x| buffer[(x, y)].symbol())
         .collect::<String>();
-    let x = column_of(&footer, "Assistant").unwrap_or_else(|| panic!("{footer}")) as u16;
+    let x = column_of(&edge, "Assistant").expect("the title scrolled onto the edge") as u16;
+    assert_eq!(buffer[(x - 1, y)].symbol(), " ");
+    assert_eq!(buffer[(x + 9, y)].symbol(), " ");
+    assert_eq!(buffer[(x - 2, y)].symbol(), "─");
+    assert_eq!(buffer[(x + 10, y)].symbol(), "─");
     for x in x..x + "Assistant".len() as u16 {
-        let cell = &buffer[(x, 39)];
-        assert!(
-            cell.modifier.contains(ratatui::style::Modifier::DIM),
-            "{cell:?}"
-        );
-        assert_eq!(cell.fg, ratatui::style::Color::Reset, "{cell:?}");
-        assert!(
-            !cell.modifier.contains(ratatui::style::Modifier::BOLD),
-            "{cell:?}"
-        );
+        let cell = &buffer[(x, y)];
+        assert_eq!(cell.fg, title_cell.fg);
+        assert_eq!(cell.modifier, title_cell.modifier);
     }
 }
 
-fn recorded_tool_footer(forward: bool) {
+fn recorded_tool_edge(forward: bool) {
     for width in [200, 149, 120, 100] {
         let (mut view, _) = fixture(false);
         let path =
@@ -731,7 +763,7 @@ fn recorded_tool_footer(forward: bool) {
             .into_iter()
             .find(|event| event.calls.first().is_some_and(|call| call.name == "Bash"))
             .unwrap();
-        let title = event.calls[0].event_detail_title.clone();
+        let title = event.calls[0].title.clone();
         view.set_event(vec![event]);
         view.select_event(Some(0));
         let initial = screen_rows(&view, width, 30);
@@ -751,48 +783,30 @@ fn recorded_tool_footer(forward: bool) {
         }
         event_detail_wheel(&mut view, forward);
         let rows = screen_rows(&view, width, 30);
-        let footer = rows.last().unwrap();
         let viewport = view.viewport.borrow();
-        assert!(
-            view.event_detail.scroll.borrow().offset > 0,
-            "title must be offscreen: {rows:?}"
-        );
-        let columns = viewport.event_detail_columns.unwrap();
-        let centered =
-            super::centering::centered_x(columns.panel, columns.text, title.width() as u16);
-        let start = 1 + view.center_footer_hints().width() as u16 + 2;
-        let expected = if width >= super::render::WIDE_LAYOUT_COLUMNS && centered >= start {
-            centered
-        } else {
-            columns.text.right() - title.width() as u16
-        };
+        let footer = &rows[usize::from(viewport.output_borders[0].y)];
+        assert!(view.event_detail.scroll.borrow().offset > 0, "{rows:?}");
         let compact = footer.replace(' ', "");
         assert!(compact.contains(&title.replace(' ', "")), "{footer}");
         let first = title.chars().next().unwrap().to_string();
         let x = column_of(footer, &first).unwrap();
-        assert_eq!(x, usize::from(expected), "{footer}");
-        assert!(
-            x + title.width() <= usize::from(columns.text.right()),
+        assert_eq!(
+            x,
+            (usize::from(width) - title.width() - 2) / 2 + 1,
             "{footer}"
         );
-        assert!(
-            footer
-                .chars()
-                .skip(usize::from(columns.time.x))
-                .all(|c| c == ' '),
-            "{footer}"
-        );
+        assert!(!rows.last().unwrap().contains(&title));
     }
 }
 
 #[test]
-fn event_detail_recorded_footer_scrolling_down() {
-    recorded_tool_footer(true);
+fn event_detail_recorded_top_edge_scrolling_down() {
+    recorded_tool_edge(true);
 }
 
 #[test]
-fn event_detail_recorded_footer_scrolling_up() {
-    recorded_tool_footer(false);
+fn event_detail_recorded_top_edge_scrolling_up() {
+    recorded_tool_edge(false);
 }
 
 #[test]
@@ -829,10 +843,10 @@ fn output_border_jump(bottom: bool) {
             let event_scroll = view.event_list.scroll.get();
             let output = view.viewport.borrow().event_detail;
             let y = if bottom { height - 2 } else { output.y };
-            // The narrow layout shares this rule with the event list.
+            // The medium layout shares this rule with the event list.
             let x = view.viewport.borrow().event_panel.x;
             if bottom {
-                assert_eq!(buffer[(x, y)].symbol(), "─", "missing lower rule");
+                assert_eq!(buffer[(0, y)].symbol(), "─", "missing lower rule");
                 assert_eq!(output.bottom(), y);
             }
             view.set_active_panel(Panel::TaskList);
@@ -911,7 +925,7 @@ fn output_border_layout_reserves_one_row_and_keeps_hit_regions_separate() {
                 assert!(viewport.event_panel.bottom() <= top.y);
                 assert!(viewport.prompt.bottom() <= top.y);
                 assert!(!viewport.event_detail.contains((bottom.x, bottom.y).into()));
-                for x in 0..width {
+                for x in [0, width - 1] {
                     assert_eq!(buffer[(x, bottom.y)].symbol(), "─");
                 }
             } else {
@@ -930,8 +944,9 @@ fn event_detail_task_switch_preserves_scroll_and_search() {
     let other_id = other.id.clone();
     view.set_sessions(vec![view.selected_row().unwrap().clone(), other], false);
     panel(&view, now);
-    view.event_detail.search.query.insert("detail");
-    view.event_detail.search.editing = true;
+    view.set_active_panel(Panel::EventDetail);
+    view.event_detail.search.input.insert("detail");
+    view.event_detail.search.input.focus();
     view.event_detail.scroll.borrow_mut().offset = 5;
     panel(&view, now);
     let scroll = view.event_detail.scroll.borrow().offset;
@@ -940,13 +955,13 @@ fn event_detail_task_switch_preserves_scroll_and_search() {
     let index = view.rows.iter().position(|row| row.id == other_id).unwrap();
     view.set_selected(index);
     view.set_event(Vec::new());
-    assert!(!view.event_detail.search.active());
+    assert!(!view.event_detail.search.input.applied());
     let index = view.rows.iter().position(|row| row.id == id).unwrap();
     view.set_selected(index);
     view.set_event(events);
     view.event_session = Some(id);
-    assert_eq!(view.event_detail.search.query.text(), "detail");
-    assert!(view.event_detail.search.editing);
+    assert_eq!(view.event_detail.search.input.text(), "detail");
+    assert!(view.event_detail.search.input.focused());
     assert_eq!(
         view.visible_event()
             .and_then(|event| event.source.as_deref()),
@@ -974,7 +989,7 @@ fn event_detail_task_switch_discards_scroll_without_the_selected_identity() {
         let other_id = other.id.clone();
         view.set_sessions(vec![view.selected_row().unwrap().clone(), other], false);
         panel(&view, now);
-        view.event_detail.search.query.insert("detail");
+        view.event_detail.search.input.insert("detail");
         view.event_detail.scroll.borrow_mut().offset = 5;
         panel(&view, now);
         assert!(view.event_detail.scroll.borrow().offset > 0);
@@ -991,6 +1006,323 @@ fn event_detail_task_switch_discards_scroll_without_the_selected_identity() {
         view.event_session = Some(id);
         panel(&view, now);
         assert_eq!(view.event_detail.scroll.borrow().offset, 0);
-        assert_eq!(view.event_detail.search.query.text(), "detail");
+        assert_eq!(view.event_detail.search.input.text(), "detail");
     }
+}
+
+fn output_file_event(path: &Path) -> crate::event::Event {
+    let mut record: serde_json::Value = serde_json::from_str(
+        include_str!("../../tests/fixtures/claude-task-notifications.jsonl")
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    record["content"] = record["content"]
+        .as_str()
+        .unwrap()
+        .replace(
+            "/tmp/agents-notification/tasks/b9wi31ww0.output",
+            path.to_str().unwrap(),
+        )
+        .into();
+    let transcript = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(transcript.path(), format!("{record}\n")).unwrap();
+    crate::providers::claude::event_reader::tail(transcript.path(), 1)
+        .unwrap()
+        .remove(0)
+}
+
+fn append_output(path: &Path, start: usize, end: usize) {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    for row in start..end {
+        writeln!(file, "output row {row:03}").unwrap();
+    }
+}
+
+#[test]
+fn output_file_append_follows_bottom_and_preserves_scrolled_position() {
+    for width in [100, 200] {
+        for scrolled_up in [false, true] {
+            let output = tempfile::NamedTempFile::new().unwrap();
+            append_output(output.path(), 0, 60);
+            let (mut view, _) = fixture(false);
+            view.set_event(vec![output_file_event(output.path())]);
+            view.select_event(Some(0));
+            screen_rows(&view, width, 30);
+            view.event_detail.scroll.borrow_mut().offset = usize::MAX;
+            screen_rows(&view, width, 30);
+            if scrolled_up {
+                event_detail_wheel(&mut view, false);
+                screen_rows(&view, width, 30);
+            }
+            let before = view.event_detail.scroll.borrow().offset;
+            assert!(before > 0);
+            append_output(output.path(), 60, 90);
+            view.refresh_event_output();
+            let rendered = screen_rows(&view, width, 30).join("\n");
+            let after = view.event_detail.scroll.borrow().offset;
+            if scrolled_up {
+                assert_eq!(after, before, "{width}");
+                assert!(!rendered.contains("output row 089"));
+            } else {
+                assert!(after > before, "{width}: {before} -> {after}");
+                assert_eq!(after, view.viewport.borrow().event_detail_max);
+                assert!(rendered.contains("output row 089"), "{rendered}");
+            }
+        }
+    }
+}
+
+#[test]
+fn empty_output_file_follows_first_content() {
+    let output = tempfile::NamedTempFile::new().unwrap();
+    let (mut view, _) = fixture(false);
+    view.set_event(vec![output_file_event(output.path())]);
+    view.select_event(Some(0));
+    screen_rows(&view, 120, 30);
+    assert_eq!(view.event_detail.scroll.borrow().offset, 0);
+    append_output(output.path(), 0, 80);
+    view.refresh_event_output();
+    let rendered = screen_rows(&view, 120, 30).join("\n");
+    assert!(rendered.contains("output row 079"), "{rendered}");
+    assert_eq!(
+        view.event_detail.scroll.borrow().offset,
+        view.viewport.borrow().event_detail_max
+    );
+}
+
+#[test]
+fn output_file_notifications_before_one_draw_keep_following_the_bottom() {
+    let output = tempfile::NamedTempFile::new().unwrap();
+    let (mut view, _) = fixture(false);
+    view.set_event(vec![output_file_event(output.path())]);
+    view.select_event(Some(0));
+    screen_rows(&view, 120, 30);
+    append_output(output.path(), 0, 40);
+    view.refresh_event_output();
+    append_output(output.path(), 40, 80);
+    view.refresh_event_output();
+    let rendered = screen_rows(&view, 120, 30).join("\n");
+    assert!(rendered.contains("output row 079"), "{rendered}");
+}
+
+#[test]
+fn output_file_append_follows_fully_revealed_sections() {
+    let output = tempfile::NamedTempFile::new().unwrap();
+    append_output(output.path(), 0, 60);
+    let (mut view, _) = fixture(false);
+    view.set_event(vec![output_file_event(output.path())]);
+    view.select_event(Some(0));
+    screen_rows(&view, 120, 30);
+    for _ in 0..100 {
+        let bottom = {
+            let detail = view.event_detail.scroll.borrow();
+            detail.state.reveal == detail.state.hidden
+        };
+        if bottom {
+            break;
+        }
+        event_detail_wheel(&mut view, true);
+        screen_rows(&view, 120, 30);
+    }
+    {
+        let detail = view.event_detail.scroll.borrow();
+        assert_eq!(detail.state.fallback_max, None);
+        assert_eq!(detail.state.reveal, detail.state.hidden);
+    }
+    append_output(output.path(), 60, 90);
+    view.refresh_event_output();
+    let rendered = screen_rows(&view, 120, 30).join("\n");
+    assert!(rendered.contains("output row 089"), "{rendered}");
+}
+
+#[test]
+fn empty_output_file_keeps_following_across_separate_appends() {
+    let output = tempfile::NamedTempFile::new().unwrap();
+    let (mut view, _) = fixture(false);
+    view.set_event(vec![output_file_event(output.path())]);
+    view.select_event(Some(0));
+    screen_rows(&view, 200, 50);
+    for (start, end) in [(0, 80), (80, 90), (90, 100)] {
+        append_output(output.path(), start, end);
+        view.set_event(view.event_panel.clone());
+        view.refresh_event_output();
+        let rendered = screen_rows(&view, 200, 50).join("\n");
+        assert!(
+            rendered.contains(&format!("output row {:03}", end - 1)),
+            "{rendered}"
+        );
+        screen_rows(&view, 200, 50);
+    }
+}
+
+fn recorded_next_event_fixture(sort: EventSort) -> View {
+    let (mut view, _) = fixture(false);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
+    let events = crate::providers::claude::event_reader::tail(&path, usize::MAX)
+        .unwrap()
+        .into_iter()
+        .filter(|event| !event.calls.is_empty())
+        .take(4)
+        .collect();
+    view.event_list.sort = sort;
+    view.set_event(events);
+    let order: Vec<_> = view
+        .shown_events()
+        .map(|(_, event)| event.calls[0].name.as_str())
+        .collect();
+    assert_eq!(
+        order,
+        match sort {
+            EventSort::Time => vec!["Bash", "Read", "Edit", "Write"],
+            EventSort::Duration => vec!["Bash", "Write", "Edit", "Read"],
+        }
+    );
+    view.select_event(Some(2));
+    view
+}
+
+fn assert_next_event_edge(sort: EventSort, next_call: &str) {
+    for width in [90, 120, 160] {
+        let mut view = recorded_next_event_fixture(sort);
+        let next = view
+            .event_panel
+            .iter()
+            .find(|event| event.calls[0].name == next_call)
+            .unwrap()
+            .clone();
+        let title = next.calls[0].title.clone();
+        // Render the next event's own title row before comparing the edge's cells.
+        view.select_fixture_event(Some(next));
+        let area = Rect::new(0, 0, width, 30);
+        let draw = |view: &View| {
+            let mut buffer = Buffer::empty(area);
+            view.render(area, &mut buffer);
+            buffer
+        };
+        let panel = draw(&view);
+        let detail = view.viewport.borrow().event_detail;
+        let expected = (detail.y..detail.bottom())
+            .find_map(|y| {
+                let row: String = (0..width).map(|x| panel[(x, y)].symbol()).collect();
+                column_of(&row, &title).map(|x| panel[(x as u16, y)].clone())
+            })
+            .expect("next event's title is visible in its panel");
+        view.select_event(Some(2));
+        draw(&view);
+        view.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        let buffer = draw(&view);
+        let y = view.viewport.borrow().output_borders[1].y;
+        let row: String = (0..width).map(|x| buffer[(x, y)].symbol()).collect();
+        let x =
+            column_of(&row, &title).unwrap_or_else(|| panic!("missing next title: {row}")) as u16;
+        assert_eq!(x as usize, (usize::from(width) - title.width() - 2) / 2 + 1);
+        for x in x..x + title.width() as u16 {
+            assert_eq!(buffer[(x, y)].fg, expected.fg);
+            assert_eq!(buffer[(x, y)].modifier, expected.modifier);
+        }
+        assert_eq!(view.event_list.cursor, Some(2));
+    }
+}
+
+#[test]
+fn event_detail_bottom_edge_shows_the_next_event_in_time_order() {
+    assert_next_event_edge(EventSort::Time, "Write");
+}
+
+#[test]
+fn event_detail_bottom_edge_shows_the_next_event_in_duration_order() {
+    assert_next_event_edge(EventSort::Duration, "Read");
+}
+
+#[test]
+fn event_detail_bottom_edge_shows_when_the_whole_event_fits() {
+    for (sort, next) in [(EventSort::Time, "Write"), (EventSort::Duration, "Read")] {
+        let view = recorded_next_event_fixture(sort);
+        let title = &view
+            .event_panel
+            .iter()
+            .find(|event| event.calls[0].name == next)
+            .unwrap()
+            .calls[0]
+            .title;
+        let rows = screen_rows(&view, 120, 200);
+        assert_eq!(view.viewport.borrow().event_detail_max, 0);
+        let y = view.viewport.borrow().output_borders[1].y;
+        assert!(rows[usize::from(y)].contains(title));
+    }
+}
+
+#[test]
+fn event_detail_bottom_edge_waits_for_the_last_visible_line() {
+    for (sort, next) in [(EventSort::Time, "Write"), (EventSort::Duration, "Read")] {
+        let mut view = recorded_next_event_fixture(sort);
+        let title = view
+            .event_panel
+            .iter()
+            .find(|event| event.calls[0].name == next)
+            .unwrap()
+            .calls[0]
+            .title
+            .clone();
+        for key in [None, Some(KeyCode::Down), Some(KeyCode::End)] {
+            if let Some(key) = key {
+                view.handle_key(KeyEvent::new(key, KeyModifiers::NONE));
+            }
+            let rows = screen_rows(&view, 120, 30);
+            let offset = view.event_detail.scroll.borrow().offset;
+            let max = view.viewport.borrow().event_detail_max;
+            assert!(max > 1);
+            if key == Some(KeyCode::End) {
+                assert_eq!(offset, max);
+            } else if key.is_some() {
+                assert!(offset > 0 && offset < max);
+            } else {
+                assert_eq!(offset, 0);
+            }
+            let y = view.viewport.borrow().output_borders[1].y;
+            assert_eq!(
+                rows[usize::from(y)].contains(&title),
+                key == Some(KeyCode::End),
+                "{}",
+                rows[usize::from(y)]
+            );
+        }
+    }
+}
+
+#[test]
+fn event_detail_bottom_edge_is_empty_after_the_last_event() {
+    for sort in [EventSort::Time, EventSort::Duration] {
+        let mut view = recorded_next_event_fixture(sort);
+        view.select_event(Some(3));
+        for scrolled in [false, true] {
+            if scrolled {
+                view.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+            }
+            let rows = screen_rows(&view, 120, 30);
+            let y = view.viewport.borrow().output_borders[1].y;
+            assert!(
+                rows[usize::from(y)].chars().all(|c| c == '─'),
+                "{}",
+                rows[usize::from(y)]
+            );
+        }
+    }
+}
+
+#[test]
+fn event_detail_bottom_edge_hides_with_the_detail_panel() {
+    let mut view = recorded_next_event_fixture(EventSort::Time);
+    screen_rows(&view, 160, 40);
+    view.set_active_panel(Panel::TaskList);
+    for key in ['|', '_'] {
+        view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        view.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::SHIFT));
+    }
+    let rows = screen_rows(&view, 160, 40);
+    assert!(view.viewport.borrow().event_detail.is_empty());
+    assert!(!rows[38].contains("plan.md"));
 }

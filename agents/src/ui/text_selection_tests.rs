@@ -83,6 +83,95 @@ fn position(buf: &Buffer, text: &str) -> (u16, u16) {
     panic!("text not drawn: {text}");
 }
 
+fn markdown_body() -> String {
+    include_str!("../../tests/fixtures/claude-notification-reply.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find_map(|record| {
+            record["message"]["content"][0]["text"]
+                .as_str()
+                .filter(|text| text.starts_with("**结论:**"))
+                .map(str::to_owned)
+        })
+        .unwrap()
+}
+
+#[test]
+fn drag_markdown_copies_visible_text_without_markers() {
+    let mut view = fixture();
+    view.rows[0].prompt = markdown_body();
+    let mut buf = Buffer::empty(Rect::new(0, 0, 160, 80));
+    view.render_task_details(Rect::new(2, 1, 150, 70), &mut buf, Utc::now());
+    let start = position(&buf, "结论:");
+    let end = position(&buf, "原");
+    assert_eq!(start.1, end.1);
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        start.0,
+        start.1,
+    ));
+    view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end.0, end.1));
+    assert_eq!(
+        copied_text(view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end.0, end.1))),
+        "结论: 子代理的 Bash 行就是一个光秃秃的 Bash。"
+    );
+}
+
+#[test]
+fn drag_wrapped_markdown_copies_one_line_with_word_spaces() {
+    let mut view = fixture();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
+    let mut event = crate::providers::claude::event_reader::tail(&path, usize::MAX)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.body == view.rows[0].prompt)
+        .unwrap();
+    event.body = markdown_body();
+    view.rows[0].transcript = Some(path);
+    view.event_session = Some(view.rows[0].id.clone());
+    view.select_fixture_event(Some(event));
+    let area = Rect::new(2, 1, 20, 70);
+    view.viewport.borrow_mut().event_detail = area;
+    let mut buf = Buffer::empty(Rect::new(0, 0, 40, 80));
+    view.render_event_detail(area, &mut buf, Utc::now());
+    let start = position(&buf, "结论:");
+    let end = position(&buf, "原");
+    assert!(end.1 > start.1);
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        start.0,
+        start.1,
+    ));
+    view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end.0, end.1));
+    assert_eq!(
+        copied_text(view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end.0, end.1))),
+        "结论: 子代理的 Bash 行就是一个光秃秃的 Bash。"
+    );
+}
+
+#[test]
+fn drag_bold_at_wrap_boundary_copies_one_visible_line() {
+    let mut view = fixture();
+    let body = markdown_body();
+    let end = body.find("原").unwrap();
+    view.rows[0].prompt = body[..end].trim_end().replace("**结论:** ", "**结论:**\n");
+    let mut buf = Buffer::empty(Rect::new(0, 0, 80, 80));
+    view.render_task_details(Rect::new(2, 1, 7, 70), &mut buf, Utc::now());
+    let start = position(&buf, "结论:");
+    let rows = view.viewport.borrow().task_details_text.rows.clone();
+    let last = rows
+        .iter()
+        .rfind(|row| row.y >= start.1 && !row.cells.is_empty())
+        .unwrap();
+    assert!(last.y > start.1);
+    view.begin_text_selection(start.0, start.1);
+    view.extend_text_selection(8, last.y);
+    assert_eq!(
+        copied_text(view.finish_text_selection(8, last.y)),
+        "结论: 子代理的 Bash 行就是一个光秃秃的 Bash。"
+    );
+}
+
 #[test]
 fn drag_soft_wrapped_body_copies_source_without_wrap_newlines() {
     let mut view = fixture();
@@ -227,7 +316,7 @@ fn edge_drag_scrolls_and_copies_beyond_the_first_screen() {
     let Some(Action::Copy { text, .. }) = action else {
         panic!("missing copy: {action:?}");
     };
-    assert!(view.rows[0].prompt.starts_with(&text));
+    assert!(view.rows[0].prompt.replace('`', "").starts_with(&text));
     assert!(text.contains("界面上显示成"), "{text}");
     assert!(!view.tick_text_selection());
 }
@@ -290,7 +379,7 @@ fn open_event_drag_scrolls_in_both_directions_and_clears_on_release() {
     )) else {
         panic!("missing copy");
     };
-    assert!(source.starts_with(&text));
+    assert!(source.replace('`', "").starts_with(&text));
     assert!(text.contains("界面上显示成"));
     assert!(
         !render(&view)
@@ -302,7 +391,7 @@ fn open_event_drag_scrolls_in_both_directions_and_clears_on_release() {
 }
 
 #[test]
-fn drag_between_bodies_joins_original_text_with_one_newline() {
+fn drag_between_bodies_copies_displayed_lines_and_joins_soft_wraps() {
     let mut view = fixture();
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transcript.jsonl");
     let event = crate::providers::claude::event_reader::tail(&path, usize::MAX)
@@ -322,9 +411,27 @@ fn drag_between_bodies_joins_original_text_with_one_newline() {
     view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end.0, end.1));
     let message = view.rows[0].last_message.as_ref().unwrap();
     let expected = format!(
-        "{}\n{}",
-        &message[message.find("⏺ Ran").unwrap()..],
-        &view.rows[0].prompt[..view.rows[0].prompt.find("对，").unwrap()]
+        "{}\n{}\n",
+        [
+            "⏺ Ran 4 stop hooks",
+            "⎿ \u{a0}Stop hook error: codex-man…",
+            "",
+            "codex thread 01a11210-f266-71…",
+            "node \"~/Code/blockchainian/do…",
+            "",
+            "codex thread 01a11211-aa6e-76…",
+            "node \"~/Code/blockchainian/do…",
+            "",
+            "",
+            "",
+        ]
+        .join("\n"),
+        message
+            .rsplit_once("```\n\n")
+            .unwrap()
+            .1
+            .replace('`', "")
+            .trim_end(),
     );
     assert_eq!(
         view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), end.0, end.1)),
@@ -646,11 +753,11 @@ fn event_list_click_selects_cut_row_and_stationary_double_click_copies_nothing()
             .is_none()
     );
     assert!(view.event_list.cursor.is_some());
-    assert!(
-        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), at.0, at.1))
-            .is_none()
-    );
-    assert_eq!(view.visible_event(), view.event_panel.last());
+    assert!(matches!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), at.0, at.1)),
+        Some(Action::PersistFiltering { .. })
+    ));
+    assert_eq!(view.event_list.filter, crate::event::EventFilter::Message);
 }
 
 #[test]
@@ -1084,4 +1191,104 @@ fn task_details_default_selection_background_and_subagent() {
         );
     }
     assert_eq!(drag_text(&mut view, "Background"), None);
+}
+
+#[test]
+fn event_detail_zoom_drag_ignores_hidden_task_details() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("selection.jsonl");
+    let mut record: serde_json::Value = serde_json::from_str(
+        include_str!("../../tests/fixtures/claude-tool-calls.jsonl")
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    record["message"]["content"][0]["input"]["command"] =
+        "cd /workspace/project && git log -1 --oneline && git status -sb | head -1; echo done; pwd"
+            .into();
+    std::fs::write(&path, format!("{record}\n")).unwrap();
+    let event = crate::providers::claude::event_reader::tail(&path, usize::MAX)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.kind == crate::event::Kind::Tool)
+        .unwrap();
+    let mut view = fixture();
+    view.rows[0].transcript = Some(path);
+    view.event_session = Some(view.rows[0].id.clone());
+    view.select_fixture_event(Some(event));
+    let area = Rect::new(0, 0, 200, 50);
+    let render = |view: &View| {
+        let mut buf = Buffer::empty(area);
+        view.render_at(area, &mut buf, view.rows[0].updated_at);
+        buf
+    };
+    let initial = render(&view);
+    let details = view.viewport.borrow().event_text.area;
+    let focus = position_in(&initial, "cd /workspace/project", details);
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        focus.0,
+        focus.1,
+    ));
+    view.handle_mouse(mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        focus.0,
+        focus.1,
+    ));
+    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+    view.handle_key(KeyEvent::new(KeyCode::Char('_'), KeyModifiers::SHIFT));
+    let buf = render(&view);
+    let details = view.viewport.borrow().event_text.area;
+    let start = position_in(&buf, "cd /workspace/project", details);
+    let end = position_in(&buf, "pwd", details);
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        start.0,
+        start.1,
+    ));
+    render(&view);
+    view.set_pinned_events(&view.rows[0].id.clone(), Vec::new());
+    view.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        end.0 + 3,
+        end.1,
+    ));
+    let held = render(&view);
+    let highlighted = held[start]
+        .modifier
+        .contains(ratatui::style::Modifier::REVERSED);
+    view.set_pinned_events(&view.rows[0].id.clone(), Vec::new());
+    let copied = view.handle_mouse(mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        end.0 + 3,
+        end.1,
+    ));
+    assert_eq!(
+        copied_text(copied),
+        "cd /workspace/project\ngit log -1 --oneline\ngit status -sb | head -1\necho done\npwd",
+        "visible command highlighted: {highlighted}"
+    );
+    assert!(highlighted);
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        start.0,
+        start.1,
+    ));
+    view.handle_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        end.0 + 3,
+        end.1,
+    ));
+    view.event_list.search.input.set_text("no matching event");
+    view.rematch_event();
+    assert!(view.visible_event().is_none());
+    assert_eq!(
+        view.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            end.0 + 3,
+            end.1
+        )),
+        None
+    );
 }

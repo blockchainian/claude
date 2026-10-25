@@ -1,0 +1,34 @@
+dark
+js
+ [Indexed(23) NONE]const  [Indexed(24) BOLD | ITALIC]users [Indexed(23) NONE] = [{ name:  [Rgb(0, 101, 71) ITALIC]'ada' [Indexed(23) NONE], age:  [Rgb(0, 101, 71) ITALIC]36 [Indexed(23) NONE] }];
+ [Indexed(23) NONE]const  [Rgb(0, 145, 102) BOLD | ITALIC]byAge [Indexed(23) NONE] = (a, b) => a.age - b.age;
+ [Indexed(23) NONE]for (const  [Indexed(24) BOLD | ITALIC]u [Indexed(23) NONE] of users. [Rgb(0, 145, 102) ITALIC]sort [Indexed(23) NONE](byAge)) {}
+ts
+ [Indexed(23) NONE]interface  [Indexed(24) BOLD | ITALIC]User [Indexed(23) NONE] { name: string; age: number }
+ [Indexed(23) NONE]export function  [Rgb(0, 145, 102) BOLD | ITALIC]oldest [Indexed(23) NONE]( [Indexed(24) BOLD | ITALIC]users [Indexed(23) NONE]:User[]):User|undefined{return users. [Rgb(0, 145, 102) ITALIC]reduce [Indexed(23) NONE]<User|undefined>(( [Indexed(24) BOLD | ITALIC]best [Indexed(23) NONE], [Indexed(24) BOLD | ITALIC]u [Indexed(23) NONE])=>!best||u.age>best.age?u:best, [Rgb(0, 101, 71) ITALIC]undefined [Indexed(23) NONE])}
+python
+ [Indexed(23) NONE]users = []
+ [Indexed(23) NONE]def  [Rgb(0, 145, 102) BOLD | ITALIC]oldest [Indexed(23) NONE]( [Indexed(24) BOLD | ITALIC]lst [Indexed(23) NONE]):
+ [Indexed(23) NONE]    return  [Rgb(0, 145, 102) ITALIC]max [Indexed(23) NONE](lst)
+ [Indexed(23) NONE]for  [Indexed(24) BOLD | ITALIC]u [Indexed(23) NONE] in  [Rgb(0, 145, 102) ITALIC]sorted [Indexed(23) NONE](users):
+ [Indexed(23) NONE]     [Rgb(0, 145, 102) ITALIC]print [Indexed(23) NONE]( [Rgb(0, 145, 102) ITALIC]oldest [Indexed(23) NONE](users))
+rs
+ [Indexed(23) NONE]fn  [Rgb(0, 145, 102) BOLD | ITALIC]oldest [Indexed(23) NONE]( [Indexed(24) BOLD | ITALIC]users [Indexed(23) NONE]:&[User])->Option<&User>{users.iter().max_by_key(| [Indexed(24) BOLD | ITALIC]u [Indexed(23) NONE]|u.age)}
+ [Indexed(23) NONE]fn  [Rgb(0, 145, 102) BOLD | ITALIC]main [Indexed(23) NONE]() { let users =  [Rgb(0, 145, 102) ITALIC]vec! [Indexed(23) NONE][]; if let Some(u) = oldest(&users) {  [Rgb(0, 145, 102) ITALIC]println! [Indexed(23) NONE]( [Rgb(0, 101, 71) ITALIC]"{}" [Indexed(23) NONE], u); } }
+light
+js
+ [Indexed(30) NONE]const  [Indexed(124) BOLD | ITALIC]users [Indexed(30) NONE] = [{ name:  [Indexed(238) ITALIC]'ada' [Indexed(30) NONE], age:  [Indexed(238) ITALIC]36 [Indexed(30) NONE] }];
+ [Indexed(30) NONE]const  [Indexed(18) BOLD | ITALIC]byAge [Indexed(30) NONE] = (a, b) => a.age - b.age;
+ [Indexed(30) NONE]for (const  [Indexed(124) BOLD | ITALIC]u [Indexed(30) NONE] of users. [Indexed(18) ITALIC]sort [Indexed(30) NONE](byAge)) {}
+ts
+ [Indexed(30) NONE]interface  [Indexed(124) BOLD | ITALIC]User [Indexed(30) NONE] { name: string; age: number }
+ [Indexed(30) NONE]export function  [Indexed(18) BOLD | ITALIC]oldest [Indexed(30) NONE]( [Indexed(124) BOLD | ITALIC]users [Indexed(30) NONE]:User[]):User|undefined{return users. [Indexed(18) ITALIC]reduce [Indexed(30) NONE]<User|undefined>(( [Indexed(124) BOLD | ITALIC]best [Indexed(30) NONE], [Indexed(124) BOLD | ITALIC]u [Indexed(30) NONE])=>!best||u.age>best.age?u:best, [Indexed(238) ITALIC]undefined [Indexed(30) NONE])}
+python
+ [Indexed(30) NONE]users = []
+ [Indexed(30) NONE]def  [Indexed(18) BOLD | ITALIC]oldest [Indexed(30) NONE]( [Indexed(124) BOLD | ITALIC]lst [Indexed(30) NONE]):
+ [Indexed(30) NONE]    return  [Indexed(18) ITALIC]max [Indexed(30) NONE](lst)
+ [Indexed(30) NONE]for  [Indexed(124) BOLD | ITALIC]u [Indexed(30) NONE] in  [Indexed(18) ITALIC]sorted [Indexed(30) NONE](users):
+ [Indexed(30) NONE]     [Indexed(18) ITALIC]print [Indexed(30) NONE]( [Indexed(18) ITALIC]oldest [Indexed(30) NONE](users))
+rs
+ [Indexed(30) NONE]fn  [Indexed(18) BOLD | ITALIC]oldest [Indexed(30) NONE]( [Indexed(124) BOLD | ITALIC]users [Indexed(30) NONE]:&[User])->Option<&User>{users.iter().max_by_key(| [Indexed(124) BOLD | ITALIC]u [Indexed(30) NONE]|u.age)}
+ [Indexed(30) NONE]fn  [Indexed(18) BOLD | ITALIC]main [Indexed(30) NONE]() { let users =  [Indexed(18) ITALIC]vec! [Indexed(30) NONE][]; if let Some(u) = oldest(&users) {  [Indexed(18) ITALIC]println! [Indexed(30) NONE]( [Indexed(238) ITALIC]"{}" [Indexed(30) NONE], u); } }
