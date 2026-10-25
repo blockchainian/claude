@@ -69,7 +69,7 @@ mod tests {
         let add = |groups: &mut groups::Groups, call: &crate::event::ToolCall| {
             groups.add_path(
                 &super::list_group(&call.name, &display_tool_name(&call.name)),
-                Some(&call.title),
+                Some(call.title.as_str()).filter(|title| !title.is_empty()),
             );
         };
         let mut groups = groups::Groups::default();
@@ -89,14 +89,14 @@ mod tests {
         let (body, ranges) = groups.finish_with_ranges().unwrap();
         assert_eq!(
             body,
-            "appium-mcp appium {gesture tap, screenshot 400}, Read src/main.rs:10-20"
+            "appium-mcp appium {gesture tap, screenshot}, Read src/main.rs:10-20"
         );
         assert_eq!(
             ranges
                 .iter()
                 .map(|range| &body[range.clone()])
                 .collect::<Vec<_>>(),
-            ["tap", "400", "src/main.rs:10-20"]
+            ["tap", "src/main.rs:10-20"]
         );
         assert_eq!(super::list_group("functions.exec", "Exec"), ["Exec"]);
         assert_eq!(

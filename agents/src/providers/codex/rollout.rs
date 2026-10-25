@@ -1310,7 +1310,7 @@ fn completed_tool(
     };
     let call = completed_call(item, command_text, source);
     let body = call.summary.clone();
-    let paths = if item_type == "FileChange" && !call.detail_left().is_empty() {
+    let paths = if item_type == "FileChange" && !call.title.is_empty() {
         let mut offset = call.detail_left().len() + 1;
         call.title
             .split(" · ")
@@ -4810,7 +4810,7 @@ mod perspective_tests {
         let records = include_str!("../../../tests/fixtures/codex-perspective/root.jsonl");
         for (name, expected_left, expected_title) in [
             ("spawn_agent", "", "alpha"),
-            ("wait_agent", "", ""),
+            ("wait_agent", "Wait agent", ""),
             ("followup_task", "", "← alpha"),
         ] {
             let record: Value = records

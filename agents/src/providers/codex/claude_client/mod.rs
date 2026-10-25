@@ -99,7 +99,7 @@ mod tests {
             let display = super::display_tool_name(name);
             for title in ["", " \t "] {
                 call.title = title.into();
-                assert_eq!(call.detail_left(), "");
+                assert_eq!(call.detail_left(), display);
             }
             call.title = "Inspect source".into();
             assert_eq!(call.detail_left(), display);

@@ -713,14 +713,7 @@ pub(super) fn call_title(call: &crate::event::ToolCall) -> (Option<String>, Stri
             left.push_str(&format!(" · {code}"));
         }
     }
-    (
-        (!left.is_empty()).then_some(left),
-        if call.title.trim().is_empty() {
-            crate::providers::tool::display_tool_name(&call.name)
-        } else {
-            call.title.clone()
-        },
-    )
+    ((!left.is_empty()).then_some(left), call.title.clone())
 }
 
 /// One section per call; arrows are independent alignment groups.
@@ -1381,8 +1374,7 @@ mod tests {
         call.name = "Bash".into();
         assert_eq!(call_title(&call).0.as_deref(), Some("Bash · 1"));
         call.title.clear();
-        assert_eq!(call_title(&call).0.as_deref(), Some("1"));
-        assert_eq!(call_title(&call).1, "Bash");
+        assert_eq!(call_title(&call), (Some("Bash · 1".into()), String::new()));
         call.exit_code = None;
         call.title = "Inspect source".into();
         for name in ["advisor", "background"] {

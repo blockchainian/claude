@@ -262,10 +262,10 @@ pub struct ToolCall {
 
 impl ToolCall {
     /// Tool metadata beside the detail title, derived when rendered.
+    /// The tool name, unless a titled agent call or unlabeled rule omits it.
     pub(crate) fn detail_left(&self) -> String {
-        if self.title.trim().is_empty()
-            || self.agent_message.is_some()
-            || !crate::providers::tool::rule(&self.name).label
+        if !self.title.trim().is_empty()
+            && (self.agent_message.is_some() || !crate::providers::tool::rule(&self.name).label)
         {
             String::new()
         } else {

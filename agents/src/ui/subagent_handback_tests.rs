@@ -41,8 +41,11 @@ fn subagent_handback_recorded_input_output_and_titles() {
         }]
     );
     assert_eq!(events[0].body, message);
-    assert_eq!(call.detail_left(), "");
-    assert_eq!(super::tool_detail::call_title(call).1, "SubagentHandback");
+    assert_eq!(
+        call.detail_left(),
+        crate::providers::tool::display_tool_name(&call.name)
+    );
+    assert_eq!(super::tool_detail::call_title(call).1, "");
 }
 
 #[test]

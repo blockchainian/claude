@@ -263,7 +263,7 @@ fn preformatted_detail_rows_stay_in_content_column() {
 }
 
 #[test]
-fn event_detail_without_subject_centers_tool_name_without_duplicate_metadata() {
+fn event_detail_without_subject_shows_tool_name_once_on_the_left() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-agent-names.jsonl");
     let event = crate::providers::claude::event_reader::tail(&path, 200)
@@ -284,12 +284,11 @@ fn event_detail_without_subject_centers_tool_name_without_duplicate_metadata() {
         let columns = super::super::event_detail::EventDetailColumns::new(detail);
         let header = screen.lines().nth(usize::from(detail.y + 1)).unwrap();
         let title = "SubagentHandback";
-        assert_eq!(
-            header[..header.rfind(title).unwrap()].width(),
-            usize::from(columns.panel.x) + (usize::from(columns.panel.width) - title.width()) / 2
+        assert!(
+            header[..header.find(title).unwrap()].width()
+                < usize::from(columns.panel.x) + usize::from(columns.panel.width) / 4
         );
         assert_eq!(header.matches(title).count(), 1);
-        assert!(header[..header.find(title).unwrap()].trim().is_empty());
         assert!(
             screen
                 .lines()
@@ -359,7 +358,11 @@ fn event_detail_event_and_tool_times_share_the_list_clock_column() {
             }
             assert_eq!(
                 buf[(width - 1, row.y)].symbol(),
-                if detail.sections.len() > 1 { "╶" } else { " " }
+                if detail.sections.len() > 1 {
+                    "╶"
+                } else {
+                    " "
+                }
             );
             assert_ne!(buf[(columns.time.right() - 1, row.y)].symbol(), " ");
             assert!(!title.line(columns).0.to_string().contains(duration));

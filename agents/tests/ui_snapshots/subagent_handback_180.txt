@@ -91,7 +91,7 @@
 ─────────────────────────────────────────────┴╴project ──── Task log example ──────────────┴────────────────────────────────────────────────────────────────────────────────────────
  Task log example ❮ /bg
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-                                                                                  SubagentHandback                                                                        19:19:52
+ SubagentHandback                                                                                                                                                         19:19:52
 
                                                 Done. Rust crate/module names in paths now render as plain body text in both themes.
                                                 I committed and pushed it as cf2ecd3. The report is at
