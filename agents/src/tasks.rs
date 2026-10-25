@@ -232,6 +232,29 @@ fn branch_checkout(root: &Path, branch: &str) -> io::Result<Option<PathBuf>> {
     }))
 }
 
+/// The commit a new branch in `root` starts from: the checked-out branch's upstream, fetched
+/// first, when it only moves `HEAD` forward; otherwise `HEAD`, which keeps unpushed commits.
+fn latest_head(root: &Path) -> io::Result<String> {
+    use std::ffi::OsStr;
+    let upstream = [OsStr::new("rev-parse"), OsStr::new("@{upstream}")];
+    let head = git(root, &[OsStr::new("rev-parse"), OsStr::new("HEAD")])?;
+    if git(root, &upstream).is_err() {
+        return Ok(head);
+    }
+    git(root, &[OsStr::new("fetch"), OsStr::new("-q")])?;
+    let latest = git(root, &upstream)?;
+    let forward = git(
+        root,
+        &[
+            OsStr::new("merge-base"),
+            OsStr::new("--is-ancestor"),
+            OsStr::new(&head),
+            OsStr::new(&latest),
+        ],
+    );
+    Ok(if forward.is_ok() { latest } else { head })
+}
+
 /// The directory a new task on `choice` runs in: the checkout that already has the branch, or a
 /// new worktree under `root/<repository>/<branch>`, with `/` in the branch written as `+`.
 pub fn create_worktree(
@@ -293,6 +316,7 @@ pub fn create_worktree(
         .open(&probe)?;
     drop(file);
     fs::remove_file(probe)?;
+    let start;
     let add = match choice {
         BranchChoice::Existing(_) => vec![
             OsStr::new("worktree"),
@@ -300,14 +324,17 @@ pub fn create_worktree(
             target.as_os_str(),
             OsStr::new(name),
         ],
-        BranchChoice::New(_) => vec![
-            OsStr::new("worktree"),
-            OsStr::new("add"),
-            OsStr::new("-b"),
-            OsStr::new(name),
-            target.as_os_str(),
-            OsStr::new("HEAD"),
-        ],
+        BranchChoice::New(_) => {
+            start = latest_head(&repo.root)?;
+            vec![
+                OsStr::new("worktree"),
+                OsStr::new("add"),
+                OsStr::new("-b"),
+                OsStr::new(name),
+                target.as_os_str(),
+                OsStr::new(&start),
+            ]
+        }
     };
     git(&repo.root, &add)?;
     let prepared = (|| {
@@ -737,6 +764,43 @@ pub(crate) mod tests {
         );
         let second = create_worktree(&first, &root, &new("nested"), &config).unwrap();
         assert_eq!(second, root.join(repository).join("nested"));
+    }
+    #[test]
+    fn new_branch_starts_from_the_fetched_upstream_without_tracking_it() {
+        let upstream = repo();
+        let clone = tempfile::tempdir().unwrap();
+        git(
+            clone.path(),
+            &["clone", "-q", upstream.path().to_str().unwrap(), "."],
+        );
+        fs::write(upstream.path().join("sub/later"), "later").unwrap();
+        git(upstream.path(), &["add", "sub/later"]);
+        git(
+            upstream.path(),
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-m",
+                "later",
+            ],
+        );
+        let trees = tempfile::tempdir().unwrap();
+        let config = trees.path().join("claude.json");
+        let task = create_worktree(clone.path(), trees.path(), &new("task"), &config).unwrap();
+        assert_eq!(fs::read_to_string(task.join("sub/later")).unwrap(), "later");
+        assert!(!clone.path().join("sub/later").exists());
+        assert!(
+            !Command::new("git")
+                .args(["rev-parse", "--verify", "task@{upstream}"])
+                .current_dir(&task)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
     }
     #[test]
     fn origin_head_wins_and_master_is_supported() {

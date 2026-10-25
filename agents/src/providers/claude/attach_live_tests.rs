@@ -522,3 +522,6 @@ fn real_attach_clears_left_input_and_keeps_a_pending_question() {
         Err(panic) => std::panic::resume_unwind(panic),
     }
 }
+
+#[path = "attach_subagent_live_tests.rs"]
+mod subagent_live_tests;

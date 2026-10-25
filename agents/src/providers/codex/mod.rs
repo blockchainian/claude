@@ -568,6 +568,7 @@ fn session(row: &Row<'_>, parents: &HashMap<String, String>) -> rusqlite::Result
             .filter(|p| !p.is_empty())
             .map(PathBuf::from),
         archived: column::<bool>(row, "archived")?.unwrap_or(false),
+        subagent_input: None,
     }))
 }
 

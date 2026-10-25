@@ -89,6 +89,7 @@ impl Session {
             last_prompt: None,
             transcript: None,
             archived: false,
+            subagent_input: None,
         }
     }
 }

@@ -1,0 +1,50 @@
+
+ ▐▛███▛█   Claude Code v2.1.309
+▝▜██████▀  Haiku 5.5 · Claude Max
+ ▝▝   ▝▝   ~/Code/example-org/example-repo/probe · /rc
+
+
+❯ Spawn exactly one background subagent with the Agent tool (subagent_type general-purpose, run_in_background true, description 'probe looper'). Its prompt: 'This is a UI test that needs you to stay
+  busy. Call the Bash tool with command "seq 1 3000000 | wc -l" (no sleep, no background), then call it again, 300 times, one call per turn. Never stop early and never call SubagentHandback before
+  300 calls. If you receive a message from the user, answer it in one line and keep going.' After spawning it, end your turn without waiting.
+
+⏺ Agent(probe looper)
+  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)
+
+⏺ 后台的 probe looper 已经启动，正在跑 300 次 seq 循环，完成后会通知你。这个 agent 只做空转计数，不产出结果，所以它结束时不会有可用的报告。
+
+  另外，它会一直占用 token 和机器资源，直到跑完；如果你想提前停掉，告诉我就行。
+
+✻ Waiting for 1 background agent to finish
+
+❯ Run the Bash command 'seq 1 3000000 | wc -l' 15 times, one call per turn, then say done.
+
+⏺ Running 1 shell command…
+  ⎿  $ seq 1 3000000 | wc -l
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+● … (1s · ↓ 22 tokens)
+                                                                                                                                                Update available! Run: brew upgrade claude-code@latest
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── probe looper subagent ─
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Haiku 5.5 medium · Context 95% left · 52.4k/1m · weekly 81%/95% left · 1m:51s/1m:40s
+  ↑/↓ to select
+
+❯ ⏺ main
+  ◯ Haiku 5.5 medium · Context 95% left · 47.4k/1m · 1m:44s                                                                                                                           probe looper

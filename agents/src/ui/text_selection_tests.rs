@@ -53,6 +53,7 @@ fn fixture() -> View {
         last_prompt: None,
         transcript: None,
         archived: false,
+        subagent_input: None,
     };
     view.set_sessions(vec![row], false);
     view
