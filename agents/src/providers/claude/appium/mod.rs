@@ -196,7 +196,10 @@ fn element_ids(data: &ToolData<'_>) -> Option<Body> {
         .iter()
         .filter_map(|element| element["elementId"].as_str())
         .collect();
-    Some(Body::Sections(vec![text_section("output", &ids.join("\n"))]))
+    Some(Body::Sections(vec![text_section(
+        "output",
+        &ids.join("\n"),
+    )]))
 }
 
 fn gesture_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
@@ -214,7 +217,12 @@ fn gesture_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
             return empty_input(data);
         }
     }
-    other_fields(data, &["action"])
+    let mut sections: Vec<_> = text(data.input, "selector")
+        .map(|selector| code_section("selector", "", selector))
+        .into_iter()
+        .collect();
+    sections.extend(other_fields(data, &["action", "selector"])?);
+    Some(sections)
 }
 
 /// The selector as code, since predicates and XPath filters run long.
@@ -273,8 +281,10 @@ mod tests {
 
     /// The recorded calls, with the screenshot pointed at a real image file.
     fn calls(screenshot: &std::path::Path) -> Vec<ToolCall> {
-        let fixture = include_str!("../../../../tests/fixtures/claude-appium.jsonl")
-            .replace("/tmp/screenshot_1792876190968.png", screenshot.to_str().unwrap());
+        let fixture = include_str!("../../../../tests/fixtures/claude-appium.jsonl").replace(
+            "/tmp/screenshot_1792876190968.png",
+            screenshot.to_str().unwrap(),
+        );
         let dir = tempfile::tempdir().unwrap();
         let transcript = dir.path().join("transcript.jsonl");
         std::fs::write(&transcript, fixture).unwrap();
@@ -312,7 +322,10 @@ mod tests {
         image::RgbImage::new(2, 2).save(&screenshot).unwrap();
         let calls = calls(&screenshot);
         assert_eq!(
-            calls.iter().map(|call| call.title.as_str()).collect::<Vec<_>>(),
+            calls
+                .iter()
+                .map(|call| call.title.as_str())
+                .collect::<Vec<_>>(),
             [
                 "ios real",
                 "discovery",
@@ -502,6 +515,35 @@ mod tests {
                 "/tmp/page-source-b8d54b54-36f0-415d-99f5-20d6bcb9b36e.xml"
             )])
         );
+    }
+
+    #[test]
+    fn appium_gesture_shows_its_selector_as_code_and_the_rest_as_a_table() {
+        let input = serde_json::json!({
+            "action": "scroll_to_element",
+            "strategy": "-ios predicate string",
+            "selector": "label == 'Bohemian Rhapsody'",
+            "scrollDistancePreset": "large",
+            "maxScrollAttempts": 15,
+            "sessionId": "d0ffd28a-ac25-43c7-917a-f0a3c1e2b4d5"
+        });
+        let shown = super::presentation(
+            "mcp__plugin_mobile_appium-mcp__appium_gesture",
+            &super::ToolData {
+                input: &input,
+                result: None,
+            },
+        );
+        assert_eq!(shown.title.as_deref(), Some("scroll_to_element"));
+        assert_eq!(
+            shown.input[0],
+            super::code_section("selector", "", "label == 'Bohemian Rhapsody'")
+        );
+        let [_, Section::Markdown { text, .. }] = shown.input.as_slice() else {
+            panic!("the other fields must follow as a table: {:?}", shown.input);
+        };
+        assert!(text.contains("scrollDistancePreset"), "{text}");
+        assert!(!text.contains("selector") && !text.contains("sessionId"), "{text}");
     }
 
     #[test]
