@@ -1457,6 +1457,63 @@ fn archive_codex_fixture() -> (tempfile::TempDir, App) {
 }
 
 #[test]
+fn archive_codex_subagent_reaches_provider_worker() {
+    for archived in [false, true] {
+        let (directory, mut app) = archive_codex_fixture();
+        let mut provider = crate::providers::codex::CodexProvider::new(directory.path().into());
+        let mut target = crate::providers::Provider::children(
+            &mut provider,
+            &[SessionKey {
+                provider: ProviderId::Codex,
+                id: "thread-12".into(),
+            }],
+        )
+        .sessions
+        .pop()
+        .unwrap();
+        assert_eq!(target.parent.as_ref().unwrap().provider, ProviderId::Codex);
+        assert!(!target.can_resume());
+        target.archived = archived;
+        target.status = crate::model::SessionStatus::Ready;
+        let job = app
+            .hub
+            .archive(&target, None)
+            .unwrap_or_else(|error| panic!("Codex subagent archive must be supported: {error}"));
+        let result = job();
+        if archived {
+            result.unwrap();
+        } else {
+            // The fixture has no daemon; the real transport must attempt to connect.
+            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::NotFound);
+        }
+
+        let mut parent =
+            crate::providers::Provider::load(&mut provider, &[target.parent.clone().unwrap()])
+                .sessions
+                .pop()
+                .unwrap();
+        parent.status = crate::model::SessionStatus::Ready;
+        app.sessions = vec![parent, target.clone()];
+        app.view.set_sessions(app.sessions.clone(), false);
+        draw(&mut app, 120);
+        key(&mut app, KeyCode::Home);
+        key(&mut app, KeyCode::Down);
+        assert_eq!(app.view.selected_id(), Some(&target.id));
+        key(&mut app, KeyCode::Char('a'));
+        assert_ne!(app.view.selected_id(), Some(&target.id));
+        let event = app.receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+        app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+        let rendered = lines(&draw(&mut app, 160)).join("\n");
+        if archived {
+            assert!(!rendered.contains("Cannot archive:"), "{rendered}");
+        } else {
+            assert!(rendered.contains("daemon isn't running"), "{rendered}");
+        }
+    }
+}
+
+#[test]
 fn archive_errors_arrive_through_workers_for_both_providers() {
     for (directory, mut app) in [fixture(), archive_codex_fixture()] {
         let target = app
