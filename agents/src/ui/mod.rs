@@ -381,6 +381,7 @@ impl Default for View {
 struct ProjectGroup {
     key: (PathBuf, PathBuf),
     heading: PathBuf,
+    in_repository: bool,
 }
 
 impl ProjectGroup {
@@ -388,8 +389,9 @@ impl ProjectGroup {
         (!self.heading.as_os_str().is_empty()).then_some(self.heading.as_path())
     }
 
-    fn key(&self) -> (bool, &(PathBuf, PathBuf)) {
-        (self.directory().is_none(), &self.key)
+    /// Orders repository groups first, then other directories, then sessions without a directory.
+    fn key(&self) -> (bool, bool, &(PathBuf, PathBuf)) {
+        (!self.in_repository, self.directory().is_none(), &self.key)
     }
 
     fn for_session(session: &Session) -> Self {
@@ -397,10 +399,12 @@ impl ProjectGroup {
             Some(identity) => Self {
                 key: (identity.common_dir, identity.relative_cwd.clone()),
                 heading: identity.primary_root.join(identity.relative_cwd),
+                in_repository: true,
             },
             None => Self {
                 key: (session.cwd.clone(), PathBuf::new()),
                 heading: session.cwd.clone(),
+                in_repository: false,
             },
         }
     }
