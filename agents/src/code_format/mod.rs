@@ -1,0 +1,82 @@
+mod javascript;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Language {
+    JavaScript,
+    TypeScript,
+}
+
+impl Language {
+    /// A file extension or tool language token such as "js", "mjs" or "ts".
+    pub(crate) fn from_extension(name: &str) -> Option<Self> {
+        match name {
+            "js" | "mjs" | "cjs" => Some(Self::JavaScript),
+            "ts" | "mts" | "cts" => Some(Self::TypeScript),
+            _ => None,
+        }
+    }
+
+    /// An interpreter program such as "node" or "/usr/local/bin/node".
+    pub(crate) fn from_interpreter(name: &str) -> Option<Self> {
+        match std::path::Path::new(name).file_name()?.to_str()? {
+            "node" => Some(Self::JavaScript),
+            _ => None,
+        }
+    }
+
+    /// The formatted text, or None when the formatter rejects it.
+    pub(crate) fn format(self, text: &str) -> Option<String> {
+        let path = match self {
+            Self::JavaScript => "input.js",
+            Self::TypeScript => "input.ts",
+        };
+        javascript::format(path, text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Language;
+
+    #[test]
+    fn extensions_resolve_languages() {
+        for extension in ["js", "mjs", "cjs"] {
+            assert_eq!(
+                Language::from_extension(extension),
+                Some(Language::JavaScript)
+            );
+        }
+        for extension in ["ts", "mts", "cts"] {
+            assert_eq!(
+                Language::from_extension(extension),
+                Some(Language::TypeScript)
+            );
+        }
+        for extension in ["", "javascript", "node", "py", "JS", "input.js"] {
+            assert_eq!(Language::from_extension(extension), None);
+        }
+    }
+
+    #[test]
+    fn interpreter_program_names_resolve_languages() {
+        for interpreter in ["node", "/usr/local/bin/node", "./node"] {
+            assert_eq!(
+                Language::from_interpreter(interpreter),
+                Some(Language::JavaScript)
+            );
+        }
+        for interpreter in ["", "js", "ts", "python", "/usr/bin/python", "nodejs"] {
+            assert_eq!(Language::from_interpreter(interpreter), None);
+        }
+    }
+
+    #[test]
+    fn typescript_requires_its_language() {
+        let text = "const count:number=1;";
+        assert_eq!(
+            Language::TypeScript.format(text).as_deref(),
+            Some("const count: number = 1;\n")
+        );
+        assert_eq!(Language::JavaScript.format(text), None);
+    }
+}

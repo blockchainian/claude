@@ -2,6 +2,7 @@ mod activity;
 mod app;
 mod ask;
 mod clipboard;
+mod code_format;
 mod event;
 mod images;
 mod jsonl;

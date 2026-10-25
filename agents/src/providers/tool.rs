@@ -5,6 +5,7 @@ pub(crate) mod shell_summary;
 pub(crate) use shell_output::Stream;
 use shell_output::sections as shell_output_sections;
 
+use crate::code_format::Language;
 use crate::event::{Section, SourceRecord, ToolCall};
 use crate::images::{Image, ImageSource};
 use serde_json::Value;
@@ -421,7 +422,13 @@ pub(crate) fn picked_sections(
         return Vec::new();
     }
     vec![match format {
-        Format::Code(lang) => code_section(label, lang, &format_code(lang, &text)),
+        Format::Code(lang) => code_section(
+            label,
+            lang,
+            &Language::from_extension(lang)
+                .and_then(|l| l.format(&text))
+                .unwrap_or(text),
+        ),
         Format::Markdown => Section::Markdown {
             label: label.into(),
             text,
@@ -432,36 +439,6 @@ pub(crate) fn picked_sections(
             markdown: false,
         },
     }]
-}
-
-fn format_code(lang: &str, text: &str) -> String {
-    match lang {
-        "js" => {
-            use dprint_plugin_typescript::configuration::{
-                Configuration, ConfigurationBuilder, QuoteStyle,
-            };
-            use dprint_plugin_typescript::{FormatTextOptions, format_text};
-
-            static CONFIG: std::sync::OnceLock<Configuration> = std::sync::OnceLock::new();
-            let config = CONFIG.get_or_init(|| {
-                ConfigurationBuilder::new()
-                    .quote_style(QuoteStyle::PreferSingle)
-                    .line_width(80)
-                    .build()
-            });
-            match format_text(FormatTextOptions {
-                path: std::path::Path::new("input.js"),
-                extension: None,
-                text: text.to_owned(),
-                config,
-                external_formatter: None,
-            }) {
-                Ok(Some(formatted)) => formatted,
-                Ok(None) | Err(_) => text.to_owned(),
-            }
-        }
-        _ => text.to_owned(),
-    }
 }
 
 /// A string or number, or a list of them joined with commas.
@@ -1092,7 +1069,10 @@ mod tests {
             (serde_json::json!(400), "400"),
             (serde_json::json!(-2), "-2"),
             (serde_json::json!(2.5), "2.5"),
-            (serde_json::json!([400, "wide", -2, 2.5]), "400, wide, -2, 2.5"),
+            (
+                serde_json::json!([400, "wide", -2, 2.5]),
+                "400, wide, -2, 2.5",
+            ),
         ] {
             assert_eq!(super::title_text(&value).as_deref(), Some(expected));
         }
