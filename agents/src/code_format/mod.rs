@@ -1,9 +1,11 @@
 mod javascript;
+mod rust;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Language {
     JavaScript,
     TypeScript,
+    Rust,
 }
 
 impl Language {
@@ -12,6 +14,7 @@ impl Language {
         match name.to_ascii_lowercase().as_str() {
             "js" | "mjs" | "cjs" => Some(Self::JavaScript),
             "ts" | "mts" | "cts" => Some(Self::TypeScript),
+            "rs" => Some(Self::Rust),
             _ => None,
         }
     }
@@ -29,6 +32,7 @@ impl Language {
         let path = match self {
             Self::JavaScript => "input.js",
             Self::TypeScript => "input.ts",
+            Self::Rust => return rust::format(text),
         };
         javascript::format(path, text)
     }
@@ -80,3 +84,6 @@ mod tests {
         assert_eq!(Language::JavaScript.format(text), None);
     }
 }
+
+#[cfg(test)]
+mod rust_tests;
