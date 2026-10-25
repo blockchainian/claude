@@ -183,16 +183,27 @@ pub(super) fn abbreviate_paths(
         .iter()
         .map(|range| display_width(&text[range.clone()]))
         .sum();
-    let tail_width = display_width(&text[ranges.last().map_or(text.len(), |range| range.end)..]);
     let width = display_width(text).saturating_sub(source_width)
         + paths.iter().map(|path| display_width(path)).sum::<usize>();
     let mut overflow = width.saturating_sub(max_width);
-    // Prose after the last path shrinks a path only down to its file name.
-    let mut path_overflow = width.saturating_sub(tail_width).saturating_sub(max_width);
-    for path in paths.iter_mut().rev() {
+    for (index, range) in ranges.iter().enumerate().rev() {
         if overflow == 0 {
             break;
         }
+        // Prose after a path shrinks it only down to its file name.
+        let shown_width = display_width(&text[..range.end])
+            + paths[..=index]
+                .iter()
+                .map(|path| display_width(path))
+                .sum::<usize>();
+        let source_width: usize = ranges[..=index]
+            .iter()
+            .map(|range| display_width(&text[range.clone()]))
+            .sum();
+        let path_overflow = shown_width
+            .saturating_sub(source_width)
+            .saturating_sub(max_width);
+        let path = &mut paths[index];
         let width = display_width(path);
         let name_width = display_width(path.rsplit('/').next().unwrap_or(path)).min(width);
         // Keep an ellipsis when surrounding prose alone exceeds the row width.
@@ -203,7 +214,6 @@ pub(super) fn abbreviate_paths(
         let shrunk = abbreviate_path(path, target, None);
         let saved = width.saturating_sub(display_width(&shrunk));
         overflow = overflow.saturating_sub(saved);
-        path_overflow = path_overflow.saturating_sub(saved);
         *path = shrunk;
     }
     let mut fitted = String::new();
@@ -425,6 +435,18 @@ mod tests {
         assert_eq!(
             abbreviate_paths(text, &ranges, 12, cwd),
             "Reopened se…. Then a long tail of prose follows here"
+        );
+    }
+
+    #[test]
+    fn suffix_paths_keep_the_name_for_prose_after_each_path() {
+        let text = "Read /private/docs/design.md then move it somewhere sensible \
+                    over the coming days, /private/src/old.rs and more";
+        let cwd = Path::new("/nonexistent");
+        let ranges = crate::ui::paths::text_paths(text, cwd);
+        assert_eq!(
+            abbreviate_paths(text, &ranges, 40, cwd),
+            "Read design.md then move it somewhere sensible over the coming days, … and more"
         );
     }
 
