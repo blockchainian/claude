@@ -111,11 +111,7 @@ pub(crate) fn truncate_line_with_ellipsis_if_overflow(
 /// Keeps whole components around one `…` gap, then fits the final name alone.
 /// Home and relative paths keep their tail; root paths keep their head and name,
 /// since a lone `/…/` before the name says nothing.
-pub(super) fn abbreviate_path(
-    path: &str,
-    max_width: usize,
-    cwd: Option<&std::path::Path>,
-) -> String {
+pub(super) fn shorten_path(path: &str, max_width: usize, cwd: Option<&std::path::Path>) -> String {
     let path = display_path(path, cwd);
     if display_width(&path) <= max_width {
         return path;
@@ -132,7 +128,7 @@ pub(super) fn abbreviate_path(
         .filter(|part| !part.is_empty())
         .collect();
     let candidates: Vec<String> = if anchor == "/" {
-        let name = components.last().copied().unwrap_or_default();
+        let name = path_name(&path);
         (1..components.len().saturating_sub(1))
             .rev()
             .map(|end| format!("/{}/…/{name}", components[..end].join("/")))
@@ -148,8 +144,15 @@ pub(super) fn abbreviate_path(
     {
         return candidate;
     }
-    let name = components.last().copied().unwrap_or(&path);
-    truncate_line_with_ellipsis_if_overflow(Line::raw(name.to_owned()), max_width).to_string()
+    truncate_line_with_ellipsis_if_overflow(Line::raw(path_name(&path).to_owned()), max_width)
+        .to_string()
+}
+
+/// A path's last component, the part shortening keeps longest.
+fn path_name(path: &str) -> &str {
+    path.split('/')
+        .rfind(|part| !part.is_empty())
+        .unwrap_or(path)
 }
 
 fn display_path(path: &str, cwd: Option<&std::path::Path>) -> String {
@@ -169,7 +172,7 @@ fn display_path(path: &str, cwd: Option<&std::path::Path>) -> String {
 }
 
 /// Fits paths in a row, shrinking the rightmost path fully before its left neighbor.
-pub(super) fn abbreviate_paths(
+pub(super) fn fit_paths_in_row(
     text: &str,
     ranges: &[std::ops::Range<usize>],
     max_width: usize,
@@ -183,27 +186,36 @@ pub(super) fn abbreviate_paths(
         .iter()
         .map(|range| display_width(&text[range.clone()]))
         .sum();
-    let tail_width = display_width(&text[ranges.last().map_or(text.len(), |range| range.end)..]);
     let width = display_width(text).saturating_sub(source_width)
         + paths.iter().map(|path| display_width(path)).sum::<usize>();
     let mut overflow = width.saturating_sub(max_width);
-    // Prose after the last path shrinks a path only down to its file name.
-    let mut path_overflow = width.saturating_sub(tail_width).saturating_sub(max_width);
-    for path in paths.iter_mut().rev() {
+    for (index, range) in ranges.iter().enumerate().rev() {
         if overflow == 0 {
             break;
         }
+        let before = (display_width(&text[..range.start])
+            + paths[..index]
+                .iter()
+                .map(|path| display_width(path))
+                .sum::<usize>())
+        .saturating_sub(
+            ranges[..index]
+                .iter()
+                .map(|range| display_width(&text[range.clone()]))
+                .sum(),
+        );
+        let path = &mut paths[index];
         let width = display_width(path);
-        let name_width = display_width(path.rsplit('/').next().unwrap_or(path)).min(width);
-        // Keep an ellipsis when surrounding prose alone exceeds the row width.
-        let target = width
-            .saturating_sub(path_overflow)
-            .max(1)
-            .min(width.saturating_sub(overflow).max(name_width));
-        let shrunk = abbreviate_path(path, target, None);
+        let name_width = display_width(path_name(path)).min(width);
+        // Text after a path shrinks it only down to its name; text before it
+        // can shrink it further, but always leaves at least an ellipsis.
+        let target = max_width
+            .saturating_sub(before)
+            .min(width.saturating_sub(overflow).max(name_width))
+            .max(1);
+        let shrunk = shorten_path(path, target, None);
         let saved = width.saturating_sub(display_width(&shrunk));
         overflow = overflow.saturating_sub(saved);
-        path_overflow = path_overflow.saturating_sub(saved);
         *path = shrunk;
     }
     let mut fitted = String::new();
@@ -218,7 +230,7 @@ pub(super) fn abbreviate_paths(
 }
 
 /// Fits each path to the wrapping width, independently of surrounding text.
-pub(super) fn abbreviate_paths_for_wrap(
+pub(super) fn fit_paths_to_wrap_width(
     text: &str,
     ranges: &[std::ops::Range<usize>],
     width: usize,
@@ -228,7 +240,7 @@ pub(super) fn abbreviate_paths_for_wrap(
     let mut end = 0;
     for range in ranges {
         fitted.push_str(&text[end..range.start]);
-        fitted.push_str(&abbreviate_path(&text[range.clone()], width, Some(cwd)));
+        fitted.push_str(&shorten_path(&text[range.clone()], width, Some(cwd)));
         end = range.end;
     }
     fitted.push_str(&text[end..]);
@@ -292,8 +304,7 @@ mod tests {
         let path = format!("~/{}", path.splitn(4, '/').nth(3).unwrap());
         let mut snapshot = String::new();
         for width in [100, 60, 40, 25, 15, 8, 1, 0] {
-            snapshot
-                .push_str(format!("{width}: {}", abbreviate_path(&path, width, None)).trim_end());
+            snapshot.push_str(format!("{width}: {}", shorten_path(&path, width, None)).trim_end());
             snapshot.push('\n');
         }
         let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ui_snapshots/path_widths.txt");
@@ -343,13 +354,13 @@ mod tests {
         ] {
             for (width, expected) in widths {
                 assert_eq!(
-                    abbreviate_path(path, width, None),
+                    shorten_path(path, width, None),
                     expected,
                     "{path} at {width}"
                 );
             }
             for width in 0..30 {
-                let display = abbreviate_path(path, width, None);
+                let display = shorten_path(path, width, None);
                 assert!(display.width() <= width);
                 assert!(!display.contains("…/…"));
             }
@@ -361,7 +372,7 @@ mod tests {
         let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
         let cwd = home.join("project");
         assert_eq!(
-            abbreviate_path("~/project/alpha/file", 100, Some(&cwd)),
+            shorten_path("~/project/alpha/file", 100, Some(&cwd)),
             "alpha/file"
         );
         for (path, width, expected) in [
@@ -373,23 +384,23 @@ mod tests {
             (cwd.clone(), 100, "project"),
         ] {
             assert_eq!(
-                abbreviate_path(path.to_str().unwrap(), width, Some(&cwd)),
+                shorten_path(path.to_str().unwrap(), width, Some(&cwd)),
                 expected
             );
         }
         assert_eq!(
-            abbreviate_path("/a/bc/file", 100, Some(Path::new("/a/b"))),
+            shorten_path("/a/bc/file", 100, Some(Path::new("/a/b"))),
             "/a/bc/file"
         );
-        assert_eq!(abbreviate_path("/", 1, None), "/");
-        assert_eq!(abbreviate_path("", 0, None), "");
+        assert_eq!(shorten_path("/", 1, None), "/");
+        assert_eq!(shorten_path("", 0, None), "");
     }
 
     #[test]
     fn suffix_paths_fit_unicode_without_splitting_graphemes() {
-        assert_eq!(abbreviate_path("/目录/工具", 6, None), "工具");
-        assert_eq!(abbreviate_path("/目录/工具", 3, None), "工…");
-        assert_eq!(abbreviate_path("/dir/e\u{301}cole", 3, None), "e\u{301}c…");
+        assert_eq!(shorten_path("/目录/工具", 6, None), "工具");
+        assert_eq!(shorten_path("/目录/工具", 3, None), "工…");
+        assert_eq!(shorten_path("/dir/e\u{301}cole", 3, None), "e\u{301}c…");
     }
 
     #[test]
@@ -406,7 +417,7 @@ mod tests {
             (6, "left …"),
         ] {
             assert_eq!(
-                abbreviate_paths(text, &ranges, width, cwd),
+                fit_paths_in_row(text, &ranges, width, cwd),
                 expected,
                 "width {width}"
             );
@@ -419,12 +430,48 @@ mod tests {
         let cwd = Path::new("/nonexistent");
         let ranges = crate::ui::paths::text_paths(text, cwd);
         assert_eq!(
-            abbreviate_paths(text, &ranges, 40, cwd),
+            fit_paths_in_row(text, &ranges, 40, cwd),
             "Reopened sed.md. Then a long tail of prose follows here"
         );
         assert_eq!(
-            abbreviate_paths(text, &ranges, 12, cwd),
+            fit_paths_in_row(text, &ranges, 12, cwd),
             "Reopened se…. Then a long tail of prose follows here"
+        );
+    }
+
+    #[test]
+    fn suffix_paths_keep_the_name_for_prose_after_each_path() {
+        let text = "Read /private/docs/design.md then move it somewhere sensible \
+                    over the coming days, /private/src/old.rs and more";
+        let cwd = Path::new("/nonexistent");
+        let ranges = crate::ui::paths::text_paths(text, cwd);
+        assert_eq!(
+            fit_paths_in_row(text, &ranges, 40, cwd),
+            "Read design.md then move it somewhere sensible over the coming days, … and more"
+        );
+    }
+
+    #[test]
+    fn suffix_paths_keep_the_name_of_a_directory_with_a_trailing_slash() {
+        let text = "Add `/private/src/code_format/` support, with a long tail of prose";
+        let cwd = Path::new("/nonexistent");
+        let ranges = crate::ui::paths::text_paths(text, cwd);
+        assert_eq!(
+            fit_paths_in_row(text, &ranges, 30, cwd),
+            "Add `code_format` support, with a long tail of prose"
+        );
+    }
+
+    #[test]
+    fn suffix_paths_keep_visible_names_in_a_long_cjk_prompt() {
+        let text = "目标 给 `/private/src/code_format/` 加上 Rust 格式化，用 syn 解析。\
+                    先读 /private/src/code_format/mod.rs，以及设计文档 \
+                    /private/scratchpad/design.md。";
+        let cwd = Path::new("/nonexistent");
+        let ranges = crate::ui::paths::text_paths(text, cwd);
+        assert_eq!(
+            fit_paths_in_row(text, &ranges, 40, cwd),
+            "目标 给 `code_format` 加上 Rust 格式化，用 syn 解析。先读 …，以及设计文档 …。"
         );
     }
 
@@ -434,11 +481,11 @@ mod tests {
         let cwd = Path::new("/nonexistent");
         let ranges = crate::ui::paths::text_paths(text, cwd);
         assert_eq!(
-            abbreviate_paths_for_wrap(text, &ranges, 22, cwd),
+            fit_paths_to_wrap_width(text, &ranges, 22, cwd),
             "报告：`/private/…/result.md`，已发送。"
         );
         assert_eq!(
-            abbreviate_paths_for_wrap(text, &ranges, 5, cwd),
+            fit_paths_to_wrap_width(text, &ranges, 5, cwd),
             "报告：`resu…`，已发送。"
         );
     }

@@ -49,7 +49,7 @@ impl TitleRow {
     pub fn title_in(&self, width: usize, cwd: &std::path::Path) -> (Line<'static>, Vec<CellMap>) {
         let source = self.source();
         let paths = super::paths::text_paths(&source, cwd);
-        let display = super::line_truncation::abbreviate_paths(&source, &paths, width, cwd);
+        let display = super::line_truncation::fit_paths_in_row(&source, &paths, width, cwd);
         let drawn = Line::from(Span::styled(
             display.replace('\t', "    "),
             self.title_style,

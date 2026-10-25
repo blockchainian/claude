@@ -677,7 +677,7 @@ mod tests {
     fn shortened_filename_preserves_following_cjk_punctuation() {
         let source = "报告已写到 /private/tmp/claude-501/-Users-satoshi-Code-blockchainian-claude/0ed4978e-9ece-4b9d-9bc5-04bf44fedacb/scratchpad/background-research/report.md，并已发给 team-lead。";
         for markdown in [false, true] {
-            let shortened = super::super::line_truncation::abbreviate_paths_for_wrap(
+            let shortened = super::super::line_truncation::fit_paths_to_wrap_width(
                 source,
                 &crate::ui::paths::text_paths(source, std::path::Path::new("/")),
                 25,
@@ -731,7 +731,7 @@ mod tests {
     fn home_replacement_after_wrapped_whitespace_maps_original_home() {
         let home = std::env::var("HOME").expect("HOME");
         let source = format!("before {home}/workspace/report.md after");
-        let shortened = super::super::line_truncation::abbreviate_paths_for_wrap(
+        let shortened = super::super::line_truncation::fit_paths_to_wrap_width(
             &source,
             &crate::ui::paths::text_paths(&source, std::path::Path::new("/")),
             15,
@@ -823,7 +823,7 @@ mod tests {
     #[test]
     fn abbreviated_paths_map_omitted_bytes_and_preserve_following_text() {
         let source = "before /private/workspace/reports/report.md after";
-        let shortened = super::super::line_truncation::abbreviate_paths_for_wrap(
+        let shortened = super::super::line_truncation::fit_paths_to_wrap_width(
             source,
             &crate::ui::paths::text_paths(source, std::path::Path::new("/")),
             20,

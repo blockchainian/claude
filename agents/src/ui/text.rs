@@ -67,7 +67,7 @@ pub(crate) fn summary(
             &detected
         }
     };
-    let text = super::line_truncation::abbreviate_paths(text, paths, width, cwd);
+    let text = super::line_truncation::fit_paths_in_row(text, paths, width, cwd);
     let text = crate::providers::text::printable(&text);
     if !is_prose(kind) {
         return Line::styled(text.split_whitespace().collect::<Vec<_>>().join(" "), style);

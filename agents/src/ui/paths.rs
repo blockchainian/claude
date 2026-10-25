@@ -206,7 +206,7 @@ mod tests {
         }
         let text = "./screens/screen.png";
         assert_eq!(
-            super::super::line_truncation::abbreviate_paths_for_wrap(
+            super::super::line_truncation::fit_paths_to_wrap_width(
                 text,
                 &text_paths(text, dir.path()),
                 12,
