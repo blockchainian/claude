@@ -1429,6 +1429,7 @@ impl View {
             let mut detail = self.event_detail.scroll.borrow_mut();
             if detail.state.scroll_rows(forward, row, rows) {
                 detail.offset = detail.state.position();
+                detail.scrolled = Some(forward);
                 true
             } else {
                 drop(viewport);
@@ -1521,6 +1522,9 @@ impl View {
             }
             if panel == Panel::EventDetail {
                 detail.offset = detail.state.position();
+                if edge {
+                    detail.scrolled = Some(forward);
+                }
             }
             (row, rows)
         };

@@ -77,10 +77,7 @@ fn event_border_labels_align_with_clock_in_three_layouts() {
                 .rev()
                 .find(|&x| buf[(x, label.y)].symbol() != " ")
                 .unwrap();
-            if end != right
-                || !(text.ends_with(&format!("{expected}╶─"))
-                    || text.ends_with(&format!("{expected}╺━")))
-            {
+            if end != right || !text.ends_with(&format!("{expected}╶─")) {
                 failures.push(format!(
                     "{width} {sort:?}: last={end}, clock={right}, {text:?}"
                 ));

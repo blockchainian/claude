@@ -9622,8 +9622,7 @@ fn open_view_scrollbar() {
     assert_eq!(buf[(scrollbar_x, area.top())].symbol(), "▕");
     assert_eq!(buf[(scrollbar_x, area.top())].fg, Color::Reset);
     assert_eq!(buf[(scrollbar_x, area.bottom() - 1)].symbol(), " ");
-    // The detail opens at its top, so its top rule warns that scrolling up leaves the event.
-    assert_eq!(buf[(scrollbar_x, layout.event_detail.top())].symbol(), "━");
+    assert_eq!(buf[(scrollbar_x, layout.event_detail.top())].symbol(), "─");
     assert_eq!(
         buf[(scrollbar_x, layout.event_detail.bottom())].symbol(),
         "─"

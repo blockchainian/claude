@@ -1337,9 +1337,10 @@ fn heavy_output_borders(view: &View) -> [bool; 2] {
 }
 
 #[test]
-fn event_detail_rules_turn_heavy_at_the_boundary_a_scroll_would_leave() {
+fn event_detail_rules_turn_heavy_only_where_the_next_scroll_would_leave() {
     let (mut view, _) = fixture(true);
-    assert_eq!(heavy_output_borders(&view), [true, false]);
+    // Opening an event that starts at its top is no scroll inside it.
+    assert_eq!(heavy_output_borders(&view), [false, false]);
     event_detail_wheel(&mut view, true);
     assert_eq!(heavy_output_borders(&view), [false, false]);
     for _ in 0..60 {
@@ -1351,6 +1352,18 @@ fn event_detail_rules_turn_heavy_at_the_boundary_a_scroll_would_leave() {
     assert_eq!(view.event_list.cursor, Some(1));
     assert_eq!(heavy_output_borders(&view), [false, true]);
 
-    let (view, _) = fixture(false);
+    // Returning from the next event lands at the bottom without a scroll inside it.
+    event_detail_wheel(&mut view, true);
+    assert_eq!(view.event_list.cursor, Some(2));
+    event_detail_wheel(&mut view, false);
+    assert_eq!(view.event_list.cursor, Some(1));
     assert_eq!(heavy_output_borders(&view), [false, false]);
+    for _ in 0..60 {
+        if heavy_output_borders(&view)[0] {
+            break;
+        }
+        event_detail_wheel(&mut view, false);
+    }
+    assert_eq!(view.event_list.cursor, Some(1));
+    assert_eq!(heavy_output_borders(&view), [true, false]);
 }

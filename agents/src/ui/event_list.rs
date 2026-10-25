@@ -679,6 +679,7 @@ impl View {
             if let Some(previous) = detail.key.replace(key) {
                 detail.saved.insert(previous, left);
             }
+            detail.scrolled = None;
             let saved = detail.saved.remove(&key);
             // Entering by wheel starts at the end the wheel came from.
             detail.state = saved.filter(|_| entry.is_none()).unwrap_or_default();
@@ -735,16 +736,10 @@ impl View {
             );
         }
         viewport.event_detail_max = rows.max;
-        let edges = [false, true].map(|forward| {
-            let top = detail.state.content_top;
-            !detail.state.clone().scroll_window(forward, top)
+        let top = detail.state.content_top;
+        viewport.event_detail_edges = [false, true].map(|forward| {
+            detail.scrolled == Some(forward) && !detail.state.clone().scroll_window(forward, top)
         });
-        // Content that never scrolls has no boundary to warn about.
-        viewport.event_detail_edges = if edges == [true, true] {
-            [false, false]
-        } else {
-            edges
-        };
         detail.offset = rows.scroll;
         rows
     }

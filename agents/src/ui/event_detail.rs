@@ -89,6 +89,8 @@ pub(super) struct EventDetailScroll {
     pub event: Option<super::task_ui::EventId>,
     /// The wheel direction that selected the entry, until its layout starts it at that end.
     pub entry: Option<bool>,
+    /// The direction of the last scroll inside the selected event, cleared when another opens.
+    pub scrolled: Option<bool>,
     /// An output refresh reached while the detail was at its bottom.
     pub follow_output: bool,
     pub saved: std::collections::HashMap<u64, super::SectionScroll>,
