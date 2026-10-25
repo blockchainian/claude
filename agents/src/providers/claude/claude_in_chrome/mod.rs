@@ -15,6 +15,11 @@ pub(crate) const SERVER: McpServer = McpServer {
             ..DEFAULT_RULE
         },
         ToolRule {
+            name: "tabs_context_mcp",
+            title: &[Pick::Field(Source::Input, "/createIfEmpty")],
+            ..DEFAULT_RULE
+        },
+        ToolRule {
             name: "computer",
             title: &[
                 Pick::Field(Source::Input, "/action_summary"),
@@ -138,6 +143,22 @@ mod tests {
             );
             assert_eq!(shown.title.as_deref(), Some(title));
             assert_eq!(shown.input, rest);
+        }
+    }
+
+    #[test]
+    fn chrome_tabs_context_titles_a_true_flag_by_its_name() {
+        for (flag, title) in [(true, Some("createIfEmpty")), (false, None)] {
+            let input = serde_json::json!({"createIfEmpty": flag});
+            let shown = super::presentation(
+                "mcp__claude-in-chrome__tabs_context_mcp",
+                &super::ToolData {
+                    input: &input,
+                    result: None,
+                },
+            );
+            assert_eq!(shown.title.as_deref(), title);
+            assert_eq!(shown.input, Vec::new());
         }
     }
 

@@ -442,14 +442,15 @@ pub(crate) fn picked_sections(
     }]
 }
 
-/// A string or number, or a list of them joined with commas.
-fn title_text(value: &Value) -> Option<String> {
+/// A string or number, or a list of them joined with commas; a true flag is its field name.
+fn title_text(value: &Value, pointer: &str) -> Option<String> {
     let scalar = |value: &Value| match value {
         Value::String(text) => Some(text.clone()),
         Value::Number(number) => Some(number.to_string()),
         _ => None,
     };
     match value {
+        Value::Bool(true) => pointer.rsplit('/').next().map(str::to_owned),
         Value::Array(items) => items
             .iter()
             .map(scalar)
@@ -463,7 +464,7 @@ pub(crate) fn presentation(name: &str, data: &ToolData<'_>) -> Presentation {
     let rule = rule(name);
     let title = rule.title.iter().find_map(|pick| {
         let title = match pick {
-            Pick::Field(source, pointer) => title_text(field(data, *source, pointer)?)?,
+            Pick::Field(source, pointer) => title_text(field(data, *source, pointer)?, pointer)?,
             Pick::With(function) => function(data)?,
         };
         (!title.trim().is_empty()).then_some(title)
@@ -1246,17 +1247,24 @@ mod tests {
                 "400, wide, -2, 2.5",
             ),
         ] {
-            assert_eq!(super::title_text(&value).as_deref(), Some(expected));
+            assert_eq!(
+                super::title_text(&value, "/size").as_deref(),
+                Some(expected)
+            );
         }
         for value in [
-            serde_json::json!(true),
+            serde_json::json!(false),
             serde_json::json!(null),
             serde_json::json!({}),
             serde_json::json!([400, false]),
             serde_json::json!([[400]]),
         ] {
-            assert_eq!(super::title_text(&value), None);
+            assert_eq!(super::title_text(&value, "/size"), None);
         }
+        assert_eq!(
+            super::title_text(&serde_json::json!(true), "/options/createIfEmpty").as_deref(),
+            Some("createIfEmpty")
+        );
     }
 
     fn shell_output(command: &str, text: &str) -> Vec<crate::event::Section> {
