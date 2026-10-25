@@ -203,7 +203,7 @@ fn prompt_deliveries<'a>(
                 deliveries.insert(*offset, enqueue);
             }
         } else if record["type"] == "user"
-            && record["isMeta"] != true
+            && !is_hidden_meta(record)
             && record["isCompactSummary"] != true
             && let Some(text) = super::images::prompt_text(record)
             && is_prompt_text(record, &text)
@@ -895,7 +895,7 @@ impl EventReader {
                     .as_ref()
                     .is_some_and(|(kind, _, _)| matches!(kind, Kind::Agent | Kind::Session));
                 if let Some(text) = text.filter(|text| !text.trim().is_empty())
-                    && (record["isMeta"] != true || is_peer)
+                    && (!is_hidden_meta(&record) || is_peer)
                     && !["<task-notification>", "<system-reminder>"]
                         .iter()
                         .any(|prefix| text.trim_start().starts_with(prefix))
@@ -1452,6 +1452,12 @@ pub(super) fn pasted_content(mut text: &str) -> Option<String> {
 }
 
 /// Human-origin prompts can start with XML; system wrappers remain system records.
+/// Claude Code marks injected user records as meta; a scheduled task's prompt is meta too,
+/// yet it is the delivery of a queued prompt.
+fn is_hidden_meta(record: &serde_json::Value) -> bool {
+    record["isMeta"] == true && record["scheduledFireId"].is_null()
+}
+
 pub(super) fn is_prompt_text(record: &serde_json::Value, text: &str) -> bool {
     !["<task-notification>", "<system-reminder>"]
         .iter()
@@ -1681,6 +1687,28 @@ pub(crate) mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn delivered_scheduled_prompt_is_no_longer_queued() {
+        let fixture = include_str!("../../../tests/fixtures/claude-scheduled-prompt.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{}", fixture.lines().next().unwrap()).unwrap();
+        let events = tail(file.path(), 20).unwrap();
+        assert_eq!(events.last().unwrap().kind, Kind::QueuedUser);
+        let mut reader = Reader::new(file.path().into(), false);
+        reader.refresh(20).unwrap();
+        for line in fixture.lines().skip(1) {
+            writeln!(file, "{line}").unwrap();
+        }
+        let events = tail(file.path(), 20).unwrap();
+        assert_eq!(reader.refresh(20).unwrap().events, events);
+        let prompts: Vec<_> = events
+            .iter()
+            .filter(|event| matches!(event.kind, Kind::User | Kind::QueuedUser))
+            .map(|event| event.kind.clone())
+            .collect();
+        assert_eq!(prompts, [Kind::User]);
     }
 
     #[test]
