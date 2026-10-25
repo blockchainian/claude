@@ -171,13 +171,73 @@ fn display_path(path: &str, cwd: Option<&std::path::Path>) -> String {
     path.to_owned()
 }
 
-/// Fits paths in a row, shrinking the rightmost path fully before its left neighbor.
+/// Fits paths in a row. When shortening paths to their names fits the whole row,
+/// the rightmost path shrinks fully before its left neighbor; otherwise the row is
+/// cut anyway, so paths fill it from the left and keep their full form while they fit.
 pub(super) fn fit_paths_in_row(
     text: &str,
     ranges: &[std::ops::Range<usize>],
     max_width: usize,
     cwd: &std::path::Path,
 ) -> String {
+    let (paths, row_end) = fit_paths(text, ranges, max_width, cwd);
+    let mut fitted = String::new();
+    let mut start = 0;
+    for (range, path) in ranges.iter().zip(&paths) {
+        if range.start >= row_end {
+            break;
+        }
+        fitted.push_str(&text[start..range.start]);
+        fitted.push_str(path);
+        start = range.end;
+    }
+    fitted.push_str(&text[start..row_end.max(start)]);
+    fitted
+}
+
+/// Fits the paths of a row of styled words, as `fit_paths_in_row` does for plain text.
+/// Paths are found in the row's whole text, since Markdown can split one across words;
+/// a fitted path takes the style of the word it starts in.
+pub(super) fn fit_paths_in_spans(
+    spans: &mut [Span<'static>],
+    max_width: usize,
+    cwd: &std::path::Path,
+) {
+    let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
+    let ranges = super::paths::text_paths(&text, cwd);
+    if ranges.is_empty() {
+        return;
+    }
+    let (paths, row_end) = fit_paths(&text, &ranges, max_width, cwd);
+    let mut start = 0;
+    for span in spans {
+        let span_end = start + span.content.len();
+        let mut fitted = String::new();
+        let mut kept = start;
+        for (range, path) in ranges.iter().zip(&paths) {
+            if range.end <= start || range.start >= span_end || range.start >= row_end {
+                continue;
+            }
+            fitted.push_str(&text[kept..range.start.max(start)]);
+            if range.start >= start {
+                fitted.push_str(path);
+            }
+            kept = range.end.min(span_end);
+        }
+        fitted.push_str(&text[kept..span_end.min(row_end).max(kept)]);
+        span.content = fitted.into();
+        start = span_end;
+    }
+}
+
+/// Each path of `text` as it fits in a row of `max_width` columns, and the byte
+/// offset where the row's text ends: right after a path whose name had to be cut.
+fn fit_paths(
+    text: &str,
+    ranges: &[std::ops::Range<usize>],
+    max_width: usize,
+    cwd: &std::path::Path,
+) -> (Vec<String>, usize) {
     let mut paths: Vec<String> = ranges
         .iter()
         .map(|range| display_path(&text[range.clone()], Some(cwd)))
@@ -186,9 +246,32 @@ pub(super) fn fit_paths_in_row(
         .iter()
         .map(|range| display_width(&text[range.clone()]))
         .sum();
-    let width = display_width(text).saturating_sub(source_width)
-        + paths.iter().map(|path| display_width(path)).sum::<usize>();
-    let mut overflow = width.saturating_sub(max_width);
+    let paths_width: usize = paths.iter().map(|path| display_width(path)).sum();
+    let width = display_width(text).saturating_sub(source_width) + paths_width;
+    if width <= max_width {
+        return (paths, text.len());
+    }
+    let names_width: usize = paths
+        .iter()
+        .map(|path| display_width(path_name(path)).min(display_width(path)))
+        .sum();
+    let row_end = if width - paths_width + names_width <= max_width {
+        shrink_rightmost_first(text, ranges, &mut paths, width - max_width, max_width);
+        text.len()
+    } else {
+        fill_from_left(text, ranges, &mut paths, max_width)
+    };
+    (paths, row_end)
+}
+
+/// Shrinks paths from the right until the row loses its `overflow`.
+fn shrink_rightmost_first(
+    text: &str,
+    ranges: &[std::ops::Range<usize>],
+    paths: &mut [String],
+    mut overflow: usize,
+    max_width: usize,
+) {
     for (index, range) in ranges.iter().enumerate().rev() {
         if overflow == 0 {
             break;
@@ -218,15 +301,53 @@ pub(super) fn fit_paths_in_row(
         overflow = overflow.saturating_sub(saved);
         *path = shrunk;
     }
-    let mut fitted = String::new();
+}
+
+/// Gives each path, left to right, the room its row has left, and returns where
+/// the row's text ends; paths past the row stay whole.
+fn fill_from_left(
+    text: &str,
+    ranges: &[std::ops::Range<usize>],
+    paths: &mut [String],
+    max_width: usize,
+) -> usize {
+    let mut before = 0;
     let mut end = 0;
-    for (range, path) in ranges.iter().zip(&paths) {
-        fitted.push_str(&text[end..range.start]);
-        fitted.push_str(path);
+    for (path, range) in paths.iter_mut().zip(ranges) {
+        before += display_width(&text[end..range.start]);
+        if before >= max_width {
+            break;
+        }
+        let rest = display_width(&text[range.end..]);
+        let (fitted, ends_row) = fit_path(std::mem::take(path), max_width - before, rest);
+        *path = fitted;
+        if ends_row {
+            return range.end;
+        }
+        before += display_width(path);
         end = range.end;
     }
-    fitted.push_str(&text[end..]);
-    fitted
+    text.len()
+}
+
+/// A path shortened to the `room` left in its row, with `rest` columns of text after
+/// it, and whether the row ends with it. A row that overflows ends in an ellipsis, so
+/// a path followed by text fits only with a column to spare; a path whose name must be
+/// cut takes the full room and ends the row, its own ellipsis standing for the rest.
+fn fit_path(path: String, room: usize, rest: usize) -> (String, bool) {
+    let width = display_width(&path);
+    if width + rest <= room || (rest > 0 && width < room) {
+        return (path, false);
+    }
+    if rest > 0 {
+        let shorter = shorten_path(&path, room - 1, None);
+        if !shorter.is_empty() && !shorter.ends_with('…') {
+            return (shorter, false);
+        }
+    }
+    let shorter = shorten_path(&path, room, None);
+    let ends_row = shorter.ends_with('…');
+    (shorter, ends_row)
 }
 
 /// Fits each path to the wrapping width, independently of surrounding text.
@@ -403,76 +524,58 @@ mod tests {
         assert_eq!(shorten_path("/dir/e\u{301}cole", 3, None), "e\u{301}c…");
     }
 
-    #[test]
-    fn suffix_paths_compress_rightmost_path_to_the_limit_first() {
-        let text = "/alpha/left /beta/gamma/right";
+    /// The row as drawn: its paths fitted, then the row cut with an ellipsis.
+    fn row(text: &str, width: usize) -> String {
         let cwd = Path::new("/nonexistent");
         let ranges = crate::ui::paths::text_paths(text, cwd);
+        let fitted = fit_paths_in_row(text, &ranges, width, cwd);
+        truncate_line_with_ellipsis_if_overflow(Line::raw(fitted), width).to_string()
+    }
+
+    #[test]
+    fn row_paths_shrink_rightmost_first_when_names_fit_the_row() {
+        let text = "/alpha/left /beta/gamma/right";
         for (width, expected) in [
             (100, text),
             (25, "/alpha/left /beta/…/right"),
             (17, "/alpha/left right"),
             (13, "/alpha/left …"),
-            (9, "left …"),
+            (9, "left rig…"),
             (6, "left …"),
         ] {
-            assert_eq!(
-                fit_paths_in_row(text, &ranges, width, cwd),
-                expected,
-                "width {width}"
-            );
+            assert_eq!(row(text, width), expected, "width {width}");
         }
     }
 
     #[test]
-    fn suffix_paths_keep_the_name_for_prose_after_the_last_path() {
+    fn row_paths_that_fit_keep_their_full_form() {
         let text = "Reopened /private/jobs/tmp/sed.md. Then a long tail of prose follows here";
-        let cwd = Path::new("/nonexistent");
-        let ranges = crate::ui::paths::text_paths(text, cwd);
-        assert_eq!(
-            fit_paths_in_row(text, &ranges, 40, cwd),
-            "Reopened sed.md. Then a long tail of prose follows here"
-        );
-        assert_eq!(
-            fit_paths_in_row(text, &ranges, 12, cwd),
-            "Reopened se…. Then a long tail of prose follows here"
-        );
+        assert_eq!(row(text, 40), "Reopened /private/jobs/tmp/sed.md. Then…");
+        assert_eq!(row(text, 12), "Reopened se…");
     }
 
     #[test]
-    fn suffix_paths_keep_the_name_for_prose_after_each_path() {
+    fn row_paths_ignore_text_beyond_the_row() {
         let text = "Read /private/docs/design.md then move it somewhere sensible \
                     over the coming days, /private/src/old.rs and more";
-        let cwd = Path::new("/nonexistent");
-        let ranges = crate::ui::paths::text_paths(text, cwd);
+        assert_eq!(row(text, 40), "Read /private/docs/design.md then move …");
+    }
+
+    #[test]
+    fn row_paths_after_another_path_keep_the_rest_of_the_row() {
+        let text = "把 /private/src/ui/shell_commands.rs 挪到 /private/src/shell_commands.rs，\
+                    让它成为独立模块。后面还有很长很长的一段文字";
         assert_eq!(
-            fit_paths_in_row(text, &ranges, 40, cwd),
-            "Read design.md then move it somewhere sensible over the coming days, … and more"
+            row(text, 57),
+            "把 /private/src/ui/shell_commands.rs 挪到 shell_commands…"
         );
     }
 
     #[test]
-    fn suffix_paths_keep_the_name_of_a_directory_with_a_trailing_slash() {
+    fn row_paths_keep_the_name_of_a_directory_with_a_trailing_slash() {
         let text = "Add `/private/src/code_format/` support, with a long tail of prose";
-        let cwd = Path::new("/nonexistent");
-        let ranges = crate::ui::paths::text_paths(text, cwd);
-        assert_eq!(
-            fit_paths_in_row(text, &ranges, 30, cwd),
-            "Add `code_format` support, with a long tail of prose"
-        );
-    }
-
-    #[test]
-    fn suffix_paths_keep_visible_names_in_a_long_cjk_prompt() {
-        let text = "目标 给 `/private/src/code_format/` 加上 Rust 格式化，用 syn 解析。\
-                    先读 /private/src/code_format/mod.rs，以及设计文档 \
-                    /private/scratchpad/design.md。";
-        let cwd = Path::new("/nonexistent");
-        let ranges = crate::ui::paths::text_paths(text, cwd);
-        assert_eq!(
-            fit_paths_in_row(text, &ranges, 40, cwd),
-            "目标 给 `code_format` 加上 Rust 格式化，用 syn 解析。先读 …，以及设计文档 …。"
-        );
+        assert_eq!(row(text, 20), "Add `code_format` s…");
+        assert_eq!(row(text, 40), "Add `/private/src/code_format/` support…");
     }
 
     #[test]

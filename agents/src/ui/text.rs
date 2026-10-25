@@ -52,26 +52,22 @@ pub(crate) fn summary(
     paths: Option<&[Range<usize>]>,
 ) -> Line<'static> {
     let style = super::style::event_styles(kind).1;
-    let normalized;
-    let text = if !is_prose(kind) && paths.is_none() {
-        normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        normalized.as_str()
-    } else {
-        text
-    };
-    let detected;
-    let paths = match paths {
-        Some(paths) => paths,
-        None => {
-            detected = super::paths::text_paths(text, cwd);
-            &detected
-        }
-    };
-    let text = super::line_truncation::fit_paths_in_row(text, paths, width, cwd);
-    let text = crate::providers::text::printable(&text);
     if !is_prose(kind) {
+        let normalized;
+        let detected;
+        let (text, paths) = match paths {
+            Some(paths) => (text, paths),
+            None => {
+                normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                detected = super::paths::text_paths(&normalized, cwd);
+                (normalized.as_str(), detected.as_slice())
+            }
+        };
+        let text = super::line_truncation::fit_paths_in_row(text, paths, width, cwd);
+        let text = crate::providers::text::printable(&text);
         return Line::styled(text.split_whitespace().collect::<Vec<_>>().join(" "), style);
     }
+    let text = crate::providers::text::printable(text);
     let mut spans = Vec::new();
     for line in lines(&text, cwd, usize::MAX, true) {
         if line
@@ -96,6 +92,7 @@ pub(crate) fn summary(
             }
         }
     }
+    super::line_truncation::fit_paths_in_spans(&mut spans, width, cwd);
     Line::from(spans)
 }
 
@@ -126,6 +123,50 @@ mod tests {
         assert!(line.contains("是子命令？比如 rg -n 'background' src 里的 background"));
         assert!(line.contains("cat README.md 的是文件"));
         assert!(!line.contains('`'));
+    }
+
+    /// A prose summary as drawn in a row of `width` columns.
+    fn prose_row(text: &str, width: usize) -> String {
+        let line = summary(text, Path::new("/nonexistent"), width, &Kind::User, None);
+        super::super::line_truncation::truncate_line_with_ellipsis_if_overflow(line, width)
+            .to_string()
+    }
+
+    #[test]
+    fn prose_summary_fits_paths_after_hidden_markdown_markers() {
+        let text = "**读** **读** **读** **读** **读** **读** **读** **读**  /private/tmp/design.md \
+                    先读设计文档，保留现有行为，检查所有调用方，再运行相关测试。";
+        assert_eq!(
+            prose_row(text, 50),
+            "读 读 读 读 读 读 读 读 /private/tmp/design.md 先…"
+        );
+    }
+
+    #[test]
+    fn prose_summary_fits_paths_after_collapsed_whitespace() {
+        let text = format!(
+            "目标{}/private/tmp/design.md 先读设计文档，保留现有行为，检查所有调用方，再运行相关测试。",
+            " ".repeat(60)
+        );
+        assert_eq!(
+            prose_row(&text, 60),
+            "目标 /private/tmp/design.md 先读设计文档，保留现有行为，检…"
+        );
+    }
+
+    #[test]
+    fn prose_summary_fits_paths_that_markdown_splits() {
+        let home = "读 ~/notes/design.md 后面还有很长很长的一段文字以及其他信息，检查所有调用方。";
+        assert_eq!(prose_row(home, 16), "读 design.md 后…");
+        assert_eq!(prose_row(home, 20), "读 ~/…/design.md 后…");
+        let bold = "读 /private/**src**/file.rs 后面还有很长很长的说明文字";
+        assert_eq!(prose_row(bold, 20), "读 file.rs 后面还有…");
+    }
+
+    #[test]
+    fn prose_summary_ends_a_row_at_a_cut_path_with_one_ellipsis() {
+        let text = "**读** `/private/目录/工具.rs`，完成。";
+        assert_eq!(prose_row(text, 7), "读 工…");
     }
 
     #[test]
