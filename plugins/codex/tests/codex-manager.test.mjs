@@ -1426,6 +1426,33 @@ test("attach takes a thread id, reports a finished session without an inbox even
   }
 });
 
+test("attach refuses a thread another session started, but not one it attached", { timeout: 20_000 }, async () => {
+  const home = await tempHome();
+  const other = path.join(home.home, "99999999-2222-3333-4444-555555555555");
+  await mkdir(other, { recursive: true });
+  await writeFile(path.join(other, "state.json"), JSON.stringify({ updatedAt: 1, threads: [
+    { id: "thread-4", name: "twin", cwd: "/repo/d", turnId: null, lastStatus: "completed", detached: true },
+    { id: "thread-5", name: "slow-requests", cwd: "/repo/e", turnId: null, lastStatus: "idle", attached: true, detached: true }
+  ] }));
+  const script = daemonScript();
+  script.threads = sessionsOnDaemon();
+  const daemon = await fakeDaemon(script.handler);
+  const mcp = await mcpChild(home, daemon);
+  try {
+    const started = await mcp.call("attach", { thread: "thread-4" });
+    assert.equal(started.isError, true);
+    assert.match(started.text, /thread thread-4 was started by codex-manager/);
+    assert.equal(script.messages.some((message) => message.method === "thread/resume"), false);
+    const attached = await mcp.call("attach", { thread: "slow-requests" });
+    assert.equal(attached.isError, false, attached.text);
+    assert.deepEqual((await mcp.call("list", {})).json.threads.map((thread) => thread.id), ["thread-5"]);
+  } finally {
+    await mcp.close();
+    await daemon.close();
+    await home.close();
+  }
+});
+
 test("attach refuses a name no session has, and a name several sessions share", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   const script = daemonScript();

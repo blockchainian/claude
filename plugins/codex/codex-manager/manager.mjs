@@ -10,7 +10,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 import { readStdin } from "../lib/stdin.mjs";
-import { SessionStore, askTimeoutSeconds, readSupervisor, writeSupervisor } from "../lib/inbox.mjs";
+import { SessionStore, askTimeoutSeconds, readSupervisor, startedByManager, writeSupervisor } from "../lib/inbox.mjs";
 import { defaultSessionsDir, parentProcesses, recordedSessionId, resolveSessionId } from "./session.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -492,12 +492,13 @@ class Manager {
     return named[0];
   }
 
-  /** Subscribes to a session this manager did not start, leaving its settings as its own client set them. */
+  /** Subscribes to a session no codex-manager started, leaving its settings as its own client set them. */
   async attach({ thread }) {
     if (!thread) throw new Error("thread is required");
     const client = await this.connect();
     const found = await this.findThread(client, thread);
     if (!this.owns(found.id)) {
+      if (startedByManager(found.id)) throw new Error(`thread ${found.id} was started by codex-manager, so only the session that started it drives it; start a new thread`);
       // Recorded before the resume so a turn that ends right behind the response is not missed.
       this.updateThread(found.id, { name: found.name ?? null, cwd: found.cwd, turnId: null, lastStatus: "idle", attached: true });
       let latest;
@@ -620,7 +621,7 @@ const MODEL_PROPERTIES = { model: { type: "string", enum: Object.keys(MODEL_EFFO
 const TOOLS = [
   { name: "start", description: "Start a codex worker thread on the shared daemon and give it a task; returns the thread id and the await command.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute checkout or worktree root, not a subdirectory." }, prompt: { type: "string", description: "The task, written for a worker that sees nothing of this conversation: its goal, the files involved, test-first, the gate, and commit+push. Write it as technical writing." }, name: { type: "string", description: "Short human-readable thread name." }, ...MODEL_PROPERTIES }, required: ["cwd", "prompt"] } },
   { name: "transfer", description: "Transfer this session to an independent Codex thread. Run /compact manually first; only the latest compaction summary is sent, excluding later conversation. This session receives no messages from the thread.", inputSchema: { type: "object", properties: { cwd: { type: "string", description: "Absolute checkout or worktree root, not a subdirectory." }, ...MODEL_PROPERTIES }, required: ["cwd"] } },
-  { name: "attach", description: "Take over a codex session already running elsewhere, found by its thread id or exact name, so that send, interrupt and the await command work on it.", inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or exact session name." } }, required: ["thread"] } },
+  { name: "attach", description: "Take over a codex session already running elsewhere, found by its thread id or exact name, so that send, interrupt and the await command work on it. A thread codex-manager started is refused.", inputSchema: { type: "object", properties: { thread: { type: "string", description: "Thread id or exact session name." } }, required: ["thread"] } },
   { name: "send", description: "Send a follow-up prompt to a codex thread: it starts a new turn when the thread is idle and is injected into the running turn otherwise. Keep follow-ups small and related, at most three items; start a new thread for unrelated work.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, prompt: { type: "string", description: "The follow-up, written as technical writing." } }, required: ["threadId", "prompt"] } },
   { name: "reply", description: "Answer a waiting codex thread from the intent of its prompt. Pass the request's text as ask and your answer as reply. The reply becomes the result of its ask call. Pass callId only when several requests are waiting.", inputSchema: { type: "object", properties: { threadId: { type: "string" }, callId: { type: "string" }, ask: { type: "string", description: "The waiting request's text, verbatim: the ask question." }, reply: { type: "string", description: "The answer to its question." } }, required: ["threadId", "ask", "reply"] } },
   { name: "interrupt", description: "Interrupt the running turn of a codex thread.", inputSchema: { type: "object", properties: { threadId: { type: "string" } }, required: ["threadId"] } },

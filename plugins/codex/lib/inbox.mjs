@@ -43,6 +43,17 @@ export function readSupervisor(threadId, env = process.env) {
   return readJson(supervisorPath(threadId, env));
 }
 
+/** Whether any Claude session's codex-manager started the thread, as opposed to attaching it. */
+export function startedByManager(threadId, env = process.env) {
+  let sessions;
+  try {
+    sessions = readdirSync(managerHome(env));
+  } catch {
+    return false;
+  }
+  return sessions.some((session) => readJson(path.join(managerHome(env), session, "state.json"))?.threads?.some((thread) => thread.id === threadId && !thread.attached));
+}
+
 export class SessionStore {
   constructor(sessionId, env = process.env) {
     this.sessionId = sessionId;
