@@ -164,3 +164,57 @@ fn project_groups_put_directoryless_sessions_last_in_every_tab_through_app() {
         );
     }
 }
+
+#[test]
+fn project_groups_put_sessions_outside_repositories_after_repositories() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(directory.path()).unwrap();
+    let repository = root.join("zulu");
+    let plain = root.join("alpha");
+    std::fs::create_dir(&repository).unwrap();
+    std::fs::create_dir(&plain).unwrap();
+    let status = std::process::Command::new("git")
+        .args(["init", "-q", "-b", "main"])
+        .current_dir(&repository)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let db = rusqlite::Connection::open(directory.path().join("state_5.sqlite")).unwrap();
+    db.execute_batch(include_str!("../tests/fixtures/codex-state.sql"))
+        .unwrap();
+    db.execute(
+        "DELETE FROM threads WHERE id NOT IN ('thread-0', 'thread-1', 'thread-2')",
+        [],
+    )
+    .unwrap();
+    for (index, cwd) in ["", plain.to_str().unwrap(), repository.to_str().unwrap()]
+        .into_iter()
+        .enumerate()
+    {
+        db.execute(
+            "UPDATE threads SET cwd=?1, title=?2, name=?2, rollout_path='', updated_at_ms=?3, recency_at_ms=?3 WHERE id=?4",
+            rusqlite::params![cwd, format!("Project task {index}"), 1_700_000_000_000_i64 + index as i64, format!("thread-{index}")],
+        )
+        .unwrap();
+    }
+    let mut app = App::new(
+        Hub::new(vec![Box::new(crate::providers::codex::CodexProvider::new(
+            directory.path().into(),
+        ))]),
+        directory.path().into(),
+    );
+    app.refresh();
+    for session in &mut app.sessions {
+        session.status = SessionStatus::Inactive;
+    }
+    app.view.set_sessions(app.sessions.clone(), false);
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)));
+    let mut order = Vec::new();
+    for _ in 0..3 {
+        order.push(app.view.selected_id().unwrap().id.clone());
+        app.handle_event(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
+    }
+    assert_eq!(order, ["thread-2", "thread-1", "thread-0"]);
+}
