@@ -541,12 +541,7 @@ fn transcript_claude_titles_show_content_types_in_order_else_the_role() {
         ),
     ] {
         let raw = fixture.lines().nth(line).unwrap();
-        let content = super::super::tool_detail::transcript_content(
-            &Ok(raw.into()),
-            ProviderId::Claude,
-            &crate::event::Kind::Assistant,
-        );
-        assert_eq!(content.sections[0].title.title, expected);
+        assert_eq!(transcript_title(ProviderId::Claude, raw), expected);
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("record.jsonl");
@@ -563,4 +558,59 @@ fn transcript_claude_titles_show_content_types_in_order_else_the_role() {
             "missing {expected}: {rendered}"
         );
     }
+}
+
+#[test]
+fn transcript_codex_titles_prefer_item_then_content_then_payload_type() {
+    use crate::providers::ProviderId;
+    for (fixture, line, expected) in [
+        (
+            include_str!("../../tests/fixtures/codex-shell-truncated.jsonl"),
+            0,
+            "Command Execution",
+        ),
+        (
+            include_str!("../../tests/fixtures/codex-rollout.jsonl"),
+            5,
+            "Agent Message",
+        ),
+        (
+            include_str!("../../tests/fixtures/codex-rollout.jsonl"),
+            1,
+            "Input Text, Input Text",
+        ),
+        (
+            include_str!("../../tests/fixtures/codex-rollout.jsonl"),
+            6,
+            "Output Text",
+        ),
+        (
+            include_str!("../../tests/fixtures/codex-rollout.jsonl"),
+            3,
+            "Custom Tool Call",
+        ),
+        (
+            include_str!("../../tests/fixtures/codex-rollout.jsonl"),
+            0,
+            "Task Started",
+        ),
+    ] {
+        assert_eq!(
+            transcript_title(ProviderId::Codex, fixture.lines().nth(line).unwrap()),
+            expected
+        );
+    }
+}
+
+/// The title the transcript gives one raw record.
+fn transcript_title(provider: crate::providers::ProviderId, raw: &str) -> String {
+    super::super::tool_detail::transcript_content(
+        &Ok(raw.into()),
+        provider,
+        &crate::event::Kind::Assistant,
+    )
+    .sections[0]
+        .title
+        .title
+        .clone()
 }

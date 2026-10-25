@@ -514,20 +514,33 @@ pub(super) fn transcript_content(
         .map(|text| {
             let record: serde_json::Value =
                 serde_json::from_str(text).expect("raw_text validates JSON");
-            // The record's content types when it has any, else its role.
-            let types = match provider {
-                crate::providers::ProviderId::Codex => record["payload"]["type"]
-                    .as_str()
-                    .map(super::formatting::title_words)
-                    .unwrap_or_default(),
-                crate::providers::ProviderId::Claude => record["message"]["content"]
+            let content_types = |content: &serde_json::Value| {
+                content
                     .as_array()
                     .into_iter()
                     .flatten()
                     .filter_map(|block| block["type"].as_str())
                     .map(super::formatting::title_words)
                     .collect::<Vec<_>>()
-                    .join(", "),
+                    .join(", ")
+            };
+            // The record's most specific type when it has any, else its role.
+            let types = match provider {
+                crate::providers::ProviderId::Codex => {
+                    let payload = &record["payload"];
+                    payload["item"]["type"]
+                        .as_str()
+                        .map(super::formatting::title_words)
+                        .or_else(|| {
+                            Some(content_types(&payload["content"]))
+                                .filter(|types| !types.is_empty())
+                        })
+                        .or_else(|| payload["type"].as_str().map(super::formatting::title_words))
+                        .unwrap_or_default()
+                }
+                crate::providers::ProviderId::Claude => {
+                    content_types(&record["message"]["content"])
+                }
             };
             let title = if types.is_empty() {
                 super::formatting::title_words(record["type"].as_str().unwrap_or_default())
