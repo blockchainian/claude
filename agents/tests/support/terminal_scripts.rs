@@ -394,3 +394,49 @@ fn probe_shell_output_colors(
     std::fs::write(path.with_extension("json"), verdict.to_string()).unwrap();
     println!("{verdict}");
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_git_global_diff_colors() {
+    let call = include_str!("../fixtures/shell-output-corpus.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|call| call["command"] == "chmod +x x.sh && git -C ~/.claude diff -- settings.json")
+        .unwrap();
+    let command = call["command"].as_str().unwrap();
+    let body = call["stdout"].as_str().unwrap();
+    for provider in ["claude", "codex"] {
+        let name = format!("git-global-diff-{provider}");
+        let (_directory, tmux) = start_shell_output_probe(&name, command, body, provider);
+        tmux.run(&["send-keys", "-t", "probe", "End"]);
+        let capture = tmux.capture_when(|capture| capture.contains("+{\"enabled\": true}"));
+        let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+        let parser = captured_screen(&colored, 200, 50);
+        let background = |needle: &str| {
+            let (row, line) = capture
+                .lines()
+                .enumerate()
+                .find(|(_, line)| line.contains(needle))
+                .unwrap();
+            parser
+                .screen()
+                .cell(
+                    row as u16,
+                    line[..line.find(needle).unwrap()].width() as u16,
+                )
+                .unwrap()
+                .bgcolor()
+        };
+        let deleted = background("-{\"enabled\": false}");
+        let inserted = background("+{\"enabled\": true}");
+        let header = background("diff --git a/settings.json b/settings.json");
+        assert_ne!(deleted, inserted, "{capture}");
+        assert_ne!(deleted, header, "{capture}");
+        assert_ne!(inserted, header, "{capture}");
+        let path = std::env::temp_dir().join(format!("agents-{name}.ansi"));
+        std::fs::write(&path, colored).unwrap();
+        let verdict = serde_json::json!({"verdict": "pass", "provider": provider, "capture": path});
+        std::fs::write(path.with_extension("json"), verdict.to_string()).unwrap();
+        println!("{verdict}");
+    }
+}

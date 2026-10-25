@@ -62,6 +62,11 @@ static STAT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^ (?:\S.* \| |\d+ files? changed)".into()));
 static COUNTS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*\d+(\s+\d+)*(\s+\S.*)?$".into()));
+static DIFF: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+    r"^(?:[ +\-\\]|diff |index |old mode|new mode|deleted file|new file|similarity|rename |copy |Binary files|commit |Author:|Date:|Merge:|$)".into(),
+)
+});
 static LOG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{7,40} ".into()));
 
 // Shapes match shell words separated by NUL. Capture 1 supplies the count or
@@ -79,7 +84,6 @@ const DIFF_FLAGS: &[&str] = &[
     "--quiet",
     "-s",
     "--no-patch",
-    "--oneline",
     "--format*",
     "--pretty*",
 ];
@@ -544,15 +548,23 @@ impl Description {
         } else {
             None
         };
+        let every = if matches!(self.kind, Kind::Diff) {
+            Some(Pattern {
+                regex: (*DIFF).clone(),
+                strength: Strength::Hint,
+            })
+        } else {
+            self.every.map(|regex| Pattern {
+                regex: (**regex).clone(),
+                strength: Strength::Required,
+            })
+        };
         Outcome {
             lines: self.range,
             kind: self.kind,
             first,
             last: None,
-            every: self.every.map(|regex| Pattern {
-                regex: (**regex).clone(),
-                strength: Strength::Required,
-            }),
+            every,
             known: self.known,
             blank_only: self.blank,
         }
@@ -698,10 +710,38 @@ fn count(rule: Count, arg: &str, files: &str) -> Option<(Option<usize>, Option<S
     })
 }
 
+fn git_words(words: &[String]) -> std::borrow::Cow<'_, [String]> {
+    if words.first().is_none_or(|word| word != "git") {
+        return words.into();
+    }
+    let mut index = 1;
+    while let Some(word) = words.get(index) {
+        match word.as_str() {
+            "-C" | "-c" | "--git-dir" | "--work-tree" if words.get(index + 1).is_some() => {
+                index += 2
+            }
+            "--no-pager" => index += 1,
+            word if word.starts_with("--git-dir=") || word.starts_with("--work-tree=") => {
+                index += 1
+            }
+            _ => break,
+        }
+    }
+    if index == 1 {
+        words.into()
+    } else {
+        std::iter::once(words[0].clone())
+            .chain(words[index..].iter().cloned())
+            .collect::<Vec<_>>()
+            .into()
+    }
+}
+
 fn description(words: &[String], filter: bool) -> Option<(Description, bool)> {
     if words.first().is_some_and(|w| w == "sed") {
         return sed_description(words).map(|s| (s, false));
     }
+    let words = git_words(words);
     let joined = words.join("\0");
     for row in ROWS.iter().filter(|r| r.filter == filter) {
         let mut captures = Region::new();
@@ -1231,6 +1271,11 @@ mod shape_tests {
             ("nl -ba a.rs", 0, None, true, false),
             ("git show HEAD:a.rs", 0, None, true, false),
             ("git diff", 0, None, false, true),
+            ("git -C x diff", 0, None, false, true),
+            ("git --no-pager diff", 0, None, false, true),
+            ("git -c core.pager=cat show HEAD", 0, None, false, true),
+            ("git --git-dir=.git log -p", 0, None, false, true),
+            ("git -C x add a.rs", 0, Some(0), false, false),
             ("git log -p", 0, None, false, true),
             ("diff -u a.rs b.rs", 0, None, false, true),
             ("wc -l a.rs b.rs", 3, Some(3), false, false),
@@ -1244,6 +1289,34 @@ mod shape_tests {
             assert_eq!(output.lines, LineRange { min, max }, "{command}");
             assert_eq!(matches!(output.kind, Kind::File { .. }), file, "{command}");
             assert_eq!(matches!(output.kind, Kind::Diff), diff, "{command}");
+        }
+    }
+
+    #[test]
+    fn git_global_options_preserve_diff_opening() {
+        for command in [
+            "git -C x diff",
+            "git --git-dir .git diff",
+            "git --work-tree x diff",
+            "git --work-tree=x diff",
+            "git -C x -c core.pager=cat --git-dir=.git --work-tree=x --no-pager diff",
+        ] {
+            let shape = one(command);
+            let first = shape.outcomes[0].first.as_ref().expect(command);
+            assert_eq!(first.strength, Strength::Required);
+            assert!(first.regex.is_match("diff --git a/a.rs b/a.rs"));
+            assert!(!first.regex.is_match("-removed"));
+        }
+    }
+
+    #[test]
+    fn diff_lines_are_hints() {
+        for command in ["git diff", "git show HEAD", "git log -p", "diff -u a b"] {
+            let shape = one(command);
+            let hint = shape.outcomes[0].every.as_ref().expect(command);
+            assert_eq!(hint.strength, Strength::Hint);
+            assert!(hint.regex.is_match("+added"));
+            assert!(!hint.regex.is_match("warning: message"));
         }
     }
 

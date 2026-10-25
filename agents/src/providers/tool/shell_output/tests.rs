@@ -53,6 +53,19 @@ pub(super) fn actual(command: &str, stdout: &str, stream: Stream) -> Vec<Span> {
         .unwrap_or_default()
 }
 
+#[test]
+fn shell_output_git_show_oneline_remains_diff() {
+    let stdout = "94d34bd Enable setting\ndiff --git a/settings.json b/settings.json\nindex 491f90e..6db6124 100644\n--- a/settings.json\n+++ b/settings.json\n@@ -1 +1 @@\n-{\"enabled\": false}\n+{\"enabled\": true}\n";
+    assert_eq!(
+        actual("git show --oneline HEAD", stdout, Stream::default()),
+        vec![Span {
+            start: 0,
+            end: stdout.lines().count(),
+            language: "diff".into(),
+        }]
+    );
+}
+
 type Expected<'a> = &'a [(usize, usize, &'a str)];
 type Case<'a> = (&'a str, &'a str, Expected<'a>);
 type StreamCase<'a> = (&'a str, &'a str, Stream, Expected<'a>);
@@ -61,6 +74,11 @@ type StreamCase<'a> = (&'a str, &'a str, Stream, Expected<'a>);
 fn shell_output_command_table() {
     // A case is only a command, its real output shape, and the expected colored ranges.
     let cases: &[Case<'_>] = &[
+        (
+            "chmod +x x.sh && git -C ~/.claude diff -- settings.json",
+            "diff --git a/settings.json b/settings.json\nindex 491f90e..6db6124 100644\n--- a/settings.json\n+++ b/settings.json\n@@ -1 +1 @@\n-{\"enabled\": false}\n+{\"enabled\": true}\n",
+            &[(0, 7, "diff")],
+        ),
         (
             "cd src && sed -n 35,70p checks.test.mjs",
             "export const value = 1;\n",
