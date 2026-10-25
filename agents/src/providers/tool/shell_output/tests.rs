@@ -53,6 +53,40 @@ pub(super) fn actual(command: &str, stdout: &str, stream: Stream) -> Vec<Span> {
         .unwrap_or_default()
 }
 
+pub(super) fn sed_grep_head_fixture() -> (String, &'static str, Stream) {
+    let input: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/sed-grep-head/input.json"
+    ))
+    .unwrap();
+    let stdout = include_str!("../../../../tests/fixtures/sed-grep-head/stdout.txt");
+    assert_eq!(input["tool_result"]["content"].as_str().unwrap(), stdout);
+    (
+        input["tool_use"]["input"]["command"]
+            .as_str()
+            .unwrap()
+            .to_owned(),
+        stdout,
+        Stream {
+            trimmed: true,
+            is_error: input["tool_result"]["is_error"].as_bool().unwrap(),
+            ..Stream::default()
+        },
+    )
+}
+
+#[test]
+fn shell_output_real_sed_grep_head_boundaries() {
+    let (command, stdout, stream) = sed_grep_head_fixture();
+    assert_eq!(
+        actual(&command, stdout, stream),
+        vec![Span {
+            start: 0,
+            end: 125,
+            language: "rs".into(),
+        }]
+    );
+}
+
 #[test]
 fn shell_output_git_show_oneline_remains_diff() {
     let stdout = "94d34bd Enable setting\ndiff --git a/settings.json b/settings.json\nindex 491f90e..6db6124 100644\n--- a/settings.json\n+++ b/settings.json\n@@ -1 +1 @@\n-{\"enabled\": false}\n+{\"enabled\": true}\n";

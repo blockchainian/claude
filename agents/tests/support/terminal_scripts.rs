@@ -240,6 +240,56 @@ fn start_shell_output_probe(
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_shell_sed_grep_head_colors() {
+    let input: serde_json::Value =
+        serde_json::from_str(include_str!("../fixtures/sed-grep-head/input.json")).unwrap();
+    let command = input["tool_use"]["input"]["command"].as_str().unwrap();
+    let body = include_str!("../fixtures/sed-grep-head/stdout.txt");
+    let (_directory, tmux) = start_shell_output_probe("sed-grep-head", command, body, "claude");
+    tmux.run(&["resize-window", "-t", "probe", "-x", "240", "-y", "600"]);
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
+    let capture = tmux.capture_when(|capture| {
+        capture.contains("/// Formats source code") && capture.contains("protects_heredoc_bodies()")
+    });
+    let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    let parser = captured_screen(&colored, 240, 600);
+    let color = |line: &str, needle: &str| {
+        let (row, text) = capture
+            .lines()
+            .enumerate()
+            .find(|(_, text)| text.contains(line))
+            .unwrap_or_else(|| panic!("missing {line:?}: {capture}"));
+        parser
+            .screen()
+            .cell(
+                row as u16,
+                text[..text.find(needle).unwrap()].width() as u16,
+            )
+            .unwrap()
+            .fgcolor()
+    };
+    assert_ne!(
+        color("/// Formats source code", "Formats"),
+        color("    Text,", "Text"),
+        "first sed stayed plain: {capture}"
+    );
+    for (line, identifier, string) in [
+        ("let label = pointer.rsplit", "pointer", "\"\""),
+        ("if lang.eq_ignore_ascii_case(\"md\")", "lang", "\"md\""),
+    ] {
+        assert_ne!(color(line, identifier), color(line, string), "{capture}");
+    }
+    let grep = "ui/shell_commands.rs:55:    let mut heredocs = Vec::new();";
+    assert_eq!(color(grep, "let"), color(grep, "heredocs"), "{capture}");
+    let path = std::env::temp_dir().join("agents-sed-grep-head.ansi");
+    std::fs::write(&path, colored).unwrap();
+    let verdict = serde_json::json!({"verdict":"pass", "provider":"claude", "rust_sections":3, "grep_plain":true, "capture":path});
+    std::fs::write(path.with_extension("json"), verdict.to_string()).unwrap();
+    println!("{verdict}");
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_shell_line_format_filters_colors() {
     for provider in ["claude", "codex"] {
         for (name, filter) in [

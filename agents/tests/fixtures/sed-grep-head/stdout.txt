@@ -1,0 +1,155 @@
+    Hidden,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Format {
+    Text,
+    Markdown,
+    /// Formats source code in the given language as a code section.
+    Code(&'static str),
+    /// A JSON array as a Markdown table, one row per element and one column per field;
+    /// a JSON object is a single row.
+    Table,
+}
+        Some(_) => Vec::new(),
+        None => json_input(input),
+    }
+}
+
+pub(crate) fn picked_sections(
+    value: &Value,
+    pointer: &str,
+    format: Format,
+    output: bool,
+) -> Vec<Section> {
+    let label = pointer.rsplit('/').next().unwrap_or("");
+    if let Format::Table = format {
+        return markdown_table(value, label)
+            .map(|text| Section::Markdown {
+                label: label.into(),
+                text,
+            })
+            .into_iter()
+            .collect();
+    }
+    let text = value
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| value.to_string());
+    if text.trim().is_empty() {
+        return Vec::new();
+    }
+    vec![match format {
+        Format::Code(lang) => code_section(label, lang, &format_code(lang, &text)),
+        Format::Markdown => Section::Markdown {
+            label: label.into(),
+            text,
+        },
+        Format::Text if output => text_section("output", &text),
+        Format::Text | Format::Table => Section::Prose {
+            text,
+            markdown: false,
+        },
+    }]
+}
+
+fn format_code(lang: &str, text: &str) -> String {
+    match lang {
+        "js" => {
+            use dprint_plugin_typescript::configuration::{
+                Configuration, ConfigurationBuilder, QuoteStyle,
+            };
+            use dprint_plugin_typescript::{FormatTextOptions, format_text};
+
+            static CONFIG: std::sync::OnceLock<Configuration> = std::sync::OnceLock::new();
+            let config = CONFIG.get_or_init(|| {
+                ConfigurationBuilder::new()
+                    .quote_style(QuoteStyle::PreferSingle)
+                    .line_width(80)
+                    .build()
+            });
+            match format_text(FormatTextOptions {
+                path: std::path::Path::new("input.js"),
+                extension: None,
+                text: text.to_owned(),
+                config,
+                external_formatter: None,
+            }) {
+                Ok(Some(formatted)) => formatted,
+                Ok(None) | Err(_) => text.to_owned(),
+            }
+        }
+        _ => text.to_owned(),
+    }
+}
+
+/// A string or number, or a list of them joined with commas.
+fn title_text(value: &Value) -> Option<String> {
+    let scalar = |value: &Value| match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    };
+    match value {
+        Value::Array(items) => items
+}
+
+pub(crate) fn code_section(label: &str, lang: &str, text: &str) -> Section {
+    Section::Code {
+        label: label.to_owned(),
+        lang: lang.to_owned(),
+        text: text.to_owned(),
+    }
+}
+
+pub(crate) fn file_language(path: &str) -> &str {
+    let path = std::path::Path::new(path);
+    path.extension()
+        .or_else(|| path.file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+}
+
+pub(crate) fn file_section(label: &str, path: &str, text: &str) -> Section {
+    let lang = file_language(path);
+    if lang.eq_ignore_ascii_case("md") || lang.eq_ignore_ascii_case("markdown") {
+        Section::Markdown {
+            label: label.to_owned(),
+            text: text.to_owned(),
+        }
+    } else {
+        code_section(label, lang, text)
+    }
+}
+
+pub(crate) fn text_section(label: &str, text: &str) -> Section {
+ui/highlight.rs:778:    fn shell_script_python_heredoc() {
+ui/highlight.rs:788:    fn shell_script_python_heredoc_after_script_arguments() {
+ui/highlight.rs:809:    fn shell_script_node_heredoc() {
+ui/highlight.rs:844:    fn shell_script_cat_heredoc_by_extension() {
+ui/shell_commands.rs:55:    let mut heredocs = Vec::new();
+ui/shell_commands.rs:150:                // A heredoc inside a group needs the complete shell grammar.
+ui/shell_commands.rs:154:                let (end, delimiter, tabs) = heredoc_delimiter(source, index + 2)?;
+ui/shell_commands.rs:155:                heredocs.push((delimiter, tabs));
+ui/shell_commands.rs:159:                if !heredocs.is_empty() || bytes.get(index + 2) == Some(&b'&') {
+ui/shell_commands.rs:168:                if !heredocs.is_empty() {
+ui/shell_commands.rs:202:                if !heredocs.is_empty() || matches!(bytes.get(index + 1), Some(b';' | b'&')) {
+ui/shell_commands.rs:212:                if !heredocs.is_empty() {
+ui/shell_commands.rs:214:                    for (delimiter, tabs) in heredocs.drain(..) {
+ui/shell_commands.rs:215:                        let (_, marker_end) = heredoc_body(source, index, &delimiter, tabs)?;
+ui/shell_commands.rs:273:    if !groups.is_empty() || !heredocs.is_empty() || index > bytes.len() {
+ui/shell_commands.rs:310:fn heredoc_delimiter(source: &str, mut index: usize) -> Option<(usize, String, bool)> {
+ui/shell_commands.rs:344:fn heredoc_body(
+ui/shell_commands.rs:379:/// Recognizes interpreter invocations and cat file heredocs without changing source bytes.
+ui/shell_commands.rs:393:            if let Some(script) = cat_heredoc(source, index, command.range.end) {
+ui/shell_commands.rs:407:                let Some((end, delimiter, tabs)) = heredoc_delimiter(source, index + 2) else {
+ui/shell_commands.rs:412:                    if let Some((range, _)) = heredoc_body(source, start, &delimiter, tabs) {
+ui/shell_commands.rs:446:fn cat_heredoc(source: &str, mut index: usize, end: usize) -> Option<Script<'_>> {
+ui/shell_commands.rs:449:    let mut heredoc = None;
+ui/shell_commands.rs:472:            Some(b'<') if heredoc.is_none() && bytes.get(index + 1) == Some(&b'<') => {
+ui/shell_commands.rs:473:                let (next, delimiter, tabs) = heredoc_delimiter(source, index + 2)?;
+ui/shell_commands.rs:475:                heredoc = Some((delimiter, tabs));
+ui/shell_commands.rs:478:                let (delimiter, tabs) = heredoc?;
+ui/shell_commands.rs:479:                let (range, _) = heredoc_body(source, index + 1, &delimiter, tabs)?;
+ui/shell_commands.rs:575:    fn separated_commands_protect_shell_contexts_and_heredocs() {
+ui/shell_commands.rs:703:    fn protects_heredoc_bodies() {

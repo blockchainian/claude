@@ -939,20 +939,27 @@ fn pipeline_description(source: &str) -> Pipeline {
             upstream_failure: last > 0,
         };
     }
-    let Some(stages) = shell_summary::pipeline_words(&literal) else {
+    let Some(parts) = crate::ui::shell_commands::split_with_separators(&literal) else {
         return Pipeline::unknown();
     };
-    let upstream_failure = stages.len() > 1;
-    let mut stages = stages.iter();
+    let upstream_failure = parts.len() > 1;
+    let mut stages = parts.iter().map(|part| {
+        shell_summary::pipeline_words(&literal[part.range.clone()])?
+            .into_iter()
+            .next()
+    });
     let Some(first) = stages.next() else {
         return Pipeline::unknown();
     };
-    let described = description(first, false);
+    let described = first.as_deref().and_then(|words| description(words, false));
     let mut failure = described
         .as_ref()
         .filter(|_| {
             !matches!(
-                first.first().map(String::as_str),
+                first
+                    .as_ref()
+                    .and_then(|words| words.first())
+                    .map(String::as_str),
                 Some("echo" | "printf" | "pwd" | "true")
             )
         })
@@ -976,9 +983,18 @@ fn pipeline_description(source: &str) -> Pipeline {
             failure = Some(Failure::Unknown);
             continue;
         }
-        let Some((filter, verbatim)) = description(stage, true) else {
-            return Pipeline::unknown();
+        let Some((filter, verbatim)) = stage.as_deref().and_then(|words| description(words, true))
+        else {
+            // Unknown stages can change both content and size; later filters
+            // can still establish independent output constraints.
+            output = Description::unknown();
+            failure = Some(Failure::Unknown);
+            continue;
         };
+        let program = stage
+            .as_ref()
+            .and_then(|words| words.first())
+            .map(String::as_str);
         failure = Some(filter.failure());
         if !matches!(filter.kind, Kind::Plain) {
             output = filter;
@@ -986,10 +1002,10 @@ fn pipeline_description(source: &str) -> Pipeline {
         }
         output.cat = false;
         if !verbatim {
-            output.beginning &= stage.first().is_some_and(|word| word == "head")
-                || !matches!(output.kind, Kind::Diff) && filter.beginning;
+            output.beginning &=
+                program == Some("head") || !matches!(output.kind, Kind::Diff) && filter.beginning;
         }
-        if stage.first().is_some_and(|word| word == "sed") {
+        if program == Some("sed") {
             if output.range != SILENT {
                 output.range = filter.range;
             }
@@ -1115,6 +1131,39 @@ mod shape_tests {
 
     fn one(command: &str) -> OutputShape {
         pipeline_shape(command, &Stream::default(), false)
+    }
+
+    #[test]
+    fn unknown_pipeline_stages_preserve_head_bound() {
+        let (command, _, stream) = super::super::tests::sed_grep_head_fixture();
+        for command in [
+            command.clone(),
+            command.replace("--include=*.rs", "'--include=*.rs'"),
+            "cat a.rs | grep -v marker | head -30".into(),
+            "echo header | grep -v marker | head -30".into(),
+        ] {
+            let shapes = shapes(&command, &stream).unwrap();
+            let output = &shapes.last().unwrap().outcomes[0];
+            assert_eq!(
+                output.lines,
+                LineRange {
+                    min: 0,
+                    max: Some(30),
+                },
+                "{command}"
+            );
+            assert!(matches!(output.kind, Kind::Plain));
+            assert!(output.known.is_none());
+            assert!(output.every.is_none());
+            assert!(output.first.is_none());
+        }
+        for (command, range) in [
+            ("grep --include=*.rs marker . | head -30 > out", SILENT),
+            ("grep --include=*.rs marker . 2>&1 | head -30", UNKNOWN),
+            ("grep --include=*.rs marker . < input | head -30", UNKNOWN),
+        ] {
+            assert_eq!(one(command).outcomes[0].lines, range, "{command}");
+        }
     }
 
     #[test]

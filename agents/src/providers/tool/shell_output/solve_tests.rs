@@ -75,6 +75,22 @@ fn table(text: &str) -> Vec<Line> {
 }
 
 #[test]
+fn real_sed_output_saturates_pipeline_bounds() {
+    let (command, text, stream) = super::tests::sed_grep_head_fixture();
+    let mut shapes = super::describe::shapes(&command, &stream).unwrap();
+    let lines = super::lines::lines(text, &stream, &[], &[]);
+    let solution = solve(&shapes, &lines, text).unwrap();
+    let expected = vec![0, 0, 13, 94, 125, 155];
+    assert_eq!(solution.earliest, expected);
+    for (cut, expected) in solution.cuts.0.iter().zip(expected) {
+        assert_eq!(cut.iter().collect::<Vec<_>>(), vec![expected]);
+    }
+    assert!(solution.in_gap.iter().all(|in_gap| !in_gap));
+    shapes.last_mut().unwrap().outcomes[0].lines.max = Some(29);
+    assert!(solve(&shapes, &lines, text).is_none());
+}
+
+#[test]
 fn sed_code_then_rg_is_a_maximal_search_run() {
     let text =
         "fn main() {\n    run();\n}\nsrc/main.rs:2:    run();\nsrc/lib.rs:8:pub fn run() {}\n";
