@@ -28,7 +28,6 @@ pub(crate) const SERVER: McpServer = McpServer {
         },
         ToolRule {
             name: "appium_screenshot",
-            title: &[Pick::Field(Source::Input, "/maxWidth")],
             input: Some((Pick::With(screenshot_input), Format::Table)),
             output: Some((Pick::With(screenshot), Format::Text)),
             ..DEFAULT_RULE
@@ -164,7 +163,7 @@ fn session_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
 }
 
 fn screenshot_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
-    other_fields(data, &["maxWidth"])
+    other_fields(data, &[])
 }
 
 /// The saved screenshot itself in place of the sentence naming its file.
@@ -308,7 +307,7 @@ mod tests {
                 "ios real",
                 "discovery",
                 "create",
-                "400",
+                "",
                 "accessibility id",
                 "tap",
                 "-ios predicate string",
@@ -345,7 +344,13 @@ mod tests {
             output_text(&calls[9]),
             "Successfully tapped at coordinates (200, 85)."
         );
-        assert_eq!(input(3), Vec::new());
+        assert_eq!(
+            input(3),
+            vec![Section::Markdown {
+                label: "input".into(),
+                text: "| maxWidth |\n| --- |\n| 400 |".into(),
+            }]
+        );
         for (index, selector) in [(4, "Playlists"), (6, "label CONTAINS[c] 'classic'")] {
             assert_eq!(
                 input(index),
