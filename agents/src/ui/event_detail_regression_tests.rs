@@ -151,7 +151,7 @@ fn event_detail_body_uses_default_foreground_and_preserves_title_and_markdown_st
             assert_eq!(text_cell(&buffer, "link").fg, Color::Reset);
             assert_eq!(
                 text_cell(&buffer, "let value").fg,
-                super::super::highlight::code_lines("let value = 42;\n", "rs")[0].spans[0]
+                super::super::highlight::code_block("let value = 42;\n", "rs")[0].spans[0]
                     .style
                     .fg
                     .unwrap()
@@ -249,7 +249,7 @@ fn tool_detail_body_uses_default_foreground_and_preserves_syntax_highlighting() 
         for token in ["cargo", "let", "answer"] {
             assert_ne!(text_cell(&body, token).fg, Color::Reset, "{token}");
         }
-        let expected = super::super::highlight::code_lines("let value = 42;", "rust");
+        let expected = super::super::highlight::code_block("let value = 42;", "rust");
         assert_eq!(
             text_cell(&body, "let").fg,
             expected[0].spans[0].style.fg.unwrap()

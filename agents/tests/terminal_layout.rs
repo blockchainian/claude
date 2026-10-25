@@ -53,6 +53,9 @@ mod terminal_questions;
 #[path = "support/terminal_mcp.rs"]
 mod terminal_mcp;
 
+#[path = "support/terminal_chrome_tabs_close.rs"]
+mod terminal_chrome_tabs_close;
+
 #[path = "support/terminal_headings.rs"]
 mod terminal_headings;
 

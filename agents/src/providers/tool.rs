@@ -852,25 +852,35 @@ pub(crate) fn markdown_table(value: &Value, name: &str) -> Option<String> {
             }
         }
     }
-    let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
     if columns.is_empty() {
-        let mut lines = vec![line(vec![table_cell(name)]), "| --- |".to_owned()];
-        lines.extend(rows.iter().map(|row| line(vec![cell(row)])));
-        return Some(lines.join("\n"));
+        return Some(markdown_table_rows(
+            &[name],
+            rows.iter().map(|row| vec![cell(row)]),
+        ));
     }
+    Some(markdown_table_rows(
+        &columns,
+        rows.iter().map(|row| {
+            columns
+                .iter()
+                .map(|column| row.get(column).map_or_else(String::new, cell))
+                .collect()
+        }),
+    ))
+}
+
+/// Builds a table from column names and cells already escaped or formatted as Markdown.
+pub(crate) fn markdown_table_rows(
+    columns: &[&str],
+    rows: impl IntoIterator<Item = Vec<String>>,
+) -> String {
+    let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
     let mut lines = vec![
         line(columns.iter().map(|column| table_cell(column)).collect()),
         line(vec!["---".to_owned(); columns.len()]),
     ];
-    lines.extend(rows.iter().map(|row| {
-        line(
-            columns
-                .iter()
-                .map(|column| row.get(column).map_or_else(String::new, cell))
-                .collect(),
-        )
-    }));
-    Some(lines.join("\n"))
+    lines.extend(rows.into_iter().map(line));
+    lines.join("\n")
 }
 
 pub(crate) fn code_section(label: &str, lang: &str, text: &str) -> Section {
