@@ -35,8 +35,8 @@ pub(crate) const SERVER: McpServer = McpServer {
         ToolRule {
             name: "appium_find_element",
             aliases: &["appium_find_elements"],
-            title: &[Pick::Field(Source::Input, "/strategy")],
-            input: Some((Pick::With(selector_input), Format::Code(""))),
+            title: &[Pick::Field(Source::Input, "/selector")],
+            input: Some((Pick::With(find_input), Format::Text)),
             output: Some((Pick::With(element_ids), Format::Text)),
             ..DEFAULT_RULE
         },
@@ -203,20 +203,6 @@ fn element_ids(data: &ToolData<'_>) -> Option<Body> {
 }
 
 fn gesture_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
-    let shown = ["action", "sessionId"];
-    if let Some(fields) = data.input.as_object() {
-        let remaining: Vec<_> = fields
-            .iter()
-            .filter(|(key, _)| !shown.contains(&key.as_str()))
-            .collect();
-        if let [(key, Value::String(id))] = remaining.as_slice()
-            && key.as_str() == "elementUUID"
-            && !id.is_empty()
-            && data.result.is_some_and(|result| result.text().contains(id))
-        {
-            return empty_input(data);
-        }
-    }
     let mut sections: Vec<_> = text(data.input, "selector")
         .map(|selector| code_section("selector", "", selector))
         .into_iter()
@@ -225,10 +211,15 @@ fn gesture_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     Some(sections)
 }
 
-/// The selector as code, since predicates and XPath filters run long.
-fn selector_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
-    let selector = text(data.input, "selector")?;
-    let mut sections = vec![code_section("selector", "", selector)];
+/// The strategy a find uses, followed by any other fields.
+fn find_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    let mut sections: Vec<_> = text(data.input, "strategy")
+        .map(|strategy| Section::Prose {
+            text: strategy.into(),
+            markdown: false,
+        })
+        .into_iter()
+        .collect();
     sections.extend(other_fields(data, &["selector", "strategy"])?);
     Some(sections)
 }
@@ -331,9 +322,9 @@ mod tests {
                 "discovery",
                 "create",
                 "",
-                "accessibility id",
+                "Playlists",
                 "tap",
-                "-ios predicate string",
+                "label CONTAINS[c] 'classic'",
                 "fc1c5393-ccb0-466a-ab9c-c0f2e70a1a9d",
                 "label",
                 "tap",
@@ -353,7 +344,7 @@ mod tests {
                         "| platform | capabilities |\n| --- | --- |\n| ios | \\{\\\"appium\\:udid\\\"\\:\\\"00000000\\-0000000000000000\\\"\\,"
                     )
         ));
-        assert_eq!(input(5), Vec::new());
+        assert_eq!(input(5), prose("A5000000-0000-0000-BE14-000000000000"));
         assert_eq!(input(7), Vec::new());
         assert_eq!(input(8), prose("42010000-0000-0000-BE14-000000000000"));
         assert_eq!(
@@ -368,12 +359,8 @@ mod tests {
             "Successfully tapped at coordinates (200, 85)."
         );
         assert_eq!(input(3), prose("400"));
-        for (index, selector) in [(4, "Playlists"), (6, "label CONTAINS[c] 'classic'")] {
-            assert_eq!(
-                input(index),
-                vec![super::code_section("selector", "", selector)]
-            );
-        }
+        assert_eq!(input(4), prose("accessibility id"));
+        assert_eq!(input(6), prose("-ios predicate string"));
 
         assert_eq!(
             output_text(&calls[0]),
@@ -426,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn gesture_keeps_input_when_the_result_does_not_cover_it() {
+    fn gesture_shows_its_element_even_when_the_result_repeats_it() {
         let records: Vec<Value> = include_str!("../../../../tests/fixtures/claude-appium.jsonl")
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
@@ -443,40 +430,24 @@ mod tests {
                     .is_some_and(|name| name.ends_with("appium_gesture"))
             })
             .unwrap();
-        let input = &call["input"];
         let result_block = blocks
             .iter()
             .find(|block| block["tool_use_id"] == call["id"])
             .unwrap();
-        let mut result = super::ToolResult {
+        let result = super::ToolResult {
             source: None,
             content: result_block["content"].clone(),
             structured: Value::Null,
             error: false,
         };
-        fn data<'a>(
-            input: &'a Value,
-            result: Option<&'a super::ToolResult>,
-        ) -> super::ToolData<'a> {
-            super::ToolData { input, result }
-        }
+        let element = call["input"]["elementUUID"].as_str().unwrap();
+        assert!(result.text().contains(element));
         assert_eq!(
-            super::gesture_input(&data(input, Some(&result))),
-            Some(Vec::new())
-        );
-        assert!(!super::gesture_input(&data(input, None)).unwrap().is_empty());
-        let mut extra = input.clone();
-        extra["duration"] = 100.into();
-        assert!(
-            !super::gesture_input(&data(&extra, Some(&result)))
-                .unwrap()
-                .is_empty()
-        );
-        result.content = Value::String("Tap failed".into());
-        assert!(
-            !super::gesture_input(&data(input, Some(&result)))
-                .unwrap()
-                .is_empty()
+            super::gesture_input(&super::ToolData {
+                input: &call["input"],
+                result: Some(&result),
+            }),
+            Some(prose(element))
         );
     }
 
