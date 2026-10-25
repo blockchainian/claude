@@ -208,7 +208,8 @@ fn overlay_confirmation_covers_links_and_clicks() {
     view.confirm_dialog = Some(ConfirmDialog {
         action: ConfirmAction::Delete(view.selected_id().unwrap().clone()),
         title: "Delete recorded task?".into(),
-        confirm: false,
+        selected: 0,
+        worktree: None,
     });
     let mut after = Buffer::empty(area);
     draw(&view, &mut after);
@@ -244,7 +245,8 @@ fn overlay_confirmation_emits_left_border_after_wide_text() {
         let dialog = ConfirmDialog {
             action: ConfirmAction::Delete(view.selected_id().unwrap().clone()),
             title: "Recorded task".into(),
-            confirm: false,
+            selected: 0,
+            worktree: None,
         };
         let mut probe = Buffer::empty(area);
         view.render_confirm_dialog(&dialog, area, &mut probe);
@@ -310,7 +312,8 @@ fn overlay_confirmation_clears_cut_right_half_and_keeps_whole_neighbor() {
     let dialog = ConfirmDialog {
         action: ConfirmAction::Delete(view.selected_id().unwrap().clone()),
         title: "Recorded task".into(),
-        confirm: false,
+        selected: 0,
+        worktree: None,
     };
     let mut probe = Buffer::empty(area);
     view.render_confirm_dialog(&dialog, area, &mut probe);

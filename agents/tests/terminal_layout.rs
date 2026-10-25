@@ -3593,3 +3593,74 @@ fn terminal_configuration_version_notices() {
         "{{\"configuration_version_notices\":\"pass\",\"startup\":true,\"save\":true,\"runtime_upgrade\":true,\"bytes_preserved\":true}}"
     );
 }
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_delete_linked_worktree_dialog() {
+    let repository = tempfile::tempdir().unwrap();
+    let primary = repository.path().join("repo");
+    let linked = repository.path().join("linked");
+    std::fs::create_dir(&primary).unwrap();
+    for args in [
+        vec!["init", "-b", "main"],
+        vec![
+            "-c",
+            "user.name=Probe",
+            "-c",
+            "user.email=probe@example.test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "fixture",
+        ],
+        vec!["worktree", "add", "-b", "linked", linked.to_str().unwrap()],
+    ] {
+        let output = Command::new("git")
+            .current_dir(&primary)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    }
+    let records = include_str!("fixtures/transcript.jsonl")
+        .lines()
+        .map(|line| {
+            let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+            if record.get("cwd").is_some() {
+                record["cwd"] = linked.to_string_lossy().as_ref().into();
+            }
+            record.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let (_directory, tmux, transcript) = start_probe_with_transcript("delete-worktree", &records);
+    let output = Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/delete-worktree-probe");
+    std::fs::create_dir_all(&output).unwrap();
+    tmux.run(&["send-keys", "-t", "probe", "Home"]);
+    tmux.run(&["send-keys", "-t", "probe", "BSpace"]);
+    let capture = tmux.capture_when(|capture| {
+        capture.contains("3. Permanently delete task, child agents and worktree")
+    });
+    assert!(capture.contains("❯ 1. Cancel"), "{capture}");
+    std::fs::write(output.join("dialog.txt"), &capture).unwrap();
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    tmux.wait_for(|capture| !capture.contains("Permanently delete “"));
+    assert!(transcript.exists());
+    assert!(linked.exists());
+    tmux.run(&["send-keys", "-t", "probe", "BSpace"]);
+    tmux.wait_for(|capture| {
+        capture.contains("3. Permanently delete task, child agents and worktree")
+    });
+    tmux.run(&["send-keys", "-t", "probe", "3"]);
+    tmux.wait_for(|capture| {
+        !transcript.exists() && !linked.exists() && !capture.contains("Permanently delete “")
+    });
+    let verdict = serde_json::json!({"verdict":"pass", "third_option":true, "cancel_default":true, "task_deleted":true, "worktree_removed":true});
+    std::fs::write(
+        output.join("verdict.json"),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
+}

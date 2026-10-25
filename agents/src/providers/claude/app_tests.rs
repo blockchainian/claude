@@ -1347,7 +1347,7 @@ fn delete_confirmation_removes_real_transcript_through_provider() {
     assert!(!key(&mut app, KeyCode::Enter));
     let event = app.next_input(Duration::from_secs(10));
     assert_ne!(app.view.selected_id(), Some(&target.id));
-    assert!(matches!(&event, Input::Deleted { id, result: Ok(()) } if id == &target.id));
+    assert!(matches!(&event, Input::Deleted { id, result: Ok(None) } if id == &target.id));
     let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
     app.handle_inputs(event, &mut None, &mut schedule).unwrap();
     app.finish_refreshes();

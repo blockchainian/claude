@@ -843,10 +843,11 @@ impl View {
             ConfirmAction::Delete(id) => {
                 let title = format!("Permanently delete “{}”?", dialog.title);
                 let description = "This stops any running work in this task and its child agents, then permanently deletes their history. This cannot be undone.";
-                let description = if self
-                    .rows
-                    .iter()
-                    .any(|session| session.id == *id && session.background_job.is_some())
+                let description = if dialog.worktree.is_none()
+                    && self
+                        .rows
+                        .iter()
+                        .any(|session| session.id == *id && session.background_job.is_some())
                 {
                     format!("{description} Worktrees and branches created by agents remain.")
                 } else {
@@ -873,9 +874,12 @@ impl View {
         }
         lines.push(Line::default());
         let options_start = lines.len() as u16;
-        for (index, label) in ["Cancel", confirm_label].into_iter().enumerate() {
-            let confirm = index == 1;
-            let selected = dialog.confirm == confirm;
+        let mut options = vec!["Cancel", confirm_label];
+        if dialog.worktree.is_some() {
+            options.push("Permanently delete task, child agents and worktree");
+        }
+        for (index, label) in options.iter().enumerate() {
+            let selected = dialog.selected == index;
             let text = format!(
                 "{} {}. {label}",
                 if selected { PROMPT_MARKER } else { " " },
@@ -901,12 +905,10 @@ impl View {
         let viewport = &mut *self.viewport.borrow_mut();
         let block = Block::default().borders(Borders::ALL);
         let inner = block.inner(dialog).inner(Margin::new(1, 0));
-        viewport.confirm_options = [false, true]
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, confirm)| {
+        viewport.confirm_options = (0..options.len())
+            .filter_map(|index| {
                 let y = inner.y + options_start + index as u16;
-                (y < inner.bottom()).then_some((Rect::new(inner.x, y, inner.width, 1), confirm))
+                (y < inner.bottom()).then_some((Rect::new(inner.x, y, inner.width, 1), index))
             })
             .collect();
         block.render(dialog, buf);
