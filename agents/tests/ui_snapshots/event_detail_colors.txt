@@ -32,9 +32,9 @@ Denied
   list plain: Rgb(160, 99, 93)
 QueuedSystem
   Queued System: Indexed(24) BOLD
-  plain: Reset NONE
+  plain: Reset BOLD
   bold: Reset BOLD
-  link: Reset NONE
+  link: Reset BOLD
   Heading: Reset BOLD
-  let value: Indexed(23) NONE
+  let value: Indexed(23) BOLD
   list plain: Indexed(24)

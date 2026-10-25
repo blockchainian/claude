@@ -113,12 +113,19 @@ pub(super) fn thread_color(slot: usize) -> Color {
 pub(super) fn event_styles(kind: &crate::event::Kind) -> (Style, Style) {
     use crate::event::Kind;
     let body = match kind {
-        Kind::User | Kind::Compaction | Kind::QueuedUser => Style::default(),
+        Kind::User | Kind::Compaction => Style::default(),
+        Kind::QueuedUser => queued_style(),
         Kind::Assistant | Kind::Agent | Kind::Session => assistant_style(),
-        Kind::Tool | Kind::QueuedSystem => Style::default().fg(crate::theme::text_accent_color()),
+        Kind::Tool => Style::default().fg(crate::theme::text_accent_color()),
+        Kind::QueuedSystem => queued_style().fg(crate::theme::text_accent_color()),
         Kind::Error | Kind::Denied => error_style(),
     };
     (body.bold(), body)
+}
+
+/// A prompt still waiting in the provider's queue, bold in every panel until it is delivered.
+pub(super) fn queued_style() -> Style {
+    Style::default().bold()
 }
 
 /// The assistant event body and token dots for the selected task and its descendants.

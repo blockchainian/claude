@@ -4235,6 +4235,36 @@ fn task_details_prompt_shows_queued_entries_in_order() {
 }
 
 #[test]
+fn task_details_queued_entries_are_bold_and_the_current_prompt_is_not() {
+    let mut row = session("queue", "Queue task", SessionStatus::Working, 0);
+    row.prompt = "Current prompt".into();
+    row.queued = vec!["Queued prompt".into()];
+    let mut view = test_view(Grouping::Project, true);
+    view.set_sessions(vec![row], false);
+    let area = Rect::new(0, 0, 40, 15);
+    let mut buf = Buffer::empty(area);
+    view.render_task_details(area, &mut buf, Utc::now());
+    let bold = |text: &str| {
+        let rows = buf.content.chunks(40);
+        let cells = rows
+            .into_iter()
+            .find(|row| {
+                row.iter()
+                    .map(|cell| cell_text(cell.symbol()))
+                    .collect::<String>()
+                    .contains(text)
+            })
+            .unwrap();
+        cells
+            .iter()
+            .filter(|cell| !cell.symbol().trim().is_empty())
+            .all(|cell| cell.modifier.contains(ratatui::style::Modifier::BOLD))
+    };
+    assert!(bold("Queued prompt"));
+    assert!(!bold("Current prompt"));
+}
+
+#[test]
 fn task_details_prompt_renders_all_wrapped_lines() {
     let mut row = session("prompt", "Prompt task", SessionStatus::Working, 0);
     row.prompt = format!("{} {} {}", "a".repeat(40), "b".repeat(40), "c".repeat(40));
@@ -6143,12 +6173,12 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
     let mut buf = Buffer::empty(area);
     view.render_at(area, &mut buf, now);
     let top = view.center_layout(area).event_panel.y;
-    for (offset, colour) in [
-        (0, Color::Reset),
-        (1, Color::Yellow),
-        (2, crate::theme::text_accent_color()),
-        (3, Color::Rgb(160, 99, 93)),
-        (4, Color::Reset),
+    for (offset, colour, queued) in [
+        (0, Color::Reset, false),
+        (1, Color::Yellow, false),
+        (2, crate::theme::text_accent_color(), false),
+        (3, Color::Rgb(160, 99, 93), false),
+        (4, Color::Reset, true),
     ] {
         let y = top + offset;
         let x = (1..89).find(|&x| buf[(x, y)].symbol() != " ").unwrap();
@@ -6156,10 +6186,12 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
         let body = &buf[(x, y)];
         assert_eq!(label.fg, colour, "label row {y}");
         assert_eq!(body.fg, colour, "body row {y}");
-        assert!(!label.modifier.contains(Modifier::BOLD), "row {y}");
+        assert_eq!(label.modifier.contains(Modifier::BOLD), queued, "row {y}");
         assert!(!label.modifier.contains(Modifier::DIM), "label row {y}");
-        assert!(
-            !body.modifier.intersects(Modifier::DIM | Modifier::BOLD),
+        assert!(!body.modifier.contains(Modifier::DIM), "body row {y}");
+        assert_eq!(
+            body.modifier.contains(Modifier::BOLD),
+            queued,
             "body row {y}"
         );
     }
@@ -6191,16 +6223,17 @@ fn task_event_uses_cctail_colours_and_highlights_latest_time() {
         assert_eq!(time_style, super::style::time_style());
         assert_eq!(time.fg, Color::Reset);
         assert_eq!(time.modifier, Modifier::DIM);
-        view.event_panel.last_mut().unwrap().kind = kind;
+        view.event_panel.last_mut().unwrap().kind = kind.clone();
         let mut buf = Buffer::empty(area);
         view.render_at(area, &mut buf, now);
         let x = (1..89)
             .find(|&x| buf[(x, top + 4)].symbol() != " ")
             .unwrap();
+        let queued = matches!(kind, Kind::QueuedUser | Kind::QueuedSystem);
         for x in [x, x + 10] {
             let cell = &buf[(x, top + 4)];
             assert_eq!(cell.fg, colour);
-            assert!(!cell.modifier.contains(Modifier::BOLD));
+            assert_eq!(cell.modifier.contains(Modifier::BOLD), queued);
             assert!(!cell.modifier.contains(Modifier::DIM));
         }
         let time = &buf[(97, top + 4)];
@@ -7092,25 +7125,29 @@ mod input_row {
                     let (_, task_row, _, event_row, task, event_panel) =
                         rendered_inputs(width, query, left);
                     let area = Rect::new(3, 2, width, 40);
-                    let mut editor: crate::line_edit::Editor = super::super::line_edit::Editor::default();
+                    let mut editor: crate::line_edit::Editor =
+                        super::super::line_edit::Editor::default();
                     editor.set_text(query);
                     if left {
                         editor.move_caret(crate::line_edit::Motion::Left);
                     }
                     let expected = (9 + editor
-                        .window(usize::from(task_row.width.saturating_sub(9))).caret_column)
+                        .window(usize::from(task_row.width.saturating_sub(9)))
+                        .caret_column)
                         .min(task_row.width.saturating_sub(1));
                     assert_eq!(
                         task.cursor_pos(area),
                         Some((task_row.x + expected, task_row.y))
                     );
-                    let mut editor: crate::line_edit::Editor = super::super::line_edit::Editor::default();
+                    let mut editor: crate::line_edit::Editor =
+                        super::super::line_edit::Editor::default();
                     editor.set_text(query);
                     if left {
                         editor.move_caret(crate::line_edit::Motion::Left);
                     }
                     let event_expected = (9 + editor
-                        .window(usize::from(event_row.width.saturating_sub(9))).caret_column)
+                        .window(usize::from(event_row.width.saturating_sub(9)))
+                        .caret_column)
                         .min(event_row.width.saturating_sub(1));
                     assert_eq!(
                         event_panel.cursor_pos(area),
@@ -10791,7 +10828,8 @@ mod event_navigation {
                 let current = events.len() / 2;
                 view.select_fixture_event(Some(events[current].clone()));
                 let key = KeyEvent::new(code, modifiers);
-                let mut editor: crate::line_edit::Editor = super::super::line_edit::Editor::default();
+                let mut editor: crate::line_edit::Editor =
+                    super::super::line_edit::Editor::default();
                 editor.set_text("a");
                 let mut kills = crate::line_edit::KillBuffer::default();
                 kills.begin_stroke();

@@ -1915,7 +1915,11 @@ fn event_detail_parts_layout_with_images(
     mut image_size: impl FnMut(usize, &crate::images::ImageSource) -> Option<(u16, u16)>,
 ) -> EventDetailLayout {
     let width = usize::from(columns.text.width);
-    let body_style = Style::default();
+    let body_style = if matches!(event.kind, Kind::QueuedUser | Kind::QueuedSystem) {
+        super::style::queued_style()
+    } else {
+        Style::default()
+    };
     let mut image_index = 0;
     let mut layout = EventDetailLayout {
         columns,
@@ -2433,6 +2437,50 @@ pub(super) mod event_markdown {
         assert!(
             links.iter().any(|(_, target)| target
                 == &super::super::links::LinkTarget::Image(image.source.clone()))
+        );
+    }
+
+    #[test]
+    fn queued_prompt_is_bold_in_the_list_and_event_detail_until_dequeued() {
+        let delivery: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/claude-queued-image.jsonl"
+        ))
+        .unwrap();
+        let text = &delivery["attachment"]["prompt"][0]["text"];
+        let enqueue = serde_json::json!({
+            "type": "queue-operation", "operation": "enqueue", "content": text,
+            "timestamp": delivery["timestamp"]
+        });
+        let remove = serde_json::json!({
+            "type": "queue-operation", "operation": "remove", "content": text,
+            "commandUuid": delivery["attachment"]["source_uuid"],
+            "timestamp": delivery["timestamp"]
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("transcript.jsonl");
+        let bold = |records: String| {
+            std::fs::write(&transcript, records).unwrap();
+            let events = crate::providers::claude::event_reader::tail(&transcript, 20).unwrap();
+            let event = events.last().unwrap().clone();
+            let area = Rect::new(0, 0, 200, 1);
+            let mut buf = Buffer::empty(area);
+            render_event(&event, "19:58:06", false, area, &mut buf, None, dir.path());
+            let list = buf.content[..20]
+                .iter()
+                .filter(|cell| !cell.symbol().trim().is_empty())
+                .all(|cell| cell.modifier.contains(Modifier::BOLD));
+            let layout = event_detail_layout(&event, 200, dir.path(), DateTime::UNIX_EPOCH);
+            let body = layout.lines[layout.bodies[0].clone()]
+                .iter()
+                .flat_map(|line| &line.spans)
+                .filter(|span| !span.content.trim().is_empty())
+                .all(|span| span.style.add_modifier.contains(Modifier::BOLD));
+            (event.kind, list, body)
+        };
+        assert_eq!(bold(format!("{enqueue}\n")), (Kind::QueuedUser, true, true));
+        assert_eq!(
+            bold(format!("{enqueue}\n{remove}\n{delivery}\n")),
+            (Kind::User, false, false)
         );
     }
 

@@ -40,9 +40,16 @@ pub(super) fn line(text: impl Into<Line<'static>>, area: Rect, buf: &mut Buffer)
             .render(row(area, 0, 1), buf);
     }
 }
-fn input_row<P: line_edit::Placeholder>(prompt: &str, edit: &line_edit::Editor<P>, area: Rect) -> (Line<'static>, u16) {
+fn input_row<P: line_edit::Placeholder>(
+    prompt: &str,
+    edit: &line_edit::Editor<P>,
+    area: Rect,
+) -> (Line<'static>, u16) {
     let prompt_width = prompt.width();
-    let line_edit::Window { text, caret_column: caret } = edit.window(usize::from(area.width).saturating_sub(prompt_width));
+    let line_edit::Window {
+        text,
+        caret_column: caret,
+    } = edit.window(usize::from(area.width).saturating_sub(prompt_width));
     (
         Line::from(vec![
             Span::styled(
@@ -58,7 +65,12 @@ fn input_row<P: line_edit::Placeholder>(prompt: &str, edit: &line_edit::Editor<P
     )
 }
 
-pub(super) fn click_input_row<P: line_edit::Placeholder>(editor: &mut line_edit::Editor<P>, area: Rect, prefix: &str, column: u16) {
+pub(super) fn click_input_row<P: line_edit::Placeholder>(
+    editor: &mut line_edit::Editor<P>,
+    area: Rect,
+    prefix: &str,
+    column: u16,
+) {
     let columns = usize::from(area.width).saturating_sub(prefix.width());
     let column = usize::from(column.saturating_sub(area.x)).saturating_sub(prefix.width());
     editor.place_caret_in_window(columns, column);
@@ -1533,7 +1545,10 @@ impl View {
         for queued in &session.queued {
             separate_section(&mut items);
             let start = items.len();
-            let (lines, breaks) = super::text::layout(queued, &session.cwd, width, true);
+            let (mut lines, breaks) = super::text::layout(queued, &session.cwd, width, true);
+            for span in lines.iter_mut().flat_map(|line| &mut line.spans) {
+                span.style = style::queued_style().patch(span.style);
+            }
             continuations.extend(
                 breaks
                     .into_iter()
@@ -2812,7 +2827,10 @@ mod title_input_tests {
                     let input = view.viewport.borrow().title_input;
                     assert!(input.x >= rule.x && input.right() <= rule.right());
                     if !input.is_empty() {
-                        let line_edit::Window { text: visible, caret_column: caret } = view.rename.window(usize::from(input.width));
+                        let line_edit::Window {
+                            text: visible,
+                            caret_column: caret,
+                        } = view.rename.window(usize::from(input.width));
                         assert!(caret < input.width);
                         if !text.is_empty() {
                             let mut expected = Buffer::empty(input);
