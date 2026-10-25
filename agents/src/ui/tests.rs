@@ -8302,7 +8302,11 @@ fn task_event_click_keeps_list_and_detail_right_click_keeps_selection() {
     assert_eq!(view.visible_event(), view.event_panel.get(6));
     let selected = event_screen(&view, 100, 45, now);
     assert!(selected.contains("A second paragraph"));
-    click_event_text(&mut view, &list, "A long response", MouseButton::Right);
+    assert!(
+        view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 1, 1))
+            .is_none()
+    );
+    view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), 1, 1));
     assert_eq!(view.visible_event(), view.event_panel.last());
     click_event_text(&mut view, &list, "A long response", MouseButton::Left);
     let open = event_screen(&view, 100, 45, now);

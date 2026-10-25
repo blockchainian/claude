@@ -109,10 +109,7 @@ impl View {
                     ("⌃c", "Quit"),
                 ],
             ),
-            group(
-                "Events",
-                &[("space", "Filter"), ("/", "Search"), ("t", "Sort")],
-            ),
+            group("Events", &[("/", "Search"), ("t", "Sort")]),
             group(
                 "Navigate",
                 &[

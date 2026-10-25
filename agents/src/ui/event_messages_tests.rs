@@ -40,22 +40,32 @@ fn fixture() -> (tempfile::TempDir, View) {
     );
     view.set_event(events);
     view.set_active_panel(Panel::EventList);
+    view.viewport.borrow_mut().event_panel = Rect::new(0, 0, 100, 20);
     (dir, view)
 }
 
-fn space(view: &mut View) {
+fn filter_click(view: &mut View) {
     let id = view.selected_id().unwrap().clone();
-    let action = view.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
-    if view.active_panel == Panel::EventList {
-        assert_eq!(
-            action,
-            Some(Action::PersistFiltering {
-                id,
-                filter: view.event_list.filter,
-            })
-        );
-    } else {
-        assert_eq!(action, None);
+    let area = view.viewport.borrow().event_panel;
+    for kind in [
+        MouseEventKind::Down(MouseButton::Right),
+        MouseEventKind::Up(MouseButton::Right),
+    ] {
+        let action = view.handle_mouse(MouseEvent {
+            kind,
+            column: area.x,
+            row: area.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        if kind == MouseEventKind::Up(MouseButton::Right) {
+            assert_eq!(
+                action,
+                Some(Action::PersistFiltering {
+                    id: id.clone(),
+                    filter: view.event_list.filter,
+                })
+            );
+        }
     }
 }
 
@@ -73,7 +83,7 @@ fn message(kind: &Kind) -> bool {
 }
 
 #[test]
-fn space_cycles_all_messages_tools_and_keeps_pins() {
+fn filter_click_cycles_all_messages_tools_and_keeps_pins() {
     let (_dir, mut view) = fixture();
     let template = view.event_panel[0].clone();
     view.set_event(
@@ -145,7 +155,7 @@ fn space_cycles_all_messages_tools_and_keeps_pins() {
         assert!(expected.iter().any(|&i| view.event_panel[i].kind == kind));
     }
     assert_eq!(expected.len(), 5);
-    space(&mut view);
+    filter_click(&mut view);
     assert_eq!(view.event_list.filter, EventFilter::Message);
     assert_eq!(
         view.shown_events().map(|(i, _)| i).collect::<Vec<_>>(),
@@ -154,7 +164,7 @@ fn space_cycles_all_messages_tools_and_keeps_pins() {
     assert!(view.shown_row_position(EventRow::Pinned(0)).is_some());
     assert!(view.shown_row_position(EventRow::Pinned(1)).is_some());
     view.select_event(view.shown_row_position(EventRow::Pinned(0)));
-    space(&mut view);
+    filter_click(&mut view);
     assert_eq!(view.event_list.filter, EventFilter::Tool);
     let tools: Vec<_> = view
         .event_panel
@@ -170,14 +180,14 @@ fn space_cycles_all_messages_tools_and_keeps_pins() {
     assert!(view.shown_row_position(EventRow::Pinned(0)).is_some());
     assert!(view.shown_row_position(EventRow::Pinned(1)).is_some());
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
-    space(&mut view);
+    filter_click(&mut view);
     assert_eq!(view.event_list.filter, EventFilter::All);
     assert_eq!(view.shown_events().map(|(i, _)| i).collect::<Vec<_>>(), all);
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
 }
 
 #[test]
-fn space_preserves_message_selection_and_rematches_hidden_rows_in_both_sorts() {
+fn filter_click_preserves_message_selection_and_rematches_hidden_rows_in_both_sorts() {
     for sort in [EventSort::Time, EventSort::Duration] {
         let (_dir, mut view) = fixture();
         view.set_event_sort(sort);
@@ -187,11 +197,11 @@ fn space_preserves_message_selection_and_rematches_hidden_rows_in_both_sorts() {
             .position(|e| message(&e.kind))
             .unwrap();
         view.select_event(view.shown_row_position(EventRow::Timeline(full)));
-        space(&mut view);
+        filter_click(&mut view);
         assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(full)));
-        space(&mut view);
+        filter_click(&mut view);
         assert!(view.shown_events().all(|(_, e)| tool(&e.kind)));
-        space(&mut view);
+        filter_click(&mut view);
         view.select_event(view.shown_row_position(EventRow::Timeline(full)));
         assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(full)));
         let hidden = view
@@ -215,13 +225,13 @@ fn space_preserves_message_selection_and_rematches_hidden_rows_in_both_sorts() {
                 .map(|(i, _)| EventRow::Timeline(i))
                 .unwrap()
         };
-        space(&mut view);
+        filter_click(&mut view);
         assert_eq!(view.selected_event_row(), Some(expected));
     }
 }
 
 #[test]
-fn space_combines_with_search_without_changing_event_matches() {
+fn filter_click_combines_with_search_without_changing_event_matches() {
     let (_dir, mut view) = fixture();
     view.prepare_event_search();
     view.event_list.search.input.set_text("Tool");
@@ -230,7 +240,7 @@ fn space_combines_with_search_without_changing_event_matches() {
         .map(|i| view.event_matches(i))
         .collect();
     assert!(view.shown_events().any(|(_, e)| tool(&e.kind)));
-    space(&mut view);
+    filter_click(&mut view);
     assert!(view.shown_events().all(|(_, e)| message(&e.kind)));
     assert_eq!(
         (0..view.event_panel.len())
@@ -248,14 +258,14 @@ fn space_combines_with_search_without_changing_event_matches() {
 }
 
 #[test]
-fn space_keeps_following_at_the_bottom_and_clears_pending_counts() {
+fn filter_click_keeps_following_at_the_bottom_and_clears_pending_counts() {
     let (_dir, mut view) = fixture();
     view.viewport.borrow_mut().event_panel = Rect::new(0, 0, 100, 4);
     view.show_newest_event();
     for _ in 0..3 {
         view.event_list.pending_older = 10;
         view.event_list.unseen.set(3);
-        space(&mut view);
+        filter_click(&mut view);
         assert!(view.following_event());
         assert_eq!(view.event_scroll(), view.event_max_scroll());
         assert_eq!(view.event_list.pending_older, 0);
@@ -264,7 +274,7 @@ fn space_keeps_following_at_the_bottom_and_clears_pending_counts() {
 }
 
 #[test]
-fn space_edits_focused_search_and_filters_only_when_blurred() {
+fn filter_click_edits_focused_search_and_filters_only_when_blurred() {
     let (_dir, mut view) = fixture();
     view.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
     for editing in [true, false] {
@@ -299,7 +309,7 @@ fn space_edits_focused_search_and_filters_only_when_blurred() {
                 continue;
             }
             for expected in [&messages, &tools, &all] {
-                space(&mut view);
+                filter_click(&mut view);
                 assert_eq!(view.event_list.search.input.text(), query);
                 assert_eq!(view.event_list.search.input.focused(), editing);
                 assert_eq!(view.matching_event_count(), expected.len(), "{query}");
@@ -323,7 +333,7 @@ fn space_edits_focused_search_and_filters_only_when_blurred() {
 }
 
 #[test]
-fn space_remaps_background_return_and_keeps_its_details() {
+fn filter_click_remaps_background_return_and_keeps_its_details() {
     for hidden in [false, true] {
         let (_dir, mut view) = fixture();
         let full = view
@@ -338,7 +348,7 @@ fn space_remaps_background_return_and_keeps_its_details() {
             scroll: 7,
             search: Default::default(),
         });
-        space(&mut view);
+        filter_click(&mut view);
         let saved = view.event_list.background_return.as_ref().unwrap();
         assert_eq!(
             saved.event,
@@ -350,11 +360,13 @@ fn space_remaps_background_return_and_keeps_its_details() {
 }
 
 #[test]
-fn space_keeps_event_detail_space_behavior() {
+fn space_leaves_the_event_filter_alone() {
     let (_dir, mut view) = fixture();
-    view.set_active_panel(Panel::EventDetail);
-    space(&mut view);
-    assert_eq!(view.event_list.filter, EventFilter::All);
+    for panel in [Panel::EventList, Panel::EventDetail] {
+        view.set_active_panel(panel);
+        assert_eq!(view.handle_key(KeyCode::Char(' ').into()), None);
+        assert_eq!(view.event_list.filter, EventFilter::All);
+    }
     assert_eq!(view.event_detail.mode, task_ui::EventDetailMode::Transcript);
 }
 
@@ -380,7 +392,7 @@ fn filters_restore_when_reopening_a_task() {
                 .shown_events()
                 .all(|(_, e)| message(&e.kind) == (filter == EventFilter::Message))
         );
-        space(&mut reopened);
+        filter_click(&mut reopened);
         reopened.initialize_event_list(loaded.task_sort(&id), loaded.task_filter(&id));
         assert_eq!(
             reopened.event_list.filter,

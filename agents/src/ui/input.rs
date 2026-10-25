@@ -217,6 +217,19 @@ impl View {
         }
     }
 
+    fn cycle_event_filter(&mut self) -> Option<Action> {
+        self.change_event_list(true, |list| {
+            list.filter = list.filter.next();
+            list.settings_initialized = true;
+        });
+        self.selected_id()
+            .cloned()
+            .map(|id| Action::PersistFiltering {
+                id,
+                filter: self.event_list.filter,
+            })
+    }
+
     fn open_background(&mut self, task: crate::model::BackgroundTask) {
         let Some(output) = task.output.as_deref() else {
             return;
@@ -663,11 +676,18 @@ impl View {
                 self.prepare_prompt();
                 self.input_box.paste_mouse(area, &self.input_label(), mouse);
             }
-            PasteTarget::Title(area) => render::click_input_row(&mut self.rename, area, "", mouse.column),
+            PasteTarget::Title(area) => {
+                render::click_input_row(&mut self.rename, area, "", mouse.column)
+            }
             PasteTarget::Branch(area) => {
                 let selector = self.selector.as_mut().expect("branch selector");
                 selector.selected = selector.len() - 1;
-                render::click_input_row(selector.active_editor().expect("branch editor"), area, &format!("New branch {PROMPT_MARKER} "), mouse.column);
+                render::click_input_row(
+                    selector.active_editor().expect("branch editor"),
+                    area,
+                    &format!("New branch {PROMPT_MARKER} "),
+                    mouse.column,
+                );
             }
             PasteTarget::Search(panel) => {
                 let rect = self.search_rect(panel);
@@ -927,6 +947,9 @@ impl View {
                 if self.search_focused() || self.selected_draft.is_some() {
                     self.right_click();
                     return None;
+                }
+                if self.viewport.borrow().event_panel.contains(position) {
+                    return self.cycle_event_filter();
                 }
                 if self.viewport.borrow().event_detail.contains(position) {
                     return if self.terminal.is_some() {
@@ -1939,19 +1962,6 @@ impl View {
                 || self.active_panel == Panel::EventDetail && !self.terminal_requested())
         {
             return self.toggle_event_pin();
-        }
-        if plain && key.code == KeyCode::Char(' ') && self.active_panel == Panel::EventList {
-            self.change_event_list(true, |list| {
-                list.filter = list.filter.next();
-                list.settings_initialized = true;
-            });
-            return self
-                .selected_id()
-                .cloned()
-                .map(|id| Action::PersistFiltering {
-                    id,
-                    filter: self.event_list.filter,
-                });
         }
         if let Some(code) = super::navigation::list_navigation(key) {
             self.navigate_active_panel(code);

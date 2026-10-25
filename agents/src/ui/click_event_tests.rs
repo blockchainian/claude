@@ -467,7 +467,7 @@ fn selected_detail_refreshes_and_event_wheel_changes_it() {
     let area = view.viewport.borrow().event_panel;
     view.handle_mouse(mouse(MouseEventKind::ScrollDown, area.x + 22, area.y + 3));
     assert_eq!(view.visible_event(), view.event_panel.get(1));
-    release_click(&mut view, MouseButton::Right, area.x + 22, area.y + 3);
+    release_click(&mut view, MouseButton::Right, 1, 1);
     assert_eq!(view.visible_event(), view.event_panel.last());
 }
 

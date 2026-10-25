@@ -753,11 +753,11 @@ fn event_list_click_selects_cut_row_and_stationary_double_click_copies_nothing()
             .is_none()
     );
     assert!(view.event_list.cursor.is_some());
-    assert!(
-        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), at.0, at.1))
-            .is_none()
-    );
-    assert_eq!(view.visible_event(), view.event_panel.last());
+    assert!(matches!(
+        view.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Right), at.0, at.1)),
+        Some(Action::PersistFiltering { .. })
+    ));
+    assert_eq!(view.event_list.filter, crate::event::EventFilter::Message);
 }
 
 #[test]

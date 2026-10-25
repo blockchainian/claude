@@ -2,15 +2,15 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Shortcuts
 
- Tasks                   Events           Navigate
- n          New          Space  Filter    ⌃w h/j/k/l  Focus left/down/up/right
- o, Enter   Open         /      Search    ↑           Up
- r          Rename       t      Sort      ↓           Down
- a          Archive                       PgUp        Page up
- Backspace  Delete                        PgDn        Page down
- Esc        Back                          ⌃w _        Max width
- f          Fork                          ⌃w |        Max height
- x          Stop                          ⌃w =        Reset size
+ Tasks                   Events       Navigate
+ n          New          /  Search    ⌃w h/j/k/l  Focus left/down/up/right
+ o, Enter   Open         t  Sort      ↑           Up
+ r          Rename                    ↓           Down
+ a          Archive                   PgUp        Page up
+ Backspace  Delete                    PgDn        Page down
+ Esc        Back                      ⌃w _        Max width
+ f          Fork                      ⌃w |        Max height
+ x          Stop                      ⌃w =        Reset size
  /          Search
  Tab/⇧Tab   Filter
  g          Group

@@ -3,9 +3,9 @@
  Shortcuts
 
  Tasks                                   Events
- n          New                          Space  Filter
- o, Enter   Open                         /      Search
- r          Rename                       t      Sort
+ n          New                          /  Search
+ o, Enter   Open                         t  Sort
+ r          Rename
  a          Archive
  Backspace  Delete
  Esc        Back
