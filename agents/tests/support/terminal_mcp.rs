@@ -45,7 +45,7 @@ fn terminal_claude_mcp_generic_event_detail() {
         (
             "image",
             include_str!("../fixtures/mcp-claude/image.jsonl"),
-            vec!["\"actions\": [", "\"duration\": 5", "[image image/jpeg]"],
+            vec!["Action", "Input", "computer", "wait", "[image image/jpeg]"],
         ),
         (
             "multiline",
@@ -327,4 +327,56 @@ fn terminal_claude_chrome_javascript() {
     )
     .unwrap();
     println!("{verdict}");
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_claude_chrome_browser_batch() {
+    use std::io::Write;
+    let (_directory, tmux, transcript) = start_probe("chrome-browser-batch");
+    tmux.run(&["resize-window", "-t", "probe", "-x", "500", "-y", "100"]);
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&transcript)
+        .unwrap()
+        .write_all(include_str!("../fixtures/claude-chrome-browser-batch.jsonl").as_bytes())
+        .unwrap();
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
+    let plain = tmux.capture_when(|capture| {
+        capture
+            .lines()
+            .any(|line| line.contains("Action") && line.contains("│ Input"))
+            && capture.contains("javascript_tool")
+            && capture.contains("localStorage.getItem")
+    });
+    let header = plain
+        .lines()
+        .find(|line| line.contains("Action") && line.contains("│ Input"))
+        .unwrap();
+    assert_eq!(
+        header.trim().split('│').map(str::trim).collect::<Vec<_>>(),
+        ["Action", "Input"]
+    );
+    let navigate = plain
+        .lines()
+        .find(|line| line.trim_start().starts_with("navigate"))
+        .unwrap();
+    assert!(
+        navigate.contains("│ https://www.chadwallet.xyz/"),
+        "{navigate}"
+    );
+    let javascript = plain
+        .lines()
+        .find(|line| line.trim_start().starts_with("javascript_tool"))
+        .unwrap();
+    assert_eq!(javascript.matches('│').count(), 1, "{javascript}");
+    assert!(
+        javascript.contains("localStorage.getItem('privy:token')"),
+        "{javascript}"
+    );
+    assert!(
+        !javascript.contains('`'),
+        "inline delimiters stay hidden: {javascript}"
+    );
+    save_mcp_capture(&tmux, "claude", "browser-batch");
 }

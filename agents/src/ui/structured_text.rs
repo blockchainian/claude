@@ -23,7 +23,7 @@ pub(super) trait Document {
         super::content::hard_wrap(self.highlighted(), width)
     }
     fn highlighted(&self) -> Vec<Line<'static>> {
-        highlight::code_lines(&self.text(), self.syntax())
+        highlight::code_block(&self.text(), self.syntax())
     }
 }
 

@@ -260,7 +260,7 @@ fn exceeds_limits(text: &str) -> bool {
 
 /// `text` as one line per source line, highlighted as `lang` when the language is known
 /// and the text is within the size limits, plain otherwise.
-pub(super) fn code_lines(text: &str, lang: &str) -> Vec<Line<'static>> {
+pub(super) fn code_block(text: &str, lang: &str) -> Vec<Line<'static>> {
     if let Some(lang) = lang.strip_prefix("numbered:") {
         if exceeds_limits(text) {
             return plain_lines(text);
@@ -281,7 +281,7 @@ pub(super) fn code_lines(text: &str, lang: &str) -> Vec<Line<'static>> {
             .zip(&gutters)
             .map(|(line, gutter)| &line[gutter.len()..])
             .collect::<String>();
-        let mut lines = code_lines(&code, lang);
+        let mut lines = code_block(&code, lang);
         lines.resize_with(gutters.len(), Line::default);
         for (line, gutter) in lines.iter_mut().zip(gutters) {
             if !gutter.is_empty() {
@@ -476,7 +476,7 @@ pub(super) fn diff_lines(text: &str, lang: &str, width: usize) -> Vec<Line<'stat
                     })
                     .map(|(line, _)| format!("{}\n", &line[1..]))
                     .collect();
-                code_lines(&source, lang).into_iter()
+                code_block(&source, lang).into_iter()
             };
             let mut before = syntax.then(|| code('+'));
             let mut after = syntax.then(|| code('-'));
@@ -715,7 +715,7 @@ mod tests {
     #[test]
     fn numbered_code_keeps_gutters_dim_and_code_highlighted() {
         let source = "     1\tlet answer = \"ready\";\n     2\t// next\nplain text";
-        let lines = code_lines(source, "numbered:rs");
+        let lines = code_block(source, "numbered:rs");
         assert_eq!(text(&lines), source.lines().collect::<Vec<_>>());
         assert_eq!(lines[0].spans[0].content, "     1\t");
         assert!(lines[0].spans[0].style.add_modifier.contains(Modifier::DIM));
@@ -723,16 +723,16 @@ mod tests {
         assert!(lines[0].spans.len() > 2);
         assert_eq!(lines[1].spans[0].content, "     2\t");
         assert!(!lines[2].spans[0].style.add_modifier.contains(Modifier::DIM));
-        assert_eq!(text(&code_lines("     1\t", "numbered:rs")), ["     1\t"]);
+        assert_eq!(text(&code_block("     1\t", "numbered:rs")), ["     1\t"]);
     }
 
     #[test]
     fn known_language_highlights_and_keeps_the_text() {
-        let lines = code_lines("let x = 1;\n", "rs");
+        let lines = code_block("let x = 1;\n", "rs");
         assert_eq!(text(&lines), ["let x = 1;"]);
         assert!(lines[0].spans.len() > 1);
         assert!(lines[0].spans.iter().all(|span| span.style.fg.is_some()));
-        assert_eq!(text(&code_lines("echo hi", "bash")), ["echo hi"]);
+        assert_eq!(text(&code_block("echo hi", "bash")), ["echo hi"]);
     }
 
     fn byte_styles(lines: &[Line<'_>]) -> Vec<Vec<Style>> {
@@ -749,7 +749,7 @@ mod tests {
 
     fn assert_script_styles(source: &str, script: &str, lang: &str) {
         let _guard = crate::theme::TEST_LOCK.lock().unwrap();
-        let lines = code_lines(source, "bash");
+        let lines = code_block(source, "bash");
         assert_eq!(text(&lines), source.lines().collect::<Vec<_>>());
         let actual = byte_styles(&lines);
         let shell = byte_styles(&highlighted(source, "bash").unwrap());
@@ -896,7 +896,7 @@ mod tests {
             "python3 -c \"unterminated",
         ] {
             assert_eq!(
-                code_lines(source, "bash"),
+                code_block(source, "bash"),
                 highlighted(source, "bash").unwrap(),
                 "{source}"
             );
@@ -906,21 +906,21 @@ mod tests {
     #[test]
     fn extension_aliases_find_their_language() {
         for lang in ["mjs", "cjs", "jsx", "jsonc"] {
-            let lines = code_lines("const x = { \"a\": 1 };", lang);
+            let lines = code_block("const x = { \"a\": 1 };", lang);
             assert!(lines[0].spans.len() > 1, "{lang} is not highlighted");
         }
     }
 
     #[test]
     fn unknown_language_and_oversized_text_are_plain() {
-        let lines = code_lines("let x = 1;", "no-such-language");
+        let lines = code_block("let x = 1;", "no-such-language");
         assert_eq!(lines[0].spans.len(), 1);
         assert_eq!(lines[0].spans[0].style, Style::default());
         let long = format!("let x = \"{}\";", "a".repeat(MAX_LINE_BYTES));
-        assert_eq!(code_lines(&long, "rs")[0].spans.len(), 1);
+        assert_eq!(code_block(&long, "rs")[0].spans.len(), 1);
         let many = "x\n".repeat(MAX_LINES + 1);
-        assert_eq!(code_lines(&many, "rs").len(), MAX_LINES + 1);
-        assert_eq!(code_lines(&many, "rs")[0].spans.len(), 1);
+        assert_eq!(code_block(&many, "rs").len(), MAX_LINES + 1);
+        assert_eq!(code_block(&many, "rs")[0].spans.len(), 1);
     }
 
     #[test]
@@ -1096,7 +1096,7 @@ mod tests {
                 }
                 let default = theme.settings.foreground.and_then(terminal_color);
                 with_current_theme(|current| current.theme = Some(theme));
-                let expected = byte_styles(&code_lines(code, "rs"));
+                let expected = byte_styles(&code_block(code, "rs"));
                 assert!(expected[0].iter().any(|style| style.fg == default));
                 assert!(expected[0].iter().any(|style| style.fg != default));
                 let lines = diff_lines(&format!("@@ -1 +1 @@\n-{code}\n+{code}\n {code}"), "rs", 0);
@@ -1131,7 +1131,7 @@ mod tests {
         use_theme(false, None).unwrap();
         let code = "fn main() { let value = 42; }";
         let lines = diff_lines(&format!("-{code}\n+{code}"), "rs", 40);
-        let expected = byte_styles(&code_lines(code, "rs"));
+        let expected = byte_styles(&code_block(code, "rs"));
         let foreground = with_theme(|theme| theme.settings.foreground.and_then(terminal_color));
         for (line, scope) in lines.iter().zip(["markup.deleted", "markup.inserted"]) {
             assert_eq!(line.spans[0].content.len(), 1);
@@ -1214,8 +1214,8 @@ mod tests {
         use_theme(false, None).unwrap();
         let source = "@@ -1,3 +1,3 @@\n /* start\n-old comment\n+new comment\n */\n@@ -9 +9 @@\n-fn before() {}\n+fn after() {}";
         let lines = diff_lines(source, "rs", 0);
-        let before = byte_styles(&code_lines("/* start\nold comment\n*/", "rs"));
-        let after = byte_styles(&code_lines("/* start\nnew comment\n*/", "rs"));
+        let before = byte_styles(&code_block("/* start\nold comment\n*/", "rs"));
+        let after = byte_styles(&code_block("/* start\nnew comment\n*/", "rs"));
         let styles = byte_styles(&lines);
         for (row, expected) in [
             (1, &after[0]),
@@ -1228,7 +1228,7 @@ mod tests {
             }
         }
         for (row, code) in [(6, "fn before() {}"), (7, "fn after() {}")] {
-            let expected = byte_styles(&code_lines(code, "rs"));
+            let expected = byte_styles(&code_block(code, "rs"));
             let foreground = with_theme(|theme| theme.settings.foreground.and_then(terminal_color));
             for (actual, expected) in styles[row][1..].iter().zip(&expected[0]) {
                 let expected = if expected.fg.is_none() || expected.fg == foreground {

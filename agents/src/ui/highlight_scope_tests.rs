@@ -62,7 +62,7 @@ fn scoped_identifiers_use_variable_property_and_function_colors() {
             Color::Rgb(0, 101, 71)
         };
         let definition = Modifier::BOLD | Modifier::ITALIC;
-        let js = code_lines(SAMPLES[0].1, "js");
+        let js = code_block(SAMPLES[0].1, "js");
         for (row, token) in [(0, "users"), (2, "u of")] {
             assert_token(&js, row, token, binding, definition);
         }
@@ -70,7 +70,7 @@ fn scoped_identifiers_use_variable_property_and_function_colors() {
         for token in ["ada", "36"] {
             assert_token(&js, 0, token, constant, Modifier::ITALIC);
         }
-        let ts = code_lines(SAMPLES[1].1, "ts");
+        let ts = code_block(SAMPLES[1].1, "ts");
         for property in ["name", "age", "string", "number"] {
             assert_token(&ts, 0, property, normal, Modifier::empty());
         }
@@ -78,7 +78,7 @@ fn scoped_identifiers_use_variable_property_and_function_colors() {
         assert_token(&ts, 1, "User", normal, Modifier::empty());
         assert_token(&ts, 1, "reduce", function, Modifier::ITALIC);
         assert_token(&ts, 0, "User", binding, definition);
-        let python = code_lines(SAMPLES[2].1, "python");
+        let python = code_block(SAMPLES[2].1, "python");
         assert_token(&python, 1, "oldest", function, definition);
         assert_token(&python, 1, "lst", binding, definition);
         assert_token(&python, 3, "u in", binding, definition);
@@ -86,7 +86,7 @@ fn scoped_identifiers_use_variable_property_and_function_colors() {
         for (row, token) in [(2, "max"), (3, "sorted"), (4, "print"), (4, "oldest")] {
             assert_token(&python, row, token, function, Modifier::ITALIC);
         }
-        let rust = code_lines(SAMPLES[3].1, "rs");
+        let rust = code_block(SAMPLES[3].1, "rs");
         assert_token(&rust, 0, "users", binding, definition);
         for token in ["User", "Option"] {
             assert!(
@@ -145,7 +145,7 @@ fn identifier_colors_render_in_both_backgrounds() {
         actual.push_str(if light { "light\n" } else { "dark\n" });
         for (language, source) in SAMPLES {
             actual.push_str(&format!("{language}\n"));
-            let lines = code_lines(source, language);
+            let lines = code_block(source, language);
             let mut buffer = Buffer::empty(Rect::new(
                 0,
                 0,

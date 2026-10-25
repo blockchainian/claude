@@ -348,7 +348,7 @@ impl Part {
                 Style::new().dim(),
             ))],
             Body::Code(lang) => {
-                let mut lines = highlight::code_lines(source, lang);
+                let mut lines = highlight::code_block(source, lang);
                 if lang.starts_with("numbered:") {
                     for line in &mut lines {
                         for span in &mut line.spans {
@@ -413,7 +413,7 @@ fn shell_lines(source: &str, commands: &[crate::shell_commands::Command]) -> Vec
         let mut rows: Vec<_> = commands[first..=index]
             .iter()
             .flat_map(|command| {
-                highlight::code_lines(&source[command.range.clone()].replace('\t', "    "), "bash")
+                highlight::code_block(&source[command.range.clone()].replace('\t', "    "), "bash")
             })
             .collect();
         let count = rows.len();
@@ -1532,7 +1532,7 @@ mod tests {
             .find(|span| span.content.contains("lastMessage"))
             .unwrap();
         assert_eq!(key.style.fg, Some(highlight::json_key_foreground()));
-        let reference = highlight::code_lines(r#"["已提交推送"]"#, "json");
+        let reference = highlight::code_block(r#"["已提交推送"]"#, "json");
         let string_style = reference[0]
             .spans
             .iter()
