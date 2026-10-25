@@ -14,8 +14,7 @@ fn codex_exit_event(code: i32) -> crate::event::Event {
         record["payload"]["item"]["status"] = "completed".into();
     }
     std::fs::write(&path, format!("{record}\n")).unwrap();
-    let provider =
-        crate::providers::codex::CodexProvider::new(dir.path().into());
+    let provider = crate::providers::codex::CodexProvider::new(dir.path().into());
     let (mut view, _) = event_fixture();
     view.rows[0].transcript = Some(path);
     provider
@@ -166,10 +165,8 @@ fn command_exit_titles_use_error_colored_digits_for_both_providers() {
                 event.calls = vec![event.calls[0].clone(); count];
                 let detail =
                     tool_detail::event_detail_content(&event, String::new(), Style::new().dim());
-                let columns = super::super::event_detail::event_detail_columns(
-                    Rect::new(0, 0, 120, 30),
-                    Rect::new(0, 0, 40, 30),
-                );
+                let columns =
+                    super::super::event_detail::EventDetailColumns::new(Rect::new(0, 0, 120, 30));
                 for section in &detail.sections {
                     let (line, _) = section.title.line(columns);
                     let text = line.to_string();
