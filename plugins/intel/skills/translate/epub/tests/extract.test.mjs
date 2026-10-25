@@ -404,3 +404,50 @@ test("refuses a work dir that already holds sections.json", () => {
   assert.match(run.stderr, /sections\.json/);
   assert.equal(fs.readFileSync(sections, "utf8"), '{"sections": []}');
 });
+
+// Excerpts of the supplied Kindle conversion of Design Patterns (Gamma et al.).
+// Chapter 2 starts at the end of text00000; its prose starts in text00001.
+for (const format of ["ncx", "nav"]) {
+  for (const anchor of ["span-id", "a-id", "a-name"]) {
+    test(`Kindle ${format} anchors (${anchor}) split chapters and keep cross-file continuations`, () => {
+      const work = tmpDir(), epub = path.join(work, "b.epub");
+      const fixture = new URL("./fixtures/design-patterns/", import.meta.url);
+      const ncx = fs.readFileSync(new URL("toc.ncx", fixture), "utf8");
+      const files = Object.fromEntries(["text00000.html", "text00001.html", "text00004.html"].map(name => {
+        let html = fs.readFileSync(new URL(name, fixture), "utf8");
+        if (anchor !== "span-id") html = html.replace(/<span id="(filepos\d+)"><\/span>/g,
+          `<a ${anchor === "a-name" ? "name" : "id"}="$1"></a>`);
+        return [`Text/${name}`, html.match(/<body>([\s\S]*)<\/body>/)[1]];
+      }));
+      const nav = {};
+      for (const point of ex.iterElements(ex.fromstring(ncx))) {
+        if (point.tag !== "navPoint") continue;
+        const content = point.children.find(e => e.tag === "content");
+        nav[`Text/${content.attrs.src}`] = ex.itertext(point.children.find(e => e.tag === "navLabel")).trim();
+      }
+      makeEpub(epub, files, Object.keys(files), nav);
+      if (format === "ncx") {
+        const zip = new ex.ZipFile(epub);
+        const entries = Object.fromEntries(zip.namelist().filter(n => n !== "nav.xhtml").map(n => [n, zip.read(n)]));
+        entries["package.opf"] = entries["package.opf"].toString().replace(
+          /<item id="nav"[^>]*\/>/, '<item id="ncx" href="Text/toc.ncx" media-type="application/x-dtbncx+xml"/>');
+        entries["Text/toc.ncx"] = ncx;
+        fs.writeFileSync(epub, makeZip(entries));
+      }
+      const secs = extractSections(work, epub);
+      assert.deepEqual(secs.map(s => [s.kind, s.title]), [
+        ["chapter", "Introduction"], ["chapter", "A Case Study: Designing a Document Editor"],
+        ["back", "Design Pattern Catalog"], ["chapter", "Creational Patterns"],
+        ["back", "Appendix A. Glossary"], ["back", "Appendix B. Guide to Notation"],
+        ["back", "Appendix C. Foundation Classes"],
+      ]);
+      const bodies = secs.map(s => fs.readFileSync(path.join(work, s.file), "utf8"));
+      for (const [i, marker] of ["Designing object-oriented software", "This chapter presents a case study",
+        "Design Pattern Catalog", "Creational design patterns abstract"].entries()) {
+        assert.ok(bodies[i].includes(marker), marker);
+        for (let j = 0; j < bodies.length; j++) if (j !== i) assert.ok(!bodies[j].includes(marker), marker);
+      }
+      assert.deepEqual(secs.filter(s => s.kind === "chapter").map(s => s.chapter), [1, 2, 3]);
+    });
+  }
+}

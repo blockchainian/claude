@@ -1,0 +1,62 @@
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap>
+<navPoint id="id5" playOrder="5">
+       <navLabel>
+         <text>Contents</text>
+       </navLabel>
+       <content src="text00000.html#filepos0000020960"/>
+     </navPoint>
+<navPoint id="id9" playOrder="9">
+       <navLabel>
+         <text>Chapter 1. Introduction</text>
+       </navLabel>
+       <content src="text00000.html#filepos0000042931"/>
+     </navPoint>
+<navPoint id="id10" playOrder="10">
+       <navLabel>
+         <text>Chapter 2. A Case Study: Designing a Document Editor</text>
+       </navLabel>
+       <content src="text00000.html#filepos0000139303"/>
+     </navPoint>
+<navPoint id="id11" playOrder="11">
+       <navLabel>
+         <text>Design Pattern Catalog</text>
+       </navLabel>
+       <content src="text00001.html#filepos0000248375"/>
+     </navPoint>
+<navPoint id="id12" playOrder="12">
+       <navLabel>
+         <text>Chapter 3. Creational Patterns</text>
+       </navLabel>
+       <content src="text00001.html#filepos0000248553"/>
+     </navPoint>
+<navPoint id="id16" playOrder="16">
+       <navLabel>
+         <text>Appendix A. Glossary</text>
+       </navLabel>
+       <content src="text00004.html#filepos0000851967"/>
+     </navPoint>
+<navPoint id="id17" playOrder="17">
+       <navLabel>
+         <text>Appendix B. Guide to Notation</text>
+       </navLabel>
+       <content src="text00004.html#filepos0000861050"/>
+     </navPoint>
+<navPoint id="id18" playOrder="18">
+       <navLabel>
+         <text>Appendix C. Foundation Classes</text>
+       </navLabel>
+       <content src="text00004.html#filepos0000870440"/>
+     </navPoint>
+<navPoint id="id19" playOrder="19">
+       <navLabel>
+         <text>Bibliography</text>
+       </navLabel>
+       <content src="text00004.html#filepos0000880296"/>
+     </navPoint>
+<navPoint id="id20" playOrder="20">
+       <navLabel>
+         <text>Index</text>
+       </navLabel>
+       <content src="text00004.html#filepos0000905472"/>
+     </navPoint>
+</navMap></ncx>
