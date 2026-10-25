@@ -308,6 +308,10 @@ pub enum Action {
     },
     /// Backspace, then confirmation: permanently delete the session transcript.
     Delete(SessionKey),
+    DeleteWorktree {
+        id: SessionKey,
+        path: PathBuf,
+    },
     RedeemResetCredit {
         provider: crate::providers::ProviderId,
         request: crate::providers::ResetCreditRequest,

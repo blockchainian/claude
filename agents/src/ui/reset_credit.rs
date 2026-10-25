@@ -129,14 +129,24 @@ impl View {
                     request: incident.request.clone(),
                 },
                 title: String::new(),
-                confirm: false,
+                selected: 0,
+                worktree: None,
             });
         }
     }
 
     pub(super) fn accept_confirmation(&mut self, dialog: ConfirmDialog) -> Option<Action> {
         match dialog.action {
-            ConfirmAction::Delete(id) => self.confirm_delete(id),
+            ConfirmAction::Delete(id) => {
+                if dialog.selected == 2 {
+                    Some(Action::DeleteWorktree {
+                        id,
+                        path: dialog.worktree.expect("third option has a linked worktree"),
+                    })
+                } else {
+                    self.confirm_delete(id)
+                }
+            }
             ConfirmAction::Reset { provider, request } => {
                 self.reset_pending.insert(provider);
                 Some(Action::RedeemResetCredit { provider, request })
@@ -235,7 +245,7 @@ mod tests {
         let mut view = fixture();
         let mut offer = offer();
         view.offer_reset_credit(crate::providers::ProviderId::Claude, vec![offer.clone()]);
-        assert!(!view.confirm_dialog.as_ref().unwrap().confirm);
+        assert_eq!(view.confirm_dialog.as_ref().unwrap().selected, 0);
         let rendered = screen(&view, 120, 48);
         assert!(rendered.contains("Redeem a Claude reset credit?"));
         assert!(rendered.contains("2. Redeem reset credit"));
@@ -296,7 +306,7 @@ mod tests {
             .borrow()
             .confirm_options
             .iter()
-            .find(|(_, confirm)| *confirm)
+            .find(|(_, selected)| *selected == 1)
             .unwrap()
             .0;
         for kind in [
