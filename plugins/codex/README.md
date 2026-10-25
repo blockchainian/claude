@@ -77,7 +77,7 @@ with its app-server daemon running (`codex agents` starts one).
 | `reply(threadId, ask, reply, callId?)` | Answer what the thread is waiting for, quoting the request's text as `ask`: the reply becomes the result of its `ask` call. `callId` picks one when several are waiting. |
 | `interrupt(threadId)` | `turn/interrupt` the thread's current turn. |
 | `list(state?)` | The threads this Claude session started or attached, their `state`, and the unread inbox count per thread. State is `detached` first, then `waiting` for a pending ask, otherwise `lastStatus`: `inProgress`, `completed`, `failed`, `interrupted`, `idle` (no turn yet), or `unavailable` (resume failed). Pass an array of states to include; omit for all threads, or pass `[]` for none. |
-| `detach(threadId)` | Release a thread no longer needed. A thread this session started gets `thread/archive`, together with its spawned agents, and a later `send` is refused. An attached session only gets `thread/unsubscribe`; it stays open in its own client, and a later `send` or `attach` subscribes again. Refused while a turn is running. |
+| `detach(threadId)` | Release a thread no longer needed. A thread this session started gets `thread/archive`, together with its spawned agents; a later `send` or `attach`, by id or name, gets `thread/unarchive` and subscribes again with the thread's start settings. An attached session only gets `thread/unsubscribe`; it stays open in its own client, and a later `send` or `attach` subscribes again. Refused while a turn is running. |
 | `review(cwd, base, out, plan?, decisions?, name?, stance?, focus?)` | A read-only thread running codex's own review mode (`review/start`, its rubric and P0–P3 priorities) over the commits since `base`; the rendered review — an overall verdict and one finding per line with its file and lines — is saved to `out`. With `plan`, the reviewer reads the spec first and does not flag a behaviour change the spec asks for. With `decisions`, the reviewer also reads the rules decided during the run: it does not report one as a departure from the spec, and judges each on its own, tracing what reads the result, also in code the changes did not touch. `stance: "adversarial"` adds a challenge stance (`codex-manager/adversarial-review.md`): the reviewer looks for the strongest reasons the change should not ship and questions the approach itself. `focus` names what it should weigh most. |
 
 ## Attached sessions
@@ -102,8 +102,8 @@ deliver an already answered ask). A thread is finished only when its turn
 completed (not failed, interrupted or waiting on an ask), its result has been
 checked and accepted, and no further message is planned. Blocked threads and
 results still being checked are not finished. Once finished, `detach` in the
-same turn; a thread the session started is then archived and takes no further
-`send`. Before ending a multi-thread run, `list(state: ["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"])`
+same turn; a thread the session started is then archived until a later `send`
+or `attach` takes it back. Before ending a multi-thread run, `list(state: ["waiting", "inProgress", "completed", "failed", "interrupted", "idle", "unavailable"])`
 and detach every finished thread.
 
 `node <plugin>/codex-manager/manager.mjs detach --thread <id>` releases a thread
