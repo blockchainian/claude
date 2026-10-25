@@ -44,6 +44,7 @@ fn terminal_path_suffixes_and_cwd_basename() {
     records.push(read);
     let transcript: String = records.iter().map(|record| format!("{record}\n")).collect();
     let (_directory, tmux, _transcript) = start_probe_with_transcript("path-suffixes", &transcript);
+    tmux.run(&["resize-window", "-t", "probe", "-x", "260", "-y", "50"]);
 
     let wide = tmux.capture_when(|capture| {
         capture
@@ -94,7 +95,7 @@ fn terminal_path_suffixes_and_cwd_basename() {
     let verdict = serde_json::json!({
         "verdict": "pass",
         "surfaces": ["cwd border", "log summary", "tool detail"],
-        "widths": [200, 52],
+        "widths": [260, 52],
         "capture": capture_path,
     });
     std::fs::write(

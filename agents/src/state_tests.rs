@@ -28,8 +28,8 @@ fn nested_config_and_state_load() {
 #[test]
 fn worktree_root_defaults() {
     assert_eq!(
-        worktree_root(Some("/Users/probe".into())),
-        Some(PathBuf::from("/Users/probe/.agents/worktrees"))
+        worktree_root(Some("/Users/example-user".into())),
+        Some(PathBuf::from("/Users/example-user/.agents/worktrees"))
     );
     assert_eq!(worktree_root(Some("".into())), None);
     assert_eq!(worktree_root(None), None);

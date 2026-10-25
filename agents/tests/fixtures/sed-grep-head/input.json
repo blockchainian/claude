@@ -1,5 +1,5 @@
 {
-  "source": "/Users/example-user/.claude/projects/-Users-example-user-Code--worktrees-agents-panel/b0c53151-998c-4ca6-98d7-56854e10fb79.jsonl",
+  "source": "/Users/example-user/.claude/projects/-Users-user-Code--worktrees-example.com/b0c53151-998c-4ca6-98d7-56854e10fb79.jsonl",
   "use_line": 59,
   "result_line": 60,
   "tool_use": {
@@ -7,7 +7,7 @@
     "id": "toolu_012X3SLK84Pb4TkhzDQmLdAF",
     "name": "Bash",
     "input": {
-      "command": "cd /Users/example-user/Code/.worktrees/agents-panel/agents/src && sed -n 220,232p providers/tool.rs; sed -n 395,475p providers/tool.rs; sed -n 840,870p providers/tool.rs; grep -rn \"format_code\\|heredoc\" --include=*.rs . | grep -v \"_tests.rs\\|/tests.rs\" | head -30",
+      "command": "cd /Users/example-user/Code/.worktrees/example.com/agents/src && sed -n 220,232p providers/tool.rs; sed -n 395,475p providers/tool.rs; sed -n 840,870p providers/tool.rs; grep -rn \"format_code\\|heredoc\" --include=*.rs . | grep -v \"_tests.rs\\|/tests.rs\" | head -30",
       "description": "读 format_code 和 heredoc"
     },
     "caller": {

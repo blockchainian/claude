@@ -72,7 +72,7 @@ mod tests {
         let event: serde_json::Value =
             serde_json::from_str(COMPLETED.lines().next().unwrap()).unwrap();
         let expected = event["lastMessage"].as_str().unwrap();
-        assert!(expected.contains("`agents-panel`"));
+        assert!(expected.contains("`example.com`"));
         assert!(expected.contains("\n\n- Space / Enter"));
         assert_eq!(message(COMPLETED).as_deref(), Some(expected));
     }

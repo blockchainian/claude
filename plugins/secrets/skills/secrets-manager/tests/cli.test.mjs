@@ -24,7 +24,7 @@ test("parseFile skips blanks and # comments, collects per-line errors", () => {
 
 // The vendor files use two shapes (6 and 8 fields) and put the auth-token/TOTP columns in either
 // order; the decoder keys on field shape, not position. Values below are fake.
-const AUTH40 = "0123456789abcdef0123456789abcdef01234567";
+const AUTH40 = "a".repeat(40);
 const TOTP16 = "ABCDEFGHIJKLMNOP";
 
 test("parseXVendorLine reads the 6-field shape", () => {

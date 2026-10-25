@@ -27,6 +27,7 @@ pub(crate) const SERVER: McpServer = McpServer {
         ToolRule {
             name: "tabs_context_mcp",
             title: &[Pick::Field(Source::Input, "/createIfEmpty")],
+            output: Some((Pick::With(tabs_context_output), Format::Text)),
             ..DEFAULT_RULE
         },
         ToolRule {
@@ -45,6 +46,29 @@ pub(crate) const SERVER: McpServer = McpServer {
         },
     ],
 };
+
+fn tabs_context_output(data: &ToolData<'_>) -> Option<Body> {
+    use crate::event::Section;
+
+    let result = data.result.filter(|result| !result.error)?;
+    if result.content.as_array()?.len() != 3 {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(content_text(&result.content, 0)?).ok()?;
+    let tabs = value.get("availableTabs")?;
+    tabs.as_array()?;
+    Some(Body::Sections(vec![
+        Section::Markdown {
+            label: "output".into(),
+            text: markdown_table(tabs, "availableTabs")?,
+        },
+        Section::Text {
+            label: "output".into(),
+            text: content_text(&result.content, 1)?.to_owned(),
+        },
+        system_reminder_section(content_text(&result.content, 2)?)?,
+    ]))
+}
 
 fn batch_input(data: &ToolData<'_>) -> Option<Vec<crate::event::Section>> {
     use crate::event::Section;
@@ -102,6 +126,119 @@ fn inline_code_cell(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use serde_json::Value;
+    fn tabs_context_fixture() -> (Value, super::ToolResult) {
+        let records: Vec<Value> =
+            include_str!("../../../../tests/fixtures/claude-chrome-tabs-context.jsonl")
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        let call = &records[0]["message"]["content"][0];
+        let result = &records[1]["message"]["content"][0];
+        assert_eq!(call["id"], result["tool_use_id"]);
+        (
+            call["input"].clone(),
+            super::ToolResult {
+                source: None,
+                content: result["content"].clone(),
+                structured: Value::Null,
+                error: false,
+            },
+        )
+    }
+
+    #[test]
+    fn tabs_context_output_shows_recorded_table_text_and_reminder() {
+        let (input, result) = tabs_context_fixture();
+        let super::Body::Sections(sections) = super::output(
+            super::rule("mcp__claude-in-chrome__tabs_context_mcp").output,
+            &super::ToolData {
+                input: &input,
+                result: Some(&result),
+            },
+        ) else {
+            panic!("expected sections")
+        };
+        let [
+            crate::event::Section::Markdown { text: table, .. },
+            crate::event::Section::Text { text, .. },
+            crate::event::Section::Error { text: reminder },
+        ] = sections.as_slice()
+        else {
+            panic!("expected table, text and reminder: {sections:?}")
+        };
+        assert_eq!(
+            table,
+            "| tabId | title | url |\n| --- | --- | --- |\n| 1001 | New Tab | chrome\\:\\/\\/newtab\\/ |"
+        );
+        assert_eq!(text, result.content[1]["text"].as_str().unwrap());
+        assert_eq!(
+            format!("<system-reminder>{reminder}</system-reminder>"),
+            result.content[2]["text"].as_str().unwrap()
+        );
+        assert!(!reminder.contains("<system-reminder>"));
+        assert!(!reminder.contains("</system-reminder>"));
+    }
+
+    #[test]
+    fn tabs_context_output_preserves_unrecognized_results() {
+        let (input, original) = tabs_context_fixture();
+        let mut cases = Vec::new();
+        let mut missing = original.content.clone();
+        missing.as_array_mut().unwrap().pop();
+        cases.push(missing);
+        let mut extra = original.content.clone();
+        extra
+            .as_array_mut()
+            .unwrap()
+            .push(original.content[1].clone());
+        cases.push(extra);
+        for (index, replacement) in [
+            (0, serde_json::json!({"type":"text", "text":"invalid json"})),
+            (0, serde_json::json!({"type":"text", "text":"{}"})),
+            (1, serde_json::json!({"type":"image"})),
+            (
+                2,
+                serde_json::json!({"type":"text", "text":"<system-reminder>incomplete"}),
+            ),
+        ] {
+            let mut content = original.content.clone();
+            content[index] = replacement;
+            cases.push(content);
+        }
+        for content in cases {
+            let result = super::ToolResult {
+                content,
+                source: None,
+                structured: Value::Null,
+                error: false,
+            };
+            let super::Body::Sections(sections) = super::output(
+                super::rule("mcp__claude-in-chrome__tabs_context_mcp").output,
+                &super::ToolData {
+                    input: &input,
+                    result: Some(&result),
+                },
+            ) else {
+                panic!("expected raw sections")
+            };
+            assert_eq!(sections, super::raw_output(&result));
+        }
+        let result = super::ToolResult {
+            error: true,
+            ..original
+        };
+        let super::Body::Sections(sections) = super::output(
+            super::rule("mcp__claude-in-chrome__tabs_context_mcp").output,
+            &super::ToolData {
+                input: &input,
+                result: Some(&result),
+            },
+        ) else {
+            panic!("expected raw error")
+        };
+        assert_eq!(sections, super::raw_output(&result));
+    }
+
     fn batch_table(input: &Value, result: Option<&super::ToolResult>) -> String {
         let shown = super::presentation(
             "mcp__claude-in-chrome__browser_batch",
@@ -266,7 +403,7 @@ mod tests {
     #[test]
     fn chrome_find_and_computer_title_their_fields_and_show_the_rest() {
         let tab = vec![crate::event::Section::Prose {
-            text: "665979853".into(),
+            text: "1001".into(),
             markdown: false,
         }];
         for (name, input, title, rest) in [
@@ -274,7 +411,7 @@ mod tests {
                 "mcp__claude-in-chrome__find",
                 serde_json::json!({
                     "query": "Refresh link near the calendar/summary panel",
-                    "tabId": 665979853
+                    "tabId": 1001
                 }),
                 "Refresh link near the calendar/summary panel",
                 tab.clone(),
@@ -283,7 +420,7 @@ mod tests {
                 "mcp__claude-in-chrome__computer",
                 serde_json::json!({
                     "action": "left_click",
-                    "tabId": 665979853,
+                    "tabId": 1001,
                     "ref": "ref_21",
                     "action_summary": "点搜索按钮执行航班搜索"
                 }),
@@ -292,7 +429,7 @@ mod tests {
             ),
             (
                 "mcp__claude-in-chrome__computer",
-                serde_json::json!({"action": "wait", "tabId": 665979853, "duration": 4}),
+                serde_json::json!({"action": "wait", "tabId": 1001, "duration": 4}),
                 "wait",
                 tab.clone(),
             ),
@@ -354,8 +491,12 @@ mod tests {
                 result: Some(&result),
             },
         );
-        assert_eq!(shown.title.as_deref(), Some("665979963"));
-        assert!(shown.input.is_empty(), "unexpected input: {:?}", shown.input);
+        assert_eq!(shown.title.as_deref(), Some("1002"));
+        assert!(
+            shown.input.is_empty(),
+            "unexpected input: {:?}",
+            shown.input
+        );
     }
 
     #[test]

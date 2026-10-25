@@ -1066,7 +1066,7 @@ pub(super) mod tests {
         let live = std::env::var_os("AGENTS_BRANCH_TRANSCRIPT").map(PathBuf::from);
         let path = live.as_deref().unwrap_or(fixture.path());
         let summary = read(path, std::fs::metadata(path).unwrap().len()).unwrap();
-        assert_eq!(summary.git_branch.as_deref(), Some("agents-panel"));
+        assert_eq!(summary.git_branch.as_deref(), Some("example.com"));
         assert!(summary.pr.is_none());
         eprintln!(
             "parsed cwd={:?}, branch={:?}, pr={:?}",
@@ -1092,7 +1092,7 @@ pub(super) mod tests {
             })
             .find(|line| line.contains("Branch regression") && line.contains("─"))
             .unwrap();
-        assert!(footer.contains("agents-panel"), "{footer}");
+        assert!(footer.contains("example.com"), "{footer}");
     }
 
     fn cache_records() -> Vec<Value> {
@@ -2649,7 +2649,7 @@ pub(super) mod tests {
             }
             let mut last = expected.clone();
             last["prNumber"] = 833.into();
-            last["prUrl"] = "https://github.com/example-user/example-app/pull/833".into();
+            last["prUrl"] = "https://github.com/example/example/pull/833".into();
             writeln!(file, "{last}").unwrap();
             let pr = read(file.path(), file.as_file().metadata().unwrap().len())
                 .unwrap()

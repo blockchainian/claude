@@ -1,7 +1,7 @@
 Write .md
 agents: clickable paths and image links
 
-Branch agents-panel, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
+Branch example.com, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
 
 Goal
 
@@ -11,7 +11,7 @@ click on it runs macOS open on the target (files in their default app, directori
 Read .md
 agents: clickable paths and image links
 
-Branch agents-panel, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
+Branch example.com, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
 
 Goal
 
@@ -21,7 +21,7 @@ click on it runs macOS open on the target (files in their default app, directori
 cat .md
 agents: clickable paths and image links
 
-Branch agents-panel, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
+Branch example.com, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
 
 Goal
 
@@ -31,7 +31,7 @@ click on it runs macOS open on the target (files in their default app, directori
 head .markdown
 agents: clickable paths and image links
 
-Branch agents-panel, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
+Branch example.com, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
 
 Goal
 
@@ -41,7 +41,7 @@ click on it runs macOS open on the target (files in their default app, directori
 cat .MD
 agents: clickable paths and image links
 
-Branch agents-panel, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
+Branch example.com, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
 
 Goal
 
@@ -51,7 +51,7 @@ click on it runs macOS open on the target (files in their default app, directori
 Read .markdown
 agents: clickable paths and image links
 
-Branch agents-panel, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
+Branch example.com, worktree /workspace/agents, crate agents/. Read agents/AGENTS.md first.
 
 Goal
 

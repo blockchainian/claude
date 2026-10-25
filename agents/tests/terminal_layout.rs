@@ -934,7 +934,7 @@ fn terminal_dashboard_tabs_and_footer() {
             path.display()
         );
         tmux.run(&["send-keys", "-t", "probe", "?"]);
-        tmux.wait_for(|capture| capture.contains("Task shortcuts"));
+        tmux.wait_for(|capture| capture.lines().any(|line| line.trim() == "Shortcuts"));
         let help = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         assert!(
             help.lines()
@@ -1024,7 +1024,12 @@ fn assert_task_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &s
         .collect();
     let top_end = 2 + lines[2..]
         .iter()
-        .take_while(|line| line.matches('│').count() == separators.len())
+        .take_while(|line| {
+            separators.iter().all(|column| {
+                line.match_indices('│')
+                    .any(|(index, _)| line[..index].width() == *column)
+            })
+        })
         .count();
     let task_details_start = separators[0];
     let task_details_end = if width >= 150 {
@@ -1032,85 +1037,84 @@ fn assert_task_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &s
     } else {
         width as usize
     };
-    let middle: Vec<_> = lines[top_end].chars().collect();
-    let task_details: String = middle[task_details_start..task_details_end]
-        .iter()
-        .collect();
-    let status = " Inactive ";
-    let start = (task_details_end - task_details_start - status.len()) / 2;
-    assert_eq!(
-        task_details
-            .chars()
-            .skip(start)
-            .take(status.len())
-            .collect::<String>(),
-        status,
-        "{capture}"
-    );
-    assert!(task_details.starts_with('┴'), "{capture}");
-    assert!(
-        task_details.ends_with(if width >= 150 {
-            " claude╶┴"
-        } else {
-            " claude╶─"
-        }),
-        "{capture}"
-    );
-    assert!(
-        task_details
-            .chars()
-            .skip(1)
-            .take(start - 1)
-            .all(|c| c == '─'),
-        "{capture}"
-    );
-    let folder_start = task_details.chars().count() - " claude╶─".chars().count();
-    assert!(
-        task_details
-            .chars()
-            .skip(start + status.len())
-            .take(folder_start - start - status.len())
-            .all(|c| c == '─'),
-        "{capture}"
-    );
     let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
     let parser = captured_screen(&colored, width, height);
-    let cell = parser
-        .screen()
-        .cell(top_end as u16, (task_details_start + start + 1) as u16)
-        .unwrap();
-    assert!(cell.bold(), "{colored}");
-    assert!(!cell.dim(), "{colored}");
-    assert_eq!(cell.fgcolor(), vt100::Color::Default);
-
-    let top: String = (task_details_start..task_details_end)
-        .map(|x| parser.screen().cell(1, x as u16).unwrap().contents())
-        .collect();
-    let elapsed = top
-        .rsplit('─')
-        .map(|part| part.trim_matches('┬'))
-        .find(|part| !part.trim_matches([' ', '┬']).is_empty())
-        .unwrap();
-    assert!(
-        elapsed.starts_with(' ') && elapsed.ends_with('╶'),
+    let edge = |y| {
+        (task_details_start..task_details_end)
+            .map(|x| parser.screen().cell(y, x as u16).unwrap().contents())
+            .collect::<String>()
+    };
+    let top = edge(1);
+    let status = " Inactive ⏸\u{fe0e} ";
+    let status_start = top.find(status).expect("status on the top rule");
+    assert_eq!(
+        top[..status_start].width(),
+        (task_details_end - task_details_start - status.width()) / 2,
         "{capture}"
     );
-    assert!(!elapsed.trim().is_empty(), "{capture}");
+    for x in task_details_start + top[..status_start].width() + 1
+        ..task_details_start + top[..status_start].width() + status.width() - 1
+    {
+        let cell = parser.screen().cell(1, x as u16).unwrap();
+        assert!(cell.bold(), "{colored}");
+        assert!(!cell.dim(), "{colored}");
+        assert_eq!(cell.fgcolor(), vt100::Color::Default);
+    }
+    let elapsed = " 16s╶";
+    assert!(
+        top.ends_with(&format!(
+            "{elapsed}{}",
+            if width >= 150 { '┬' } else { '─' }
+        )),
+        "{capture}"
+    );
     let elapsed_start = task_details_end - 1 - elapsed.width();
     for x in elapsed_start + 1..task_details_end - 2 {
         let cell = parser.screen().cell(1, x as u16).unwrap();
         assert!(cell.dim(), "{colored}");
         assert!(!cell.bold(), "{colored}");
     }
-    let title = top
-        .split('─')
-        .find(|part| !part.trim_matches([' ', '┬']).is_empty())
-        .unwrap();
-    assert!(title.starts_with(' ') && title.ends_with(' '), "{capture}");
-    let start = (task_details_end - task_details_start - title.width()) / 2;
-    assert_eq!(top[..top.find(title).unwrap()].width(), start, "{capture}");
-    for x in task_details_start + start + 1..task_details_start + start + title.width() - 1 {
-        let cell = parser.screen().cell(1, x as u16).unwrap();
+
+    let bottom = edge(top_end as u16);
+    let title = match width {
+        150 | 151 => " Codex manager 停止时… ",
+        _ => " Codex manager 停止时线程处理 ",
+    };
+    let title_start = bottom.find(title).expect("task name on the bottom rule");
+    assert_eq!(
+        bottom[..title_start].width(),
+        (task_details_end - task_details_start - title.width()) / 2,
+        "{capture}"
+    );
+    assert!(top.starts_with('┬'), "{capture}");
+    let folder = match width {
+        150 | 151 => "┴╴cla… ",
+        _ => "┴╴claude ",
+    };
+    assert!(bottom.starts_with(folder), "{capture}");
+    assert!(
+        bottom[folder.len()..title_start].chars().all(|c| c == '─'),
+        "{capture}"
+    );
+    let branch_start = bottom.rfind(" main╶").expect("branch on the bottom rule");
+    assert!(
+        bottom[title_start + title.len()..branch_start]
+            .chars()
+            .all(|c| c == '─'),
+        "{capture}"
+    );
+    assert!(
+        bottom.ends_with(if width >= 150 {
+            " main╶┴"
+        } else {
+            " main╶─"
+        }),
+        "{capture}"
+    );
+    for x in task_details_start + bottom[..title_start].width() + 1
+        ..task_details_start + bottom[..title_start].width() + title.width() - 1
+    {
+        let cell = parser.screen().cell(top_end as u16, x as u16).unwrap();
         if !cell.contents().is_empty() {
             assert!(cell.bold(), "{colored}");
             assert!(!cell.dim(), "{colored}");
@@ -1189,8 +1193,8 @@ fn terminal_layout_tracks_width() {
             "fixture not selected: {capture}"
         );
         assert!(
-            !lines[1].contains("Inactive"),
-            "status must stay on the bottom rule: {capture}"
+            lines[1].contains(" Inactive ⏸\u{fe0e} "),
+            "status must stay on the top rule: {capture}"
         );
         let top = lines[2];
         assert_eq!(
@@ -1204,7 +1208,12 @@ fn terminal_layout_tracks_width() {
             .collect();
         let top_end = 2 + lines[2..]
             .iter()
-            .take_while(|line| line.matches('│').count() == separators.len())
+            .take_while(|line| {
+                separators.iter().all(|column| {
+                    line.match_indices('│')
+                        .any(|(index, _)| line[..index].width() == *column)
+                })
+            })
             .count();
         let prompt = top_end + 1;
         assert!(lines[prompt].contains('❯'), "prompt missing: {capture}");
@@ -1251,7 +1260,7 @@ fn terminal_layout_tracks_width() {
             let column_width = (width as usize - 8) / 4;
             assert_eq!(separators, [column_width + 2, 2 * column_width + 5]);
             for line in &lines[2..top_end] {
-                let event_panel = line.split('│').next_back().unwrap();
+                let event_panel = line.splitn(3, '│').nth(2).unwrap();
                 if !event_panel.trim().is_empty() {
                     assert_eq!(
                         event_panel.len() - event_panel.trim_start().len(),
@@ -1259,8 +1268,8 @@ fn terminal_layout_tracks_width() {
                         "log left: {line}"
                     );
                     assert_eq!(
-                        line.trim_end().width(),
-                        width as usize - 1,
+                        line.trim_end_matches([' ', '┐', '│', '┘']).width(),
+                        width as usize - 2,
                         "log time right: {line}"
                     );
                 }
@@ -1274,11 +1283,14 @@ fn terminal_layout_tracks_width() {
                 .iter()
                 .collect();
             assert!(
-                task_details.contains(" Inactive "),
-                "status missing from middle rule: {capture}"
+                task_details.contains(match width {
+                    150 | 151 => " Codex manager 停止时… ",
+                    _ => " Codex manager 停止时线程处理 ",
+                }),
+                "task name missing from middle rule: {capture}"
             );
             for line in &lines[2..top_end] {
-                let event_panel = line.split('│').next_back().unwrap();
+                let event_panel = line.splitn(3, '│').nth(2).unwrap();
                 assert!(!event_panel.contains("────"), "extra log rule: {capture}");
                 assert!(!line.contains(" · Inactive"), "extra status row: {capture}");
             }
@@ -1291,8 +1303,8 @@ fn terminal_layout_tracks_width() {
             );
             assert!(
                 lines[2..top_end].iter().any(|line| {
-                    line.split('│')
-                        .next_back()
+                    line.splitn(3, '│')
+                        .nth(2)
                         .is_some_and(|event_panel| event_panel.contains("Stop hook"))
                 }),
                 "event list missing from top row: {capture}"
@@ -1332,7 +1344,7 @@ fn terminal_layout_tracks_width() {
             assert!(
                 opened_lines[event_rule + 1..opened_lines.len() - 1]
                     .join("\n")
-                    .contains("run_in_background"),
+                    .contains("codex thread 01a11210-f266-7182-b202-269b6b4fe157"),
                 "clicked user event missing from detail: {opened}"
             );
             // Search follows the last mouse panel, independently of the selected event.
@@ -1900,11 +1912,17 @@ fn terminal_task_details_section_positions() {
             };
             let panel_right = right - if width >= 150 { 2 } else { 1 };
             let panel_width = panel_right - left - 2;
-            let bottom = 2 + lines[2..]
-                .iter()
-                .take_while(|line| line.matches('│').count() == separators.len())
-                .count();
             let parser = captured_screen(&capture, width, 70);
+            let bottom = (2..lines.len())
+                .find(|&y| {
+                    parser
+                        .screen()
+                        .cell(y as u16, left as u16)
+                        .unwrap()
+                        .contents()
+                        == "┴"
+                })
+                .unwrap();
             let panel: Vec<String> = (2..bottom)
                 .map(|y| {
                     (left + 2..panel_right)
@@ -1936,6 +1954,12 @@ fn terminal_task_details_section_positions() {
                     .all(|row| !row.contains("claude-opus-5-5") && !row.contains("medium"))
             );
             let status: String = (left..right)
+                .map(|x| parser.screen().cell(1, x as u16).unwrap().contents())
+                .collect();
+            assert!(status.contains(" Inactive "), "{status}");
+            assert!(!status.contains("main"), "{status}");
+            assert!(!status.contains('#'), "{status}");
+            let title: String = (left..right)
                 .map(|x| {
                     parser
                         .screen()
@@ -1944,62 +1968,44 @@ fn terminal_task_details_section_positions() {
                         .contents()
                 })
                 .collect();
-            assert!(
-                status.ends_with(if width >= 150 {
-                    " claude╶┴"
-                } else {
-                    " claude╶─"
-                }),
-                "{status}"
-            );
-            assert!(status.contains(" Inactive "), "{status}");
-            assert!(!status.contains("main"), "{status}");
+            assert!(title.starts_with("┴╴claude "), "{title}");
+            let end = if width >= 150 { "╶┴" } else { "╶─" };
             if has_pr {
-                assert!(status.starts_with("┴╴#763 ─"), "{status}");
+                assert!(title.ends_with(&format!(" #763{end}")), "{title}");
+                assert!(!title.contains("main"), "{title}");
             } else {
-                assert!(!status.contains('#'), "{status}");
-                assert!(status.starts_with("┴────"), "{status}");
+                assert!(title.ends_with(&format!(" main{end}")), "{title}");
+                assert!(!title.contains('#'), "{title}");
             }
-            let model_y = if width >= 150 { bottom } else { bottom + 2 };
-            let model_left = if width >= 150 { separators[1] } else { 0 };
-            let model_right = width as usize;
-            let model: String = (model_left..model_right)
+            let model: String = (0..=left)
                 .map(|x| {
                     parser
                         .screen()
-                        .cell(model_y as u16, x as u16)
+                        .cell(bottom as u16, x as u16)
                         .unwrap()
                         .contents()
                 })
                 .collect();
-            assert!(
-                model.starts_with(if width >= 150 {
-                    "┴╴claude-opus-5-5 "
-                } else {
-                    "─╴claude-opus-5-5 "
-                }),
-                "{model}"
-            );
-            assert!(model.contains("claude-opus-5-5 · medium"), "{model}");
+            assert!(model.starts_with("─╴claude-opus-5-5 "), "{model}");
+            assert!(model.ends_with(" medium╶┴"), "{model}");
             assert!(!model.contains("Model"));
-            assert!(model.contains('·'));
             let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
             let colored = captured_screen(&colored, width, 70);
             for (start, length) in [
-                (model_left + 2, "claude-opus-5-5".len()),
+                (2, "claude-opus-5-5".len()),
                 (
-                    model_left + 2 + "claude-opus-5-5 · ".width(),
+                    model[..model.find("medium").unwrap()].width(),
                     "medium".len(),
                 ),
             ] {
                 for x in start..start + length {
-                    let cell = colored.screen().cell(model_y as u16, x as u16).unwrap();
+                    let cell = colored.screen().cell(bottom as u16, x as u16).unwrap();
                     assert!(cell.dim(), "{capture}");
                     assert!(!cell.bold(), "{capture}");
                 }
             }
             println!(
-                "{{\"task_details_sections\":\"pass\",\"folder_on_status_rule\":\"pass\",\"model_on_event_rule\":\"pass\",\"metadata_dim\":\"pass\",\"width\":{width},\"pr\":{has_pr}}}"
+                "{{\"task_details_sections\":\"pass\",\"folder_on_title_rule\":\"pass\",\"model_on_chart_rule\":\"pass\",\"metadata_dim\":\"pass\",\"width\":{width},\"pr\":{has_pr}}}"
             );
         }
     }

@@ -433,9 +433,9 @@ fn real_terminal_panel_clears_left_input() {
         dashboard::open_terminal(&mut app, session.id.clone(), |screen| {
             screen.lines().any(|line| line.trim() == "❯")
         });
-        dashboard::paste_terminal(&mut app, "agents-panel stale text\nsecond line");
+        dashboard::paste_terminal(&mut app, "example.com stale text\nsecond line");
         dashboard::wait_terminal(&mut app, |screen| screen.contains("second line"));
-        let prompt = "Reply exactly agents-panel-✓ and stop. Do not use tools.";
+        let prompt = "Reply exactly example.com-✓ and stop. Do not use tools.";
         dashboard::send(
             &mut app,
             session.id.clone(),

@@ -13,11 +13,11 @@ fn terminal_claude_chrome_tabs_close() {
         .unwrap();
     tmux.run(&["send-keys", "-t", "probe", "End"]);
     let plain = tmux.capture_when(|capture| {
-        capture.contains("Closed tab 665979963.")
+        capture.contains("Closed tab 1002.")
             && capture.lines().any(|line| {
                 line.trim_start()
                     .starts_with("claude-in-chrome tabs close mcp")
-                    && line.split_whitespace().any(|word| word == "665979963")
+                    && line.split_whitespace().any(|word| word == "1002")
             })
     });
     assert!(

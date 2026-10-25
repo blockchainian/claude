@@ -656,7 +656,7 @@ mod tests {
         let capabilities = serde_json::json!({
             "appium:udid": "00000000-0000000000000000",
             "appium:usePreinstalledWDA": true,
-            "appium:prebuiltWDAPath": "/Users/user/.cache/appium-mcp/wda-real/16.12.4/signed/23ed55a4-b472-45e1-b469-ee696e1e150c/Payload-resigned.ipa",
+            "appium:prebuiltWDAPath": "/Users/example-user/.cache/appium-mcp/wda-real/16.12.4/signed/23ed55a4-b472-45e1-b469-ee696e1e150c/Payload-resigned.ipa",
             "appium:wdaLaunchTimeout": 30000,
             "appium:shouldTerminateApp": false,
             "appium:newCommandTimeout": 600

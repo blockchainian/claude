@@ -50,7 +50,7 @@ fn installed_background_branch_border() {
         if selected
             && capture
                 .lines()
-                .any(|row| row.contains("─") && row.trim_end().ends_with("agents-panel╶─"))
+                .any(|row| row.contains("─") && row.trim_end().ends_with("example.com╶─"))
         {
             let result = serde_json::json!({"passed":true,"binary":binary,"transcript":transcript,"capture":capture});
             if let Some(path) = std::env::var_os("AGENTS_BRANCH_VERDICT") {

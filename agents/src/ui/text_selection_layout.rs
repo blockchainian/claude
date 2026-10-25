@@ -543,7 +543,7 @@ mod tests {
         let basename = path.rsplit('/').next().unwrap();
         let parent = path.rsplit('/').nth(1).unwrap();
         let home = std::env::var("HOME").unwrap();
-        let fixture_cwd = std::path::Path::new(fixture["cwd"].as_str().unwrap())
+        let fixture_cwd = std::path::Path::new(path.split_once("/.claude/").unwrap().0)
             .parent()
             .unwrap()
             .to_str()
@@ -675,7 +675,7 @@ mod tests {
 
     #[test]
     fn shortened_filename_preserves_following_cjk_punctuation() {
-        let source = "报告已写到 /private/tmp/claude-501/-Users-example-user-Code-blockchainian-claude/0ed4978e-9ece-4b9d-9bc5-04bf44fedacb/scratchpad/background-research/report.md，并已发给 team-lead。";
+        let source = "报告已写到 /private/tmp/claude-501/-Users-user-Code-blockchainian-claude/0ed4978e-9ece-4b9d-9bc5-04bf44fedacb/scratchpad/background-research/report.md，并已发给 team-lead。";
         for markdown in [false, true] {
             let shortened = super::super::line_truncation::fit_paths_to_wrap_width(
                 source,

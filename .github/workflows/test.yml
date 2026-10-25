@@ -5,6 +5,38 @@ on:
     branches: [main]
   pull_request:
 jobs:
+  privacy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PRIVACY_EVENT: ${{ github.event_name }}
+      PRIVACY_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      PRIVACY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install Gitleaks
+        run: |
+          set -euo pipefail
+          version=8.30.1
+          archive="gitleaks_${version}_linux_x64.tar.gz"
+          release="https://github.com/gitleaks/gitleaks/releases/download/v${version}"
+          cd "$RUNNER_TEMP"
+          curl -fsSL "$release/$archive" -o "$archive"
+          curl -fsSL "$release/gitleaks_${version}_checksums.txt" -o checksums.txt
+          awk -v archive="$archive" '$2 == archive' checksums.txt | sha256sum --check --strict
+          tar -xzf "$archive" gitleaks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Scan commits for secrets and home paths
+        run: python3 .github/scripts/privacy.py gitleaks
+      - name: Scan added lines for private terms
+        if: ${{ !cancelled() }}
+        env:
+          PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
+        run: python3 .github/scripts/privacy.py denylist
   codex:
     runs-on: ubuntu-latest
     steps:

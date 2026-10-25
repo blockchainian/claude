@@ -42,13 +42,14 @@ enum Body {
     Prose(bool),
     /// Literal output with its original logical lines.
     Text,
+    Error,
     Note,
 }
 
 impl Body {
     fn content_kind(&self) -> ContentKind {
         match self {
-            Self::Markdown | Self::Prose(_) => ContentKind::Prose,
+            Self::Markdown | Self::Prose(_) | Self::Error => ContentKind::Prose,
             Self::Label(_)
             | Self::Image { .. }
             | Self::Arrow
@@ -365,6 +366,10 @@ impl Part {
             Body::Note => source
                 .split('\n')
                 .map(|line| Line::styled(line.to_owned(), Style::new().dim()))
+                .collect(),
+            Body::Error => source
+                .split('\n')
+                .map(|line| Line::from(Span::styled(line.to_owned(), super::style::error_style())))
                 .collect(),
             Body::Text | Body::Prose(false) => source
                 .split('\n')
@@ -864,6 +869,10 @@ fn push_section(parts: &mut Vec<Part>, section: &Section, label_style: Style, te
                     .into_iter()
                     .map(|part| part.into_prose(false)),
             );
+            return;
+        }
+        Section::Error { text } => {
+            parts.push(Part::new(cells(text), Body::Error));
             return;
         }
         Section::Label(text) => {
@@ -1839,7 +1848,7 @@ mod tests {
             ["fn main() {}", "---", "print('ready')", "[package]"]
         );
     }
-    const SHELL_SAMPLE: &str = r#"cd ~/Code/example-org/example-repo && F="darwin/Library/Application Support/Code/User/settings.json" && git diff --stat -- "$F"; sed -i '' 's/^  "workbench.panel.defaultLocation": "left",$/  "workbench.panel.defaultLocation": "left",\n  "workbench.panel.showLabels": false,/' "$F" && sed -n 6,9p "$F""#;
+    const SHELL_SAMPLE: &str = r#"cd ~/Code/example/project && F="darwin/Library/Application Support/Code/User/settings.json" && git diff --stat -- "$F"; sed -i '' 's/^  "workbench.panel.defaultLocation": "left",$/  "workbench.panel.defaultLocation": "left",\n  "workbench.panel.showLabels": false,/' "$F" && sed -n 6,9p "$F""#;
 
     fn command_part(command: &str) -> Part {
         let mut parts = Vec::new();
@@ -1861,7 +1870,7 @@ mod tests {
         let lines = part.lines(500, Style::default(), chrono::DateTime::UNIX_EPOCH);
         assert_eq!(lines.len(), 5);
         let commands = [
-            "cd ~/Code/example-org/example-repo",
+            "cd ~/Code/example/project",
             r#"F="darwin/Library/Application Support/Code/User/settings.json""#,
             r#"git diff --stat -- "$F""#,
             r#"sed -i '' 's/^  "workbench.panel.defaultLocation": "left",$/  "workbench.panel.defaultLocation": "left",\n  "workbench.panel.showLabels": false,/' "$F""#,
@@ -2513,6 +2522,28 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn error_section_keeps_text_selection_and_colors_every_line() {
+        let mut parts = Vec::new();
+        push_section(
+            &mut parts,
+            &Section::Error {
+                text: "first line\nsecond line".into(),
+            },
+            Style::default(),
+            true,
+        );
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].source, "first line\nsecond line");
+        assert!(!parts[0].markdown());
+        let lines = parts[0].lines(7, Style::default(), chrono::DateTime::UNIX_EPOCH);
+        assert!(lines.len() > 2, "error text must wrap");
+        for span in lines.iter().flat_map(|line| &line.spans) {
+            assert_eq!(span.style.fg, super::super::style::error_style().fg);
+        }
+        assert!(parts[0].maps(&lines).iter().any(|row| !row.is_empty()));
     }
 
     #[test]

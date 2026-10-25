@@ -72,7 +72,15 @@ fn terminal_claude_mcp_generic_event_detail() {
             let boolean = token_color(&capture, "false", 200, 150);
             let number = token_color(&capture, "10,", 200, 150);
             let string = token_color(&capture, "events", 200, 150);
-            assert_ne!(key, string, "JSON keys and strings have separate colors");
+            let punctuation = token_color(&capture, "{", 200, 150);
+            assert_eq!(
+                key, string,
+                "JSON keys and strings share the theme's string color"
+            );
+            assert_ne!(
+                string, punctuation,
+                "JSON strings and punctuation have separate colors"
+            );
             for color in [key, string, number, boolean] {
                 assert_ne!(
                     color,
@@ -362,7 +370,7 @@ fn terminal_claude_chrome_browser_batch() {
         .find(|line| line.trim_start().starts_with("navigate"))
         .unwrap();
     assert!(
-        navigate.contains("│ https://www.example-app.xyz/"),
+        navigate.contains("│ https://example.com/"),
         "{navigate}"
     );
     let javascript = plain
@@ -371,7 +379,7 @@ fn terminal_claude_chrome_browser_batch() {
         .unwrap();
     assert_eq!(javascript.matches('│').count(), 1, "{javascript}");
     assert!(
-        javascript.contains("localStorage.getItem('privy:token')"),
+        javascript.contains("localStorage.getItem('example:session')"),
         "{javascript}"
     );
     assert!(

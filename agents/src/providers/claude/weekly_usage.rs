@@ -446,10 +446,10 @@ mod tests {
             .remove(0);
         let request = ResetCreditRequest {
             offer,
-            idempotency_key: "bfe35785-12de-4333-8026-680aeaa0510e".into(),
+            idempotency_key: "00000000-0000-4000-8000-000000000001".into(),
         };
         let expected = serde_json::json!({"program":"cedar_ember", "grant_id":"opus55-launch-promax-20260921",
-            "request_id":"bfe35785-12de-4333-8026-680aeaa0510e"});
+            "request_id":"00000000-0000-4000-8000-000000000001"});
         assert_eq!(redemption_body(&request), expected);
         assert_eq!(redemption_body(&request), expected);
     }

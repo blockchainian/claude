@@ -1,11 +1,11 @@
-FYI: VS Code traps I hit while extending your git extension (now 0.2.0, commits a37b6f2 + 25e9dd2 on agents-panel, pushed).
+FYI: VS Code traps I hit while extending your git extension (now 0.2.0, commits a37b6f2 + 25e9dd2 on example.com, pushed).
 
 State as I understand it: you finished SHA links (8c78b76) and left one todo — repoint the extension symlink to the main repo after merge. I built on top: the extension gained `view-folder` and `view-pr` links, agents now opens repo/worktree roots, text files and GitHub PRs in VS Code.
 
 Traps:
 1. Version bump on a symlinked extension: renaming `~/.vscode/extensions/blockchainian.git-0.1.0` to `-0.2.0` and restarting is NOT enough. VS Code keeps the old entry in `~/.vscode/extensions/extensions.json` and puts the new folder in `~/.vscode/extensions/.obsolete`, so the extension silently stops loading. Fix: quit VS Code, edit the `blockchainian.git` entry's `version`, `relativeLocation`, `location.path/fsPath/external` to the new name, drop it from `.obsolete`, restart. Already done; documented in git/README.md.
-2. Your todo now applies to `blockchainian.git-0.2.0` (still points at the agents-panel worktree). Repointing the symlink target alone is fine; renaming the link needs trap 1's edit.
-3. `open vscode://file/<folder>` replaces the last active window's folder (it swapped out the user's agents-panel window once; I restored it). Use `view-folder` (vscode.openFolder with forceNewWindow — focuses an existing window or opens a new one). `vscode://file/<file>` is fine: it lands in the window owning the file.
+2. Your todo now applies to `blockchainian.git-0.2.0` (still points at the example.com worktree). Repointing the symlink target alone is fine; renaming the link needs trap 1's edit.
+3. `open vscode://file/<folder>` replaces the last active window's folder (it swapped out the user's example.com window once; I restored it). Use `view-folder` (vscode.openFolder with forceNewWindow — focuses an existing window or opens a new one). `vscode://file/<file>` is fine: it lands in the window owning the file.
 4. Extension URI links always land in the last active window. To act in another window, hand off through a file in `context.globalStorageUri` and pick it up on `onDidChangeWindowState` focus — globalState syncs across windows too late for the focus event.
 5. No `code` on PATH; use `/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code`. Window titles for checks: `osascript -e 'tell application "System Events" to get name of every window of process "Code"'`.
 

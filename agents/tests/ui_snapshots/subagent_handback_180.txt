@@ -95,7 +95,7 @@
 
                                                 Done. Rust crate/module names in paths now render as plain body text in both themes.
                                                 I committed and pushed it as cf2ecd3. The report is at
-                                                /private/tmp/claude-501/-Users-example-user-Code-blockchainian-dot/…/report.md.
+                                                /private/tmp/claude-501/-Users-user-Code-blockchainian-dot/…/report.md.
 
                                                 Cause: entity.name.namespace in the theme files colored the notify:: segments. The
                                                 Rust grammar emits entity.name.namespace.rust and entity.name.module.rust. Semantic

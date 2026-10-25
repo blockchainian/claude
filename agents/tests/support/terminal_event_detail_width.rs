@@ -11,16 +11,16 @@ pub(super) fn message_width(capture: &str, width: usize) -> usize {
     width - 1 - list_left - 10
 }
 
-// Detail panels occupy the terminal interior. Their clock and two-cell gap
-// reserve ten cells at the right edge; reading width is independent of that.
+// Detail panels occupy the terminal interior. Their clock, two-cell gap and
+// right margin reserve eleven cells; reading width is independent of that.
 pub(super) fn content_width(width: usize) -> usize {
-    width - 2 - 10
+    width - 2 - 11
 }
 
 pub(super) fn event_detail_center(width: usize, content_width: usize) -> usize {
     (1 + (width - 2) / 2)
         .saturating_sub(content_width / 2)
-        .min((width - 11).saturating_sub(content_width))
+        .min((width - 12).saturating_sub(content_width))
         .max(1)
 }
 
@@ -66,15 +66,11 @@ fn terminal_preformatted_detail_stays_in_content_column() {
         let path = std::env::temp_dir().join(format!("agents-detail-message-width-{width}.txt"));
         std::fs::write(&path, &capture).unwrap();
         let rows: Vec<_> = capture.lines().collect();
-        let rule = rows
+        let detail = event_detail_rows(&capture, usize::from(width)).unwrap();
+        let body: Vec<_> = rows[detail]
             .iter()
-            .rposition(|line| line.matches('─').count() > usize::from(width / 2))
-            .unwrap();
-        let body: Vec<_> = rows
-            .iter()
-            .skip(rule + 2)
-            .take_while(|line| !line.starts_with(" ? help"))
-            .map(|line| line.trim_end().trim_end_matches('│').trim_end())
+            .skip(1)
+            .map(|line| line.trim_end().trim_end_matches(['│', '▕']).trim_end())
             .filter(|line| !line.trim().is_empty() && line.trim() != "↓")
             .collect();
         assert!(!body.is_empty(), "{capture}");

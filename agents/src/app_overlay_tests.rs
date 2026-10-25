@@ -174,9 +174,10 @@ fn delete_dialog_worktree_removal_through_app() {
         assert!(!children.exists());
         assert!(app.sessions.is_empty());
         assert_eq!(linked.exists(), choice == '2' || dirty);
-        assert!(
+        assert_eq!(
             crate::tasks::tests::git(repo.path(), &["branch", "--list", "linked"])
-                .contains("linked")
+                .contains("linked"),
+            choice == '2' || dirty
         );
         app.draw(&mut terminal).unwrap();
         let rendered = terminal

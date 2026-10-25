@@ -3195,7 +3195,7 @@ fn task_details_folder_and_pr_use_rule_styles_and_keep_links() {
     row.git_branch = Some("hidden-branch".into());
     row.pr = Some(crate::model::PullRequest {
         number: 833,
-        url: "https://github.com/example-user/example-app/pull/833".into(),
+        url: "https://github.com/example/example/pull/833".into(),
     });
     let mut view = test_view(Grouping::Project, true);
     view.status_filter = 1;
@@ -3371,7 +3371,7 @@ fn task_details_status_folder_and_optional_pr_snapshot() {
     assert_eq!(view.viewport.borrow().task_details_links.len(), 1);
     row.pr = Some(crate::model::PullRequest {
         number: 833,
-        url: "https://github.com/example-user/example-app/pull/833".into(),
+        url: "https://github.com/example/example/pull/833".into(),
     });
     view.set_sessions(vec![row.clone()], false);
     assert_eq!(
@@ -4972,7 +4972,7 @@ fn column_padding_fixture() -> (View, chrono::DateTime<Utc>) {
     row.prompt = "Inspect the files".into();
     row.prompt_at = Some(now - Duration::seconds(45));
     row.turn_messages = 3;
-    row.git_branch = Some("agents-panel".into());
+    row.git_branch = Some("example.com".into());
     row.pr = Some(crate::model::PullRequest {
         number: 13,
         url: "https://github.com/blockchainian/claude/pull/13".into(),
@@ -6665,7 +6665,7 @@ fn task_details_status_shows_only_the_directory_name() {
 #[test]
 fn group_header_shows_the_directory_basename() {
     let mut task = session("path", "Path task", SessionStatus::Ready, 0);
-    task.cwd = "/Users/visitor/Code/.worktrees/agents-panel".into();
+    task.cwd = "/Users/example-user/Code/.worktrees/example.com".into();
     let mut view = test_view(Grouping::Project, false);
     view.set_sessions(vec![task], false);
     let area = Rect::new(0, 0, 30, 6);
@@ -6681,9 +6681,9 @@ fn group_header_shows_the_directory_basename() {
                 .trim_end()
                 .to_owned()
         })
-        .find(|row| row.contains("agents-panel"))
+        .find(|row| row.contains("example.com"))
         .unwrap();
-    assert_eq!(heading.trim(), "agents-panel");
+    assert_eq!(heading.trim(), "example.com");
 }
 
 mod event_path_abbrev {
@@ -9098,7 +9098,7 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
     selected.git_branch = Some("main".into());
     selected.pr = Some(crate::model::PullRequest {
         number: 833,
-        url: "https://github.com/example-user/example-app/pull/833".into(),
+        url: "https://github.com/example/example/pull/833".into(),
     });
     selected.queued = vec![format!("Then read {}", todo.display())];
     let rendered = screen(&view, 120, 40);
@@ -9123,7 +9123,7 @@ fn task_details_project_lines_link_the_pull_request_and_the_directory() {
         ),
         Some(Action::Open(crate::ui::links::LinkTarget::Path(
             super::vscode::pull_request_link(
-                "https://github.com/example-user/example-app/pull/833",
+                "https://github.com/example/example/pull/833",
                 dir.path()
             )
             .unwrap()
@@ -9172,7 +9172,7 @@ fn links_of_a_panel_left_out_of_the_frame_do_not_linger() {
     let selected = &mut view.rows[view.selected];
     selected.pr = Some(crate::model::PullRequest {
         number: 833,
-        url: "https://github.com/example-user/example-app/pull/833".into(),
+        url: "https://github.com/example/example/pull/833".into(),
     });
     screen(&view, 120, 40);
     let (rect, _) = view

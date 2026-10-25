@@ -16,7 +16,7 @@
                            • STYLES.md
                            • website/STYLES.md
                            • .semgrepignore
-                           • website/src/lib/example-app/api/__fixtures__/tradingActivityItems.ts
+                           • website/src/lib/example.com/api/__fixtures__/tradingActivityItems.ts
                            • docs/axiom/api-spec.md
 
                            负责范围内的旧路径已清理，specs/ 未改。
