@@ -524,6 +524,22 @@ pub(super) fn transcript_content(
                 }
                 title.push_str(&super::formatting::title_words(kind));
             }
+            if provider == crate::providers::ProviderId::Claude
+                && let Some(content) = record["message"]["content"].as_array()
+            {
+                let types = content
+                    .iter()
+                    .filter_map(|block| block["type"].as_str())
+                    .map(super::formatting::title_words)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if !types.is_empty() {
+                    if !title.is_empty() {
+                        title.push_str(" / ");
+                    }
+                    title.push_str(&types);
+                }
+            }
             let time = record["timestamp"]
                 .as_str()
                 .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())

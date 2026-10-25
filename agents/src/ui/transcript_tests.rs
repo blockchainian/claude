@@ -472,3 +472,98 @@ fn transcript_records_scroll_as_one_complete_document_without_fold_markers() {
             .join("\n\n")
     );
 }
+
+#[test]
+fn transcript_claude_titles_include_content_types_in_order() {
+    use crate::providers::ProviderId;
+    for (fixture, line, expected) in [
+        (
+            include_str!("../../tests/fixtures/claude-todos.jsonl"),
+            0,
+            "Assistant / Tool Use",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-subagent-model-history.jsonl"),
+            1,
+            "Assistant / Thinking",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-bg-metadata.jsonl"),
+            3,
+            "Assistant / Text",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-advisor.jsonl"),
+            0,
+            "Assistant / Server Tool Use",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-todos.jsonl"),
+            1,
+            "User / Tool Result",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-equal-timestamps.jsonl"),
+            0,
+            "User / Text",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-prompt-images.jsonl"),
+            0,
+            "User / Text, Image",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-prompt-images.jsonl"),
+            4,
+            "User / Text, Image, Image",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-prompt-images.jsonl"),
+            7,
+            "User / Text, Text",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-bg-metadata.jsonl"),
+            0,
+            "User",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-subagent-model-history.jsonl"),
+            0,
+            "Attachment",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-queued-dequeue.jsonl"),
+            3,
+            "System",
+        ),
+        (
+            include_str!("../../tests/fixtures/claude-model-command.jsonl"),
+            0,
+            "Assistant",
+        ),
+    ] {
+        let raw = fixture.lines().nth(line).unwrap();
+        let content = super::super::tool_detail::transcript_content(
+            &Ok(raw.into()),
+            ProviderId::Claude,
+            &crate::event::Kind::Assistant,
+        );
+        assert_eq!(content.sections[0].title.title, expected);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("record.jsonl");
+        std::fs::write(&path, raw).unwrap();
+        let (mut view, now) = event_fixture();
+        let mut event = view.event_panel[0].clone();
+        event.source_records = vec![crate::event::SourceRecord { path, offset: 0 }];
+        view.set_event(vec![event]);
+        event_screen(&view, 240, 90, now);
+        transcript(&mut view);
+        let rendered = event_screen(&view, 240, 90, now);
+        assert!(
+            rendered.contains(expected),
+            "missing {expected}: {rendered}"
+        );
+    }
+}
