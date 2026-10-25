@@ -1585,7 +1585,10 @@ fn diff_backgrounds_reach_terminal_edges_without_moving_text() {
                                 .iter()
                                 .any(|(title_row, _)| *title_row == source)
                             && (x == panel.x || x == panel.right() - 1);
+                        // The left padding also carries the mirrored scrollbar.
+                        let scrollbar = x == panel.x && buffer[(x, y)].symbol() == "▏";
                         if !edge_rule
+                            && !scrollbar
                             && !layout.times.iter().any(|(time_row, _)| *time_row == source)
                         {
                             assert_eq!(

@@ -508,20 +508,23 @@ impl View {
             .filter(|&row| layout.cut_text(row))
             .collect::<Vec<_>>();
         let kept = rows.kept;
+        let mut thumb_rows = 0..0;
         if overflow && height > 0 {
             let thumb = (height * height)
                 .div_ceil(height + viewport.event_detail_max)
                 .max(1)
                 .min(height);
             let top = scroll * (height - thumb) / viewport.event_detail_max.max(1);
+            thumb_rows = top..top + thumb;
+            // A mirrored scrollbar sits in the left padding when the panel has one.
+            let left = (areas.panel.x < area.x).then_some(areas.panel.x);
             for row in 0..height {
-                buf[(scrollbar_x, body_area.y + row as u16)].set_symbol(
-                    if (top..top + thumb).contains(&row) {
-                        "▕"
-                    } else {
-                        " "
-                    },
-                );
+                let y = body_area.y + row as u16;
+                let thumb = thumb_rows.contains(&row);
+                buf[(scrollbar_x, y)].set_symbol(if thumb { "▕" } else { " " });
+                if let Some(x) = left {
+                    buf[(x, y)].set_symbol(if thumb { "▏" } else { " " });
+                }
             }
         }
         let visible_rows = kept
@@ -633,7 +636,8 @@ impl View {
             for row in call_titles {
                 if let Some(row) = visible_rows.iter().position(|&source| source == row) {
                     let y = body_area.y + row as u16;
-                    for (x, cap) in [(areas.panel.x, "╴"), (areas.panel.right() - 1, "╶")] {
+                    let left = if thumb_rows.contains(&row) { "┤" } else { "╴" };
+                    for (x, cap) in [(areas.panel.x, left), (areas.panel.right() - 1, "╶")] {
                         buf[(x, y)]
                             .set_symbol(cap)
                             .set_style(Style::default().dim());
@@ -2969,6 +2973,53 @@ pub(super) mod event_markdown {
                     if rules { ["╴", "╶"] } else { [" ", " "] },
                     "row {y}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn overflowing_detail_mirrors_the_scrollbar_into_the_left_padding() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for id in (0..12).map(|id| id.to_string()) {
+            let record = serde_json::json!({
+                "type":"assistant", "timestamp":"2026-10-06T16:39:01Z", "uuid":id,
+                "message":{"id":"batch", "content":[
+                    {"type":"tool_use", "id":id, "name":"Read", "input":{"file_path":format!("/opt/{id}.rs")}}
+                ]}
+            });
+            std::io::Write::write_all(&mut file, format!("{record}\n").as_bytes()).unwrap();
+        }
+        let events = crate::providers::claude::event_reader::tail(file.path(), 1).unwrap();
+        let view = View::new(Grouping::Project, false);
+        let panel = Rect::new(0, 0, 80, 16);
+        let content = panel.inner(ratatui::layout::Margin::new(1, 0));
+        let mut buffer = Buffer::empty(panel);
+        view.render_event_detail_content(
+            &events[0],
+            "12:34:56",
+            super::super::event_detail::EventDetailArea { panel, content },
+            &mut buffer,
+            Path::new("/"),
+            DateTime::UNIX_EPOCH,
+        );
+        let rows: Vec<_> = (panel.y..panel.bottom())
+            .map(|y| {
+                (
+                    buffer[(panel.x, y)].symbol().to_string(),
+                    buffer[(content.right(), y)].symbol().to_string(),
+                    buffer[(content.x, y)].symbol() == "R",
+                )
+            })
+            .collect();
+        assert!(rows.iter().any(|(left, _, title)| left == "┤" && *title));
+        assert!(rows.iter().any(|(left, _, title)| left == "▏" && !*title));
+        for (left, right, title) in rows {
+            if title {
+                assert!(["┤", "╴"].contains(&left.as_str()), "{left}");
+            } else if right == "▕" {
+                assert_eq!(left, "▏");
+            } else {
+                assert_ne!(left, "▏");
             }
         }
     }
