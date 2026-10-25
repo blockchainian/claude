@@ -1346,8 +1346,8 @@ fn arrow(view: &mut View, forward: bool) {
     ));
 }
 
-/// Scrolls one row at a time until `edge` turns heavy, then checks five more rows stay inside.
-fn assert_heavy_five_rows_before_leaving(view: &mut View, forward: bool) {
+/// Scrolls one row at a time until `edge` turns heavy, then checks two wheel steps of rows stay inside.
+fn assert_heavy_two_wheel_steps_before_leaving(view: &mut View, forward: bool) {
     let edge = usize::from(forward);
     for _ in 0..60 {
         if heavy_output_borders(view)[edge] {
@@ -1357,7 +1357,7 @@ fn assert_heavy_five_rows_before_leaving(view: &mut View, forward: bool) {
     }
     let mut expected = [false, false];
     expected[edge] = true;
-    for _ in 0..6 {
+    for _ in 0..=2 * super::input::WHEEL_ROWS {
         assert_eq!(view.event_list.cursor, Some(1));
         assert_eq!(heavy_output_borders(view), expected);
         arrow(view, forward);
@@ -1366,17 +1366,17 @@ fn assert_heavy_five_rows_before_leaving(view: &mut View, forward: bool) {
 }
 
 #[test]
-fn event_detail_rules_turn_heavy_five_rows_before_leaving_the_event() {
+fn event_detail_rules_turn_heavy_two_wheel_steps_before_leaving_the_event() {
     let (mut view, _) = fixture(true);
     // Opening an event that starts at its top is no scroll inside it.
     assert_eq!(heavy_output_borders(&view), [false, false]);
     arrow(&mut view, true);
     assert_eq!(heavy_output_borders(&view), [false, false]);
-    assert_heavy_five_rows_before_leaving(&mut view, true);
+    assert_heavy_two_wheel_steps_before_leaving(&mut view, true);
 
     // Returning from the next event lands at the bottom without a scroll inside it.
     event_detail_wheel(&mut view, false);
     assert_eq!(view.event_list.cursor, Some(1));
     assert_eq!(heavy_output_borders(&view), [false, false]);
-    assert_heavy_five_rows_before_leaving(&mut view, false);
+    assert_heavy_two_wheel_steps_before_leaving(&mut view, false);
 }

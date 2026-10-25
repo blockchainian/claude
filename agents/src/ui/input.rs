@@ -2,7 +2,7 @@ use super::render::HORIZONTAL_PADDING;
 use super::*;
 
 /// Rows one wheel report scrolls the event list and details panels, matching CLAUDE_CODE_SCROLL_SPEED and the tmux wheel binding.
-const WHEEL_ROWS: usize = 3;
+pub(super) const WHEEL_ROWS: usize = 3;
 
 #[derive(PartialEq, Eq)]
 pub(super) enum ClickTarget {
