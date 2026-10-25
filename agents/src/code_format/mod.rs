@@ -9,7 +9,7 @@ pub(crate) enum Language {
 impl Language {
     /// A file extension or tool language token such as "js", "mjs" or "ts".
     pub(crate) fn from_extension(name: &str) -> Option<Self> {
-        match name {
+        match name.to_ascii_lowercase().as_str() {
             "js" | "mjs" | "cjs" => Some(Self::JavaScript),
             "ts" | "mts" | "cts" => Some(Self::TypeScript),
             _ => None,
@@ -40,19 +40,19 @@ mod tests {
 
     #[test]
     fn extensions_resolve_languages() {
-        for extension in ["js", "mjs", "cjs"] {
+        for extension in ["js", "mjs", "cjs", "JS", "Mjs"] {
             assert_eq!(
                 Language::from_extension(extension),
                 Some(Language::JavaScript)
             );
         }
-        for extension in ["ts", "mts", "cts"] {
+        for extension in ["ts", "mts", "cts", "TS", "Cts"] {
             assert_eq!(
                 Language::from_extension(extension),
                 Some(Language::TypeScript)
             );
         }
-        for extension in ["", "javascript", "node", "py", "JS", "input.js"] {
+        for extension in ["", "javascript", "node", "py", "input.js"] {
             assert_eq!(Language::from_extension(extension), None);
         }
     }
