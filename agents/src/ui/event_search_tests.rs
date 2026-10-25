@@ -33,9 +33,7 @@ fn draw_event_detail(view: &View) {
 fn list_search_finds_trailing_tool_name_after_non_ascii_text() {
     let (_dir, mut view) = fixture();
     let dir = tempfile::tempdir().unwrap();
-    let provider = crate::providers::codex::CodexProvider::new(
-        dir.path().to_owned(),
-    );
+    let provider = crate::providers::codex::CodexProvider::new(dir.path().to_owned());
     let mut session = view.selected_row().unwrap().clone();
     session.transcript = Some(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

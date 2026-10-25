@@ -485,7 +485,8 @@ fn appium_session_table_detail_snapshot() {
         .unwrap();
     assert_eq!(event.calls[0].title, "create");
     let mut snapshot = String::new();
-    for line in event_detail_layout(&event, 120, Path::new("/workspace"), DateTime::UNIX_EPOCH).lines
+    for line in
+        event_detail_layout(&event, 120, Path::new("/workspace"), DateTime::UNIX_EPOCH).lines
     {
         snapshot.push_str(line.to_string().trim_end());
         snapshot.push('\n');

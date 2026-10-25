@@ -162,10 +162,7 @@ fn ask_question_answers_list_headers_like_the_submit_tab() {
 
 #[test]
 fn ask_question_rejections_list_what_was_answered() {
-    assert_eq!(
-        output(&question_event(REJECTED)),
-        "Chat about this"
-    );
+    assert_eq!(output(&question_event(REJECTED)), "Chat about this");
     let record: serde_json::Value = serde_json::from_str(REJECTED.lines().nth(1).unwrap()).unwrap();
     let original = record["message"]["content"][0]["content"].as_str().unwrap();
     let answered = original.replace("(No answer provided)", "Answer: 直接隐藏");

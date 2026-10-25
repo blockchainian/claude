@@ -244,7 +244,11 @@ mod tests {
         // Only the presence of an approval matters; its contents are not read here.
         payload["threads"][0]["waiting"] = serde_json::json!([{}]);
         fs::write(&state, payload.to_string()).unwrap();
-        let status = || supervisions(home, std::slice::from_ref(&parent)).unwrap()[0].state.clone();
+        let status = || {
+            supervisions(home, std::slice::from_ref(&parent)).unwrap()[0]
+                .state
+                .clone()
+        };
         assert_eq!(status(), SupervisionState::Active);
         fs::write(home.join("claude-parent/thread-12.ask.pending.txt"), b"{}").unwrap();
         fs::write(home.join("claude-parent/other.ask.pending.json"), b"{}").unwrap();
@@ -318,7 +322,11 @@ mod tests {
         let parent = attached_parent(home, "claude-parent");
         let target = home.join("ask.json");
         fs::write(&target, pending_ask().to_string()).unwrap();
-        symlink(&target, home.join("claude-parent/thread-12.ask.pending.json")).unwrap();
+        symlink(
+            &target,
+            home.join("claude-parent/thread-12.ask.pending.json"),
+        )
+        .unwrap();
         // The directory entry remains, but reading it returns NotFound after withdrawal.
         fs::remove_file(target).unwrap();
         let links = supervisions(home, &[parent]).unwrap();

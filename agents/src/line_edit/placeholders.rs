@@ -14,10 +14,7 @@ impl<P: Placeholder> Editor<P> {
     }
 
     /// Restores numbered labels as placeholders in order; a None payload removes its label.
-    pub fn from_labeled_text(
-        text: &str,
-        payloads: impl IntoIterator<Item = Option<P>>,
-    ) -> Self {
+    pub fn from_labeled_text(text: &str, payloads: impl IntoIterator<Item = Option<P>>) -> Self {
         let mut edit = Self::default();
         edit.set_text(text);
         let mut offset = 0;

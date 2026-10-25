@@ -374,8 +374,7 @@ mod tests {
             input: &call["input"],
             result: Some(&result),
         };
-        let Body::Sections(sections) = output(rule("codex-manager.interrupt").output, &data)
-        else {
+        let Body::Sections(sections) = output(rule("codex-manager.interrupt").output, &data) else {
             panic!("expected interrupt output")
         };
         assert_eq!(

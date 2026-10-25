@@ -673,14 +673,13 @@ mod tests {
         let text = plain(&lines);
         assert_eq!(text[0], "platform │ capabilities");
         assert_eq!(text[2], "ios      │ {");
-        assert_eq!(text[3], "         │   \"appium:udid\": \"00000000-0000000000000000\",");
+        assert_eq!(
+            text[3],
+            "         │   \"appium:udid\": \"00000000-0000000000000000\","
+        );
         assert_eq!(text.last().unwrap(), "         │ }");
         let document = super::super::structured_text::parse(&capabilities.to_string()).unwrap();
-        let expected: Vec<String> = document
-            .lines(49)
-            .iter()
-            .map(ToString::to_string)
-            .collect();
+        let expected: Vec<String> = document.lines(49).iter().map(ToString::to_string).collect();
         let cells: Vec<String> = text[2..]
             .iter()
             .map(|line| line.chars().skip(11).collect())

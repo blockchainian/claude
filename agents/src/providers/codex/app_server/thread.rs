@@ -56,7 +56,9 @@ pub(in crate::providers::codex) enum Status {
     Idle,
     SystemError,
     #[serde(rename_all = "camelCase")]
-    Active { active_flags: Vec<String> },
+    Active {
+        active_flags: Vec<String>,
+    },
 }
 
 impl Status {
@@ -69,7 +71,10 @@ impl Status {
     }
 }
 
-pub(in crate::providers::codex) fn status(client: &mut Client, thread_id: &str) -> io::Result<Status> {
+pub(in crate::providers::codex) fn status(
+    client: &mut Client,
+    thread_id: &str,
+) -> io::Result<Status> {
     let response: ReadResponse = client.request(
         "thread/read",
         ReadParams {

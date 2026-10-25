@@ -1,9 +1,8 @@
-mod tools;
-pub(crate) mod claude_client;
 mod app_server;
 #[cfg(test)]
 mod ask_live_tests;
 mod background;
+pub(crate) mod claude_client;
 #[cfg(test)]
 mod inner_tests;
 #[cfg(test)]
@@ -25,6 +24,7 @@ mod terminal_live_tests;
 mod terminal_tests;
 #[cfg(test)]
 mod tests;
+mod tools;
 
 use super::{
     AccountUsageJob, Capabilities, Provider, ProviderId, ResetCreditJob, ResetCreditRequest,

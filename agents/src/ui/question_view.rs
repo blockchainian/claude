@@ -314,7 +314,11 @@ impl QuestionView {
         }
     }
 
-    pub(super) fn key(&mut self, key: KeyEvent, kills: &mut crate::line_edit::KillBuffer) -> Option<Outcome> {
+    pub(super) fn key(
+        &mut self,
+        key: KeyEvent,
+        kills: &mut crate::line_edit::KillBuffer,
+    ) -> Option<Outcome> {
         if key.kind == KeyEventKind::Release {
             return None;
         }
@@ -675,7 +679,8 @@ impl QuestionView {
             } else {
                 Span::raw(
                     page.other
-                        .window(usize::from(width.saturating_sub(5 + check.width() as u16))).text
+                        .window(usize::from(width.saturating_sub(5 + check.width() as u16)))
+                        .text
                         .to_owned(),
                 )
             };
@@ -742,7 +747,8 @@ impl QuestionView {
         let start = 5 + self.other_check().width() as u16;
         let caret = self.pages[self.page]
             .other
-            .window(usize::from(area.width.saturating_sub(start))).caret_column;
+            .window(usize::from(area.width.saturating_sub(start)))
+            .caret_column;
         Some((
             area.x + (start + caret).min(area.width - 1),
             area.y + row as u16,
@@ -1240,16 +1246,22 @@ mod tests {
         let mut view = QuestionView::new(fixture("Single"));
         let mut key = KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE);
         key.kind = KeyEventKind::Release;
-        assert!({
-            kills.begin_stroke();
-            view.key(key, &mut kills)
-        }.is_none());
         assert!(
             {
                 kills.begin_stroke();
-                view.key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::CONTROL), &mut kills)
+                view.key(key, &mut kills)
             }
-                .is_none()
+            .is_none()
+        );
+        assert!(
+            {
+                kills.begin_stroke();
+                view.key(
+                    KeyEvent::new(KeyCode::Char('2'), KeyModifiers::CONTROL),
+                    &mut kills,
+                )
+            }
+            .is_none()
         );
         assert_eq!(
             submitted(press(&mut view, KeyCode::Enter)).answers["Probe single choice?"].answers,

@@ -54,7 +54,8 @@ impl Hub {
                     SupervisionState::Active | SupervisionState::Asking(_)
                 ) =>
             {
-                self.provider(supervision.supervisor.provider).detach(supervision)
+                self.provider(supervision.supervisor.provider)
+                    .detach(supervision)
             }
             _ => self.provider(session.id.provider).archive(session),
         }

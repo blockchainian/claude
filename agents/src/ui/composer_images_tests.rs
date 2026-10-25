@@ -7,7 +7,7 @@ fn image() -> ImageAttachment {
         .unwrap()
 }
 fn key(editor: &mut Composer, code: KeyCode, modifiers: KeyModifiers) {
-        let mut kills = crate::line_edit::KillBuffer::default();
+    let mut kills = crate::line_edit::KillBuffer::default();
     assert!({
         kills.begin_stroke();
         editor.handle_key(KeyEvent::new(code, modifiers), &mut kills)
@@ -88,7 +88,17 @@ fn wrapped_vertical_movement_never_places_the_caret_inside_an_image() {
     editor.insert_placeholder(image());
     editor.insert("\nz");
     for down in [false, false, true, true] {
-        editor.move_row(line_edit::Wrap { width: 6, first_row_inset: 0 }, if down { line_edit::Vertical::Down } else { line_edit::Vertical::Up });
+        editor.move_row(
+            line_edit::Wrap {
+                width: 6,
+                first_row_inset: 0,
+            },
+            if down {
+                line_edit::Vertical::Down
+            } else {
+                line_edit::Vertical::Up
+            },
+        );
         assert!(!(3..12).contains(&editor.cursor()), "{}", editor.cursor());
     }
 }
@@ -134,12 +144,15 @@ fn recalled_history_keeps_the_image_attachment() {
 
 #[test]
 fn control_v_does_not_trigger_image_paste() {
-        let mut kills = crate::line_edit::KillBuffer::default();
+    let mut kills = crate::line_edit::KillBuffer::default();
     let mut prompt = PromptBox::default();
     assert_eq!(
         {
             kills.begin_stroke();
-            prompt.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL), &mut kills)
+            prompt.handle_key(
+                KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
+                &mut kills,
+            )
         },
         None
     );
@@ -148,13 +161,16 @@ fn control_v_does_not_trigger_image_paste() {
 
 #[test]
 fn image_only_submit_carries_an_attachment_without_placeholder_text() {
-        let mut kills = crate::line_edit::KillBuffer::default();
+    let mut kills = crate::line_edit::KillBuffer::default();
     let mut prompt = PromptBox::default();
     prompt.editor.insert_placeholder(image());
     assert_eq!(
         {
             kills.begin_stroke();
-            prompt.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &mut kills)
+            prompt.handle_key(
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                &mut kills,
+            )
         },
         Some(PromptAction::Submit(String::new()))
     );
@@ -163,7 +179,7 @@ fn image_only_submit_carries_an_attachment_without_placeholder_text() {
 
 #[test]
 fn history_search_keeps_distinct_images_with_the_same_caption() {
-        let mut kills = crate::line_edit::KillBuffer::default();
+    let mut kills = crate::line_edit::KillBuffer::default();
     let mut prompt = PromptBox::default();
     let mut paths = Vec::new();
     for _ in 0..2 {
@@ -176,12 +192,18 @@ fn history_search_keeps_distinct_images_with_the_same_caption() {
     prompt.editor.clear();
     {
         kills.begin_stroke();
-        prompt.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL), &mut kills)
+        prompt.handle_key(
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+            &mut kills,
+        )
     };
     for path in paths.iter().rev() {
         {
             kills.begin_stroke();
-            prompt.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL), &mut kills)
+            prompt.handle_key(
+                KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+                &mut kills,
+            )
         };
         assert_eq!(prompt.editor.image_paths(), vec![path.clone()]);
     }
@@ -197,11 +219,17 @@ fn image_caret_stays_on_grapheme_boundaries_with_combining_text() {
     assert_eq!(editor.cursor(), editor.text().len());
     assert!(
         editor
-            .caret_stops(line_edit::Wrap { width: 80, first_row_inset: 0 })
+            .caret_stops(line_edit::Wrap {
+                width: 80,
+                first_row_inset: 0
+            })
             .iter()
             .any(|p| p.byte == editor.cursor())
     );
-    editor.apply(crate::line_edit::EditCommand::Delete(crate::line_edit::Motion::Left), &mut crate::line_edit::KillBuffer::default());
+    editor.apply(
+        crate::line_edit::EditCommand::Delete(crate::line_edit::Motion::Left),
+        &mut crate::line_edit::KillBuffer::default(),
+    );
     assert!(editor.is_empty());
     assert!(editor.image_paths().is_empty());
 }
@@ -213,7 +241,10 @@ fn remaining_images_keep_contiguous_numbers_after_deletion() {
     editor.insert_placeholder(image());
     let second = editor.image_paths()[1].clone();
     editor.move_caret(crate::line_edit::Motion::TextStart);
-    editor.apply(crate::line_edit::EditCommand::Delete(crate::line_edit::Motion::Right), &mut crate::line_edit::KillBuffer::default());
+    editor.apply(
+        crate::line_edit::EditCommand::Delete(crate::line_edit::Motion::Right),
+        &mut crate::line_edit::KillBuffer::default(),
+    );
     assert_eq!(editor.text(), "[Image #1]");
     assert_eq!(editor.image_paths(), vec![second]);
     editor.insert_placeholder(image());
@@ -228,7 +259,10 @@ fn renumbering_across_ten_images_preserves_caret_and_attachment_order() {
     }
     let paths = editor.image_paths()[1..].to_vec();
     editor.move_caret(crate::line_edit::Motion::TextStart);
-    editor.apply(crate::line_edit::EditCommand::Delete(crate::line_edit::Motion::Right), &mut crate::line_edit::KillBuffer::default());
+    editor.apply(
+        crate::line_edit::EditCommand::Delete(crate::line_edit::Motion::Right),
+        &mut crate::line_edit::KillBuffer::default(),
+    );
     editor.move_caret(crate::line_edit::Motion::TextEnd);
     editor.insert(" suffix");
     assert_eq!(editor.prompt_text(), " suffix");
@@ -237,7 +271,10 @@ fn renumbering_across_ten_images_preserves_caret_and_attachment_order() {
     assert!(editor.text().ends_with("[Image #10] suffix"));
     editor.move_caret(crate::line_edit::Motion::TextStart);
     for _ in 0..10 {
-        editor.apply(crate::line_edit::EditCommand::Delete(crate::line_edit::Motion::Right), &mut crate::line_edit::KillBuffer::default());
+        editor.apply(
+            crate::line_edit::EditCommand::Delete(crate::line_edit::Motion::Right),
+            &mut crate::line_edit::KillBuffer::default(),
+        );
     }
     assert_eq!(editor.text(), " suffix");
     assert!(editor.image_paths().is_empty());

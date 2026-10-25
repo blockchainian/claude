@@ -7,7 +7,7 @@ fn focused(text: &str, width: u16) -> PromptBox {
     prompt
 }
 fn press(prompt: &mut PromptBox, code: KeyCode, modifiers: KeyModifiers) -> Option<PromptAction> {
-        let mut kills = crate::line_edit::KillBuffer::default();
+    let mut kills = crate::line_edit::KillBuffer::default();
     {
         kills.begin_stroke();
         prompt.handle_key(KeyEvent::new(code, modifiers), &mut kills)
@@ -38,7 +38,7 @@ fn vertical_keys_follow_wrapped_rows_and_graphemes() {
 }
 #[test]
 fn newline_keys_preserve_editor_and_release_is_ignored() {
-        let mut kills = crate::line_edit::KillBuffer::default();
+    let mut kills = crate::line_edit::KillBuffer::default();
     for (code, modifiers) in [
         (KeyCode::Enter, KeyModifiers::SHIFT),
         (KeyCode::Enter, KeyModifiers::ALT),

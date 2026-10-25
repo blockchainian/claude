@@ -1620,10 +1620,7 @@ mod tests {
                 .get_args()
                 .map(|arg| arg.to_str().unwrap())
                 .collect();
-            assert_eq!(
-                args,
-                ["--bg", "--resume", &session.id.id, option, value]
-            );
+            assert_eq!(args, ["--bg", "--resume", &session.id.id, option, value]);
             assert_eq!(command.get_current_dir(), Some(session.cwd.as_path()));
         }
     }

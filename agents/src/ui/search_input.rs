@@ -71,7 +71,8 @@ impl SearchInput {
         let prompt_width = SEARCH_PROMPT.width();
         let caret = self
             .query
-            .window(usize::from(row.width).saturating_sub(prompt_width)).caret_column;
+            .window(usize::from(row.width).saturating_sub(prompt_width))
+            .caret_column;
         let column =
             (prompt_width + usize::from(caret)).min(usize::from(row.width.saturating_sub(1)));
         Some((row.x + column as u16, row.y))

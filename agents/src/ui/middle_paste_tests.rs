@@ -40,7 +40,9 @@ fn middle_paste_prompt_hits_display_cells_and_line_ends() {
     ] {
         let mut view = fixture();
         view.input_box.editor.set_text(text);
-        view.input_box.editor.move_caret(crate::line_edit::Motion::TextStart);
+        view.input_box
+            .editor
+            .move_caret(crate::line_edit::Motion::TextStart);
         screen(&view, 160, 40);
         let prompt = view.viewport.borrow().prompt;
         // The first line has the task label; later lines start at the padding.
@@ -130,7 +132,9 @@ fn middle_paste_title_and_search_use_the_clicked_editor() {
             assert_eq!(input.text(), "贴🦀");
             let mut editor: crate::line_edit::Editor = super::super::line_edit::Editor::default();
             editor.set_text("贴🦀");
-            let caret = editor.window(usize::from(area.width.saturating_sub(9))).caret_column;
+            let caret = editor
+                .window(usize::from(area.width.saturating_sub(9)))
+                .caret_column;
             assert_eq!(input.caret(area), Some((area.x + 9 + caret, area.y)));
         }
     }

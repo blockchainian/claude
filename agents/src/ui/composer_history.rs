@@ -90,7 +90,11 @@ impl PromptBox {
         self.search_history(false, true);
     }
 
-    pub(super) fn history_key(&mut self, key: KeyEvent, kills: &mut crate::line_edit::KillBuffer) -> bool {
+    pub(super) fn history_key(
+        &mut self,
+        key: KeyEvent,
+        kills: &mut crate::line_edit::KillBuffer,
+    ) -> bool {
         let control = key.modifiers == KeyModifiers::CONTROL;
         if self.search.is_none() {
             if control && key.code == KeyCode::Char('r') {

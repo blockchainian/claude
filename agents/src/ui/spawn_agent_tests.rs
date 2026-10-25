@@ -11,9 +11,7 @@ fn display_view() -> View {
     )
     .unwrap();
     let claude = crate::providers::claude::ClaudeProvider::new(config.path().into());
-    let codex = crate::providers::codex::CodexProvider::new(
-        config.path().into(),
-    );
+    let codex = crate::providers::codex::CodexProvider::new(config.path().into());
     let mut view = test_view(Grouping::Project, false);
     view.set_input_choices(HashMap::from([
         (ProviderId::Claude, claude.input_choices()),

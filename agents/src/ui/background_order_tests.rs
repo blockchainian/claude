@@ -152,12 +152,10 @@ fn background_children_keep_start_order_through_provider_refreshes() {
                         .position(|line| line.replace(' ', "").contains(&name.replace(' ', "")))
                         .unwrap_or_else(|| panic!("missing {name}: {}", rows.join("\n")));
                 assert!(
-                    rows[position]
-                        .trim_end()
-                        .ends_with(&format_duration(
-                            (now - chrono::DateTime::from_timestamp_millis(*start).unwrap())
-                                .num_seconds()
-                        )),
+                    rows[position].trim_end().ends_with(&format_duration(
+                        (now - chrono::DateTime::from_timestamp_millis(*start).unwrap())
+                            .num_seconds()
+                    )),
                     "step {step}: {}",
                     rows[position]
                 );

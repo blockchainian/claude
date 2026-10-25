@@ -24,9 +24,9 @@ impl KillBuffer {
     /// After an intervening non-kill stroke, nonempty text replaces the saved text.
     /// An empty kill keeps the saved text and continues the chain.
     pub fn push(&mut self, fragment: &str, direction: Direction) {
-        let joins = self.last_kill_stroke.is_some_and(|last| {
-            last == self.stroke || last.wrapping_add(1) == self.stroke
-        });
+        let joins = self
+            .last_kill_stroke
+            .is_some_and(|last| last == self.stroke || last.wrapping_add(1) == self.stroke);
         if !fragment.is_empty() {
             if !joins {
                 self.text = fragment.to_owned();

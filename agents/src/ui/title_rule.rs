@@ -25,7 +25,9 @@ pub(super) fn centered_title(
     let used = left + title.width();
     spans.extend(title.spans);
     if let Some(time) = time.filter(|time| used + 1 + time.width() + right_padding <= width) {
-        spans.push(Span::raw(" ".repeat(width - used - time.width() - right_padding)));
+        spans.push(Span::raw(
+            " ".repeat(width - used - time.width() - right_padding),
+        ));
         spans.push(time.to_owned().dim());
     }
     Line::from(spans)
@@ -44,7 +46,10 @@ mod tests {
             assert!(!text.chars().any(|c| ('\u{2500}'..='\u{257f}').contains(&c)));
             if width >= 16 {
                 assert!(text.ends_with(" 35s"), "{text}");
-                assert_eq!(text.chars().take_while(|ch| *ch == ' ').count(), (width - 6) / 2);
+                assert_eq!(
+                    text.chars().take_while(|ch| *ch == ' ').count(),
+                    (width - 6) / 2
+                );
             }
         }
     }

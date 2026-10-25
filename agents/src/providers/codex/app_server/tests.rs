@@ -374,7 +374,6 @@ fn delete_real_codex_sessions() {
     }
 }
 
-
 #[test]
 #[ignore = "uses local auth and the shared daemon; declines an approval and deletes its throwaway thread"]
 fn approval_status_marks_a_live_codex_session() {
@@ -397,7 +396,8 @@ fn approval_status_marks_a_live_codex_session() {
     })).unwrap();
     let deadline = Instant::now() + Duration::from_secs(90);
     let request = loop {
-        let message: Value = serde_json::from_str(&owner.transport.receive_until(deadline).unwrap()).unwrap();
+        let message: Value =
+            serde_json::from_str(&owner.transport.receive_until(deadline).unwrap()).unwrap();
         if message["method"] == "item/commandExecution/requestApproval"
             && message["params"]["threadId"] == id
         {
@@ -405,11 +405,26 @@ fn approval_status_marks_a_live_codex_session() {
         }
     };
     let live = live_writers(&provider.home.join("thread-writer-locks")).unwrap();
-    assert!(live.contains_key(&id), "thread must have a real writer process");
-    let db = Connection::open_with_flags(provider.home.join("state_5.sqlite"), OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    assert!(
+        live.contains_key(&id),
+        "thread must have a real writer process"
+    );
+    let db = Connection::open_with_flags(
+        provider.home.join("state_5.sqlite"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
     let read = || {
-        let sessions = provider.read_sessions(&db, std::slice::from_ref(&id), &live).unwrap();
-        provider.enrich_sessions(Snapshot { sessions, has_more: false, supervisions: vec![] }).unwrap()
+        let sessions = provider
+            .read_sessions(&db, std::slice::from_ref(&id), &live)
+            .unwrap();
+        provider
+            .enrich_sessions(Snapshot {
+                sessions,
+                has_more: false,
+                supervisions: vec![],
+            })
+            .unwrap()
     };
     let snapshot = read();
     assert_eq!(snapshot.sessions.len(), 1);
@@ -420,10 +435,15 @@ fn approval_status_marks_a_live_codex_session() {
     view.render(buffer.area, &mut buffer);
     let screen: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
     assert!(screen.contains("Needs input"), "{screen}");
-    owner.respond(&request["id"], json!({"decision": "decline"})).unwrap();
+    owner
+        .respond(&request["id"], json!({"decision": "decline"}))
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while read().sessions[0].status == SessionStatus::NeedsInput {
-        assert!(Instant::now() < deadline, "resolved approval kept NeedsInput");
+        assert!(
+            Instant::now() < deadline,
+            "resolved approval kept NeedsInput"
+        );
         std::thread::sleep(Duration::from_millis(100));
     }
 }

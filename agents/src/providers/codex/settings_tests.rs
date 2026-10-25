@@ -15,8 +15,7 @@ fn settings_inputs_are_supported_for_inactive_and_active_threads() {
         .unwrap()
         .execute_batch(include_str!("../../../tests/fixtures/codex-state.sql"))
         .unwrap();
-    let mut provider =
-        CodexProvider::new(directory.path().into());
+    let mut provider = CodexProvider::new(directory.path().into());
     let mut session = provider
         .refresh(1)
         .sessions

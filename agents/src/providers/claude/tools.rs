@@ -173,7 +173,11 @@ fn tool_search_title(data: &ToolData<'_>) -> Option<String> {
         return Some(query.to_owned());
     };
     let mut groups = crate::providers::tool::groups::Groups::default();
-    for name in names.split(',').map(str::trim).filter(|name| !name.is_empty()) {
+    for name in names
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
         match crate::providers::mcp::parse(name) {
             Some((server, tool)) => groups.add(server, Some(&tool.replace('_', " "))),
             None => groups.add(name, None),
@@ -524,7 +528,10 @@ mod tests {
             title("select:mcp__plugin_codex_codex-manager__start,mcp__plugin_codex_codex-manager__send,mcp__claude-in-chrome__javascript_tool,Monitor").as_deref(),
             Some("codex-manager {start, send}, claude-in-chrome javascript tool, Monitor")
         );
-        assert_eq!(title("notebook jupyter").as_deref(), Some("notebook jupyter"));
+        assert_eq!(
+            title("notebook jupyter").as_deref(),
+            Some("notebook jupyter")
+        );
     }
 
     #[test]

@@ -1066,7 +1066,10 @@ mod tests {
         let selector = view.selector.as_ref().unwrap();
         assert_eq!(selector.selected, selected);
         assert_eq!(selector.branch_editor().unwrap().text(), "feature/half");
-        assert_eq!(selector.branch_editor().unwrap().window(80).caret_column, caret);
+        assert_eq!(
+            selector.branch_editor().unwrap().window(80).caret_column,
+            caret
+        );
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(
             view.selected_draft().unwrap().branch,

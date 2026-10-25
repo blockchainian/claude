@@ -197,8 +197,10 @@ fn task_list_time_and_status_columns_in_large_medium_small() {
 
 #[test]
 fn background_indicators_match_task_list_for_commands_and_child_states() {
-    assert_ne!(View::status_indicator(SessionStatus::Working).content,
-        View::status_indicator(SessionStatus::Ready).content);
+    assert_ne!(
+        View::status_indicator(SessionStatus::Working).content,
+        View::status_indicator(SessionStatus::Ready).content
+    );
     for width in [160, 120, 90] {
         let (mut view, _) = frame(width);
         let parent = view.rows[view.selected].id.clone();
@@ -227,7 +229,19 @@ fn background_indicators_match_task_list_for_commands_and_child_states() {
             assert_eq!(buf[(x + 1, y)].symbol(), " ");
             let cap = layout.task_details.x.saturating_sub(2).max(buf.area.x) + 1;
             assert_eq!(buf[(cap, y)].symbol(), "╴", "{width}");
-            assert_eq!(end_of(&buf, Rect { y, height: 1, ..layout.task_details }, "1m 6s").0, expected_end);
+            assert_eq!(
+                end_of(
+                    &buf,
+                    Rect {
+                        y,
+                        height: 1,
+                        ..layout.task_details
+                    },
+                    "1m 6s"
+                )
+                .0,
+                expected_end
+            );
         }
     }
 }

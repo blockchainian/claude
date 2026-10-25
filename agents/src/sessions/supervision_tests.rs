@@ -162,10 +162,8 @@ fn supervision(supervisor: &Session, session: &Session, state: SupervisionState)
 }
 
 fn pending_questions() -> Vec<String> {
-    let ask: serde_json::Value = serde_json::from_str(include_str!(
-        "../../tests/fixtures/supervision-ask.json"
-    ))
-    .unwrap();
+    let ask: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/supervision-ask.json")).unwrap();
     vec![ask["text"].as_str().unwrap().into()]
 }
 
@@ -298,7 +296,11 @@ fn cached_rows_receive_current_supervisions_without_enrich() {
     thread.status = SessionStatus::Ready;
     owner.page = vec![root.clone(), unrelated.clone()];
     target.page = vec![thread.clone()];
-    let current = supervision(&root, &thread, SupervisionState::Asking(pending_questions()));
+    let current = supervision(
+        &root,
+        &thread,
+        SupervisionState::Asking(pending_questions()),
+    );
     owner.supervisions.push(current.clone());
     let previous = Snapshot {
         sessions: vec![root.clone(), unrelated.clone(), thread.clone()],
@@ -365,7 +367,9 @@ fn archive_routes_held_sessions_to_supervisor_and_detached_sessions_to_owner() {
         let (owner, target) = providers();
         let root = session(owner.id, "root");
         let thread = session(target.id, "thread");
-        let relation = state.clone().map(|state| supervision(&root, &thread, state));
+        let relation = state
+            .clone()
+            .map(|state| supervision(&root, &thread, state));
         let owner_actions = owner.actions.clone();
         let target_actions = target.actions.clone();
         let hub = Hub::new(vec![Box::new(target), Box::new(owner)]);

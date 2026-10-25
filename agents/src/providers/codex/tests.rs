@@ -529,13 +529,7 @@ fn names_follow_history_mode() {
             Some("  Codex name  "),
             Some("Codex name"),
         ),
-        (
-            "paginated",
-            "Preview",
-            "Preview",
-            None,
-            None,
-        ),
+        ("paginated", "Preview", "Preview", None, None),
         (
             "legacy",
             "Preview",

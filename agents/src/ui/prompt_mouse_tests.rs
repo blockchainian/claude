@@ -6,9 +6,13 @@ fn prompt(view: &mut View, text: &str, width: u16) -> (Rect, u16) {
     view.input_box.editor.set_text(text);
     screen(view, width, 40);
     let area = view.viewport.borrow().prompt.inner(Margin::new(1, 0));
-    view.input_box.editor.move_caret(crate::line_edit::Motion::TextStart);
+    view.input_box
+        .editor
+        .move_caret(crate::line_edit::Motion::TextStart);
     let x = view.input_box.cursor(area, &view.input_label()).unwrap().0;
-    view.input_box.editor.move_caret(crate::line_edit::Motion::TextEnd);
+    view.input_box
+        .editor
+        .move_caret(crate::line_edit::Motion::TextEnd);
     screen(view, width, 40);
     (area, x)
 }
@@ -41,7 +45,9 @@ fn prompt_mouse_click_places_caret_on_wide_multiline_and_wrapped_cells() {
     let (area, x) = prompt(&mut view, text, 60);
     // Scroll to the beginning before checking a soft-wrapped row, which starts at the
     // box's left edge.
-    view.input_box.editor.move_caret(crate::line_edit::Motion::TextStart);
+    view.input_box
+        .editor
+        .move_caret(crate::line_edit::Motion::TextStart);
     screen(&view, 60, 40);
     click_mouse(
         &mut view,

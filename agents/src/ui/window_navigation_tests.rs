@@ -98,7 +98,10 @@ fn nonempty_editors_delete_ctrl_w_immediately_without_navigating() {
             "one "
         );
         assert!(view.window_prefix.is_none());
-        assert_eq!(view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)), None);
+        assert_eq!(
+            view.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
+            None
+        );
         assert_eq!(view.active_panel, panel);
         assert_eq!(
             view.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)),
