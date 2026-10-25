@@ -508,17 +508,19 @@ impl View {
             .filter(|&row| layout.cut_text(row))
             .collect::<Vec<_>>();
         let kept = rows.kept;
+        let mut thumb_rows = 0..0;
         if overflow && height > 0 {
             let thumb = (height * height)
                 .div_ceil(height + viewport.event_detail_max)
                 .max(1)
                 .min(height);
             let top = scroll * (height - thumb) / viewport.event_detail_max.max(1);
+            thumb_rows = top..top + thumb;
             // A mirrored scrollbar sits in the left padding when the panel has one.
             let left = (areas.panel.x < area.x).then_some(areas.panel.x);
             for row in 0..height {
                 let y = body_area.y + row as u16;
-                let thumb = (top..top + thumb).contains(&row);
+                let thumb = thumb_rows.contains(&row);
                 buf[(scrollbar_x, y)].set_symbol(if thumb { "▕" } else { " " });
                 if let Some(x) = left {
                     buf[(x, y)].set_symbol(if thumb { "▏" } else { " " });
@@ -630,9 +632,14 @@ impl View {
             }
         }
         // Merged calls' titles reach into the pane padding, like the task details' background titles.
+        // The scrollbar thumbs hide them so the thumbs stay whole.
         if areas.panel.x < columns.text.x && areas.panel.right() > columns.time.right() {
             for row in call_titles {
-                if let Some(row) = visible_rows.iter().position(|&source| source == row) {
+                if let Some(row) = visible_rows
+                    .iter()
+                    .position(|&source| source == row)
+                    .filter(|row| !thumb_rows.contains(row))
+                {
                     let y = body_area.y + row as u16;
                     for (x, cap) in [(areas.panel.x, "╴"), (areas.panel.right() - 1, "╶")] {
                         buf[(x, y)]
@@ -3057,8 +3064,12 @@ pub(super) mod event_markdown {
             })
             .collect();
         assert!(rows.iter().any(|(left, _, title)| left == "▏" && !*title));
+        assert!(
+            rows.iter()
+                .any(|(left, right, title)| *title && left == "▏" && right == "▕")
+        );
         for (left, right, title) in rows {
-            if title {
+            if title && right != "▕" {
                 assert_eq!([left.as_str(), right.as_str()], ["╴", "╶"]);
             } else if right == "▕" {
                 assert_eq!(left, "▏");
