@@ -1339,43 +1339,44 @@ fn heavy_output_borders(view: &View) -> [bool; 2] {
         .map(|rule| rows[usize::from(rule.y)].contains('━'))
 }
 
+fn arrow(view: &mut View, forward: bool) {
+    view.handle_key(KeyEvent::new(
+        if forward { KeyCode::Down } else { KeyCode::Up },
+        KeyModifiers::NONE,
+    ));
+}
+
+/// Scrolls one row at a time until `edge` turns heavy, then checks five more rows stay inside.
+fn assert_heavy_five_rows_before_leaving(view: &mut View, forward: bool) {
+    let edge = usize::from(forward);
+    for _ in 0..60 {
+        if heavy_output_borders(view)[edge] {
+            break;
+        }
+        arrow(view, forward);
+    }
+    let mut expected = [false, false];
+    expected[edge] = true;
+    for _ in 0..6 {
+        assert_eq!(view.event_list.cursor, Some(1));
+        assert_eq!(heavy_output_borders(view), expected);
+        arrow(view, forward);
+    }
+    assert_ne!(view.event_list.cursor, Some(1));
+}
+
 #[test]
-fn event_detail_rules_turn_heavy_three_scrolls_before_leaving_the_event() {
+fn event_detail_rules_turn_heavy_five_rows_before_leaving_the_event() {
     let (mut view, _) = fixture(true);
     // Opening an event that starts at its top is no scroll inside it.
     assert_eq!(heavy_output_borders(&view), [false, false]);
-    event_detail_wheel(&mut view, true);
+    arrow(&mut view, true);
     assert_eq!(heavy_output_borders(&view), [false, false]);
-    for _ in 0..60 {
-        if heavy_output_borders(&view)[1] {
-            break;
-        }
-        event_detail_wheel(&mut view, true);
-    }
-    // The warning shows while two more wheel steps stay inside and the third leaves.
-    for _ in 0..2 {
-        assert_eq!(view.event_list.cursor, Some(1));
-        assert_eq!(heavy_output_borders(&view), [false, true]);
-        event_detail_wheel(&mut view, true);
-    }
-    assert_eq!(heavy_output_borders(&view), [false, true]);
+    assert_heavy_five_rows_before_leaving(&mut view, true);
 
     // Returning from the next event lands at the bottom without a scroll inside it.
-    event_detail_wheel(&mut view, true);
-    assert_eq!(view.event_list.cursor, Some(2));
     event_detail_wheel(&mut view, false);
     assert_eq!(view.event_list.cursor, Some(1));
     assert_eq!(heavy_output_borders(&view), [false, false]);
-    for _ in 0..60 {
-        if heavy_output_borders(&view)[0] {
-            break;
-        }
-        event_detail_wheel(&mut view, false);
-    }
-    for _ in 0..3 {
-        assert_eq!(view.event_list.cursor, Some(1));
-        assert_eq!(heavy_output_borders(&view), [true, false]);
-        event_detail_wheel(&mut view, false);
-    }
-    assert_eq!(view.event_list.cursor, Some(0));
+    assert_heavy_five_rows_before_leaving(&mut view, false);
 }

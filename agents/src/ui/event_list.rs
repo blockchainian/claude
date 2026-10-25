@@ -737,10 +737,10 @@ impl View {
         }
         viewport.event_detail_max = rows.max;
         let top = detail.state.content_top;
-        // The warning starts while two wheel steps still stay inside, so the third would leave.
+        // The warning starts once five rows or fewer remain before the scroll leaves.
         viewport.event_detail_edges = [false, true].map(|forward| {
             let mut ahead = detail.state.clone();
-            ahead.scroll_rows(forward, top, 2 * super::input::WHEEL_ROWS);
+            ahead.scroll_rows(forward, top, 5);
             detail.scrolled == Some(forward) && !ahead.scroll_window(forward, top)
         });
         detail.offset = rows.scroll;
