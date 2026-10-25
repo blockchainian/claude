@@ -4038,6 +4038,33 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn coordinate_gesture_titles_merge_with_element_gestures() {
+        let fixture = include_str!("../../../tests/fixtures/claude-appium.jsonl");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for line in fixture.lines() {
+            let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+            if record["type"] == "assistant" {
+                let blocks = record["message"]["content"].as_array_mut().unwrap();
+                blocks.retain(|block| {
+                    block["name"]
+                        .as_str()
+                        .is_some_and(|name| name.ends_with("__appium_gesture"))
+                });
+                if blocks.is_empty() {
+                    continue;
+                }
+                record["message"]["id"] = "gesture-batch".into();
+                record["requestId"] = "gesture-batch".into();
+            }
+            writeln!(file, "{record}").unwrap();
+        }
+        let events = tail(file.path(), 100).unwrap();
+        let event = events.iter().find(|event| event.calls.len() == 2).unwrap();
+        assert_eq!(event.body, "appium-mcp appium gesture tap");
+        assert!(event.calls.iter().all(|call| call.title == "tap"));
+    }
+
+    #[test]
     fn missing_result_keeps_the_entire_batch_running_and_request_id_groups() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         for mut r in [

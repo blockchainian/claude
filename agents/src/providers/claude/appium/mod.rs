@@ -43,7 +43,7 @@ pub(crate) const SERVER: McpServer = McpServer {
         },
         ToolRule {
             name: "appium_gesture",
-            title: &[Pick::With(gesture_title)],
+            title: &[Pick::Field(Source::Input, "/action")],
             input: Some((Pick::With(gesture_input), Format::Table)),
             ..DEFAULT_RULE
         },
@@ -190,22 +190,8 @@ fn element_ids(data: &ToolData<'_>) -> Option<Body> {
     Some(Body::Sections(vec![text_section("output", &ids.join("\n"))]))
 }
 
-/// The gesture, with the point it touched when it was given coordinates.
-fn gesture_title(data: &ToolData<'_>) -> Option<String> {
-    let action = text(data.input, "action")?;
-    let coordinate = |field: &str| match &data.input[field] {
-        Value::Number(number) => Some(number.to_string()),
-        Value::String(text) => Some(text.clone()),
-        _ => None,
-    };
-    Some(match (coordinate("x"), coordinate("y")) {
-        (Some(x), Some(y)) => format!("{action} ({x}, {y})"),
-        _ => action.to_owned(),
-    })
-}
-
 fn gesture_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
-    let shown = ["action", "x", "y", "sessionId"];
+    let shown = ["action", "sessionId"];
     if let Some(fields) = data.input.as_object() {
         let remaining: Vec<_> = fields
             .iter()
@@ -219,7 +205,7 @@ fn gesture_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
             return empty_input(data);
         }
     }
-    other_fields(data, &["action", "x", "y"])
+    other_fields(data, &["action"])
 }
 
 /// The selector as code, since predicates and XPath filters run long.
@@ -328,7 +314,7 @@ mod tests {
                 "-ios predicate string",
                 "fc1c5393-ccb0-466a-ab9c-c0f2e70a1a9d",
                 "label",
-                "tap (200, 85)",
+                "tap",
                 "create",
             ]
         );
@@ -348,7 +334,17 @@ mod tests {
         assert_eq!(input(5), Vec::new());
         assert_eq!(input(7), Vec::new());
         assert_eq!(input(8), prose("42010000-0000-0000-BE14-000000000000"));
-        assert_eq!(input(9), Vec::new());
+        assert_eq!(
+            input(9),
+            vec![Section::Markdown {
+                label: "input".into(),
+                text: "| x | y |\n| --- | --- |\n| 200 | 85 |".into(),
+            }]
+        );
+        assert_eq!(
+            output_text(&calls[9]),
+            "Successfully tapped at coordinates (200, 85)."
+        );
         assert_eq!(input(3), Vec::new());
         for (index, selector) in [(4, "Playlists"), (6, "label CONTAINS[c] 'classic'")] {
             assert_eq!(
@@ -379,6 +375,31 @@ mod tests {
         assert_eq!(
             output_text(&calls[8]),
             "ClassicalPrivate  •  51 songs  •  4 hrs 41 min"
+        );
+    }
+
+    #[test]
+    fn gesture_coordinates_and_remaining_fields_use_a_table() {
+        let records: Vec<Value> = include_str!("../../../../tests/fixtures/claude-appium.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let mut input = records
+            .iter()
+            .flat_map(|record| record["message"]["content"].as_array().unwrap())
+            .find(|block| block["input"]["x"].is_number())
+            .unwrap()["input"]
+            .clone();
+        input["duration"] = 100.into();
+        assert_eq!(
+            super::gesture_input(&super::ToolData {
+                input: &input,
+                result: None
+            }),
+            Some(vec![Section::Markdown {
+                label: "input".into(),
+                text: "| x | y | duration |\n| --- | --- | --- |\n| 200 | 85 | 100 |".into(),
+            }])
         );
     }
 

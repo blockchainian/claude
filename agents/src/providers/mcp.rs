@@ -79,10 +79,7 @@ mod tests {
         for gesture in &gestures {
             add(&mut groups, gesture);
         }
-        assert_eq!(
-            groups.finish().unwrap(),
-            "appium-mcp appium gesture {tap, tap (200, 85)}"
-        );
+        assert_eq!(groups.finish().unwrap(), "appium-mcp appium gesture tap");
         let mut groups = groups::Groups::default();
         for gesture in &gestures {
             add(&mut groups, gesture);
@@ -92,14 +89,14 @@ mod tests {
         let (body, ranges) = groups.finish_with_ranges().unwrap();
         assert_eq!(
             body,
-            "appium-mcp appium {gesture {tap, tap (200, 85)}, screenshot 400}, Read src/main.rs:10-20"
+            "appium-mcp appium {gesture tap, screenshot 400}, Read src/main.rs:10-20"
         );
         assert_eq!(
             ranges
                 .iter()
                 .map(|range| &body[range.clone()])
                 .collect::<Vec<_>>(),
-            ["tap", "tap (200, 85)", "400", "src/main.rs:10-20"]
+            ["tap", "400", "src/main.rs:10-20"]
         );
         assert_eq!(super::list_group("functions.exec", "Exec"), ["Exec"]);
         assert_eq!(
