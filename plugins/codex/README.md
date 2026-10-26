@@ -179,7 +179,7 @@ backfills turns that finished while disconnected.
 
 ```
 ~/.local/state/codex-manager/
-  threads/<codex-thread-id>.json   the supervising Claude session and its manager's pid
+  threads/<codex-thread-id>.json   {sessionId, pid} for a supervised thread; {} for an unsupervised thread
   <claude-session-id>/
     state.json                          threads: id, owner, name, cwd, turnId, lastStatus, attached, review (out file)
     <codex-thread-id>.jsonl             the inbox, appended by the manager and the tools server
@@ -189,6 +189,10 @@ backfills turns that finished while disconnected.
     <codex-thread-id>.ask.<call>.json   a question codex is waiting on, written by the tools server
     <codex-thread-id>.reply.<call>.json its answer, written by reply and taken by the tools server
 ```
+
+A thread record containing `{sessionId, pid}` names its supervising Claude
+session and manager process. An empty `{}` record marks an unsupervised thread;
+`agents` keeps it subscribed on its long-lived daemon connection.
 
 The session id comes from `CLAUDE_CODE_SESSION_ID` when set, else from the
 first ancestor process that has a record in `~/.claude/sessions/` (Claude

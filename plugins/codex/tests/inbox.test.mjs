@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, watch, writeFileSync } from "node:fs";
+import { linkSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import test from "node:test";
+import * as inbox from "../lib/inbox.mjs";
 import { SessionStore } from "../lib/inbox.mjs";
 
 for (const state of ["missing", "empty", "consumed", "partial", "pending skips await"]) {
@@ -31,3 +32,27 @@ for (const state of ["missing", "empty", "consumed", "partial", "pending skips a
     }
   });
 }
+
+
+test("thread records replace files atomically without leaving temporary files", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "codex-record-"));
+  const env = { CODEX_MANAGER_STATE_DIR: root };
+  const directory = path.join(root, "threads");
+  const target = path.join(directory, "thread.json");
+  const previous = path.join(root, "previous.json");
+  try {
+    mkdirSync(directory);
+    writeFileSync(target, "{}");
+    linkSync(target, previous);
+    const record = { sessionId: "session", pid: process.pid };
+    inbox.writeThreadRecord("thread", record, env);
+    assert.deepEqual(inbox.readThreadRecord("thread", env), record);
+    assert.equal(readFileSync(previous, "utf8"), "{}");
+    assert.deepEqual(readdirSync(directory), ["thread.json"]);
+    inbox.writeThreadRecord("thread", {}, env);
+    assert.deepEqual(inbox.readThreadRecord("thread", env), {});
+    assert.deepEqual(readdirSync(directory), ["thread.json"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

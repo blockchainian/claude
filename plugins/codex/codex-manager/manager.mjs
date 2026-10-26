@@ -10,7 +10,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 import { readStdin } from "../lib/stdin.mjs";
-import { SessionStore, askTimeoutSeconds, readSupervisor, writeSupervisor } from "../lib/inbox.mjs";
+import { SessionStore, askTimeoutSeconds, readThreadRecord, writeThreadRecord } from "../lib/inbox.mjs";
 import { defaultSessionsDir, parentProcesses, recordedSessionId, resolveSessionId } from "./session.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -245,7 +245,7 @@ class Manager {
 
   /** Points the thread's notify and ask calls at this session. */
   supervise(threadId) {
-    writeSupervisor(threadId, { sessionId: this.store.sessionId, pid: process.pid });
+    writeThreadRecord(threadId, { sessionId: this.store.sessionId, pid: process.pid });
   }
 
   /** Questions codex keeps on disk while waiting for Claude. */
@@ -458,6 +458,7 @@ class Manager {
     const client = await this.connect();
     const absolute = path.resolve(cwd);
     const threadId = await this.startThread(client, { cwd: absolute, name, sandbox: "workspace-write", claudeTools: false, record: false, model, effort, tier });
+    writeThreadRecord(threadId, {});
     const turn = await this.startTurn(client, threadId, prompt);
     return { threadId, turnId: turn.id, name: name ?? null, cwd: absolute };
   }
@@ -509,8 +510,10 @@ class Manager {
     const found = this.state().threads.findLast((recorded) => recorded.detached && !recorded.attached && (recorded.id === thread || recorded.name === thread))
       ?? await this.findThread(client, thread);
     if (!this.owns(found.id)) {
+      const record = readThreadRecord(found.id);
+      const topLevel = record && Object.keys(record).length === 0;
       // Recorded before the resume so a turn that ends right behind the response is not missed.
-      this.updateThread(found.id, { name: found.name ?? null, cwd: found.cwd, turnId: null, lastStatus: "idle", attached: true });
+      this.updateThread(found.id, { name: found.name ?? null, cwd: found.cwd, turnId: null, lastStatus: "idle", attached: true, ...(topLevel ? { topLevel: true } : {}) });
       let latest;
       try {
         latest = await this.subscribe(client, found.id);
@@ -573,6 +576,7 @@ class Manager {
     if (thread.attached) {
       const { status } = await client.request("thread/unsubscribe", { threadId });
       this.updateThread(threadId, { detached: true });
+      if (thread.topLevel) writeThreadRecord(threadId, {});
       return { threadId, name: thread.name ?? undefined, detached: true, status };
     }
     await client.request("thread/archive", { threadId });
@@ -699,7 +703,7 @@ async function runDetach(options) {
   let manager;
   try {
     if (!options.thread) throw new Error("--thread is required");
-    const supervisor = readSupervisor(options.thread);
+    const supervisor = readThreadRecord(options.thread);
     if (!supervisor?.sessionId) throw new Error(`unknown thread: ${options.thread}`);
     const store = new SessionStore(supervisor.sessionId);
     const plugin = JSON.parse(await readFile(pluginManifestPath, "utf8"));

@@ -63,7 +63,7 @@ pub(crate) fn state_dir() -> io::Result<PathBuf> {
 #[derive(Deserialize)]
 struct Supervisor {
     #[serde(rename = "sessionId")]
-    session_id: String,
+    session_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -97,6 +97,39 @@ fn read<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<Option<T>> {
     }
 }
 
+/// The ids of the `threads/*.json` records that have no `sessionId`.
+pub(in crate::providers) fn unsupervised_threads(state: &Path) -> io::Result<Vec<String>> {
+    let entries = match fs::read_dir(state.join("threads")) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut threads = Vec::new();
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let Some(id) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        // Atomic writes leave no partial records; skip unreadable or malformed external files.
+        if let Ok(Some(Supervisor { session_id: None })) = read::<Supervisor>(&path) {
+            threads.push(id.to_owned());
+        }
+    }
+    Ok(threads)
+}
+
+/// Removes the thread's record; a missing record is not an error.
+pub(in crate::providers) fn remove_thread_record(state: &Path, thread_id: &str) -> io::Result<()> {
+    match fs::remove_file(state.join("threads").join(format!("{thread_id}.json"))) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 /// The Codex threads the given Claude sessions supervise, as codex-manager records them.
 pub(in crate::providers::claude) fn supervisions(
     state: &Path,
@@ -117,7 +150,9 @@ pub(in crate::providers::claude) fn supervisions(
         for thread in record.threads {
             let supervisor =
                 read::<Supervisor>(&state.join("threads").join(format!("{}.json", thread.id)))?;
-            if supervisor.is_none_or(|supervisor| supervisor.session_id != session.id) {
+            if supervisor
+                .is_none_or(|supervisor| supervisor.session_id.as_deref() != Some(&session.id))
+            {
                 continue;
             }
             let prefix = format!("{}.ask.", thread.id);
@@ -179,6 +214,49 @@ mod tests {
         supervisor["sessionId"] = id.into();
         fs::write(home.join("threads/thread-12.json"), supervisor.to_string()).unwrap();
         key(id)
+    }
+
+    #[test]
+    fn empty_record_does_not_supervise_a_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let parent = attached_parent(directory.path(), "claude-parent");
+        fs::write(directory.path().join("threads/thread-12.json"), b"{}").unwrap();
+        assert!(
+            supervisions(directory.path(), &[parent])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn unsupervised_scan_selects_empty_records_and_skips_bad_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path();
+        attached_parent(home, "claude-parent");
+        fs::write(home.join("threads/unsupervised.json"), b"{}").unwrap();
+        fs::write(home.join("threads/truncated.json"), br#"{"sessionId":"#).unwrap();
+        fs::write(home.join("threads/invalid.json"), b"invalid").unwrap();
+        fs::write(home.join("threads/ignored.txt"), b"{}").unwrap();
+        fs::create_dir(home.join("threads/unreadable.json")).unwrap();
+        symlink(home.join("missing.json"), home.join("threads/missing.json")).unwrap();
+        assert_eq!(unsupervised_threads(home).unwrap(), ["unsupervised"]);
+    }
+
+    #[test]
+    fn unsupervised_scan_allows_missing_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        assert!(unsupervised_threads(directory.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn removing_thread_record_allows_missing_record() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path();
+        remove_thread_record(home, "thread-12").unwrap();
+        attached_parent(home, "claude-parent");
+        remove_thread_record(home, "thread-12").unwrap();
+        assert!(!home.join("threads/thread-12.json").exists());
+        remove_thread_record(home, "thread-12").unwrap();
     }
 
     #[test]

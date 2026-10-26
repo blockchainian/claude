@@ -11,7 +11,7 @@ export function managerHome(env = process.env) {
 
 export const askTimeoutSeconds = (env = process.env) => Number(env.CODEX_MANAGER_ASK_TIMEOUT) > 0 ? Number(env.CODEX_MANAGER_ASK_TIMEOUT) : 300;
 
-function supervisorPath(threadId, env) {
+function threadRecordPath(threadId, env) {
   return path.join(managerHome(env), "threads", `${threadId}.json`);
 }
 
@@ -32,15 +32,21 @@ export function running(pid) {
   }
 }
 
-/** Names the Claude session, and its manager process, that a codex thread reports to; the last one to claim a thread has it. */
-export function writeSupervisor(threadId, supervisor, env = process.env) {
-  const target = supervisorPath(threadId, env);
+/** Records a thread's supervising session and manager pid, or {} when it is unsupervised. */
+export function writeThreadRecord(threadId, record, env = process.env) {
+  const target = threadRecordPath(threadId, env);
   mkdirSync(path.dirname(target), { recursive: true });
-  writeFileSync(target, JSON.stringify(supervisor));
+  const temporary = `${target}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, JSON.stringify(record));
+    renameSync(temporary, target);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
 }
 
-export function readSupervisor(threadId, env = process.env) {
-  return readJson(supervisorPath(threadId, env));
+export function readThreadRecord(threadId, env = process.env) {
+  return readJson(threadRecordPath(threadId, env));
 }
 
 export class SessionStore {

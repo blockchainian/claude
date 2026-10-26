@@ -1,9 +1,9 @@
 // ABOUTME: The MCP server codex runs to reach Claude: notify and ask, over stdio.
-// ABOUTME: Each call names its codex thread; the thread's supervisor record says which Claude session gets it.
+// ABOUTME: Each call names its codex thread; the thread's record says which Claude session gets it.
 
 import crypto from "node:crypto";
 import readline from "node:readline";
-import { SessionStore, askTimeoutSeconds, readSupervisor, running } from "../lib/inbox.mjs";
+import { SessionStore, askTimeoutSeconds, readThreadRecord, running } from "../lib/inbox.mjs";
 
 const textArgument = { type: "object", properties: { text: { type: "string", description: "The message for Claude." } }, required: ["text"], additionalProperties: false };
 const TOOLS = [
@@ -18,8 +18,8 @@ const failed = (text) => ({ ...said(text), isError: true });
 
 /** The store of the Claude session whose manager is running and has claimed the thread. */
 function supervisorStore(threadId) {
-  const supervisor = threadId ? readSupervisor(threadId) : undefined;
-  return supervisor && running(supervisor.pid) ? new SessionStore(supervisor.sessionId) : undefined;
+  const record = threadId ? readThreadRecord(threadId) : undefined;
+  return record?.sessionId && running(record.pid) ? new SessionStore(record.sessionId) : undefined;
 }
 
 /** Questions this process is waiting on, withdrawn when codex goes away. */

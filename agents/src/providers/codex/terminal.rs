@@ -44,6 +44,7 @@ pub(super) fn cleanup(home: &Path, session: &Session) -> io::Result<Option<Sessi
         // Revalidate before archive, which would otherwise interrupt a running turn.
         if app_server::thread::running_turn(&mut client, &id)?.is_none() {
             app_server::thread::archive(&mut client, &id)?;
+            supervision::remove_thread_record(&supervision::state_dir()?, &id)?;
         }
         Ok(())
     })))

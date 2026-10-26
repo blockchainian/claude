@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fakeDaemon, send } from "./helpers/fake-daemon.mjs";
-import { SessionStore, writeSupervisor } from "../lib/inbox.mjs";
+import { SessionStore, writeThreadRecord } from "../lib/inbox.mjs";
 import { WebSocketClient, daemonSocketPath } from "../lib/daemon-client.mjs";
 
 const manager = path.resolve("plugins/codex/codex-manager/manager.mjs");
@@ -62,7 +62,7 @@ test("detach CLI uses the owning store and live turn status after its manager ex
     const save = (lastStatus, attached = false) => store.writeState({ threads: [unrelated, { id: threadId, turnId, lastStatus, attached }] });
     save("completed");
     // The owner process is gone; the calling process has no Claude session.
-    writeSupervisor(threadId, { sessionId: store.sessionId, pid: 2147483647 }, env);
+    writeThreadRecord(threadId, { sessionId: store.sessionId, pid: 2147483647 }, env);
     const supervisorFile = path.join(home, "threads", `${threadId}.json`);
     const supervisor = await readFile(supervisorFile, "utf8");
 
@@ -114,7 +114,7 @@ async function exerciseRunningDetach({ attached = false, stall } = {}) {
   const store = new SessionStore("exited-supervisor", env);
   const unrelated = { id: "unrelated", lastStatus: "inProgress", owner: "another-agent" };
   store.writeState({ threads: [unrelated, { id: "thread-A", turnId: "stale-turn", lastStatus: "completed", attached }] });
-  writeSupervisor("thread-A", { sessionId: store.sessionId, pid: 2147483647 }, env);
+  writeThreadRecord("thread-A", { sessionId: store.sessionId, pid: 2147483647 }, env);
   const messages = [];
   let polls = 0;
   let interruptedAt;
