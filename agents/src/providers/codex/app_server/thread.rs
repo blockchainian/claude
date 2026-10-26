@@ -223,7 +223,6 @@ pub(in crate::providers::codex) fn resume(client: &mut Client, thread_id: &str) 
 #[derive(Deserialize)]
 struct UnsubscribeResponse {}
 
-#[allow(dead_code)] // Called by providers/codex/unsupervised.rs when it is added.
 pub(in crate::providers::codex) fn unsubscribe(
     client: &mut Client,
     thread_id: &str,

@@ -25,6 +25,7 @@ mod terminal_tests;
 #[cfg(test)]
 mod tests;
 mod tools;
+mod unsupervised;
 
 use super::{
     AccountUsageJob, Capabilities, Provider, ProviderId, ResetCreditJob, ResetCreditRequest,
@@ -33,6 +34,7 @@ use super::{
 #[cfg(test)]
 use crate::event;
 use crate::model::{Action, Process, Session, SessionStatus};
+use crate::providers::claude::codex_manager::supervision;
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags, Row};
 use std::{
@@ -61,6 +63,7 @@ pub struct CodexProvider {
     tasks: Mutex<HashMap<PathBuf, rollout::Tasks>>,
     models: Mutex<ModelCatalog>,
     background: Mutex<background::Background>,
+    unsupervised: Option<unsupervised::UnsupervisedThreads>,
 }
 
 impl CodexProvider {
@@ -70,6 +73,7 @@ impl CodexProvider {
             tasks: Mutex::new(HashMap::new()),
             models: Mutex::new(ModelCatalog::default()),
             background: Mutex::new(background::Background::default()),
+            unsupervised: None,
         }
     }
 
@@ -658,6 +662,16 @@ fn process_starts(pids: &[u32]) -> io::Result<HashMap<u32, DateTime<Utc>>> {
 }
 
 impl Provider for CodexProvider {
+    fn setup(&mut self) -> io::Result<()> {
+        if self.unsupervised.is_none() {
+            self.unsupervised = Some(unsupervised::UnsupervisedThreads::subscribe(
+                self.home.clone(),
+                supervision::state_dir()?,
+            )?);
+        }
+        Ok(())
+    }
+
     fn session_source(&self) -> Box<dyn Provider> {
         Box::new(Self::new(self.home.clone()))
     }
@@ -902,7 +916,8 @@ impl Provider for CodexProvider {
                 return Ok(());
             }
             let mut client = app_server::Client::connect(&home)?;
-            app_server::thread::archive(&mut client, &id)
+            app_server::thread::archive(&mut client, &id)?;
+            supervision::remove_thread_record(&supervision::state_dir()?, &id)
         }))
     }
     fn delete(&self, session: &Session) -> io::Result<SessionAction> {
@@ -913,7 +928,8 @@ impl Provider for CodexProvider {
         let id = session.id.id.clone();
         Ok(Box::new(move || {
             let mut client = app_server::Client::connect(&home)?;
-            app_server::thread::delete(&mut client, &id)
+            app_server::thread::delete(&mut client, &id)?;
+            supervision::remove_thread_record(&supervision::state_dir()?, &id)
         }))
     }
 }

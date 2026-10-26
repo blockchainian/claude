@@ -133,6 +133,95 @@ fn unsubscribe_sends_thread_id() {
     server.join().unwrap();
 }
 
+#[test]
+fn actions_remove_thread_records_only_after_success() {
+    const CHILD: &str = "AGENTS_THREAD_RECORD_ACTION_TEST";
+    if std::env::var_os(CHILD).is_none() {
+        let state = tempfile::tempdir().unwrap();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "providers::codex::app_server::tests::actions_remove_thread_records_only_after_success", "--nocapture"])
+            .env(CHILD, "1")
+            .env("CODEX_MANAGER_STATE_DIR", state.path())
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let state = supervision::state_dir().unwrap();
+    std::fs::create_dir_all(state.join("threads")).unwrap();
+    for action in ["archive", "delete", "terminal"] {
+        for succeeds in [false, true] {
+            let record = state.join("threads/thread-0.json");
+            std::fs::write(&record, "{}").unwrap();
+            let (home, server) = with_rpc_server(move |mut socket| {
+                initialize_rpc(&mut socket);
+                if action == "terminal" {
+                    let request = read_rpc(&mut socket);
+                    assert_eq!(request["method"], "thread/turns/list");
+                    send_rpc(
+                        &mut socket,
+                        json!({"id": request["id"], "result": {"data": []}}),
+                    );
+                }
+                let request = read_rpc(&mut socket);
+                assert_eq!(
+                    request["method"],
+                    if action == "delete" {
+                        "thread/delete"
+                    } else {
+                        "thread/archive"
+                    }
+                );
+                assert_eq!(request["params"]["threadId"], "thread-0");
+                send_rpc(
+                    &mut socket,
+                    if succeeds {
+                        json!({"id": request["id"], "result": {}})
+                    } else {
+                        json!({"id": request["id"], "error": {"message": "action failed"}})
+                    },
+                );
+            });
+            let (_fixture, source) = crate::providers::codex::tests::fixture();
+            let mut session = source
+                .snapshot(2)
+                .unwrap()
+                .sessions
+                .into_iter()
+                .find(|session| session.id.id == "thread-0")
+                .unwrap();
+            let provider = CodexProvider::new(home.path().into());
+            let job = match action {
+                "archive" => provider.archive(&session).unwrap(),
+                "delete" => provider.delete(&session).unwrap(),
+                "terminal" => {
+                    let path = home.path().join("rollout.jsonl");
+                    std::fs::write(
+                        &path,
+                        include_str!("../../../../tests/fixtures/codex-thread-clock.jsonl"),
+                    )
+                    .unwrap();
+                    session.transcript = Some(path);
+                    provider.terminal_cleanup(&session).unwrap().unwrap()
+                }
+                _ => unreachable!(),
+            };
+            let result = job();
+            assert_eq!(
+                result.is_ok(),
+                succeeds,
+                "{action}, succeeds={succeeds}: {result:?}"
+            );
+            server.join().unwrap();
+            assert_eq!(record.exists(), !succeeds, "{action}, succeeds={succeeds}");
+        }
+    }
+}
+
 struct Cleanup(String, PathBuf, bool);
 impl Drop for Cleanup {
     fn drop(&mut self) {

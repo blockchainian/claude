@@ -125,7 +125,6 @@ impl Client {
 
     /// Reads and drops every frame until `deadline`, server requests included, and clears
     /// `pending`. Ok at the deadline; Err when the connection fails.
-    #[allow(dead_code)] // Called by providers/codex/unsupervised.rs when it is added.
     pub(super) fn discard_until(&mut self, deadline: Instant) -> io::Result<()> {
         self.pending.clear();
         loop {

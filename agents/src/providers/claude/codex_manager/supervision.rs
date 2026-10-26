@@ -98,7 +98,6 @@ fn read<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<Option<T>> {
 }
 
 /// The ids of the `threads/*.json` records that have no `sessionId`.
-#[allow(dead_code)] // Caller: providers/codex/unsupervised.rs.
 pub(in crate::providers) fn unsupervised_threads(state: &Path) -> io::Result<Vec<String>> {
     let entries = match fs::read_dir(state.join("threads")) {
         Ok(entries) => entries,
@@ -123,7 +122,6 @@ pub(in crate::providers) fn unsupervised_threads(state: &Path) -> io::Result<Vec
 }
 
 /// Removes the thread's record; a missing record is not an error.
-#[allow(dead_code)] // Caller: providers/codex/unsupervised.rs.
 pub(in crate::providers) fn remove_thread_record(state: &Path, thread_id: &str) -> io::Result<()> {
     match fs::remove_file(state.join("threads").join(format!("{thread_id}.json"))) {
         Ok(()) => Ok(()),
