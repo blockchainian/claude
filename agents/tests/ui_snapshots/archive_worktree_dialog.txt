@@ -5,5 +5,5 @@
 │ them.                                                                        │
 │                                                                              │
 │ ❯ 1. Archive                                                                 │
-│   2. Archive and delete worktree                                             │
+│   2. Archive and delete worktree (fix-claude-session-input)                  │
 └──────────────────────────────────────────────────────────────────────────────┘

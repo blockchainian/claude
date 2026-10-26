@@ -879,13 +879,26 @@ impl View {
         }
         lines.push(Line::default());
         let options_start = lines.len() as u16;
+        let worktree_option = |label: &str| {
+            let name = dialog
+                .worktree
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .expect("worktree deletion option has a directory name");
+            format!("{label} ({})", name.to_string_lossy())
+        };
         let mut options = if matches!(dialog.action, ConfirmAction::Archive(_)) {
-            vec![confirm_label, "Archive and delete worktree"]
+            vec![
+                confirm_label.to_owned(),
+                worktree_option("Archive and delete worktree"),
+            ]
         } else {
-            vec!["Cancel", confirm_label]
+            vec!["Cancel".to_owned(), confirm_label.to_owned()]
         };
         if matches!(dialog.action, ConfirmAction::Delete(_)) && dialog.worktree.is_some() {
-            options.push("Permanently delete task, child agents and worktree");
+            options.push(worktree_option(
+                "Permanently delete task, child agents and worktree",
+            ));
         }
         for (index, label) in options.iter().enumerate() {
             let selected = dialog.selected == index;
@@ -894,14 +907,17 @@ impl View {
                 if selected { PROMPT_MARKER } else { " " },
                 index + 1
             );
-            lines.push(Line::from(Span::styled(
-                text,
-                if selected {
-                    super::style::selection_style()
-                } else {
-                    Style::default()
-                },
-            )));
+            lines.push(truncate_line_with_ellipsis_if_overflow(
+                Line::from(Span::styled(
+                    text,
+                    if selected {
+                        super::style::selection_style()
+                    } else {
+                        Style::default()
+                    },
+                )),
+                content_width,
+            ));
         }
         let height = area.height.min(lines.len() as u16 + 2);
         let dialog = Rect::new(

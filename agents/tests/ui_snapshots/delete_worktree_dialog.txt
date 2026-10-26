@@ -5,5 +5,5 @@
 │                                                                              │
 │ ❯ 1. Cancel                                                                  │
 │   2. Permanently delete task and child agents                                │
-│   3. Permanently delete task, child agents and worktree                      │
+│   3. Permanently delete task, child agents and worktree (fix-claude-session… │
 └──────────────────────────────────────────────────────────────────────────────┘
