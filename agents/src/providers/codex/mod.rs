@@ -466,6 +466,7 @@ fn apply_rollout(session: &mut Session, summary: rollout::Summary) {
     }
     session.status = status(session.process.is_some(), summary.turn_ended);
     session.tasks = summary.tasks;
+    session.pr = summary.pr;
     session.pending_questions = summary
         .pending_questions
         .into_iter()
