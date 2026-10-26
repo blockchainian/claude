@@ -1,0 +1,3 @@
+{"timestamp":"2026-10-26T02:13:28.508Z","type":"session_meta","payload":{"cwd":"/workspace/project"}}
+{"timestamp":"2026-10-26T02:13:30.058Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Create a pull request for this project."}]}}
+{"timestamp":"2026-10-26T02:19:16.788Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"command-850","command":["/bin/zsh","-lc","gh pr create --draft --title \"Example change\" --body \"Example description\""],"status":"completed","aggregated_output":"https://github.com/example/project/pull/850\n","exit_code":0},"completed_at_ms":1792981156788}}

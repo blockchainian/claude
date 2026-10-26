@@ -1,6 +1,6 @@
 use crate::event::{Event, Kind, Section, ToolCall};
 use crate::images::{Image, ImageSource};
-use crate::model::{Activity, SessionTask, TaskStatus};
+use crate::model::{Activity, PullRequest, SessionTask, TaskStatus};
 use crate::providers::text::printable;
 use crate::providers::tool::{self, Body, ToolData, ToolResult, list_title, tool_kind};
 use base64::Engine;
@@ -37,6 +37,7 @@ pub(super) struct Summary {
     pub pending_questions: Vec<crate::ask::Question>,
     pub pending_question_call: Option<(String, DateTime<Utc>)>,
     pub tasks: Vec<SessionTask>,
+    pub pr: Option<PullRequest>,
 }
 
 /// Reuses a file generation's decoded records, summary and last complete plan.
@@ -49,6 +50,7 @@ pub(super) struct Tasks {
     offset: u64,
     identity: Option<(u64, u64)>,
     tasks: Vec<SessionTask>,
+    pr: Option<PullRequest>,
 }
 
 fn questions(input: &Value) -> io::Result<Vec<crate::ask::Question>> {
@@ -86,6 +88,7 @@ impl Tasks {
         if result.is_err() {
             self.reader = None;
             self.summary = None;
+            self.pr = None;
             self.tasks.clear();
             self.offset = 0;
         }
@@ -112,6 +115,7 @@ impl Tasks {
             self.parsed_bytes += update.parsed_bytes;
         }
         if update.reset {
+            self.pr = None;
             self.tasks.clear();
             self.offset = 0;
         }
@@ -121,6 +125,9 @@ impl Tasks {
         for (offset, record) in &reader.records[start..] {
             if *offset >= reader.read {
                 continue;
+            }
+            if let Some(pr) = printed_pull_request(record) {
+                self.pr = Some(pr);
             }
             let payload = &record["payload"];
             if record["type"] == "response_item"
@@ -144,6 +151,7 @@ impl Tasks {
             latest.as_ref(),
         )?;
         result.tasks = self.tasks.clone();
+        result.pr = self.pr.clone();
         self.summary = Some(result.clone());
         Ok(result)
     }
@@ -214,6 +222,25 @@ impl Tasks {
         self.offset = offset;
         Ok(self.tasks.clone())
     }
+}
+
+/// The pull request URL printed by a successful command execution.
+fn printed_pull_request(record: &Value) -> Option<PullRequest> {
+    let payload = &record["payload"];
+    let item = &payload["item"];
+    if record["type"] != "event_msg"
+        || payload["type"] != "item_completed"
+        || item["type"] != "CommandExecution"
+        || item["status"] != "completed"
+        || item["exit_code"].as_i64() != Some(0)
+    {
+        return None;
+    }
+    item["aggregated_output"]
+        .as_str()?
+        .lines()
+        .rev()
+        .find_map(|line| PullRequest::from_url(line.trim()))
 }
 
 fn plan_tasks(payload: &Value) -> io::Result<Vec<SessionTask>> {
@@ -3027,6 +3054,108 @@ fn events_with_images<'a>(
 }
 #[cfg(test)]
 mod tests {
+    fn pr_fixture() -> Vec<Value> {
+        include_str!("../../../tests/fixtures/codex-pr-create.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    fn pr_summary(records: &[Value]) -> Summary {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let text: String = records.iter().map(|record| format!("{record}\n")).collect();
+        std::fs::write(file.path(), text).unwrap();
+        Tasks::default().summary(file.path()).unwrap()
+    }
+
+    #[test]
+    fn summary_reads_pr_from_python_output() {
+        let record = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/codex-pr-python.jsonl"
+        ))
+        .unwrap();
+        assert_eq!(
+            pr_summary(&[record]).pr,
+            Some(PullRequest {
+                number: 43,
+                url: "https://github.com/example/project/pull/43".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn summary_reads_pr_from_gh_pr_create() {
+        assert_eq!(
+            pr_summary(&pr_fixture()).pr,
+            Some(PullRequest {
+                number: 850,
+                url: "https://github.com/example/project/pull/850".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn summary_ignores_failed_gh_pr_create() {
+        let mut records = pr_fixture();
+        records.last_mut().unwrap()["payload"]["item"]["exit_code"] = serde_json::json!(1);
+        assert_eq!(pr_summary(&records).pr, None);
+    }
+
+    #[test]
+    fn summary_ignores_pr_urls_inside_json() {
+        let mut records = pr_fixture();
+        records.last_mut().unwrap()["payload"]["item"]["command"][2] =
+            serde_json::json!("gh pr view 850 --json url");
+        records.last_mut().unwrap()["payload"]["item"]["aggregated_output"] =
+            serde_json::json!({"url": "https://github.com/example/project/pull/850"})
+                .to_string()
+                .into();
+        assert_eq!(pr_summary(&records).pr, None);
+    }
+
+    #[test]
+    fn summary_pr_uses_last_url_from_successful_commands() {
+        let mut records = pr_fixture();
+        let mut last = records.last().unwrap().clone();
+        last["payload"]["item"]["aggregated_output"] = serde_json::json!(
+            "https://github.com/example/project/pull/850\n  https://github.com/example/project/pull/851  \nDone\n"
+        );
+        records.push(last);
+        let mut ignored = records.last().unwrap().clone();
+        ignored["payload"]["item"]["exit_code"] = serde_json::json!(1);
+        ignored["payload"]["item"]["aggregated_output"] =
+            serde_json::json!("https://github.com/example/project/pull/852\n");
+        records.push(ignored);
+        assert_eq!(pr_summary(&records).pr.unwrap().number, 851);
+    }
+
+    #[test]
+    fn summary_pr_requires_completed_command_execution() {
+        for (field, value) in [("type", "FileChange"), ("status", "inProgress")] {
+            let mut records = pr_fixture();
+            records.last_mut().unwrap()["payload"]["item"][field] = value.into();
+            records.last_mut().unwrap()["payload"]["item"]["changes"] = serde_json::json!({});
+            assert_eq!(pr_summary(&records).pr, None, "{field}");
+        }
+    }
+
+    #[test]
+    fn summary_pr_tracks_appends_and_clears_on_replacement() {
+        use std::io::Write;
+        let records = pr_fixture();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        for record in &records[..2] {
+            writeln!(file, "{record}").unwrap();
+        }
+        let mut tasks = Tasks::default();
+        assert_eq!(tasks.summary(file.path()).unwrap().pr, None);
+        writeln!(file, "{}", records[2]).unwrap();
+        assert_eq!(tasks.summary(file.path()).unwrap().pr.unwrap().number, 850);
+        assert_eq!(tasks.summary(file.path()).unwrap().pr.unwrap().number, 850);
+        std::fs::write(file.path(), format!("{}\n", records[0])).unwrap();
+        assert_eq!(tasks.summary(file.path()).unwrap().pr, None);
+    }
+
     fn completed_tool(record: &Value) -> std::io::Result<Option<Event>> {
         super::completed_tool(
             record,

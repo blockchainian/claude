@@ -848,3 +848,34 @@ fn hub_reports_visible_read_errors() {
     .unwrap();
     assert!(hub.refresh().sessions.is_empty());
 }
+
+#[test]
+fn session_reads_pr_from_rollout() {
+    let (dir, mut provider) = fixture();
+    let path = dir.path().join("pr.jsonl");
+    std::fs::write(
+        &path,
+        include_str!("../../../tests/fixtures/codex-pr-create.jsonl"),
+    )
+    .unwrap();
+    Connection::open(dir.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute(
+            "UPDATE threads SET rollout_path=? WHERE id='thread-0'",
+            [path.to_str().unwrap()],
+        )
+        .unwrap();
+    let snapshot = provider.refresh(1);
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id.id == "thread-0")
+        .unwrap();
+    assert_eq!(
+        session.pr,
+        Some(crate::model::PullRequest {
+            number: 850,
+            url: "https://github.com/example/project/pull/850".into(),
+        })
+    );
+}
