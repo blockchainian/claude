@@ -238,10 +238,7 @@ mod tests {
             .iter()
             .find(|s| s.id.id == "agent-input")
             .unwrap();
-        assert_eq!(
-            child.input_disabled_reason(),
-            Some("Parent must be a running background Claude session")
-        );
+        assert_eq!(child.input_disabled_reason(), Some(""));
 
         fs::write(
             agents.join("agent-input.meta.json"),
@@ -254,10 +251,7 @@ mod tests {
             .iter()
             .find(|s| s.id.id == "agent-input")
             .unwrap();
-        assert_eq!(
-            child.input_disabled_reason(),
-            Some("Subagent is no longer running")
-        );
+        assert_eq!(child.input_disabled_reason(), Some(""));
     }
 
     #[test]

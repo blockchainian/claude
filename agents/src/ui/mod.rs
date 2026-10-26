@@ -639,7 +639,7 @@ impl View {
         }
         match self.selected_row() {
             Some(session) => session.input_disabled_reason(),
-            None => Some("Select a task to type"),
+            None => Some(""),
         }
     }
 

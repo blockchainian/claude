@@ -212,12 +212,11 @@ impl Session {
 
     pub fn input_disabled_reason(&self) -> Option<&'static str> {
         if !self.can_resume() {
-            if self.id.provider != ProviderId::Claude {
-                Some("Subagent input is not supported")
-            } else if self.status != SessionStatus::Working {
-                Some("Subagent is no longer running")
-            } else if self.subagent_input.is_none() {
-                Some("Parent must be a running background Claude session")
+            if self.id.provider != ProviderId::Claude
+                || self.status != SessionStatus::Working
+                || self.subagent_input.is_none()
+            {
+                Some("")
             } else {
                 None
             }

@@ -323,3 +323,54 @@ fn prompt_paste_and_cursor_require_the_active_prompt_panel() {
     view.set_active_panel(Panel::TaskList);
     assert_eq!(view.cursor_pos(area), None);
 }
+
+#[test]
+fn disabled_prompt_shows_only_label_and_arrow() {
+    for (provider, status) in [
+        (ProviderId::Codex, SessionStatus::Working),
+        (ProviderId::Claude, SessionStatus::Ready),
+        (ProviderId::Claude, SessionStatus::Inactive),
+        (ProviderId::Claude, SessionStatus::Working),
+    ] {
+        let mut row = session("child", "ux_probe", status, 0);
+        row.id.provider = provider;
+        row.parent = Some(SessionKey {
+            provider,
+            id: "parent".into(),
+        });
+        let mut view = test_view(Grouping::Project, false);
+        if status == SessionStatus::Inactive {
+            view.status_filter = 1;
+        }
+        let mut parent = session("parent", "Parent", status, 1);
+        parent.id.provider = provider;
+        view.set_sessions(vec![parent, row], false);
+        let child = view
+            .rows
+            .iter()
+            .position(|row| row.id.id == "child")
+            .unwrap();
+        view.select(child);
+        let area = Rect::new(0, 0, 160, 40);
+        let mut buffer = Buffer::empty(area);
+        view.render(area, &mut buffer);
+        let prompt = view.center_layout(area).prompt;
+        let line: String = (prompt.x..prompt.right())
+            .map(|x| buffer[(x, prompt.y)].symbol())
+            .collect();
+        assert_eq!(line.trim(), "ux_probe ❮", "{provider:?} {status:?}");
+        assert_eq!(view.input_disabled(), Some(""));
+    }
+}
+
+#[test]
+fn no_task_prompt_shows_only_label_and_arrow() {
+    let view = test_view(Grouping::Project, false);
+    let rendered = screen(&view, 160, 40);
+    let prompt = rendered
+        .lines()
+        .find(|line| line.contains("No task ❮"))
+        .unwrap();
+    assert_eq!(prompt.trim(), "No task ❮");
+    assert_eq!(view.input_disabled(), Some(""));
+}
