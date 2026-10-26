@@ -1702,6 +1702,40 @@ test("detach unsubscribes an attached session and later send or attach subscribe
   }
 });
 
+for (const record of [{}, { sessionId: "previous-supervisor", pid: process.pid }, undefined]) {
+  test(`attach and detach preserve thread record ownership: ${JSON.stringify(record)}`, { timeout: 20_000 }, async () => {
+    const home = await tempHome();
+    const script = daemonScript();
+    script.threads = [{ id: "thread-existing", name: "existing", cwd: "/repo", status: { type: "idle" } }];
+    const daemon = await fakeDaemon(script.handler);
+    const mcp = await mcpChild(home, daemon);
+    const file = path.join(home.home, "threads", "thread-existing.json");
+    try {
+      if (record) {
+        await mkdir(path.dirname(file), { recursive: true });
+        await writeFile(file, JSON.stringify(record));
+      }
+      const attached = await mcp.call("attach", { thread: "thread-existing" });
+      assert.equal(attached.isError, false, attached.text);
+      const state = JSON.parse(await readFile(path.join(home.dir, "state.json"), "utf8"));
+      const topLevel = record && Object.keys(record).length === 0;
+      assert.equal(state.threads[0].topLevel, topLevel ? true : undefined);
+      const supervised = JSON.parse(await readFile(file, "utf8"));
+      assert.equal(supervised.sessionId, session);
+      assert.equal(supervised.pid, mcp.child.pid);
+      const detached = await mcp.call("detach", { threadId: "thread-existing" });
+      assert.equal(detached.isError, false, detached.text);
+      assert.equal(detached.json.status, "unsubscribed");
+      assert.deepEqual(JSON.parse(await readFile(file, "utf8")), topLevel ? {} : supervised);
+      assert.deepEqual(readdirSync(path.dirname(file)), ["thread-existing.json"]);
+    } finally {
+      await mcp.close();
+      await daemon.close();
+      await home.close();
+    }
+  });
+}
+
 test("a detached thread is not subscribed to again when the server starts or reconnects", { timeout: 20_000 }, async () => {
   const home = await tempHome();
   await mkdir(home.dir, { recursive: true });
@@ -1796,7 +1830,15 @@ for (const scenario of ["latest summary", "independent", "no summary", "custom t
   test(`transfer: ${scenario}`, { timeout: 20_000 }, async () => {
     const home = await tempHome();
     const script = daemonScript();
-    const daemon = await fakeDaemon(script.handler);
+    let recordAtTurnStart;
+    const daemon = await fakeDaemon((message, socket) => {
+      if (message.method === "turn/start") {
+        const file = path.join(home.home, "threads", message.params.threadId + ".json");
+        try { recordAtTurnStart = JSON.parse(readFileSync(file, "utf8")); }
+        catch (error) { if (error.code !== "ENOENT") throw error; }
+      }
+      script.handler(message, socket);
+    });
     const projects = path.join(home.home, "projects");
     const sessions = path.join(home.home, "sessions");
     await mkdir(path.join(projects, "original-project"), { recursive: true });
@@ -1825,6 +1867,7 @@ for (const scenario of ["latest summary", "independent", "no summary", "custom t
         return;
       }
       assert.equal(result.isError, false, result.text);
+      assert.deepEqual(recordAtTurnStart, {});
       const name = scenario === "latest summary" ? "Session name" : scenario === "unnamed" ? null : transferFixture[2].customTitle;
       assert.deepEqual(result.json, { threadId: "thread-A", turnId: "turn-1", name, cwd: path.resolve("plugins") });
       const start = script.messages.find((message) => message.method === "thread/start").params;
@@ -1844,7 +1887,7 @@ for (const scenario of ["latest summary", "independent", "no summary", "custom t
       assert.deepEqual(listed.json.threads, []);
       const state = await readFile(path.join(home.dir, "state.json"), "utf8").catch((error) => { if (error.code !== "ENOENT") throw error; return '{"threads":[]}'; });
       assert.deepEqual(JSON.parse(state).threads, []);
-      await assert.rejects(readFile(path.join(home.home, "threads", "thread-A.json")), { code: "ENOENT" });
+      assert.deepEqual(JSON.parse(await readFile(path.join(home.home, "threads", "thread-A.json"), "utf8")), {});
       await assert.rejects(readFile(path.join(home.dir, "thread-A.jsonl")), { code: "ENOENT" });
     } finally {
       await mcp.close();
