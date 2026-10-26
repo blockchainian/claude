@@ -855,3 +855,63 @@ fn supported_versions_write_current_version_and_future_version_latches_read_only
     assert!(loaded.save_pinned(dir.path()).is_err());
     assert_eq!(fs::read(&path).unwrap(), bytes);
 }
+
+#[test]
+fn task_repository_round_trips_and_survives_inactive_cleanup() {
+    let dir = tempfile::tempdir().unwrap();
+    let key: SessionKey = "claude:archived-worktree".parse().unwrap();
+    let repository = serde_json::json!({"root": "/path/to/primary/checkout"});
+    fs::write(
+        dir.path().join("agents.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "config": {},
+            "state": {"tasks": {key.to_string(): {"repository": repository.clone()}}}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let mut preferences = Preferences::load(dir.path());
+    let task = serde_json::to_value(&preferences.tasks[&key]).unwrap();
+    assert_eq!(task["repository"], repository);
+    preferences
+        .save_task_sort(dir.path(), &key, EventSort::Duration)
+        .unwrap();
+    preferences
+        .keep_only_task_event_pins(dir.path(), &key)
+        .unwrap();
+    let reloaded = Preferences::load(dir.path());
+    assert_eq!(reloaded.task_sort(&key), EventSort::Time);
+    assert_eq!(
+        serde_json::to_value(&reloaded.tasks[&key]).unwrap()["repository"],
+        repository
+    );
+    assert!(
+        serde_json::to_value(StoredTask::default())
+            .unwrap()
+            .get("repository")
+            .is_none()
+    );
+}
+
+#[test]
+fn task_repository_save_preserves_other_task_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let key: SessionKey = "claude:worktree".parse().unwrap();
+    let mut preferences = Preferences::default();
+    preferences
+        .save_task_sort(dir.path(), &key, EventSort::Duration)
+        .unwrap();
+    let root = dir.path().join("repository");
+    preferences
+        .save_task_repository(dir.path(), &key, root.clone())
+        .unwrap();
+    assert_eq!(
+        preferences.tasks[&key].repository.as_ref().unwrap().root,
+        root
+    );
+    let reloaded = Preferences::load(dir.path());
+    assert_eq!(reloaded.task_sort(&key), EventSort::Duration);
+    assert_eq!(reloaded.tasks[&key].repository.as_ref().unwrap().root, root);
+    preferences.forget_task(dir.path(), &key).unwrap();
+    assert!(!Preferences::load(dir.path()).tasks.contains_key(&key));
+}

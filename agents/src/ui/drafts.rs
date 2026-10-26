@@ -182,7 +182,11 @@ impl View {
                 .cmp(&b.status)
                 .then_with(|| session_order(a).cmp(&session_order(b)))
         });
-        self.project_groups = self.rows.iter().map(ProjectGroup::for_session).collect();
+        self.project_groups = self
+            .rows
+            .iter()
+            .map(|session| ProjectGroup::for_session(session, &self.task_repositories))
+            .collect();
         if let Some(id) = self.selected_draft {
             if let Some(index) = self.rows.iter().position(|row| row.id.id == id.to_string()) {
                 self.selected = index;

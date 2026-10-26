@@ -840,6 +840,11 @@ impl View {
         let width = area.width.min(80);
         let content_width = usize::from(width.saturating_sub(4).max(1));
         let (title, description, confirm_label) = match &dialog.action {
+            ConfirmAction::Archive(_) => (
+                format!("Archive “{}”?", dialog.title),
+                "This stops any running work in this task and its child agents, then archives them.".to_owned(),
+                "Archive",
+            ),
             ConfirmAction::Delete(id) => {
                 let title = format!("Permanently delete “{}”?", dialog.title);
                 let description = "This stops any running work in this task and its child agents, then permanently deletes their history. This cannot be undone.";
@@ -874,8 +879,12 @@ impl View {
         }
         lines.push(Line::default());
         let options_start = lines.len() as u16;
-        let mut options = vec!["Cancel", confirm_label];
-        if dialog.worktree.is_some() {
+        let mut options = if matches!(dialog.action, ConfirmAction::Archive(_)) {
+            vec![confirm_label, "Archive and delete worktree"]
+        } else {
+            vec!["Cancel", confirm_label]
+        };
+        if matches!(dialog.action, ConfirmAction::Delete(_)) && dialog.worktree.is_some() {
             options.push("Permanently delete task, child agents and worktree");
         }
         for (index, label) in options.iter().enumerate() {

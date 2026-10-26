@@ -86,7 +86,7 @@ enum Input {
     },
     Archived {
         id: SessionKey,
-        result: io::Result<()>,
+        result: io::Result<Option<String>>,
     },
     /// The session terminal's screen changed or its program closed the terminal.
     TerminalOutput,
@@ -236,6 +236,7 @@ impl App {
         view.set_drafts(&preferences.drafts);
         view.restore_question_answers(&preferences);
         view.restore_attention_skips(&preferences);
+        view.set_task_repositories(&preferences);
         if let Some(notice) = preferences.configuration_notice() {
             view.show_error(notice);
         } else if !preferences.draft_notices.is_empty() {
@@ -1086,6 +1087,7 @@ impl App {
         self.sessions = sessions.clone();
         self.supervisions = supervisions;
         self.view.set_loading(false);
+        self.view.set_task_repositories(&self.preferences);
         self.view.set_sessions(sessions, has_more);
     }
 
@@ -1344,7 +1346,25 @@ impl App {
         }
     }
 
-    fn archive(&mut self, session: Session) {
+    fn archive(&mut self, session: Session, worktree: Option<PathBuf>) {
+        if let Some(path) = &worktree {
+            let Some(identity) = crate::repository::repository_identity(path) else {
+                self.view
+                    .show_error("Cannot identify worktree repository".into());
+                return;
+            };
+            let saved = self.preferences.save_task_repository(
+                &self.config_dir,
+                &session.id,
+                identity.primary_root,
+            );
+            let failed = saved.is_err();
+            self.report_save(saved);
+            if failed {
+                return;
+            }
+            self.view.set_task_repositories(&self.preferences);
+        }
         let id = session.id.clone();
         self.view.begin_removal(&id);
         let supervision = self.supervisions.iter().find(|s| s.session == id);
@@ -1352,6 +1372,12 @@ impl App {
             Ok(job) => job,
             Err(error) => return self.archived(&id, Err(error)),
         };
+        let job = Box::new(move || {
+            job()?;
+            Ok(worktree
+                .and_then(|path| crate::tasks::remove_worktree(&path).err())
+                .map(|error| error.to_string()))
+        });
         if let Err(error) = self.run_session_job(
             id.clone(),
             job,
@@ -1380,11 +1406,17 @@ impl App {
         Ok(())
     }
 
-    fn archived(&mut self, id: &SessionKey, result: io::Result<()>) {
+    fn archived(&mut self, id: &SessionKey, result: io::Result<Option<String>>) {
         let generation = self.request_refresh();
         match result {
             // The row stays hidden until a refresh lists the session as archived.
-            Ok(()) => self.session_refresh.archives.push((generation, id.clone())),
+            Ok(worktree_error) => {
+                self.session_refresh.archives.push((generation, id.clone()));
+                if let Some(error) = worktree_error {
+                    self.view
+                        .show_error(format!("Cannot delete worktree: {error}"));
+                }
+            }
             Err(error) => {
                 self.view.finish_removal(id);
                 self.view.show_error(format!("Cannot archive: {error}"));
@@ -1416,7 +1448,11 @@ impl App {
             return false;
         };
         let target = match &action {
-            Action::Archive(id) if id.provider == ProviderId::Codex => None,
+            Action::Archive(id) | Action::ArchiveWorktree { id, .. }
+                if id.provider == ProviderId::Codex =>
+            {
+                None
+            }
             Action::Resume(id)
             | Action::OpenTerminal(id)
             | Action::Fork(id)
@@ -1424,6 +1460,7 @@ impl App {
             | Action::Delete(id)
             | Action::DeleteWorktree { id, .. }
             | Action::Archive(id)
+            | Action::ArchiveWorktree { id, .. }
             | Action::Stop(id) => Some(id),
             _ => None,
         };
@@ -1564,7 +1601,12 @@ impl App {
             }
             Action::Archive(id) => {
                 if let Some(session) = self.session(&id) {
-                    self.archive(session);
+                    self.archive(session, None);
+                }
+            }
+            Action::ArchiveWorktree { id, path } => {
+                if let Some(session) = self.session(&id) {
+                    self.archive(session, Some(path));
                 }
             }
             Action::Stop(id) => {

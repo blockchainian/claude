@@ -334,6 +334,10 @@ pub enum Action {
     },
     /// `a`, then confirmation: archive the session and its child agents.
     Archive(SessionKey),
+    ArchiveWorktree {
+        id: SessionKey,
+        path: PathBuf,
+    },
     /// `x`: interrupt the session's running turn.
     Stop(SessionKey),
     /// Unsupported provider operations show a notice.

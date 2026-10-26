@@ -12559,3 +12559,99 @@ fn delete_dialog_linked_worktree_options_and_controls() {
         key(&mut view, KeyCode::Esc);
     }
 }
+
+#[test]
+fn archive_dialog_linked_worktree_options_and_controls() {
+    let (_repo, linked) = crate::tasks::tests::worktree();
+    let mut view = fixture();
+    view.capabilities
+        .get_mut(&ProviderId::Claude)
+        .unwrap()
+        .archive = true;
+    view.rows[view.selected].cwd = linked.join("sub");
+    assert_eq!(key(&mut view, KeyCode::Char('a')), None);
+    let dialog = view.confirm_dialog.as_ref().expect("archive confirmation");
+    assert_eq!(dialog.options(), 2);
+    assert_eq!(dialog.selected, 0);
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 10));
+    view.render_confirm_dialog(dialog, buffer.area, &mut buffer);
+    let snapshot = buffer
+        .content
+        .chunks(80)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/ui_snapshots/archive_worktree_dialog.txt");
+    if std::env::var_os("UPDATE_ARCHIVE_SNAPSHOT").is_some() {
+        std::fs::write(&path, &snapshot).unwrap();
+    }
+    assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::Archive(session_key("42")))
+    );
+    key(&mut view, KeyCode::Char('a'));
+    assert_eq!(key(&mut view, KeyCode::Esc), None);
+    assert!(view.confirm_dialog.is_none());
+    key(&mut view, KeyCode::Char('a'));
+    assert_eq!(
+        key(&mut view, KeyCode::Char('1')),
+        Some(Action::Archive(session_key("42")))
+    );
+    key(&mut view, KeyCode::Char('a'));
+    screen(&view, 120, 48);
+    let rect = view.viewport.borrow().confirm_options[0].0;
+    assert_eq!(
+        click_mouse(
+            &mut view,
+            mouse(MouseEventKind::Down(MouseButton::Left), rect.x, rect.y)
+        ),
+        Some(Action::Archive(session_key("42")))
+    );
+}
+
+#[test]
+fn archive_without_worktree_is_immediate() {
+    let repo = crate::tasks::tests::repo();
+    let mut view = fixture();
+    view.capabilities
+        .get_mut(&ProviderId::Claude)
+        .unwrap()
+        .archive = true;
+    view.rows[view.selected].cwd = repo.path().into();
+    assert_eq!(
+        key(&mut view, KeyCode::Char('a')),
+        Some(Action::Archive(session_key("42")))
+    );
+    assert!(view.confirm_dialog.is_none());
+}
+
+#[path = "repository_group_tests.rs"]
+mod repository_group_tests;
+
+#[test]
+fn archive_dialog_second_option_includes_worktree_path() {
+    let (_repo, linked) = crate::tasks::tests::worktree();
+    let mut view = lifecycle_fixture();
+    view.rows[view.selected].cwd = linked.clone();
+    for code in [KeyCode::Char('2'), KeyCode::Enter] {
+        assert_eq!(key(&mut view, KeyCode::Char('a')), None);
+        if code == KeyCode::Enter {
+            key(&mut view, KeyCode::Down);
+        }
+        assert_eq!(
+            key(&mut view, code),
+            Some(Action::ArchiveWorktree {
+                id: session_key("42"),
+                path: std::fs::canonicalize(&linked).unwrap()
+            })
+        );
+    }
+}

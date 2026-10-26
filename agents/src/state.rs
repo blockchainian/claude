@@ -110,8 +110,15 @@ enum TaskSort {
     Duration,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct StoredRepository {
+    pub root: PathBuf,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct StoredTask {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<StoredRepository>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sort: Option<TaskSort>,
     #[serde(default, skip_serializing_if = "EventFilter::is_all")]
@@ -504,6 +511,20 @@ impl Preferences {
         })
     }
 
+    pub fn save_task_repository(
+        &mut self,
+        config_dir: &Path,
+        key: &SessionKey,
+        root: PathBuf,
+    ) -> io::Result<()> {
+        self.save_task_field(
+            config_dir,
+            key,
+            "repository",
+            Some(StoredRepository { root }),
+        )
+    }
+
     pub fn task_sort(&self, key: &SessionKey) -> EventSort {
         match self.tasks.get(key).and_then(|task| task.sort) {
             Some(TaskSort::Duration) => EventSort::Duration,
@@ -644,7 +665,7 @@ impl Preferences {
         Ok(())
     }
 
-    /// Drops a task's saved interface state but keeps its event pins.
+    /// Drops a task's saved interface state but keeps its event pins and repository.
     pub fn keep_only_task_event_pins(
         &mut self,
         config_dir: &Path,
@@ -654,6 +675,7 @@ impl Preferences {
             return Ok(());
         };
         let pins_only = StoredTask {
+            repository: task.repository.clone(),
             pinned_events: task.pinned_events.clone(),
             ..Default::default()
         };
@@ -661,7 +683,7 @@ impl Preferences {
             return Ok(());
         }
         self.update_task(config_dir, key, |task| {
-            task.retain(|field, _| field == "pinned_events");
+            task.retain(|field, _| matches!(field.as_str(), "pinned_events" | "repository"));
             Ok(())
         })
     }

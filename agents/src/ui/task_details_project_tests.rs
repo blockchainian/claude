@@ -216,7 +216,11 @@ fn status_rule_names_a_worktree_task_by_its_repository_and_opens_the_worktree() 
         let selected = &mut view.rows[view.selected];
         selected.title = "T".into();
         selected.cwd = cwd.clone();
-        view.project_groups = view.rows.iter().map(ProjectGroup::for_session).collect();
+        view.project_groups = view
+            .rows
+            .iter()
+            .map(|session| ProjectGroup::for_session(session, &view.task_repositories))
+            .collect();
         let mut buf = Buffer::empty(Rect::new(0, 0, 150, 50));
         view.render(buf.area, &mut buf);
         let (folder, target) = view.viewport.borrow().task_details_links[0].clone();
@@ -240,7 +244,11 @@ fn status_rule_names_a_missing_directory_without_a_link() {
     let mut view = fixture();
     let selected = &mut view.rows[view.selected];
     selected.cwd = "/nonexistent/build".into();
-    view.project_groups = view.rows.iter().map(ProjectGroup::for_session).collect();
+    view.project_groups = view
+        .rows
+        .iter()
+        .map(|session| ProjectGroup::for_session(session, &view.task_repositories))
+        .collect();
     let mut buf = Buffer::empty(Rect::new(0, 0, 150, 50));
     view.render(buf.area, &mut buf);
     let viewport = view.viewport.borrow();

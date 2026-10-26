@@ -245,12 +245,20 @@ struct ConfirmDialog {
 }
 
 impl ConfirmDialog {
+    fn cancels(&self, selected: usize) -> bool {
+        selected == 0 && !matches!(self.action, ConfirmAction::Archive(_))
+    }
+
     fn options(&self) -> usize {
-        if self.worktree.is_some() { 3 } else { 2 }
+        match self.action {
+            ConfirmAction::Delete(_) if self.worktree.is_some() => 3,
+            _ => 2,
+        }
     }
 }
 
 enum ConfirmAction {
+    Archive(SessionKey),
     Delete(SessionKey),
     Reset {
         provider: ProviderId,
@@ -306,6 +314,7 @@ pub struct View {
     capabilities: HashMap<ProviderId, Capabilities>,
     rows: Vec<Session>,
     project_groups: Vec<ProjectGroup>,
+    task_repositories: HashMap<SessionKey, crate::state::StoredRepository>,
     selected: usize,
     selection_history: Vec<(SessionKey, usize)>,
     interrupted_selection: Option<(SessionKey, usize)>,
@@ -394,13 +403,24 @@ impl ProjectGroup {
         (!self.in_repository, self.directory().is_none(), &self.key)
     }
 
-    fn for_session(session: &Session) -> Self {
+    fn for_session(
+        session: &Session,
+        repositories: &HashMap<SessionKey, crate::state::StoredRepository>,
+    ) -> Self {
         match crate::repository::repository_identity(&session.cwd) {
             Some(identity) => Self {
                 key: (identity.common_dir, identity.relative_cwd.clone()),
                 heading: identity.primary_root.join(identity.relative_cwd),
                 in_repository: true,
             },
+            None if repositories.contains_key(&session.id) => {
+                let root = &repositories[&session.id].root;
+                Self {
+                    key: (root.join(".git"), PathBuf::new()),
+                    heading: root.clone(),
+                    in_repository: true,
+                }
+            }
             None => Self {
                 key: (session.cwd.clone(), PathBuf::new()),
                 heading: session.cwd.clone(),
@@ -449,6 +469,7 @@ impl View {
             capabilities: HashMap::new(),
             rows: Vec::new(),
             project_groups: Vec::new(),
+            task_repositories: HashMap::new(),
             selected: usize::MAX,
             selection_history: Vec::new(),
             interrupted_selection: None,
@@ -724,6 +745,18 @@ impl View {
         self.capabilities = capabilities;
     }
 
+    pub(crate) fn set_task_repositories(&mut self, preferences: &crate::state::Preferences) {
+        self.task_repositories = preferences
+            .tasks
+            .iter()
+            .filter_map(|(key, task)| {
+                task.repository
+                    .as_ref()
+                    .map(|repository| (key.clone(), repository.clone()))
+            })
+            .collect();
+    }
+
     /// Replace rows while retaining the selected session and view preferences.
     pub fn set_sessions(&mut self, mut sessions: Vec<Session>, has_more: bool) {
         sessions.retain(|session| self.draft_of(&session.id).is_none());
@@ -768,7 +801,10 @@ impl View {
                 .cmp(&b.status)
                 .then_with(|| session_order(a).cmp(&session_order(b)))
         });
-        self.project_groups = sessions.iter().map(ProjectGroup::for_session).collect();
+        self.project_groups = sessions
+            .iter()
+            .map(|session| ProjectGroup::for_session(session, &self.task_repositories))
+            .collect();
         self.rows = sessions;
         let rows = &self.rows;
         self.task_uis.retain(|id, _| match id {
