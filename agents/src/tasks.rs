@@ -50,7 +50,7 @@ pub fn linked_worktree(directory: &Path) -> Option<PathBuf> {
 }
 
 /// Removes a linked checkout only when git can do so without discarding local changes,
-/// then force-deletes the branch it had checked out.
+/// then force-deletes its local branch and deletes a same-named upstream remote branch.
 pub fn remove_worktree(path: &Path) -> io::Result<()> {
     use std::ffi::OsStr;
     let path = fs::canonicalize(path)?;
@@ -70,6 +70,26 @@ pub fn remove_worktree(path: &Path) -> io::Result<()> {
         ],
     )
     .ok();
+    let upstream = if let Some(branch) = &branch {
+        let config = |field: &str| -> io::Result<Option<String>> {
+            let output = std::process::Command::new("git")
+                .args(["config", "--get", &format!("branch.{branch}.{field}")])
+                .current_dir(&path)
+                .output()?;
+            match output.status.code() {
+                Some(0) => String::from_utf8(output.stdout)
+                    .map(|value| Some(value.trim().to_owned()))
+                    .map_err(io::Error::other),
+                Some(1) => Ok(None),
+                _ => Err(io::Error::other(
+                    String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+                )),
+            }
+        };
+        config("remote")?.zip(config("merge")?)
+    } else {
+        None
+    };
     git(
         &identity.primary_root,
         &[
@@ -78,11 +98,42 @@ pub fn remove_worktree(path: &Path) -> io::Result<()> {
             path.as_os_str(),
         ],
     )?;
-    if let Some(branch) = branch {
+    if let Some(branch) = &branch {
         git(
             &identity.primary_root,
-            &[OsStr::new("branch"), OsStr::new("-D"), OsStr::new(&branch)],
+            &[OsStr::new("branch"), OsStr::new("-D"), OsStr::new(branch)],
         )?;
+    }
+    if let Some((remote, merge)) = upstream
+        && let Some(remote_branch) = merge.strip_prefix("refs/heads/")
+        && branch.as_deref() == Some(remote_branch)
+    {
+        if let Err(error) = git(
+            &identity.primary_root,
+            &[
+                OsStr::new("push"),
+                OsStr::new(&remote),
+                OsStr::new("--delete"),
+                OsStr::new(remote_branch),
+            ],
+        ) {
+            // A merged pull request may already have removed the upstream branch.
+            let missing = git(
+                &identity.primary_root,
+                &[
+                    OsStr::new("ls-remote"),
+                    OsStr::new("--heads"),
+                    OsStr::new(&remote),
+                    OsStr::new(&merge),
+                ],
+            )
+            .is_ok_and(|refs| refs.is_empty());
+            if !missing {
+                return Err(io::Error::other(format!(
+                    "Cannot delete upstream branch {remote}/{remote_branch}: {error}"
+                )));
+            }
+        }
     }
     Ok(())
 }
@@ -647,6 +698,127 @@ pub(crate) mod tests {
         remove_worktree(&linked).unwrap();
         assert!(!linked.exists());
         assert_eq!(git(repo.path(), &["branch", "--list", "linked"]), "");
+    }
+
+    fn worktree_with_origin() -> (tempfile::TempDir, PathBuf, tempfile::TempDir) {
+        let (repo, linked) = worktree();
+        let origin = tempfile::tempdir().unwrap();
+        git(origin.path(), &["init", "--bare"]);
+        git(
+            repo.path(),
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
+        git(repo.path(), &["config", "push.autoSetupRemote", "false"]);
+        (repo, linked, origin)
+    }
+
+    #[test]
+    fn remove_worktree_preserves_differently_named_upstream_branch() {
+        let (repo, linked, _origin) = worktree_with_origin();
+        git(repo.path(), &["push", "origin", "main"]);
+        git(&linked, &["branch", "--set-upstream-to=origin/main"]);
+        remove_worktree(&linked).unwrap();
+        assert!(!linked.exists());
+        assert_eq!(git(repo.path(), &["branch", "--list", "linked"]), "");
+        assert!(
+            !git(
+                repo.path(),
+                &["ls-remote", "--heads", "origin", "refs/heads/main"]
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn remove_worktree_skips_upstream_outside_heads() {
+        let (repo, linked, _origin) = worktree_with_origin();
+        git(&linked, &["push", "origin", "HEAD:refs/tags/base"]);
+        git(&linked, &["config", "branch.linked.remote", "origin"]);
+        git(
+            &linked,
+            &["config", "branch.linked.merge", "refs/tags/base"],
+        );
+        remove_worktree(&linked).unwrap();
+        assert!(!linked.exists());
+        assert!(
+            !git(
+                repo.path(),
+                &["ls-remote", "--tags", "origin", "refs/tags/base"]
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn remove_worktree_deletes_upstream_branch() {
+        let (repo, linked, _origin) = worktree_with_origin();
+        git(&linked, &["push", "-u", "origin", "HEAD:refs/heads/linked"]);
+        assert!(
+            !git(
+                repo.path(),
+                &["ls-remote", "--heads", "origin", "refs/heads/linked"]
+            )
+            .is_empty()
+        );
+        remove_worktree(&linked).unwrap();
+        assert!(!linked.exists());
+        assert_eq!(git(repo.path(), &["branch", "--list", "linked"]), "");
+        assert_eq!(
+            git(
+                repo.path(),
+                &["ls-remote", "--heads", "origin", "refs/heads/linked"]
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn remove_worktree_without_upstream_leaves_remote_branch() {
+        let (repo, linked, _origin) = worktree_with_origin();
+        git(&linked, &["push", "origin", "HEAD:refs/heads/linked"]);
+        remove_worktree(&linked).unwrap();
+        assert!(!linked.exists());
+        assert!(
+            !git(
+                repo.path(),
+                &["ls-remote", "--heads", "origin", "refs/heads/linked"]
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn remove_worktree_accepts_missing_upstream_branch() {
+        let (repo, linked, origin) = worktree_with_origin();
+        git(&linked, &["push", "-u", "origin", "HEAD:refs/heads/linked"]);
+        git(origin.path(), &["update-ref", "-d", "refs/heads/linked"]);
+        remove_worktree(&linked).unwrap();
+        assert!(!linked.exists());
+        assert_eq!(git(repo.path(), &["branch", "--list", "linked"]), "");
+    }
+
+    #[test]
+    fn remove_worktree_reports_upstream_push_rejection() {
+        use std::os::unix::fs::PermissionsExt;
+        let (repo, linked, origin) = worktree_with_origin();
+        git(&linked, &["push", "-u", "origin", "HEAD:refs/heads/linked"]);
+        let hook = origin.path().join("hooks/pre-receive");
+        fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::set_permissions(hook, fs::Permissions::from_mode(0o755)).unwrap();
+        let error = remove_worktree(&linked).unwrap_err();
+        assert!(
+            error.to_string().contains("pre-receive hook declined"),
+            "{error}"
+        );
+        assert!(!linked.exists());
+        assert_eq!(git(repo.path(), &["branch", "--list", "linked"]), "");
+        assert!(
+            !git(
+                repo.path(),
+                &["ls-remote", "--heads", "origin", "refs/heads/linked"]
+            )
+            .is_empty()
+        );
     }
 
     #[test]

@@ -48,7 +48,7 @@ The per-plugin gate a plan's `Checks` command composes:
 ## Version control
 
 - Bump the plugin's version in the same commit as the change; keep its manifest versions equal.
-- Commit and push to main, then update the installed plugin.
+- Land every change on main through a pull request whose CI passes, then update the installed plugin; main rejects direct pushes, force pushes and deletion.
 
 ## Tools
 
