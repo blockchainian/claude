@@ -46,6 +46,53 @@ pub struct PullRequest {
     pub url: String,
 }
 
+impl PullRequest {
+    /// Parses `https://github.com/<owner>/<repo>/pull/<number>`.
+    pub fn from_url(url: &str) -> Option<Self> {
+        let parts: Vec<_> = url
+            .strip_prefix("https://github.com/")?
+            .split('/')
+            .collect();
+        let [owner, repo, "pull", number] = parts[..] else {
+            return None;
+        };
+        if owner.is_empty() || repo.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return None;
+        }
+        Some(Self {
+            number: number.parse().ok()?,
+            url: url.to_owned(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod pull_request_tests {
+    use super::PullRequest;
+
+    #[test]
+    fn pull_request_url_accepts_only_github_prs() {
+        let url = "https://github.com/example/project/pull/850";
+        assert_eq!(
+            PullRequest::from_url(url),
+            Some(PullRequest {
+                number: 850,
+                url: url.into()
+            })
+        );
+        for url in [
+            "https://github.com/example/project/issues/850",
+            "https://github.com/example/project/pull/12/files",
+            "https://example.com/example/project/pull/850",
+            "https://github.com//project/pull/850",
+            "https://github.com/example/project/pull/+850",
+        ] {
+            assert_eq!(PullRequest::from_url(url), None, "{url}");
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Activity {
     /// Provider-marked paths in the summary label.

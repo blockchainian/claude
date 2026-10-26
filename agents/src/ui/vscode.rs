@@ -36,24 +36,12 @@ pub(super) fn file_line_link(target: &Path, line: u64) -> Option<String> {
 
 /// The link that opens a GitHub pull request URL in the window of `cwd`'s repository.
 pub(super) fn pull_request_link(url: &str, cwd: &Path) -> Option<String> {
-    let parts: Vec<_> = url
-        .strip_prefix("https://github.com/")?
-        .split('/')
-        .collect();
-    let [owner, repo, "pull", number] = parts[..] else {
-        return None;
-    };
-    let shaped = !owner.is_empty()
-        && !repo.is_empty()
-        && !number.is_empty()
-        && number.bytes().all(|byte| byte.is_ascii_digit());
-    shaped.then(|| {
-        format!(
-            "vscode://blockchainian.git/view-pr?repo={}&url={}",
-            encode(cwd.as_os_str().as_bytes()),
-            encode(url.as_bytes())
-        )
-    })
+    crate::model::PullRequest::from_url(url)?;
+    Some(format!(
+        "vscode://blockchainian.git/view-pr?repo={}&url={}",
+        encode(cwd.as_os_str().as_bytes()),
+        encode(url.as_bytes())
+    ))
 }
 
 fn repository_root(dir: &Path) -> Option<PathBuf> {
