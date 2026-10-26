@@ -17,6 +17,7 @@ pub(crate) mod background_output;
 pub(crate) mod context;
 #[cfg(test)]
 mod create_tests;
+mod daemon_socket;
 mod defaults;
 mod models;
 #[cfg(test)]
@@ -146,9 +147,67 @@ fn session_entry(config_dir: &Path, session: &Session) -> io::Result<Option<regi
         || entry.session_id.as_deref() != Some(session.id.id.as_str())
         || entry.started_at != process.started_at.map(|time| time.timestamp_millis())
     {
-        return Err(io::Error::other("Session registry changed"));
+        return Err(io::Error::other(
+            if process.label.as_deref() == Some("bg") {
+                "Claude background session identity changed"
+            } else {
+                "Session registry changed"
+            },
+        ));
     }
     Ok(Some(entry))
+}
+
+/// Whether this input can use the background daemon queue.
+fn daemon_candidate(
+    session: &Session,
+    entry: &registry::Entry,
+    question_pending: bool,
+    input: &SessionInput,
+) -> bool {
+    matches!(input, SessionInput::Prompt(text) if !text.trim_start().starts_with(['/', '!']))
+        && session.parent.is_none()
+        && matches!(
+            session.status,
+            SessionStatus::Ready | SessionStatus::Working
+        )
+        && session
+            .process
+            .as_ref()
+            .is_some_and(|process| process.label.as_deref() == Some("bg"))
+        && entry.kind.as_deref() == Some("bg")
+        && matches!(entry.status.as_deref(), Some("idle" | "busy" | "shell"))
+        && !question_pending
+        && session.ask.is_none()
+        && session.pending_questions.is_empty()
+        && session.background_job.as_ref().is_some_and(|job| {
+            !job.id.is_empty() && entry.job_id.as_deref() == Some(job.id.as_str())
+        })
+}
+
+fn daemon_prompt(
+    session: &Session,
+    entry: &registry::Entry,
+    question_pending: bool,
+    input: &SessionInput,
+) -> bool {
+    daemon_candidate(session, entry, question_pending, input)
+        && session
+            .background_job
+            .as_ref()
+            .is_some_and(|job| job.needs.is_none() && !job.awaits_prompt)
+}
+
+/// Refreshes required job state without treating unreadable state as no needs.
+fn refresh_input_job(config: &Path, session: &mut Session, job_id: &str) -> io::Result<()> {
+    let state = registry::background_jobs(config)
+        .remove(&session.id.id)
+        .ok_or_else(|| io::Error::other("Claude background job state is unavailable"))?;
+    if state.job.id != job_id {
+        return Err(io::Error::other("Claude background job identity changed"));
+    }
+    session.background_job = Some(state.job);
+    Ok(())
 }
 
 /// Finds a job woken by this terminal that has remained idle without another turn.
@@ -1269,27 +1328,49 @@ impl Provider for ClaudeProvider {
                 session_socket::session::set_name(&mut client, &name)
             }));
         }
+        let question_pending = self.terminal_question_pending(&session);
         Some(Box::new(move || match &session.process {
             Some(process) if process.label.as_deref() == Some("bg") => {
-                let entry: registry::Entry = serde_json::from_slice(&fs::read(
-                    config
-                        .join("sessions")
-                        .join(format!("{}.json", process.pid)),
-                )?)
-                .map_err(io::Error::other)?;
-                if entry.session_id.as_deref() != Some(&session.id.id)
-                    || entry.kind.as_deref() != Some("bg")
-                {
+                let entry = session_entry(&config, &session)?
+                    .ok_or_else(|| io::Error::other("Claude background session has no process"))?;
+                if entry.kind.as_deref() != Some("bg") {
                     return Err(io::Error::other(
                         "Claude background session identity changed",
                     ));
                 }
                 let job_id = entry
                     .job_id
+                    .as_deref()
                     .filter(|id| !id.is_empty())
                     .ok_or_else(|| io::Error::other("Claude background session has no job id"))?;
+                if session
+                    .background_job
+                    .as_ref()
+                    .is_some_and(|job| job.id != job_id)
+                {
+                    return Err(io::Error::other("Claude background job identity changed"));
+                }
+                let starts = registry::process_starts(&[process.pid]);
+                if !process_exists(process.pid)?
+                    || !starts
+                        .get(&process.pid)
+                        .is_some_and(|actual| registry::matches_start(&entry, actual))
+                {
+                    return Err(io::Error::other(
+                        "Claude background session is no longer running",
+                    ));
+                }
+                let mut current = session.clone();
+                if daemon_candidate(&current, &entry, question_pending, &input) {
+                    refresh_input_job(&config, &mut current, job_id)?;
+                }
+                if daemon_prompt(&current, &entry, question_pending, &input)
+                    && let SessionInput::Prompt(text) = &input
+                {
+                    return daemon_socket::Client::new(&config).enqueue(job_id, text);
+                }
                 attach::send(
-                    &job_id,
+                    job_id,
                     &session.cwd,
                     &config.join("settings.json"),
                     None,
@@ -1543,6 +1624,245 @@ fn session(
 
 #[cfg(test)]
 mod tests {
+    fn daemon_route_session() -> (Session, registry::Entry) {
+        let mut entry: registry::Entry =
+            serde_json::from_str(include_str!("../../../tests/fixtures/registry.json")).unwrap();
+        entry.kind = Some("bg".into());
+        entry.job_id = Some("d6e5280c".into());
+        entry.status = Some("idle".into());
+        let mut session = session(
+            entry.session_id.clone().unwrap(),
+            transcript::Summary::default(),
+            None,
+            Utc::now(),
+        );
+        session.status = SessionStatus::Ready;
+        session.process = Some(Process {
+            pid: entry.pid.unwrap(),
+            label: entry.kind.clone(),
+            started_at: entry.started_at.and_then(DateTime::from_timestamp_millis),
+        });
+        session.background_job = Some(crate::model::BackgroundJob {
+            id: entry.job_id.clone().unwrap(),
+            needs: None,
+            awaits_prompt: false,
+        });
+        (session, entry)
+    }
+
+    #[test]
+    fn daemon_routing_plain_prompts_use_the_queue() {
+        let (mut session, mut entry) = daemon_route_session();
+        for status in [SessionStatus::Ready, SessionStatus::Working] {
+            session.status = status;
+            for registry_status in ["idle", "busy", "shell"] {
+                entry.status = Some(registry_status.into());
+                for text in ["hello", "  第一行\nsecond line", "", "text /literal"] {
+                    assert!(
+                        daemon_prompt(&session, &entry, false, &SessionInput::Prompt(text.into())),
+                        "{status:?} {registry_status} {text:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn daemon_routing_other_inputs_keep_their_route() {
+        let (session, entry) = daemon_route_session();
+        for input in [
+            SessionInput::Prompt(" /model opus".into()),
+            SessionInput::Prompt("\n\t!ls".into()),
+            SessionInput::PromptWithImages {
+                text: "hello".into(),
+                images: vec!["image.png".into()],
+            },
+            SessionInput::SetModel("opus".into()),
+            SessionInput::SetEffort("high".into()),
+            SessionInput::Interrupt,
+            SessionInput::Rename("name".into()),
+        ] {
+            assert!(!daemon_prompt(&session, &entry, false, &input), "{input:?}");
+        }
+        let input = SessionInput::Prompt("hello".into());
+        for change in [
+            "needs-input",
+            "inactive",
+            "new",
+            "parent",
+            "process",
+            "foreground",
+            "job",
+            "needs",
+            "awaits-prompt",
+            "questions",
+            "ask",
+            "registry-kind",
+            "registry-job",
+            "registry-status",
+            "missing-status",
+        ] {
+            let mut session = session.clone();
+            let mut entry = entry.clone();
+            match change {
+                "needs-input" => session.status = SessionStatus::NeedsInput,
+                "inactive" => session.status = SessionStatus::Inactive,
+                "new" => session.status = SessionStatus::New,
+                "parent" => {
+                    session.parent = Some(SessionKey {
+                        provider: ProviderId::Claude,
+                        id: "parent".into(),
+                    })
+                }
+                "process" => session.process = None,
+                "foreground" => {
+                    session.process.as_mut().unwrap().label = Some("interactive".into())
+                }
+                "job" => session.background_job = None,
+                "needs" => session.background_job.as_mut().unwrap().needs = Some("prompt".into()),
+                "awaits-prompt" => session.background_job.as_mut().unwrap().awaits_prompt = true,
+                "questions" => session.pending_questions.push("question".into()),
+                "registry-kind" => entry.kind = Some("interactive".into()),
+                "registry-job" => entry.job_id = Some("other-job".into()),
+                "registry-status" => entry.status = Some("waiting".into()),
+                "missing-status" => entry.status = None,
+                "ask" => {}
+                _ => unreachable!(),
+            }
+            assert!(
+                !daemon_prompt(&session, &entry, change == "ask", &input),
+                "{change}"
+            );
+        }
+    }
+
+    #[test]
+    fn daemon_routing_refresh_uses_current_required_state() {
+        let (mut session, entry) = daemon_route_session();
+        let directory = tempfile::tempdir().unwrap();
+        let job_id = entry.job_id.as_deref().unwrap();
+        let job = directory.path().join("jobs").join(job_id);
+        fs::create_dir_all(&job).unwrap();
+        let mut state: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/claude-background-settings.json"
+        ))
+        .unwrap();
+        state["sessionId"] = session.id.id.clone().into();
+        let input = SessionInput::Prompt("hello".into());
+        for needs in [Some("send a prompt to start"), None] {
+            state["needs"] = needs.into();
+            fs::write(job.join("state.json"), serde_json::to_vec(&state).unwrap()).unwrap();
+            session.background_job.as_mut().unwrap().needs = Some("stale needs".into());
+            session.background_job.as_mut().unwrap().awaits_prompt = true;
+            refresh_input_job(directory.path(), &mut session, job_id).unwrap();
+            assert_eq!(
+                daemon_prompt(&session, &entry, false, &input),
+                needs.is_none()
+            );
+        }
+        assert!(refresh_input_job(directory.path(), &mut session, "other-job").is_err());
+        fs::write(job.join("state.json"), b"{").unwrap();
+        assert!(refresh_input_job(directory.path(), &mut session, job_id).is_err());
+        fs::remove_file(job.join("state.json")).unwrap();
+        assert!(refresh_input_job(directory.path(), &mut session, job_id).is_err());
+    }
+
+    #[test]
+    fn daemon_routing_send_rejects_changed_process_identity() {
+        for change in ["pid", "session", "started-at", "proc-start", "job", "kind"] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut value = registry::tests::fixture(directory.path());
+            let (mut session, _) = daemon_route_session();
+            value["sessionId"] = session.id.id.clone().into();
+            value["kind"] = "bg".into();
+            value["jobId"] = session.background_job.as_ref().unwrap().id.clone().into();
+            session.process = Some(Process {
+                pid: std::process::id(),
+                label: Some("bg".into()),
+                started_at: value["startedAt"]
+                    .as_i64()
+                    .and_then(DateTime::from_timestamp_millis),
+            });
+            match change {
+                "pid" => value["pid"] = 999999.into(),
+                "session" => value["sessionId"] = "other-session".into(),
+                "started-at" => value["startedAt"] = 0.into(),
+                "proc-start" => value["procStart"] = "Thu Jan  1 00:00:00 1970".into(),
+                "job" => value["jobId"] = "other-job".into(),
+                "kind" => value["kind"] = "interactive".into(),
+                _ => unreachable!(),
+            }
+            fs::write(
+                directory
+                    .path()
+                    .join(format!("sessions/{}.json", std::process::id())),
+                serde_json::to_vec(&value).unwrap(),
+            )
+            .unwrap();
+            let provider = ClaudeProvider::new(directory.path().into());
+            let error = provider
+                .send(&session, SessionInput::Prompt("hello".into()))
+                .unwrap()()
+            .unwrap_err();
+            assert!(
+                error.to_string().contains(if change == "proc-start" {
+                    "no longer running"
+                } else if change == "job" {
+                    "job identity changed"
+                } else {
+                    "Claude background session identity changed"
+                }),
+                "{change}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn daemon_routing_identity_errors_preserve_io_and_foreground_context() {
+        let directory = tempfile::tempdir().unwrap();
+        let (session, _) = daemon_route_session();
+        let provider = ClaudeProvider::new(directory.path().into());
+        let input = SessionInput::Prompt("hello".into());
+        let error = provider.send(&session, input.clone()).unwrap()().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+
+        let path = directory.path().join(format!(
+            "sessions/{}.json",
+            session.process.as_ref().unwrap().pid
+        ));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"{").unwrap();
+        let error = provider.send(&session, input).unwrap()().unwrap_err();
+        assert!(
+            error
+                .get_ref()
+                .is_some_and(|cause| cause.is::<serde_json::Error>())
+        );
+
+        let mut entry: serde_json::Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/registry.json")).unwrap();
+        entry["sessionId"] = "other-session".into();
+        fs::write(&path, serde_json::to_vec(&entry).unwrap()).unwrap();
+        let mut foreground = session;
+        foreground.process.as_mut().unwrap().label = Some("interactive".into());
+        assert_eq!(
+            session_entry(directory.path(), &foreground)
+                .unwrap_err()
+                .to_string(),
+            "Session registry changed"
+        );
+    }
+
+    #[test]
+    fn daemon_routing_open_terminal_keeps_paste() {
+        let provider = ClaudeProvider::new(PathBuf::from("config"));
+        let input = SessionInput::Prompt("hello".into());
+        assert!(matches!(
+            provider.terminal_input(&input),
+            Some(TerminalInput::Paste { .. })
+        ));
+    }
+
     #[test]
     fn terminal_woken_job_stops_only_without_a_turn() {
         use std::io::Write;

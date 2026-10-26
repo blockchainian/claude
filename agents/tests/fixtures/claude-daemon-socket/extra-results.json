@@ -1,0 +1,39 @@
+[
+  {
+    "case": "structured_content",
+    "ack": {
+      "ok": false,
+      "error": "malformed request: Invalid input: expected string, received array",
+      "code": "EUNKNOWN"
+    },
+    "rejected": true
+  },
+  {
+    "case": "target_field",
+    "ack": {
+      "ok": true,
+      "op": "reply"
+    },
+    "main_delivery": {
+      "record": "user",
+      "origin": {
+        "kind": "human"
+      }
+    },
+    "unsupported_target_ignored": true
+  },
+  {
+    "case": "effort_nextTurn",
+    "ack": {
+      "ok": true,
+      "op": "reply"
+    },
+    "delivery": {
+      "record": "user",
+      "origin": {
+        "kind": "human"
+      }
+    },
+    "treated_as_user_message": true
+  }
+]

@@ -1,0 +1,18 @@
+[
+  {
+    "request_line": "{\"proto\":1,\"op\":\"ping\"}\n",
+    "response_line": "{\"ok\":true,\"op\":\"ping\",\"version\":\"2.1.309\",\"proto\":1,\"carriedPromptsFormat\":1}\n"
+  },
+  {
+    "request_line": "{\"proto\":2,\"op\":\"ping\"}\n",
+    "response_line": "{\"ok\":true,\"op\":\"ping\",\"version\":\"2.1.309\",\"proto\":1,\"carriedPromptsFormat\":1}\n"
+  },
+  {
+    "request_line": "{\"proto\":2,\"op\":\"reply\",\"short\":\"c8b6f19b\",\"text\":\"POC_PROTOCOL_REJECTION\",\"auth\":\"<redacted>\",\"nextTurn\":true}\n",
+    "response_line": "{\"ok\":false,\"error\":\"proto mismatch (server=1, client=2) — background service and CLI versions differ; restart claude\",\"code\":\"EPROTO\",\"serverProto\":1,\"serverVersion\":\"2.1.309\"}\n"
+  },
+  {
+    "request_line": "{\"proto\":1,\"op\":\"reply\",\"short\":\"c8b6f19b\",\"text\":\"POC_STOPPED_JOB\",\"auth\":\"<redacted>\",\"nextTurn\":true}\n",
+    "response_line": "{\"ok\":false,\"error\":\"job not found — it may have already exited\",\"code\":\"ENOJOB\"}\n"
+  }
+]
