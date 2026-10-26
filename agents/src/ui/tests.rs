@@ -12438,9 +12438,24 @@ fn tool_image_caption_click_opens_transcript_image_without_graphics() {
     }
 }
 
+fn dialog_worktree(name: &str) -> (tempfile::TempDir, PathBuf) {
+    let (repo, linked) = crate::tasks::tests::worktree();
+    let path = repo.path().join(name);
+    crate::tasks::tests::git(
+        repo.path(),
+        &[
+            "worktree",
+            "move",
+            linked.to_str().unwrap(),
+            path.to_str().unwrap(),
+        ],
+    );
+    (repo, path)
+}
+
 #[test]
 fn delete_dialog_linked_worktree_options_and_controls() {
-    let (repo, linked) = crate::tasks::tests::worktree();
+    let (repo, linked) = dialog_worktree("fix-claude-session-input");
     let mut view = fixture();
     view.rows[view.selected].cwd = linked.join("sub");
     view.rows[view.selected].background_job = Some(crate::model::BackgroundJob {
@@ -12562,7 +12577,7 @@ fn delete_dialog_linked_worktree_options_and_controls() {
 
 #[test]
 fn archive_dialog_linked_worktree_options_and_controls() {
-    let (_repo, linked) = crate::tasks::tests::worktree();
+    let (_repo, linked) = dialog_worktree("fix-claude-session-input");
     let mut view = fixture();
     view.capabilities
         .get_mut(&ProviderId::Claude)
@@ -12653,5 +12668,52 @@ fn archive_dialog_second_option_includes_worktree_path() {
                 path: std::fs::canonicalize(&linked).unwrap()
             })
         );
+    }
+}
+
+#[test]
+fn worktree_dialog_short_directory_names_are_complete() {
+    for name in ["fix", "修复"] {
+        for action in [
+            ConfirmAction::Delete(session_key("42")),
+            ConfirmAction::Archive(session_key("42")),
+        ] {
+            let view = fixture();
+            let archive = matches!(action, ConfirmAction::Archive(_));
+            let dialog = ConfirmDialog {
+                action,
+                title: "Current task".into(),
+                selected: if archive { 1 } else { 2 },
+                worktree: Some(PathBuf::from("/repository/worktrees").join(name)),
+            };
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 10));
+            view.render_confirm_dialog(&dialog, buffer.area, &mut buffer);
+            let rendered = buffer
+                .content
+                .chunks(80)
+                .map(|row| {
+                    let mut text = String::new();
+                    let mut cells = row.iter();
+                    while let Some(cell) = cells.next() {
+                        text.push_str(cell.symbol());
+                        for _ in 1..cell.symbol().width() {
+                            cells.next();
+                        }
+                    }
+                    text
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let label = if archive {
+                "Archive and delete worktree"
+            } else {
+                "Permanently delete task, child agents and worktree"
+            };
+            assert!(
+                rendered.contains(&format!("{label} ({name})")),
+                "{rendered}"
+            );
+            assert!(!rendered.contains('…'), "{rendered}");
+        }
     }
 }
