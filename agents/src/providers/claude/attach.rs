@@ -136,7 +136,7 @@ pub(super) fn clear_left_input(terminal: &mut dyn ScreenInput) -> io::Result<()>
     Ok(())
 }
 
-fn validate_job_id(job_id: &str) -> io::Result<()> {
+pub(super) fn validate_job_id(job_id: &str) -> io::Result<()> {
     if job_id.is_empty()
         || job_id.starts_with('-')
         || Path::new(job_id).file_name() != Some(std::ffi::OsStr::new(job_id))
@@ -158,7 +158,7 @@ fn input_lock_path(config_dir: &Path, job_id: &str) -> std::path::PathBuf {
         .join(format!("{job_id}.lock"))
 }
 
-fn validate_text(text: &str) -> io::Result<()> {
+pub(super) fn validate_text(text: &str) -> io::Result<()> {
     if text
         .chars()
         .any(|ch| ch.is_control() && !matches!(ch, '\n' | '\t'))
