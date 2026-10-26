@@ -1,0 +1,47 @@
+[
+  {
+    "case": "idle_text",
+    "ack": {
+      "ok": true,
+      "op": "reply"
+    },
+    "delivery": {
+      "record": "user",
+      "origin": {
+        "kind": "human"
+      }
+    },
+    "assistant_confirmed": true
+  },
+  {
+    "case": "busy_text",
+    "ack": {
+      "ok": true,
+      "op": "reply"
+    },
+    "delivery": {
+      "record": "queued_command",
+      "origin": {
+        "kind": "human"
+      }
+    },
+    "assistant_confirmed": true,
+    "tool_in_flight_at_send": true,
+    "tool_succeeded": true,
+    "sleep_completed": false
+  },
+  {
+    "case": "slash_with_nextTurn",
+    "ack": {
+      "ok": true,
+      "op": "reply"
+    },
+    "delivery": {
+      "record": "user",
+      "origin": {
+        "kind": "human"
+      }
+    },
+    "treated_as_user_message": true
+  }
+]
