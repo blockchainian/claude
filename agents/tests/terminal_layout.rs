@@ -649,7 +649,7 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
     delete_named_draft(&tmux);
     tmux.wait_for(|capture| {
         // Confirmed deletion returns to the task chooser.
-        capture.contains("No task ❮ Select a task to type") && !capture.contains("Prompt probe ❯")
+        capture.lines().any(|line| line.trim() == "No task ❮") && !capture.contains("Prompt probe ❯")
     });
     begin_named_draft(&tmux, "Prompt probe");
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);

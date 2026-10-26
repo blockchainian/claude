@@ -83,7 +83,7 @@ fn message(kind: &Kind) -> bool {
 }
 
 #[test]
-fn filter_click_cycles_all_messages_tools_and_keeps_pins() {
+fn filter_click_cycles_all_messages_tools_users_and_keeps_pins() {
     let (_dir, mut view) = fixture();
     let template = view.event_panel[0].clone();
     view.set_event(
@@ -181,6 +181,17 @@ fn filter_click_cycles_all_messages_tools_and_keeps_pins() {
     assert!(view.shown_row_position(EventRow::Pinned(1)).is_some());
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
     filter_click(&mut view);
+    assert_eq!(view.event_list.filter, EventFilter::User);
+    assert_eq!(
+        view.shown_events()
+            .map(|(_, event)| &event.kind)
+            .collect::<Vec<_>>(),
+        vec![&Kind::User, &Kind::QueuedUser]
+    );
+    assert!(view.shown_row_position(EventRow::Pinned(0)).is_some());
+    assert!(view.shown_row_position(EventRow::Pinned(1)).is_some());
+    assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
+    filter_click(&mut view);
     assert_eq!(view.event_list.filter, EventFilter::All);
     assert_eq!(view.shown_events().map(|(i, _)| i).collect::<Vec<_>>(), all);
     assert_eq!(view.selected_event_row(), Some(EventRow::Pinned(0)));
@@ -201,6 +212,7 @@ fn filter_click_preserves_message_selection_and_rematches_hidden_rows_in_both_so
         assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(full)));
         filter_click(&mut view);
         assert!(view.shown_events().all(|(_, e)| tool(&e.kind)));
+        filter_click(&mut view);
         filter_click(&mut view);
         view.select_event(view.shown_row_position(EventRow::Timeline(full)));
         assert_eq!(view.selected_event_row(), Some(EventRow::Timeline(full)));
@@ -262,7 +274,7 @@ fn filter_click_keeps_following_at_the_bottom_and_clears_pending_counts() {
     let (_dir, mut view) = fixture();
     view.viewport.borrow_mut().event_panel = Rect::new(0, 0, 100, 4);
     view.show_newest_event();
-    for _ in 0..3 {
+    for _ in 0..4 {
         view.event_list.pending_older = 10;
         view.event_list.unseen.set(3);
         filter_click(&mut view);
@@ -300,6 +312,11 @@ fn filter_click_edits_focused_search_and_filters_only_when_blurred() {
                 .filter(|(_, e)| tool(&e.kind))
                 .map(|(i, _)| EventRow::Timeline(i))
                 .collect();
+            let users: Vec<_> = view
+                .shown_events()
+                .filter(|(_, e)| matches!(e.kind, Kind::User | Kind::QueuedUser))
+                .map(|(i, _)| EventRow::Timeline(i))
+                .collect();
             if editing {
                 let filter = view.event_list.filter;
                 assert_eq!(view.handle_key(KeyCode::Char(' ').into()), None);
@@ -308,7 +325,7 @@ fn filter_click_edits_focused_search_and_filters_only_when_blurred() {
                 assert_eq!(view.event_list.filter, filter);
                 continue;
             }
-            for expected in [&messages, &tools, &all] {
+            for expected in [&messages, &tools, &users, &all] {
                 filter_click(&mut view);
                 assert_eq!(view.event_list.search.input.text(), query);
                 assert_eq!(view.event_list.search.input.focused(), editing);
@@ -372,7 +389,7 @@ fn space_leaves_the_event_filter_alone() {
 
 #[test]
 fn filters_restore_when_reopening_a_task() {
-    for filter in [EventFilter::Message, EventFilter::Tool] {
+    for filter in [EventFilter::Message, EventFilter::Tool, EventFilter::User] {
         let (dir, view) = fixture();
         let id = view.selected_id().unwrap().clone();
         let mut preferences = crate::state::Preferences::default();
@@ -390,7 +407,7 @@ fn filters_restore_when_reopening_a_task() {
         assert!(
             reopened
                 .shown_events()
-                .all(|(_, e)| message(&e.kind) == (filter == EventFilter::Message))
+                .all(|(_, e)| filter.includes(&e.kind))
         );
         filter_click(&mut reopened);
         reopened.initialize_event_list(loaded.task_sort(&id), loaded.task_filter(&id));
@@ -417,6 +434,7 @@ fn filtered_event_border_labels_have_layout_coordinates() {
             (EventFilter::All, ""),
             (EventFilter::Message, "Assistant"),
             (EventFilter::Tool, "Tool"),
+            (EventFilter::User, "User"),
         ] {
             view.event_list.filter = filter;
             let mut buf = Buffer::empty(area);
@@ -480,6 +498,7 @@ fn event_filter_characters_match_duration_label_style() {
         for (filter, title) in [
             (EventFilter::Message, "Assistant"),
             (EventFilter::Tool, "Tool"),
+            (EventFilter::User, "User"),
         ] {
             let (_dir, mut view) = fixture();
             view.event_list.filter = filter;
@@ -520,7 +539,7 @@ fn filtered_event_labels_preserve_duration_and_model_labels() {
         let (_dir, mut view) = fixture();
         view.event_list.sort = EventSort::Duration;
         view.event_list.restoring = false;
-        for filter in [EventFilter::Message, EventFilter::Tool] {
+        for filter in [EventFilter::Message, EventFilter::Tool, EventFilter::User] {
             view.event_list.filter = EventFilter::All;
             let area = Rect::new(0, 0, width, 40);
             let mut before = Buffer::empty(area);
@@ -539,10 +558,11 @@ fn filtered_event_labels_preserve_duration_and_model_labels() {
                 }
             }
             let border = viewport.event_borders[1];
-            let title = if filter == EventFilter::Message {
-                "Assistant"
-            } else {
-                "Tool"
+            let title = match filter {
+                EventFilter::Message => "Assistant",
+                EventFilter::Tool => "Tool",
+                EventFilter::User => "User",
+                EventFilter::All => unreachable!(),
             };
             let label = Rect::new(
                 border.x.saturating_sub(2),

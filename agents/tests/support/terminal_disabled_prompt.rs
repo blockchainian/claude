@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 #[ignore = "requires tmux; run with --ignored --nocapture"]
-fn terminal_disabled_prompt_keeps_mirrored_marker_and_dim_reason() {
+fn terminal_disabled_prompt_keeps_label_and_dim_marker() {
     let directory = tempfile::tempdir().unwrap();
     let codex = directory.path().join("codex");
     let claude = directory.path().join("claude");
@@ -93,15 +93,29 @@ fn terminal_disabled_prompt_keeps_mirrored_marker_and_dim_reason() {
     for grapheme in expected.graphemes(true) {
         let cell = screen.cell(row as u16, x as u16).unwrap();
         assert_eq!(cell.contents(), grapheme);
-        assert!(cell.dim(), "cell ({x}, {row}): {capture}");
+        if x < marker - 1 {
+            assert!(cell.bold(), "label cell ({x}, {row}): {capture}");
+            assert!(!cell.dim(), "label cell ({x}, {row}): {capture}");
+        } else {
+            assert!(cell.dim(), "marker cell ({x}, {row}): {capture}");
+        }
         x += grapheme.width();
     }
     let path = std::env::temp_dir().join("agents-disabled-prompt-tmux.txt");
     std::fs::write(&path, &capture).unwrap();
-    println!(
-        "{{\"verdict\":\"pass\",\"disabled_prompt\":\"pass\",\"dim\":\"pass\",\"capture\":\"{}\"}}",
-        path.display()
-    );
+    let verdict = std::env::temp_dir().join("agents-disabled-prompt-verdict.json");
+    std::fs::write(
+        &verdict,
+        serde_json::json!({
+            "verdict": "pass",
+            "disabled_prompt": "pass",
+            "dim_marker": "pass",
+            "capture": path,
+        })
+        .to_string(),
+    )
+    .unwrap();
+    println!("{}", verdict.display());
 }
 
 #[test]
@@ -135,6 +149,45 @@ fn terminal_foreground_prompt_shows_only_bg() {
     std::fs::write(
         &verdict,
         "{\"verdict\":\"pass\",\"foreground_prompt\":\"/bg\"}\n",
+    )
+    .unwrap();
+    println!("{}", verdict.display());
+}
+
+#[test]
+#[ignore = "requires tmux; run with --ignored --nocapture"]
+fn terminal_no_task_prompt_shows_only_label_and_marker() {
+    let directory = tempfile::tempdir().unwrap();
+    let codex = directory.path().join("codex");
+    let claude = directory.path().join("claude");
+    std::fs::create_dir(&codex).unwrap();
+    std::fs::create_dir(&claude).unwrap();
+    let binary =
+        std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
+    let binary = Path::new(&binary).canonicalize().unwrap();
+    let tmux = Tmux::new(format!("agents-no-task-prompt-{}", std::process::id()));
+    tmux.run(&[
+        "new-session",
+        "-d",
+        "-s",
+        "probe",
+        "-x",
+        "120",
+        "-y",
+        "40",
+        "-e",
+        &format!("CLAUDE_CONFIG_DIR={}", claude.display()),
+        "-e",
+        &format!("CODEX_HOME={}", codex.display()),
+        "-e",
+        &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
+        binary.to_str().unwrap(),
+    ]);
+    tmux.wait_for(|capture| capture.lines().any(|line| line.trim() == "No task ❮"));
+    let verdict = std::env::temp_dir().join("agents-no-task-prompt-verdict.json");
+    std::fs::write(
+        &verdict,
+        "{\"verdict\":\"pass\",\"no_task_prompt\":\"pass\"}\n",
     )
     .unwrap();
     println!("{}", verdict.display());
