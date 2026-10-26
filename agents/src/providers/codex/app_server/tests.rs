@@ -1,9 +1,137 @@
 use crate::providers::codex::*;
 use serde_json::{Value, json};
 use std::{
+    os::unix::net::{UnixListener, UnixStream},
     process::Stdio,
     time::{Duration, Instant},
 };
+use tungstenite::{Message, WebSocket};
+
+fn read_rpc(socket: &mut WebSocket<UnixStream>) -> Value {
+    serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap()
+}
+
+fn send_rpc(socket: &mut WebSocket<UnixStream>, message: Value) {
+    socket
+        .send(Message::Text(message.to_string().into()))
+        .unwrap();
+}
+
+fn with_rpc_server(
+    server: impl FnOnce(WebSocket<UnixStream>) + Send + 'static,
+) -> (tempfile::TempDir, std::thread::JoinHandle<()>) {
+    let home = tempfile::tempdir().unwrap();
+    let control = home.path().join("app-server-control");
+    std::fs::create_dir(&control).unwrap();
+    let listener = UnixListener::bind(control.join("app-server-control.sock")).unwrap();
+    let handle = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        server(tungstenite::accept(stream).unwrap());
+    });
+    (home, handle)
+}
+
+fn initialize_rpc(socket: &mut WebSocket<UnixStream>) -> Value {
+    let request = read_rpc(socket);
+    assert_eq!(request["method"], "initialize");
+    send_rpc(
+        socket,
+        json!({"id": request["id"], "result": {"userAgent": "codex"}}),
+    );
+    assert_eq!(read_rpc(socket), json!({"method": "initialized"}));
+    request
+}
+
+#[test]
+fn initialize_opts_out_of_delta_notifications() {
+    let (home, server) = with_rpc_server(|mut socket| {
+        let request = initialize_rpc(&mut socket);
+        assert_eq!(
+            request["params"]["capabilities"],
+            json!({
+                "experimentalApi": true,
+                "optOutNotificationMethods": [
+                    "item/agentMessage/delta",
+                    "item/reasoning/summaryTextDelta",
+                    "item/reasoning/summaryPartAdded",
+                    "item/reasoning/textDelta"
+                ]
+            })
+        );
+    });
+    let _client = super::Client::connect(home.path()).unwrap();
+    server.join().unwrap();
+}
+
+#[test]
+fn discard_until_drops_frames_and_pending_requests_until_deadline() {
+    let (release, hold) = std::sync::mpsc::channel();
+    let (home, server) = with_rpc_server(move |mut socket| {
+        initialize_rpc(&mut socket);
+        send_rpc(
+            &mut socket,
+            json!({"method": "thread/started", "params": {}}),
+        );
+        send_rpc(
+            &mut socket,
+            json!({"id": 42, "method": "unknown/serverRequest", "params": {}}),
+        );
+        // A subsequent request proves all preceding frames were consumed.
+        let request = read_rpc(&mut socket);
+        send_rpc(&mut socket, json!({"id": request["id"], "result": {}}));
+        hold.recv_timeout(Duration::from_secs(2)).unwrap();
+    });
+    let mut client = super::Client::connect(home.path()).unwrap();
+    client.pending.push(super::ServerRequest {
+        id: json!(1),
+        params: json!({"threadId": "thread", "itemId": "item"}),
+    });
+    let deadline = Instant::now() + Duration::from_millis(50);
+    client.discard_until(deadline).unwrap();
+    assert!(Instant::now() >= deadline);
+    assert!(client.pending.is_empty());
+    let _: Value = client.request("thread/loaded/list", json!({})).unwrap();
+    client.discard_until(Instant::now()).unwrap();
+    release.send(()).unwrap();
+    server.join().unwrap();
+}
+
+#[test]
+fn discard_until_reports_closed_connection() {
+    let (home, server) = with_rpc_server(|mut socket| {
+        initialize_rpc(&mut socket);
+        socket.close(None).unwrap();
+    });
+    let mut client = super::Client::connect(home.path()).unwrap();
+    assert!(
+        client
+            .discard_until(Instant::now() + Duration::from_secs(1))
+            .is_err()
+    );
+    server.join().unwrap();
+}
+
+#[test]
+fn unsubscribe_sends_thread_id() {
+    let (home, server) = with_rpc_server(|mut socket| {
+        initialize_rpc(&mut socket);
+        let request = read_rpc(&mut socket);
+        assert_eq!(
+            request,
+            json!({"id": 2, "method": "thread/unsubscribe", "params": {"threadId": "thread-123"}})
+        );
+        send_rpc(&mut socket, json!({"id": request["id"], "result": {}}));
+    });
+    let mut client = super::Client::connect(home.path()).unwrap();
+    super::thread::unsubscribe(&mut client, "thread-123").unwrap();
+    server.join().unwrap();
+}
 
 struct Cleanup(String, PathBuf, bool);
 impl Drop for Cleanup {

@@ -72,6 +72,7 @@ struct InitializeParams {
 #[serde(rename_all = "camelCase")]
 struct Capabilities {
     experimental_api: bool,
+    opt_out_notification_methods: [&'static str; 4],
 }
 
 #[derive(Serialize)]
@@ -103,6 +104,12 @@ impl Client {
             InitializeParams {
                 capabilities: Capabilities {
                     experimental_api: true,
+                    opt_out_notification_methods: [
+                        "item/agentMessage/delta",
+                        "item/reasoning/summaryTextDelta",
+                        "item/reasoning/summaryPartAdded",
+                        "item/reasoning/textDelta",
+                    ],
                 },
                 client_info: ClientInfo {
                     name: "agents",
@@ -114,6 +121,27 @@ impl Client {
             .transport
             .send(json!({"method": "initialized"}).to_string())?;
         Ok(client)
+    }
+
+    /// Reads and drops every frame until `deadline`, server requests included, and clears
+    /// `pending`. Ok at the deadline; Err when the connection fails.
+    #[allow(dead_code)] // Called by providers/codex/unsupervised.rs when it is added.
+    pub(super) fn discard_until(&mut self, deadline: Instant) -> io::Result<()> {
+        self.pending.clear();
+        loop {
+            match self.transport.receive_until(deadline) {
+                Ok(_) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    return Ok(());
+                }
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     pub(super) fn wait_question(

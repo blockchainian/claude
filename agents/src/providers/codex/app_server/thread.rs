@@ -220,6 +220,19 @@ pub(in crate::providers::codex) fn resume(client: &mut Client, thread_id: &str) 
     Ok(())
 }
 
+#[derive(Deserialize)]
+struct UnsubscribeResponse {}
+
+#[allow(dead_code)] // Called by providers/codex/unsupervised.rs when it is added.
+pub(in crate::providers::codex) fn unsubscribe(
+    client: &mut Client,
+    thread_id: &str,
+) -> io::Result<()> {
+    let _: UnsubscribeResponse =
+        client.request("thread/unsubscribe", ThreadParams { thread_id })?;
+    Ok(())
+}
+
 /// Rejoins a daemon-owned question and waits for its replay on this connection.
 pub(in crate::providers::codex) fn question(
     client: &mut Client,
