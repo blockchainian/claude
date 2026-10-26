@@ -898,7 +898,7 @@ impl View {
                         .find(|(rect, _)| rect.contains(position) && rect.contains((x, y).into()))
                         .map(|(_, confirm)| *confirm);
                     if let Some(confirm) = choice {
-                        return Some(if confirm != 0 {
+                        return Some(if !self.confirm_dialog.as_ref().unwrap().cancels(confirm) {
                             let dialog =
                                 self.confirm_dialog.take().expect("confirm dialog is open");
                             self.accept_confirmation(ConfirmDialog {
@@ -1866,7 +1866,7 @@ impl View {
                 match key.code {
                     KeyCode::Esc => self.cancel_confirmation(),
                     KeyCode::Enter => {
-                        if dialog.selected != 0 {
+                        if !dialog.cancels(dialog.selected) {
                             let dialog =
                                 self.confirm_dialog.take().expect("confirm dialog is open");
                             return self.accept_confirmation(dialog);
@@ -1880,8 +1880,8 @@ impl View {
                         dialog.selected = (dialog.selected + 1) % options;
                     }
                     // Each item's number accepts it at once.
-                    KeyCode::Char('1') => self.cancel_confirmation(),
-                    KeyCode::Char(c @ '2'..='3') if (c as usize - '1' as usize) < options => {
+                    KeyCode::Char('1') if dialog.cancels(0) => self.cancel_confirmation(),
+                    KeyCode::Char(c @ '1'..='3') if (c as usize - '1' as usize) < options => {
                         dialog.selected = c as usize - '1' as usize;
                         let dialog = self.confirm_dialog.take().expect("confirm dialog is open");
                         return self.accept_confirmation(dialog);
@@ -2049,7 +2049,16 @@ impl View {
                     if !self.selected_capabilities().archive {
                         return Some(Action::Unsupported("Archive"));
                     }
-                    return Some(Action::Archive(session.id.clone()));
+                    if let Some(path) = crate::tasks::linked_worktree(&session.cwd) {
+                        self.confirm_dialog = Some(ConfirmDialog {
+                            action: ConfirmAction::Archive(session.id.clone()),
+                            title: session.display_title().to_owned(),
+                            selected: 0,
+                            worktree: Some(path),
+                        });
+                    } else {
+                        return Some(Action::Archive(session.id.clone()));
+                    }
                 }
             }
             KeyCode::Backspace => {

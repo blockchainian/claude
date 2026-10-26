@@ -1,0 +1,9 @@
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Archive “Current task”?                                                      │
+│ This stops any running work in this task and its child agents, then archives │
+│ them.                                                                        │
+│                                                                              │
+│ ❯ 1. Archive                                                                 │
+│   2. Archive and delete worktree                                             │
+└──────────────────────────────────────────────────────────────────────────────┘

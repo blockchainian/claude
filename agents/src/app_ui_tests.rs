@@ -1590,3 +1590,61 @@ fn archive_success_keeps_active_tab_and_releases_hidden_task() {
     }
     assert!(found, "archived task must remain available on Inactive");
 }
+
+#[test]
+fn archive_worktree_removes_only_after_success_and_reports_removal_failure() {
+    for outcome in ["success", "archive failure", "worktree failure"] {
+        let (directory, mut app) = archive_codex_fixture();
+        let (_repo, linked) = crate::tasks::tests::worktree();
+        let root = crate::repository::repository_identity(&linked)
+            .unwrap()
+            .primary_root;
+        let mut target = app
+            .sessions
+            .iter()
+            .find(|s| s.can_resume())
+            .unwrap()
+            .clone();
+        target.cwd = linked.clone();
+        target.archived = outcome != "archive failure";
+        target.status = crate::model::SessionStatus::Ready;
+        rusqlite::Connection::open(directory.path().join("state_5.sqlite"))
+            .unwrap()
+            .execute(
+                "UPDATE threads SET cwd=?1, archived=?2 WHERE id=?3",
+                rusqlite::params![linked.to_str().unwrap(), target.archived, target.id.id],
+            )
+            .unwrap();
+        if outcome == "worktree failure" {
+            std::fs::write(linked.join("untracked"), "keep me").unwrap();
+        }
+        app.sessions = vec![target.clone()];
+        app.view.set_sessions(app.sessions.clone(), false);
+        app.handle_action(Some(Action::ArchiveWorktree {
+            id: target.id.clone(),
+            path: linked.clone(),
+        }));
+        let event = app.receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+        app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+        let rendered = lines(&draw(&mut app, 160)).join("\n");
+        assert_eq!(linked.exists(), outcome != "success", "{outcome}");
+        if outcome == "archive failure" {
+            assert!(rendered.contains("Cannot archive:"), "{rendered}");
+        } else {
+            assert!(!rendered.contains("Cannot archive:"), "{rendered}");
+            assert_eq!(
+                rendered.contains("Cannot delete worktree:"),
+                outcome == "worktree failure",
+                "{rendered}"
+            );
+            let stored = Preferences::load(directory.path());
+            assert_eq!(
+                stored.tasks[&target.id].repository.as_ref().unwrap().root,
+                root
+            );
+            app.finish_refreshes();
+            assert!(app.sessions.iter().any(|s| s.id == target.id && s.archived));
+        }
+    }
+}
