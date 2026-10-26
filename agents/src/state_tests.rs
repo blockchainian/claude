@@ -650,6 +650,24 @@ fn task_tool_filter_round_trip() {
 }
 
 #[test]
+fn task_user_filter_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = "claude:users".parse().unwrap();
+    let mut preferences = Preferences::default();
+    preferences
+        .save_task_filter(dir.path(), &key, EventFilter::User)
+        .unwrap();
+    assert_eq!(
+        document(dir.path())["state"]["tasks"]["claude:users"]["filter"],
+        "user"
+    );
+    assert_eq!(
+        Preferences::load(dir.path()).task_filter(&key),
+        EventFilter::User
+    );
+}
+
+#[test]
 fn task_skipped_at_round_trip_and_removal_preserves_ask() {
     let dir = tempfile::tempdir().unwrap();
     let key = "claude:skipped".parse().unwrap();

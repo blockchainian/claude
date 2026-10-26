@@ -41,6 +41,7 @@ pub enum EventFilter {
     All,
     Message,
     Tool,
+    User,
 }
 
 impl EventFilter {
@@ -52,13 +53,14 @@ impl EventFilter {
         match self {
             Self::All => Self::Message,
             Self::Message => Self::Tool,
-            Self::Tool => Self::All,
+            Self::Tool => Self::User,
+            Self::User => Self::All,
         }
     }
 
     pub fn includes(self, kind: &Kind) -> bool {
         let category = match kind {
-            Kind::User | Kind::QueuedUser => Self::All,
+            Kind::User | Kind::QueuedUser => Self::User,
             Kind::Assistant
             | Kind::Compaction
             | Kind::QueuedSystem
@@ -330,3 +332,42 @@ mod agent_tests;
 #[cfg(test)]
 #[path = "event/raw_tests.rs"]
 mod raw_tests;
+
+#[cfg(test)]
+mod filter_tests {
+    use super::*;
+
+    #[test]
+    fn event_filter_cycles_all_assistant_tool_user() {
+        let mut filter = EventFilter::All;
+        for expected in ["message", "tool", "user", "all"] {
+            filter = filter.next();
+            assert_eq!(serde_json::to_value(filter).unwrap(), expected);
+        }
+        assert_eq!(filter, EventFilter::All);
+    }
+
+    #[test]
+    fn user_filter_includes_only_user_and_queued_user() {
+        let filter: EventFilter = serde_json::from_str("\"user\"").unwrap();
+        for kind in [
+            Kind::User,
+            Kind::QueuedUser,
+            Kind::Assistant,
+            Kind::Compaction,
+            Kind::QueuedSystem,
+            Kind::Agent,
+            Kind::Session,
+            Kind::Tool,
+            Kind::Error,
+            Kind::Denied,
+        ] {
+            assert_eq!(
+                filter.includes(&kind),
+                matches!(kind, Kind::User | Kind::QueuedUser),
+                "{kind:?}"
+            );
+            assert!(EventFilter::All.includes(&kind));
+        }
+    }
+}

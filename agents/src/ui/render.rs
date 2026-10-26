@@ -1237,6 +1237,7 @@ impl View {
             crate::event::EventFilter::All => return,
             crate::event::EventFilter::Message => "Assistant",
             crate::event::EventFilter::Tool => "Tool",
+            crate::event::EventFilter::User => "User",
         };
         let width = title.width() as u16;
         if rule.is_empty() || rule.width < width + 4 {
