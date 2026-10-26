@@ -45,7 +45,8 @@ pub(super) fn view_state(screen: &str) -> Option<ViewState> {
             || text == "Enter to view · x to stop"
     });
     let input_focus = footer.iter().any(|line| {
-        (line.contains("shift+tab to cycle")
+        // Claude drops the cycle hint from the mode line while it shows a shell count.
+        ((line.contains("shift+tab to cycle") || line.trim_start().starts_with("⏵⏵ "))
             && (line.contains('←') || matches!(input_box(screen), Some(PromptState::Editing(_)))))
             || line.trim() == "? for shortcuts"
     });
@@ -258,6 +259,14 @@ mod tests {
         );
         assert!(view_state(&screen.replace("↑/↓ to select", "unknown focus")).is_none());
         assert!(view_state(&screen.replace("❯ ⏺", "❯ ◯")).is_none());
+    }
+
+    #[test]
+    fn captured_shell_pill_hides_the_cycle_hint() {
+        let screen = include_str!("../../../tests/fixtures/claude-attach/model-footer.screen.txt");
+        let view = view_state(screen).unwrap();
+        assert_eq!(view.focus, Focus::Input);
+        assert_eq!(view.viewed, None);
     }
 
     #[test]
