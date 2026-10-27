@@ -1273,7 +1273,7 @@ mod tests {
             Err(std::io::Error::other("Creation was interrupted")),
         );
         assert_eq!(
-            view.selection_failure(),
+            view.selection_feedback(),
             Some(super::footer::Feedback::Error(
                 "Creation was interrupted".into()
             ))

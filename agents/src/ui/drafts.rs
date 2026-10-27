@@ -1047,6 +1047,17 @@ mod recovery_tests {
     }
 
     #[test]
+    fn submitted_draft_shows_creation_in_the_footer_until_its_task_arrives() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut view = View::default();
+        let id = submitted(&mut view, dir.path());
+        let creating = Some(super::super::footer::Feedback::Info("Creating task…".into()));
+        assert_eq!(view.selection_feedback(), creating);
+        view.draft_created(id, Ok("30eaab0c".into()));
+        assert_eq!(view.selection_feedback(), creating);
+    }
+
+    #[test]
     fn job_notification_hands_off_the_draft_before_image_delivery_finishes() {
         let dir = tempfile::tempdir().unwrap();
         let mut view = View::default();
