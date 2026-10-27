@@ -1,0 +1,5 @@
+#!/bin/sh
+# Blocks secrets and personal home paths before they reach a pull request.
+set -e
+gitleaks git --pre-commit --staged --config .gitleaks.toml --redact --no-banner
+exec python3 .github/scripts/gitleaks-privacy.py git --pre-commit --staged

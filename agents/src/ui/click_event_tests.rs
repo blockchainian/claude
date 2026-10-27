@@ -427,6 +427,33 @@ fn open_background(view: &mut View, now: chrono::DateTime<Utc>) {
 }
 
 #[test]
+fn background_output_opens_at_its_end_and_follows_appends() {
+    use std::io::Write;
+    let (mut view, now) = real_event_view();
+    let mut output = tempfile::NamedTempFile::new().unwrap();
+    for row in 0..200 {
+        writeln!(output, "output row {row:03}").unwrap();
+    }
+    view.rows[view.selected]
+        .background
+        .push(crate::model::BackgroundTask {
+            description: "Real background output".into(),
+            output: Some(output.path().into()),
+            started_at: now,
+        });
+    let screen = event_screen(&view, 160, 40, now);
+    let (x, y) = rendered_cell(&screen, "Real background");
+    assert_eq!(release_click(&mut view, MouseButton::Left, x, y), None);
+    let rendered = event_screen(&view, 160, 40, now);
+    assert!(rendered.contains("output row 199"), "{rendered}");
+    assert!(!rendered.contains("output row 000"), "{rendered}");
+    writeln!(output, "output row 200").unwrap();
+    view.refresh_event_output();
+    let rendered = event_screen(&view, 160, 40, now);
+    assert!(rendered.contains("output row 200"), "{rendered}");
+}
+
+#[test]
 fn background_click_returns_to_previous_list() {
     let (mut view, now, _output) = with_background();
     open_background(&mut view, now);

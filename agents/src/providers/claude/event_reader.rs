@@ -1116,8 +1116,11 @@ impl EventReader {
             path: path.into(),
         });
         self.push(Kind::Tool, title.clone(), at);
+        // A queued notification record has no uuid; its line's byte offset in the
+        // append-only transcript identifies it instead.
+        let source = source.map_or_else(|| format!("queue:{}", self.offset), str::to_owned);
         let event = &mut self.entries.last_mut().unwrap().event;
-        event.source = source.map(str::to_owned);
+        event.source = Some(source);
         if field("task-id").is_some() || output.is_some() {
             event.calls.push(ToolCall {
                 agent_message: None,
@@ -4203,6 +4206,13 @@ pub(crate) mod tests {
             // The same transcript fragment occupies different byte positions in these files.
             if let (Some(actual), Some(expected)) = (&mut actual.turn, expected.turn) {
                 actual.id = expected.id;
+            }
+            if actual
+                .source
+                .as_deref()
+                .is_some_and(|source| source.starts_with("queue:"))
+            {
+                actual.source.clone_from(&expected.source);
             }
         }
         assert_eq!(actual, expected);
