@@ -83,7 +83,7 @@ class PrivacyTests(unittest.TestCase):
                 command, cwd=self.repo, text=True,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 env={**{key: value for key, value in os.environ.items()
-                        if key not in ("PRIVACY_BASE", "PRIVACY_HEAD", "PRIVACY_EVENT")},
+                        if key not in ("GITHUB_EVENT_NAME", "GITHUB_EVENT_PATH")},
                      "GITHUB_EVENT_NAME": event, "GITHUB_EVENT_PATH": str(event_path),
                      "PRIVACY_DENYLIST": denylist},
             )
@@ -230,8 +230,7 @@ class PrivacyTests(unittest.TestCase):
 
     def test_ci_missing_event_environment_or_file_is_redacted(self):
         env = {key: value for key, value in os.environ.items()
-               if key not in ("GITHUB_EVENT_NAME", "GITHUB_EVENT_PATH",
-                              "PRIVACY_BASE", "PRIVACY_HEAD", "PRIVACY_EVENT")}
+               if key not in ("GITHUB_EVENT_NAME", "GITHUB_EVENT_PATH")}
         for extra in ({}, {"GITHUB_EVENT_NAME": "push"},
                       {"GITHUB_EVENT_NAME": "push",
                        "GITHUB_EVENT_PATH": str(self.repo / "missing-event.json")}):
