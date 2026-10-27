@@ -282,7 +282,11 @@ impl View {
         });
 
         self.viewport.borrow_mut().event_detail_layout = None;
-        self.event_detail.scroll.borrow_mut().offset = 0;
+        let mut detail = self.event_detail.scroll.borrow_mut();
+        detail.offset = 0;
+        // A background task's output opens at its end, where appends keep following it.
+        detail.entry = Some(false);
+        drop(detail);
         self.refresh_transcript();
     }
 

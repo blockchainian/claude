@@ -1076,6 +1076,19 @@ fn output_file_append_follows_bottom_and_preserves_scrolled_position() {
 }
 
 #[test]
+fn listed_output_file_event_opens_at_its_start() {
+    let output = tempfile::NamedTempFile::new().unwrap();
+    append_output(output.path(), 0, 200);
+    let (mut view, _) = fixture(false);
+    view.set_event(vec![output_file_event(output.path())]);
+    view.select_event(Some(0));
+    screen_rows(&view, 120, 30);
+    let rendered = screen_rows(&view, 120, 30).join("\n");
+    assert_eq!(view.event_detail.scroll.borrow().offset, 0);
+    assert!(!rendered.contains("output row 199"), "{rendered}");
+}
+
+#[test]
 fn empty_output_file_follows_first_content() {
     let output = tempfile::NamedTempFile::new().unwrap();
     let (mut view, _) = fixture(false);
