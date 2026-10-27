@@ -22,11 +22,11 @@ This directory is `agents`, the terminal command center for Claude Code and Code
 
 ## Development
 
+- Install whenever a requested change is finished.
+
 ## Tools
 
 ### Install
-
-> Install whenever a requested change is finished.
 
 - `cargo install --path . --locked` — builds and installs the current source
 
