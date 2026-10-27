@@ -1,0 +1,246 @@
+diff --git a/browse/src/browser-manager.ts b/browse/src/browser-manager.ts
+index 924efc130..f290a0b29 100644
+--- a/browse/src/browser-manager.ts
++++ b/browse/src/browser-manager.ts
+@@ -318,6 +318,23 @@ export class BrowserManager {
+     return this.chromiumProcInfo;
+   }
+ 
++  /** Resolve the browser process through this manager's live CDP connection. */
++  async getBrowserPid(): Promise<number> {
++    const browser = this.browser ?? this.context?.browser();
++    if (!browser) throw new Error('focus: no connected browser process');
++    const session = await browser.newBrowserCDPSession();
++    try {
++      const { processInfo } = await session.send('SystemInfo.getProcessInfo');
++      const browsers = processInfo.filter(p => p.type === 'browser');
++      if (browsers.length !== 1 || !Number.isSafeInteger(browsers[0].id) || browsers[0].id <= 0) {
++        throw new Error("focus: cannot identify this backend's browser PID");
++      }
++      return browsers[0].id;
++    } finally {
++      await session.detach();
++    }
++  }
++
+   // ─── Viewport + deviceScaleFactor (context options) ──────────
+   // Tracked at the manager level so recreateContext() preserves them.
+   // deviceScaleFactor is a *context* option, not a page-level setter — changes
+diff --git a/browse/src/cli.ts b/browse/src/cli.ts
+index b577df2ce..e7e5edf97 100644
+--- a/browse/src/cli.ts
++++ b/browse/src/cli.ts
+@@ -424,24 +424,6 @@ export function buildRestartEnv(
+   return env;
+ }
+ 
+-/** macOS only: pull the headed Chromium window to the user's current Space.
+- * "Google Chrome for Testing" frequently opens behind the active window or on
+- * another Space — the first thing users read as "I can't see the browser"
+- * (#1781). Best-effort, fire-and-forget, never throws. The app name is a fixed
+- * literal (no interpolation). */
+-function raiseHeadedWindowMacOS(): void {
+-  if (process.platform !== 'darwin') return;
+-  try {
+-    nodeSpawn('osascript', ['-e', 'tell application "Google Chrome for Testing" to activate'], {
+-      stdio: 'ignore',
+-      detached: true,
+-      windowsHide: true,
+-    }).unref();
+-  } catch {
+-    // osascript missing or app not present — non-fatal
+-  }
+-}
+-
+ // ─── Server Lifecycle ──────────────────────────────────────────
+ // The detached daemon's stdout/stderr used to be wired to 'ignore' on every
+ // platform, so console.error('[browse] FATAL: ...') from a Chromium crash,
+@@ -1994,10 +1976,7 @@ Refs:           After 'snapshot', use @e1, @e2... as selectors:
+     await reapRecordedChromium(state);
+   }
+ 
+-  // #1781: `focus` means "show me the window". The server-side focus activates
+-  // the page via CDP, but on macOS the app can still sit on another Space — pull
+-  // it to the user's current Space too.
+-  if (command === 'focus') raiseHeadedWindowMacOS();
++
+ }
+ 
+ if (import.meta.main) {
+diff --git a/browse/src/focus-window.ts b/browse/src/focus-window.ts
+new file mode 100644
+index 000000000..7417f2ea6
+--- /dev/null
++++ b/browse/src/focus-window.ts
+@@ -0,0 +1,28 @@
++import { execFileSync } from 'child_process';
++
++/** AppKit activation by PID avoids launching or selecting another browser. */
++export const browserActivationScript = `
++ObjC.import('AppKit');
++function run(argv) {
++  const pid = Number(argv[0]);
++  const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(pid);
++  if (app.isNil()) throw new Error('No running browser process with PID ' + pid);
++  if (!app.activateWithOptions(3)) throw new Error('Cannot activate browser PID ' + pid);
++  for (let attempt = 0; attempt < 40; attempt++) {
++    if (app.isActive) return;
++    delay(0.05);
++  }
++  throw new Error('Browser PID ' + pid + ' did not become active');
++}`;
++
++export function activateBrowserWindow(pid: number): void {
++  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('focus requires a valid browser PID');
++  if (process.platform !== 'darwin') throw new Error('focus is only supported on macOS');
++  try {
++    execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e', browserActivationScript, String(pid)], {
++      stdio: 'pipe', timeout: 5000,
++    });
++  } catch (error: any) {
++    throw new Error(`focus failed for browser PID ${pid}: ${error.message}`);
++  }
++}
+diff --git a/browse/src/meta-commands.ts b/browse/src/meta-commands.ts
+index a2bc1f4d2..9c62ec486 100644
+--- a/browse/src/meta-commands.ts
++++ b/browse/src/meta-commands.ts
+@@ -3,6 +3,7 @@
+  */
+ 
+ import type { BrowserManager } from './browser-manager';
++import { activateBrowserWindow } from './focus-window';
+ import { handleSnapshot } from './snapshot';
+ import { getCleanText } from './read-commands';
+ import { READ_COMMANDS, WRITE_COMMANDS, META_COMMANDS, PAGE_CONTENT_COMMANDS, wrapUntrustedContent, canonicalizeCommand } from './commands';
+@@ -768,46 +769,25 @@ export async function handleMetaCommand(
+ 
+     case 'focus': {
+       if (bm.getConnectionMode() !== 'headed') {
+-        return 'focus requires headed mode. Run `$B connect` first.';
++        throw new Error('focus requires headed mode. Run `$B connect` first.');
+       }
+-      try {
+-        const { execSync } = await import('child_process');
+-        // Try common Chromium-based browser app names to bring to foreground
+-        const appNames = ['Comet', 'Google Chrome', 'Arc', 'Brave Browser', 'Microsoft Edge'];
+-        let activated = false;
+-        for (const appName of appNames) {
+-          try {
+-            execSync(`osascript -e 'tell application "${appName}" to activate'`, { stdio: 'pipe', timeout: 3000, windowsHide: true });
+-            activated = true;
+-            break;
+-          } catch (err: any) {
+-            // Try next browser — osascript fails if app not found or AppleScript errors
+-            if (err?.status === undefined && !err?.message?.includes('Command failed')) throw err;
+-          }
+-        }
++      activateBrowserWindow(await bm.getBrowserPid());
+ 
+-        if (!activated) {
+-          return 'Could not bring browser to foreground. macOS only.';
+-        }
+-
+-        // If a ref was passed, scroll it into view
+-        if (args.length > 0 && args[0].startsWith('@')) {
+-          try {
+-            const resolved = await bm.resolveRef(args[0]);
+-            if ('locator' in resolved) {
+-              await resolved.locator.scrollIntoViewIfNeeded({ timeout: 5000 });
+-              return `Browser activated. Scrolled ${args[0]} into view.`;
+-            }
+-          } catch (err: any) {
+-            // Ref not found or element gone — still activated the browser
+-            if (!err?.message?.includes('not found') && !err?.message?.includes('closed') && !err?.message?.includes('Target') && !err?.message?.includes('timeout')) throw err;
++      // If a ref was passed, scroll it into view
++      if (args.length > 0 && args[0].startsWith('@')) {
++        try {
++          const resolved = await bm.resolveRef(args[0]);
++          if ('locator' in resolved) {
++            await resolved.locator.scrollIntoViewIfNeeded({ timeout: 5000 });
++            return `Browser activated. Scrolled ${args[0]} into view.`;
+           }
++        } catch (err: any) {
++          // Ref not found or element gone — still activated the browser
++          if (!err?.message?.includes('not found') && !err?.message?.includes('closed') && !err?.message?.includes('Target') && !err?.message?.includes('timeout')) throw err;
+         }
+-
+-        return 'Browser window activated.';
+-      } catch (err: any) {
+-        return `focus failed: ${err.message}. macOS only.`;
+       }
++
++      return 'Browser window activated.';
+     }
+ 
+     // ─── Watch ──────────────────────────────────────────
+diff --git a/browse/test/focus-window.test.ts b/browse/test/focus-window.test.ts
+new file mode 100644
+index 000000000..e9b9a36d6
+--- /dev/null
++++ b/browse/test/focus-window.test.ts
+@@ -0,0 +1,51 @@
++import { expect, test } from 'bun:test';
++import { BrowserManager } from '../src/browser-manager';
++import { handleMetaCommand } from '../src/meta-commands';
++import { chromium } from 'playwright';
++import { activateBrowserWindow, browserActivationScript } from '../src/focus-window';
++
++test('each backend resolves only its own Chromium PID, including persistent contexts', async () => {
++  const fs = await import('fs');
++  const os = await import('os');
++  const path = await import('path');
++  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'browse-focus-'));
++  const bm = new BrowserManager();
++  const persistent = await chromium.launchPersistentContext(profile, { headless: true });
++  try {
++    await bm.launch();
++    await expect(handleMetaCommand('focus', [], bm, () => {})).rejects.toThrow('headed mode');
++    const ownPid = await bm.getBrowserPid();
++    const session = await persistent.browser()!.newBrowserCDPSession();
++    const info = await session.send('SystemInfo.getProcessInfo');
++    const otherPid = info.processInfo.find(p => p.type === 'browser')!.id;
++    await session.detach();
++    expect(ownPid).toBeGreaterThan(0);
++    expect(ownPid).not.toBe(otherPid);
++    // Persistent contexts use the same browser-wide CDP endpoint as headed mode.
++    const persistentManager = new BrowserManager();
++    Object.assign(persistentManager, { context: persistent });
++    expect(await persistentManager.getBrowserPid()).toBe(otherPid);
++  } finally {
++    await bm.close();
++    await persistent.close();
++    fs.rmSync(profile, { recursive: true, force: true });
++  }
++}, 30_000);
++
++test('activation targets the supplied PID and verifies foreground status without browser names', () => {
++  expect(browserActivationScript).toContain('runningApplicationWithProcessIdentifier');
++  expect(browserActivationScript).toContain('Number(argv[0])');
++  expect(browserActivationScript).toContain('isActive');
++  expect(browserActivationScript).not.toMatch(/tell application|Google Chrome|Comet|Arc|Brave|Microsoft Edge/);
++});
++
++test('missing browser and invalid PID fail explicitly', async () => {
++  await expect(new BrowserManager().getBrowserPid()).rejects.toThrow('browser');
++  expect(() => activateBrowserWindow(0)).toThrow('PID');
++  expect(() => activateBrowserWindow(NaN)).toThrow('PID');
++});
++
++test.skipIf(process.platform !== 'darwin')('a nonexistent macOS process returns an activation error', () => {
++  // No app is activated and no browser window is opened.
++  expect(() => activateBrowserWindow(2147483647)).toThrow('No running browser process');
++});
+diff --git a/browse/test/headless-gpu-and-reap.test.ts b/browse/test/headless-gpu-and-reap.test.ts
+index d0dbbf0c0..79866fdf6 100644
+--- a/browse/test/headless-gpu-and-reap.test.ts
++++ b/browse/test/headless-gpu-and-reap.test.ts
+@@ -177,7 +177,7 @@ describe('stop-reap wiring pins (#2709)', () => {
+ 
+     // 5. Post-graceful-stop: the daemon closed Chromium via Playwright, but a
+     //    surviving GPU process must still be reaped after sendCommand('stop').
+-    const postStop = between('await sendCommand(state, command, commandArgs);', "if (command === 'focus')");
++    const postStop = between('await sendCommand(state, command, commandArgs);', 'if (import.meta.main)');
+     expect(postStop).toMatch(
+       /if \(command === 'stop'\) \{\s*\n\s*await reapRecordedChromium\(state\);/,
+     );

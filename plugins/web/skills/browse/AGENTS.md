@@ -32,6 +32,7 @@ To change an existing patch, recreate the baseline before it and amend that patc
 | `0004-show-only-the-pinned-tab-logs.patch` | Commands pinned to a tab (`BROWSE_TAB` / `--tab-id`) read and clear only that tab's console and network entries, and a response's status goes to its own tab's request; adds `browse/test/tab-scoped-logs.test.ts` |
 | `0005-stop-duplicate-tabs-and-logs-in-headed-mode.patch` | Headed `newTab` adopts the tab id the context's `page` handler already gave its page, so each new tab appears once in `tabs` and logs each request once; adds `browse/test/headed-newtab.test.ts`, which runs only with `BROWSE_HEADED_TESTS=1` |
 | `0006-type-into-headed-windows-started-from-background-shells.patch` | On macOS, headed daemons started outside Aqua launch through a temporary GUI LaunchAgent, preserving their environment, working directory and logs; bootout leaves the daemon alive; adds `browse/test/aqua-launch.test.ts` without opening a browser |
+| `0007-focus-raises-the-browse-window.patch` | `focus` resolves this daemon's Chromium PID through CDP and activates that process with AppKit, reporting missing processes or failed activation; removes app-name activation from the daemon and CLI; adds `browse/test/focus-window.test.ts` using headless browsers |
 
 The build checks out only `browse/`, `lib/`, `patches/` and the root files, so these upstream parts are absent from an install:
 
