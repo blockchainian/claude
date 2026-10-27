@@ -503,7 +503,7 @@ impl View {
                 .feedback
                 .as_ref()
                 .map(|(feedback, _)| feedback.line())
-                .or_else(|| self.selection_feedback().map(|feedback| feedback.line())),
+                .or_else(|| self.selection_failure().map(|failure| failure.line())),
         }
         .render(area, large, buf);
         self.viewport.borrow_mut().hint_targets.extend(keys);
@@ -947,9 +947,6 @@ impl View {
             .filter(|_| self.selected_draft().is_none());
         let status = match (session, self.selected_draft()) {
             (Some(session), _) => Self::status(session).0,
-            (None, Some(draft)) if draft.working || draft.job.is_some() => {
-                SessionStatus::Working.label()
-            }
             (None, Some(_)) => SessionStatus::New.label(),
             (None, None) => return,
         };

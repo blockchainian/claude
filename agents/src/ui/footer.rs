@@ -24,13 +24,9 @@ impl Feedback {
 }
 
 impl View {
-    /// The failure kept by the selected draft, question or prompt until it is retried, or the
-    /// selected draft's creation while it runs.
-    pub(super) fn selection_feedback(&self) -> Option<Feedback> {
+    /// The failure kept by the selected draft, question or prompt until it is retried.
+    pub(super) fn selection_failure(&self) -> Option<Feedback> {
         let text = match self.selected_draft() {
-            Some(draft) if draft.working || draft.job.is_some() => {
-                return Some(Feedback::Info("Creating task…".into()));
-            }
             Some(draft) => draft.error.clone(),
             None => self
                 .active_question()
