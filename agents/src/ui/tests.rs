@@ -12454,6 +12454,57 @@ fn dialog_worktree(name: &str) -> (tempfile::TempDir, PathBuf) {
 }
 
 #[test]
+fn delete_dialog_trunk_worktree_has_only_task_options() {
+    let (repo, linked) = crate::tasks::tests::worktree();
+    crate::tasks::tests::git(repo.path(), &["checkout", "-b", "feature"]);
+    crate::tasks::tests::git(&linked, &["checkout", "main"]);
+    let mut view = fixture();
+    view.rows[view.selected].cwd = linked.join("sub");
+
+    key(&mut view, KeyCode::Backspace);
+    let rendered = screen(&view, 120, 48);
+    assert!(!rendered.contains("and worktree"), "{rendered}");
+    assert_eq!(view.confirm_dialog.as_ref().unwrap().options(), 2);
+    assert_eq!(view.viewport.borrow().confirm_options.len(), 2);
+    assert_eq!(key(&mut view, KeyCode::Char('3')), None);
+    assert!(view.confirm_dialog.is_some());
+    assert_eq!(
+        key(&mut view, KeyCode::Char('2')),
+        Some(Action::Delete(session_key("42")))
+    );
+
+    for codes in [
+        vec![KeyCode::End],
+        vec![KeyCode::Up],
+        vec![KeyCode::Down, KeyCode::Down, KeyCode::Down],
+    ] {
+        key(&mut view, KeyCode::Backspace);
+        for code in codes {
+            key(&mut view, code);
+        }
+        assert_eq!(
+            key(&mut view, KeyCode::Enter),
+            Some(Action::Delete(session_key("42")))
+        );
+    }
+}
+
+#[test]
+fn archive_trunk_worktree_is_immediate() {
+    let (repo, linked) = crate::tasks::tests::worktree();
+    crate::tasks::tests::git(repo.path(), &["checkout", "-b", "feature"]);
+    crate::tasks::tests::git(&linked, &["checkout", "main"]);
+    let mut view = lifecycle_fixture();
+    view.rows[view.selected].cwd = linked.join("sub");
+    assert_eq!(
+        key(&mut view, KeyCode::Char('a')),
+        Some(Action::Archive(session_key("42")))
+    );
+    assert!(view.confirm_dialog.is_none());
+    assert!(!screen(&view, 120, 48).contains("Archive and delete worktree"));
+}
+
+#[test]
 fn delete_dialog_linked_worktree_options_and_controls() {
     let (repo, linked) = dialog_worktree("fix-claude-session-input");
     let mut view = fixture();

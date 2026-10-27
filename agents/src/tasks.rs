@@ -49,6 +49,25 @@ pub fn linked_worktree(directory: &Path) -> Option<PathBuf> {
     (root != identity.primary_root).then_some(root)
 }
 
+/// A linked checkout that is not on the repository's trunk branch.
+pub fn removable_worktree(directory: &Path) -> Option<PathBuf> {
+    let path = linked_worktree(directory)?;
+    let branch = git(
+        &path,
+        &[
+            std::ffi::OsStr::new("branch"),
+            std::ffi::OsStr::new("--show-current"),
+        ],
+    )
+    .ok()?;
+    // Detached checkouts have no branch to delete.
+    if branch.is_empty() || repository(&path).ok()?.trunk != branch {
+        Some(path)
+    } else {
+        None
+    }
+}
+
 /// Removes a linked checkout only when git can do so without discarding local changes,
 /// then force-deletes its local branch and deletes a same-named upstream remote branch.
 pub fn remove_worktree(path: &Path) -> io::Result<()> {
@@ -58,6 +77,11 @@ pub fn remove_worktree(path: &Path) -> io::Result<()> {
         .ok_or_else(|| io::Error::other("Cannot identify worktree repository"))?;
     if !identity.relative_cwd.as_os_str().is_empty() || path == identity.primary_root {
         return Err(io::Error::other("Directory is not a linked worktree root"));
+    }
+    if removable_worktree(&path).is_none() {
+        return Err(io::Error::other(
+            "Cannot remove a trunk worktree or identify its branch",
+        ));
     }
     // A detached checkout has no branch to delete.
     let branch = git(
@@ -307,7 +331,8 @@ fn latest_head(root: &Path) -> io::Result<String> {
 }
 
 /// The directory a new task on `choice` runs in: the checkout that already has the branch, or a
-/// new worktree under `root/<repository>/<branch>`, with `/` in the branch written as `+`.
+/// primary checkout for trunk, or a new worktree under `root/<repository>/<branch>`,
+/// with `/` in the branch written as `+`.
 pub fn create_worktree(
     directory: &Path,
     root: &Path,
@@ -321,10 +346,15 @@ pub fn create_worktree(
         .strip_prefix(&repo.root)
         .map_err(io::Error::other)?;
     let name = choice.name();
-    if let BranchChoice::Existing(branch) = choice
-        && let Some(checkout) = branch_checkout(&repo.root, branch)?
-    {
-        return Ok(checkout.join(relative));
+    if let BranchChoice::Existing(branch) = choice {
+        if let Some(checkout) = branch_checkout(&repo.root, branch)? {
+            return Ok(checkout.join(relative));
+        }
+        if branch == &repo.trunk {
+            let identity = crate::repository::repository_identity(&repo.root)
+                .ok_or_else(|| io::Error::other("Cannot identify worktree repository"))?;
+            return Ok(identity.primary_root.join(relative));
+        }
     }
     git(
         &repo.root,
@@ -677,6 +707,44 @@ pub(crate) mod tests {
         remove_worktree(&linked).unwrap();
         assert!(!linked.exists());
         assert!(repo.path().exists());
+    }
+
+    #[test]
+    fn remove_worktree_refuses_trunk() {
+        let repo = repo();
+        git(repo.path(), &["checkout", "-b", "feature"]);
+        let linked = repo.path().join("trunk");
+        git(
+            repo.path(),
+            &["worktree", "add", linked.to_str().unwrap(), "main"],
+        );
+        let error = remove_worktree(&linked).unwrap_err();
+        assert!(error.to_string().contains("trunk"), "{error}");
+        assert!(linked.exists());
+        assert_eq!(git(&linked, &["branch", "--show-current"]), "main");
+        assert!(!git(repo.path(), &["show-ref", "--verify", "refs/heads/main"]).is_empty());
+    }
+
+    #[test]
+    fn existing_trunk_reuses_primary_without_switching_or_creating_worktree() {
+        let repo = repo();
+        git(repo.path(), &["checkout", "-b", "feature"]);
+        let trees = tempfile::tempdir().unwrap();
+        let before = git(repo.path(), &["worktree", "list", "--porcelain"]);
+        let cwd = create_worktree(
+            &repo.path().join("sub"),
+            trees.path(),
+            &BranchChoice::Existing("main".into()),
+            &trees.path().join("config"),
+        )
+        .unwrap();
+        assert_eq!(cwd, fs::canonicalize(repo.path()).unwrap().join("sub"));
+        assert_eq!(git(&cwd, &["branch", "--show-current"]), "feature");
+        assert_eq!(
+            git(repo.path(), &["worktree", "list", "--porcelain"]),
+            before
+        );
+        assert_eq!(fs::read_dir(trees.path()).unwrap().count(), 0);
     }
 
     #[test]
