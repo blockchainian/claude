@@ -6,7 +6,7 @@ Proxy, Creator, Render, Mobile, Intel, and Secrets also available in Codex from 
 | Plugin | What it does |
 |---|---|
 | [codex](plugins/codex/README.md) | Runs codex worker and review threads on the shared app-server daemon through the `codex-manager` MCP server: start, send, reply, interrupt, list, review, with an inbox that wakes Claude when a thread finishes or asks. |
-| [feature](plugins/feature/README.md) | Ships a written plan: codex workstreams and UX agents in worktrees, merged behind the plan's checks, reviewed by codex, deployed and checked as the plan says; plus handoff and retro. |
+| [feature](plugins/feature/README.md) | The UX agents: one implements a frontend workstream, one fixes the UX findings routed to it, one drives a scripted UI check and returns a verdict. |
 | [mobile](plugins/mobile/README.md) | Builds, runs, profiles, and screenshots iOS apps on a simulator or a connected iPhone. |
 | [render](plugins/render/README.md) | The Render plugin with only the nine skills this desk uses, plus its MCP server, agent, and hook. |
 | [cloudflare](plugins/cloudflare/README.md) | The Cloudflare plugin with only the six skills this desk uses, plus its five MCP servers. |

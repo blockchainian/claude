@@ -1,39 +1,6 @@
 # feature
 
-Ship a feature from a written plan, with Claude orchestrating and never
-implementing. `/feature:ship` reads `plan.md`, opens a worktree per workstream
-(`skills/ship/scripts/workstream.sh`), launches the codex workstream as one thread per
-workstream through [codex](../codex/README.md)'s `codex-manager` and the UX workstream
-as one `ux-implementer` agent per UX workstream, all at once, merges each
-workstream as it finishes and runs the plan's Checks once per merged batch, deploys
-and runs the checks the plan names, runs codex's review mode once per plan and
-triages it into `findings.json`, fixes in two workstreams with no re-review, re-runs
-the touched UX checks, and decides production only when every finding is
-closed and the checks are green. `/feature:handoff` records a mid-phase stop in under 40
-lines.
-
-The plan is the user's: written in plan mode, by hand, or by any agent. Ship
-reads it by section and requires only Workstreams (each block ending in a
-`Files:` line), Dependencies and Checks; `skills/ship/minimal-plan-template.md` shows
-the full shape. Two checkers gate it before launch: `check-paths.sh` (every path
-exists in the repo) and `check-overlap.sh` (no file on two workstreams).
-`/feature:retro` closes the loop: run in a fresh session on a finished session,
-it ranks the biggest wastes by real token cost (joining the orchestrator
-transcript to each subagent's recorded usage) and routes each fix back into
-ship, the plan template and memory.
-
-## Skills
-
-| Skill | What it does |
-|---|---|
-| `/feature:ship` | Run a `plan.md` through the codex and UX workstreams to a shipped feature |
-| `/feature:handoff` | Write a mid-phase handoff: stopped at, done, next, unverified, do not redo |
-| `/feature:retro` | Run in a fresh session on a finished session: rank the biggest wastes by real token cost, classify each (knowable-fact miss / topology deviation / plan defect), and propose fixes to ship, the plan template and memory |
-| `ship/scripts/check-paths.sh` | Flags a path named in the plan that does not exist in the repo; `(new)` files are skipped |
-| `ship/scripts/check-overlap.sh` | Flags a file listed on two workstreams' `Files:` lines; the orchestrator runs it beside the path checker |
-| `ship/scripts/workstream.sh` | `open <id>` a worktree per workstream, `check <id> <cmd>` in it, `merge <id> [<cmd>...]` onto the session branch with optional checks, `base` for the review |
-| `retro/scripts/extract.mjs` | Objective retro evidence for a named session: spawn ledger + token-share-by-role, joining each spawn's `tool_use.id` to `subagents/<agent>.meta.json`, plus the codex workstream joined from `~/.codex/sessions` |
-| `retro/scripts/efficacy.mjs` | Best-effort efficacy analysis: joins the `retro.json` outcome records in `~/.local/state/feature/retros` (`FEATURE_STATE_DIR`) to `fixes.jsonl` and reports whether each applied fix's waste recurs — near-deductive for mechanical gates, suggestive otherwise |
+The UX agents for a frontend workstream: `ux-implementer` implements it, `ux-autofixer` fixes the UX findings routed to it, and `ux-verifier` drives a scripted UI check and returns a verdict with evidence paths.
 
 ## Agents
 
@@ -43,19 +10,6 @@ ship, the plan template and memory.
 | `ux-autofixer` | Opus 5.5 medium | Fix the PR threads labelled `claude-code-ux` in the UX workstream's worktree, push, reply, resolve |
 | `ux-verifier` | Sonnet low | Drive a scripted UI scenario (browse or iOS simulator) and return a verdict with evidence paths |
 
-## What the plan carries
-
-Everything ship needs to know about the project is in the plan, so a repo
-needs no contract file: the Checks commands (in each workstream and after each merged batch), an optional Deploy
-section (`staging:` and `production:` commands printing JSON with the deployed
-`sha`), optional UX checks (probe commands that print a verdict JSON), and
-optional Deploy checks (commands run against each deploy). A CLI tool's plan
-has Checks and nothing else; a web app's names its deploys and probes.
-
-CI-watching needs nothing from the project: the plugin ships its own
-GitHub/`gh`-based poller, `skills/ship/scripts/watch-ci.sh <ref> [out-file]`, used by
-the production merge gate (step 8) whenever the branch has a PR.
-
 ## Install
 
 ```
@@ -63,29 +17,6 @@ the production merge gate (step 8) whenever the branch has a PR.
 /plugin install feature@blockchainian
 ```
 
-Requires the [codex](../codex/README.md) plugin (its `codex-manager` MCP server) for the codex workstream and `uv` for `watch-ci.sh`.
-
-## Tests
-
-```
-npm run test:feature
-```
-
-Runs `skills/ship/tests/plan-checkers.test.sh` (the two plan checkers against
-fixture plans in a throwaway repo), `skills/ship/tests/workstream.test.sh` (open, check,
-merge and base against a throwaway repo), `skills/ship/tests/watch-ci.test.sh` (the CI-watch
-poller against a stubbed `gh`), and `skills/retro/tests/retro.test.sh` (the retro
-extractor against a hermetic fixture session).
-
 ## License
 
 MIT
-
-## Environment variables
-
-| Variable | Purpose | Required | Set in |
-| --- | --- | --- | --- |
-| `CI_TIMEOUT` | CI waiting limit; default 300 seconds | Optional | Shell environment |
-| `CI_INTERVAL` | CI check interval; default 5 seconds | Optional | Shell environment |
-| `FEATURE_OUTPUT_DIR` | Root for retro reports; default ~/Documents, with retros/ | Optional | Shell environment |
-| `FEATURE_STATE_DIR` | Root for retro.json records and the fixes.jsonl ledger; default ~/.local/state/feature, with retros/ | Optional | Shell environment |

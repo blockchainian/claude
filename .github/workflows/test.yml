@@ -53,9 +53,3 @@ jobs:
         with:
           node-version: 22
       - run: npm run test:marketplace
-  feature:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: npm run test:feature

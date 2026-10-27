@@ -12,10 +12,6 @@ or has something to say. Codex reaches Claude through two tools,
 Threads Claude starts get that server with the thread; sessions Claude
 attaches to get it from the installed `claude` plugin (see Install).
 
-The [feature](../feature/README.md) plugin's `/feature:ship` uses it as the
-backend: one thread per workstream, each in its own worktree, with
-Claude merging behind the plan's check command.
-
 ## Install
 
 ### Claude Code — manage Codex
