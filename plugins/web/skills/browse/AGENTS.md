@@ -33,6 +33,7 @@ To change an existing patch, recreate the baseline before it and amend that patc
 | `0005-stop-duplicate-tabs-and-logs-in-headed-mode.patch` | Headed `newTab` adopts the tab id the context's `page` handler already gave its page, so each new tab appears once in `tabs` and logs each request once; adds `browse/test/headed-newtab.test.ts`, which runs only with `BROWSE_HEADED_TESTS=1` |
 | `0006-type-into-headed-windows-started-from-background-shells.patch` | On macOS, headed daemons started outside Aqua launch through a temporary GUI LaunchAgent, preserving their environment, working directory and logs; bootout leaves the daemon alive; adds `browse/test/aqua-launch.test.ts` without opening a browser |
 | `0007-focus-raises-the-browse-window.patch` | `focus` resolves this daemon's Chromium PID through CDP and activates that process with AppKit, reporting missing processes or failed activation; removes app-name activation from the daemon and CLI; adds `browse/test/focus-window.test.ts` using headless browsers |
+| `0008-refuse-a-profile-another-browser-is-using.patch` | Only a dead local SingletonLock owner permits cleanup; live or foreign-host owners stop headed startup with a profile/PID error; removes CLI killing by shared-profile locks and shutdown cleanup of shared locks; adds `browse/test/profile-lock.test.ts` |
 
 The build checks out only `browse/`, `lib/`, `patches/` and the root files, so these upstream parts are absent from an install:
 
