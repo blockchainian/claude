@@ -41,13 +41,12 @@ def location(filename, line):
     return json.dumps(filename, ensure_ascii=True)[1:-1] + ":" + str(line)
 
 
-def scan_secrets(revisions):
+def scan_secrets(*scope):
     config = Path(__file__).resolve().parents[2] / ".gitleaks.toml"
     with tempfile.TemporaryDirectory() as directory:
         report = Path(directory) / "report.json"
         result = subprocess.run(
-            ["gitleaks", "git", "--config", str(config),
-             "--log-opts=--diff-merges=first-parent " + revisions,
+            ["gitleaks", "git", "--config", str(config), *scope,
              "--redact", "--no-banner", "--report-format=json",
              "--report-path", str(report)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -89,9 +88,10 @@ def scan_denylist(revisions):
                 filename = name[2:] if name.startswith("b/") else None
             elif line.startswith("@@ "):
                 match = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
-                if not match or filename is None:
+                if not match:
                     raise ValueError("Invalid patch")
-                line_number = int(match[1])
+                # A deleted file's hunks add no lines.
+                line_number = int(match[1]) if filename is not None else None
             elif line_number is not None and line.startswith("+"):
                 if any(word in line[1:].casefold() for word in words):
                     findings.add(location(filename, line_number))
@@ -105,9 +105,12 @@ def scan_denylist(revisions):
 
 def main():
     try:
+        # The pre-commit hook scans what is about to be committed.
+        if sys.argv[1:] == ["staged"]:
+            return scan_secrets("--pre-commit", "--staged")
         revisions = commit_range()
         if sys.argv[1:] == ["gitleaks"]:
-            return scan_secrets(revisions)
+            return scan_secrets("--log-opts=--diff-merges=first-parent " + revisions)
         if sys.argv[1:] == ["denylist"]:
             return scan_denylist(revisions)
         raise ValueError("Invalid scanner")

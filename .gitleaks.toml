@@ -10,7 +10,7 @@ secretGroup = 1
 [[rules.allowlists]]
 description = "Documented synthetic account names"
 regexTarget = "secret"
-regexes = ['''(?i)^(?:example-user|runner)$''']
+regexes = ['''(?i)^(?:example-user)$''']
 
 [[rules]]
 id = "json-personal-home-path"
@@ -21,4 +21,4 @@ secretGroup = 1
 [[rules.allowlists]]
 description = "Documented synthetic account names"
 regexTarget = "secret"
-regexes = ['''(?i)^(?:example-user|runner)$''']
+regexes = ['''(?i)^(?:example-user)$''']
