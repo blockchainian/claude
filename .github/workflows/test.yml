@@ -9,10 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      PRIVACY_EVENT: ${{ github.event_name }}
-      PRIVACY_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-      PRIVACY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,12 +27,16 @@ jobs:
           tar -xzf "$archive" gitleaks
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Scan commits for secrets and home paths
-        run: python3 .github/scripts/privacy.py gitleaks
+        run: |
+          revisions=$(python3 .github/scripts/commit_range.py)
+          gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="--diff-merges=first-parent $revisions"
       - name: Scan added lines for private terms
         if: ${{ !cancelled() }}
         env:
           PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
-        run: python3 .github/scripts/privacy.py denylist
+        run: |
+          revisions=$(python3 .github/scripts/commit_range.py)
+          python3 .github/scripts/gitleaks-privacy.py git --log-opts="--diff-merges=first-parent $revisions"
   codex:
     runs-on: ubuntu-latest
     steps:

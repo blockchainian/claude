@@ -1,6 +1,7 @@
 use crate::event::{Event, Kind, Section, ToolCall};
 use crate::images::{Image, ImageSource};
 use crate::model::{Activity, PullRequest, SessionTask, TaskStatus};
+use crate::providers::pull_request::{CreatedPullRequest, creates_pull_request};
 use crate::providers::text::printable;
 use crate::providers::tool::{self, Body, ToolData, ToolResult, list_title, tool_kind};
 use base64::Engine;
@@ -50,7 +51,8 @@ pub(super) struct Tasks {
     offset: u64,
     identity: Option<(u64, u64)>,
     tasks: Vec<SessionTask>,
-    pr: Option<PullRequest>,
+    pr: CreatedPullRequest,
+    cwd: Option<PathBuf>,
 }
 
 fn questions(input: &Value) -> io::Result<Vec<crate::ask::Question>> {
@@ -88,7 +90,8 @@ impl Tasks {
         if result.is_err() {
             self.reader = None;
             self.summary = None;
-            self.pr = None;
+            self.pr = CreatedPullRequest::default();
+            self.cwd = None;
             self.tasks.clear();
             self.offset = 0;
         }
@@ -115,7 +118,8 @@ impl Tasks {
             self.parsed_bytes += update.parsed_bytes;
         }
         if update.reset {
-            self.pr = None;
+            self.pr = CreatedPullRequest::default();
+            self.cwd = None;
             self.tasks.clear();
             self.offset = 0;
         }
@@ -126,10 +130,25 @@ impl Tasks {
             if *offset >= reader.read {
                 continue;
             }
-            if let Some(pr) = printed_pull_request(record) {
-                self.pr = Some(pr);
-            }
             let payload = &record["payload"];
+            if record["type"] == "session_meta" {
+                self.cwd = payload["cwd"].as_str().map(PathBuf::from);
+            }
+            let item = &payload["item"];
+            if record["type"] == "event_msg"
+                && payload["type"] == "item_completed"
+                && item["type"] == "CommandExecution"
+                && let Some(command) = item["command"].as_array()
+                && let Some(command) = command
+                    .iter()
+                    .map(Value::as_str)
+                    .collect::<Option<Vec<_>>>()
+                && creates_pull_request(&command.join(" "))
+                && let Some(output) = item["aggregated_output"].as_str()
+                && let Some(cwd) = &self.cwd
+            {
+                self.pr.record(cwd, output);
+            }
             if record["type"] == "response_item"
                 && payload["type"] == "function_call"
                 && payload["name"]
@@ -151,7 +170,7 @@ impl Tasks {
             latest.as_ref(),
         )?;
         result.tasks = self.tasks.clone();
-        result.pr = self.pr.clone();
+        result.pr = self.pr.pr.clone();
         self.summary = Some(result.clone());
         Ok(result)
     }
@@ -222,25 +241,6 @@ impl Tasks {
         self.offset = offset;
         Ok(self.tasks.clone())
     }
-}
-
-/// The pull request URL printed by a successful command execution.
-fn printed_pull_request(record: &Value) -> Option<PullRequest> {
-    let payload = &record["payload"];
-    let item = &payload["item"];
-    if record["type"] != "event_msg"
-        || payload["type"] != "item_completed"
-        || item["type"] != "CommandExecution"
-        || item["status"] != "completed"
-        || item["exit_code"].as_i64() != Some(0)
-    {
-        return None;
-    }
-    item["aggregated_output"]
-        .as_str()?
-        .lines()
-        .rev()
-        .find_map(|line| PullRequest::from_url(line.trim()))
 }
 
 fn plan_tasks(payload: &Value) -> io::Result<Vec<SessionTask>> {
@@ -3062,98 +3062,146 @@ mod tests {
     }
 
     fn pr_summary(records: &[Value]) -> Summary {
+        pr_summary_in(records, "git@github.com:example-org/wallet.git")
+    }
+
+    fn pr_summary_in(records: &[Value], remote: &str) -> Summary {
         let file = tempfile::NamedTempFile::new().unwrap();
+        let checkout = crate::providers::pull_request::tests::checkout(remote);
+        let mut records = records.to_vec();
+        if let Some(metadata) = records
+            .iter_mut()
+            .find(|record| record["type"] == "session_meta")
+        {
+            metadata["payload"]["cwd"] = checkout.path().to_str().unwrap().into();
+        }
         let text: String = records.iter().map(|record| format!("{record}\n")).collect();
         std::fs::write(file.path(), text).unwrap();
         Tasks::default().summary(file.path()).unwrap()
     }
 
     #[test]
-    fn summary_reads_pr_from_python_output() {
+    fn summary_ignores_python_subprocess_output() {
         let record = serde_json::from_str(include_str!(
             "../../../tests/fixtures/codex-pr-python.jsonl"
         ))
         .unwrap();
         assert_eq!(
-            pr_summary(&[record]).pr,
-            Some(PullRequest {
-                number: 43,
-                url: "https://github.com/example/project/pull/43".into(),
-            })
+            pr_summary_in(
+                &[pr_fixture()[0].clone(), record],
+                "https://github.com/example/project"
+            )
+            .pr,
+            None,
         );
     }
 
     #[test]
     fn summary_reads_pr_from_gh_pr_create() {
-        assert_eq!(
-            pr_summary(&pr_fixture()).pr,
-            Some(PullRequest {
-                number: 850,
-                url: "https://github.com/example/project/pull/850".into(),
-            })
-        );
+        assert_eq!(pr_summary(&pr_fixture()).pr.unwrap().number, 679);
     }
 
     #[test]
-    fn summary_ignores_failed_gh_pr_create() {
+    fn summary_accepts_pr_url_regardless_of_exit_code() {
         let mut records = pr_fixture();
         records.last_mut().unwrap()["payload"]["item"]["exit_code"] = serde_json::json!(1);
+        assert_eq!(pr_summary(&records).pr.unwrap().number, 679);
+    }
+
+    #[test]
+    fn summary_ignores_failed_gh_pr_create_with_zero_exit_code() {
+        let mut records = pr_fixture();
+        records.last_mut().unwrap()["payload"]["item"]["aggregated_output"] =
+            include_str!("../../../tests/fixtures/claude-pr-create/failed.output").into();
+        assert_eq!(pr_summary(&records).pr, None);
+    }
+
+    #[test]
+    fn summary_ignores_other_commands_printing_pr_urls() {
+        let mut records = pr_fixture();
+        records.last_mut().unwrap()["payload"]["item"]["command"][2] =
+            "gh pr view 679 --json url".into();
         assert_eq!(pr_summary(&records).pr, None);
     }
 
     #[test]
     fn summary_ignores_pr_urls_inside_json() {
         let mut records = pr_fixture();
-        records.last_mut().unwrap()["payload"]["item"]["command"][2] =
-            serde_json::json!("gh pr view 850 --json url");
         records.last_mut().unwrap()["payload"]["item"]["aggregated_output"] =
-            serde_json::json!({"url": "https://github.com/example/project/pull/850"})
+            serde_json::json!({"url": "https://github.com/example-org/wallet/pull/679"})
                 .to_string()
                 .into();
         assert_eq!(pr_summary(&records).pr, None);
     }
 
     #[test]
-    fn summary_pr_uses_last_url_from_successful_commands() {
+    fn summary_pr_uses_last_matching_repository_url() {
         let mut records = pr_fixture();
         let mut last = records.last().unwrap().clone();
         last["payload"]["item"]["aggregated_output"] = serde_json::json!(
-            "https://github.com/example/project/pull/850\n  https://github.com/example/project/pull/851  \nDone\n"
+            "https://github.com/example-org/wallet/pull/679\n  https://github.com/example-org/wallet/pull/680  \nDone\n"
         );
         records.push(last);
         let mut ignored = records.last().unwrap().clone();
-        ignored["payload"]["item"]["exit_code"] = serde_json::json!(1);
         ignored["payload"]["item"]["aggregated_output"] =
-            serde_json::json!("https://github.com/example/project/pull/852\n");
+            "https://github.com/example/project/pull/681\n".into();
         records.push(ignored);
-        assert_eq!(pr_summary(&records).pr.unwrap().number, 851);
+        assert_eq!(pr_summary(&records).pr.unwrap().number, 680);
     }
 
     #[test]
-    fn summary_pr_requires_completed_command_execution() {
-        for (field, value) in [("type", "FileChange"), ("status", "inProgress")] {
+    fn summary_pr_requires_command_execution_event() {
+        for (field, value) in [("type", "FileChange"), ("type", "AgentMessage")] {
             let mut records = pr_fixture();
             records.last_mut().unwrap()["payload"]["item"][field] = value.into();
             records.last_mut().unwrap()["payload"]["item"]["changes"] = serde_json::json!({});
-            assert_eq!(pr_summary(&records).pr, None, "{field}");
+            records.last_mut().unwrap()["payload"]["item"]["content"] = serde_json::json!([]);
+            assert_eq!(pr_summary(&records).pr, None, "{value}");
         }
     }
 
     #[test]
     fn summary_pr_tracks_appends_and_clears_on_replacement() {
-        use std::io::Write;
-        let records = pr_fixture();
+        use std::io::{Seek, Write};
+        let checkout = crate::providers::pull_request::tests::checkout(
+            "git@github.com:example-org/wallet.git",
+        );
+        let mut records = pr_fixture();
+        records[0]["payload"]["cwd"] = checkout.path().to_str().unwrap().into();
         let mut file = tempfile::NamedTempFile::new().unwrap();
-        for record in &records[..2] {
-            writeln!(file, "{record}").unwrap();
-        }
+        writeln!(file, "{}", records[0]).unwrap();
         let mut tasks = Tasks::default();
         assert_eq!(tasks.summary(file.path()).unwrap().pr, None);
-        writeln!(file, "{}", records[2]).unwrap();
-        assert_eq!(tasks.summary(file.path()).unwrap().pr.unwrap().number, 850);
-        assert_eq!(tasks.summary(file.path()).unwrap().pr.unwrap().number, 850);
+        writeln!(file, "{}", records[1]).unwrap();
+        assert_eq!(tasks.summary(file.path()).unwrap().pr.unwrap().number, 679);
+        assert_eq!(tasks.summary(file.path()).unwrap().pr.unwrap().number, 679);
+        assert!(
+            std::process::Command::new("git")
+                .current_dir(checkout.path())
+                .args([
+                    "remote",
+                    "set-url",
+                    "origin",
+                    "https://github.com/example/project"
+                ])
+                .status()
+                .unwrap()
+                .success()
+        );
+        records[1]["payload"]["item"]["aggregated_output"] =
+            "https://github.com/example-org/wallet/pull/680\n".into();
+        writeln!(file, "{}", records[1]).unwrap();
+        assert_eq!(tasks.summary(file.path()).unwrap().pr.unwrap().number, 680);
         std::fs::write(file.path(), format!("{}\n", records[0])).unwrap();
         assert_eq!(tasks.summary(file.path()).unwrap().pr, None);
+        file.as_file_mut().seek(std::io::SeekFrom::End(0)).unwrap();
+        writeln!(file, "{}", records[1]).unwrap();
+        assert_eq!(tasks.summary(file.path()).unwrap().pr, None);
+        assert_eq!(tasks.cwd.as_deref(), Some(checkout.path()));
+        std::fs::remove_file(file.path()).unwrap();
+        assert!(tasks.summary(file.path()).is_err());
+        assert!(tasks.cwd.is_none());
+        assert!(tasks.pr.pr.is_none());
     }
 
     fn completed_tool(record: &Value) -> std::io::Result<Option<Event>> {

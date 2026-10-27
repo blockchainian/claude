@@ -22,8 +22,6 @@ This directory is `agents`, the terminal command center for Claude Code and Code
 
 ## Development
 
-- Install whenever a requested change is finished.
-
 ## Tools
 
 ### Install

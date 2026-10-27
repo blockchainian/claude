@@ -1,6 +1,7 @@
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod mcp;
+pub(crate) mod pull_request;
 pub(crate) mod text;
 pub(crate) mod tool;
 

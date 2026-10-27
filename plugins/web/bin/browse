@@ -1,29 +1,9 @@
 #!/bin/bash
 # ABOUTME: Runs the web plugin's patched browse CLI, building it on first use into <plugin data>/browse/<build id>.
 # ABOUTME: Concurrent first calls build once behind a mkdir lock; build output goes to stderr so stdout stays browse's own.
-# ABOUTME: A launcher from a superseded install runs the currently installed version instead.
 set -euo pipefail
 
 PLUGIN_ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd -P)
-
-# A session started before a plugin update still has the superseded version's bin/ on PATH. Run the version
-# installed now instead, so every caller on this machine shares one build and no daemon restarts between builds.
-INSTALLED_PLUGINS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"
-if [ -f "$INSTALLED_PLUGINS" ] && command -v bun >/dev/null; then
-  CURRENT_ROOT=$(bun -e '
-    const { existsSync, realpathSync } = require("node:fs");
-    const { dirname } = require("node:path");
-    const [file, root] = process.argv.slice(1);
-    const installs = Object.values(require(file).plugins ?? {}).flat();
-    const paths = installs.map((install) => install.installPath).filter((path) => path && existsSync(path));
-    const current = paths.map((path) => realpathSync(path)).find((path) => dirname(path) === dirname(root));
-    if (current) console.log(current);
-  ' "$INSTALLED_PLUGINS" "$PLUGIN_ROOT" 2>/dev/null || true)
-  if [ -n "$CURRENT_ROOT" ] && [ "$CURRENT_ROOT" != "$PLUGIN_ROOT" ] && [ -x "$CURRENT_ROOT/bin/browse" ]; then
-    exec "$CURRENT_ROOT/bin/browse" "$@"
-  fi
-fi
-
 SKILL_DIR="$PLUGIN_ROOT/skills/browse"
 BUILD_ID=$(bash "$SKILL_DIR/scripts/build-id.sh")
 DEST="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/web-blockchainian}/browse/$BUILD_ID"

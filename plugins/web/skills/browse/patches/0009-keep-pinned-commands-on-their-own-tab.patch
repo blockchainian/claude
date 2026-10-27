@@ -1,0 +1,291 @@
+diff --git a/browse/src/browser-manager.ts b/browse/src/browser-manager.ts
+index a45cf8514..87c58da1c 100644
+--- a/browse/src/browser-manager.ts
++++ b/browse/src/browser-manager.ts
+@@ -15,6 +15,7 @@
+  *   restores state. Falls back to clean slate on any failure.
+  */
+ 
++import { AsyncLocalStorage } from 'node:async_hooks';
+ import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Page, type Locator, type Cookie } from 'playwright';
+ import { writeSecureFile, mkdirSecure } from './file-permissions';
+ import { addConsoleEntry, addNetworkEntry, addDialogEntry, networkBuffer, type DialogEntry } from './buffers';
+@@ -302,6 +303,7 @@ export class BrowserManager {
+   private proxyConfig: { server: string; username?: string; password?: string } | null = null;
+   private pages: Map<number, Page> = new Map();
+   private tabSessions: Map<number, TabSession> = new Map();
++  readonly commandContext = new AsyncLocalStorage<{ tabId: number }>();
+   private activeTabId: number = 0;
+   private nextTabId: number = 1;
+   private extraHeaders: Record<string, string> = {};
+@@ -977,7 +979,7 @@ export class BrowserManager {
+   async isHealthy(): Promise<boolean> {
+     if (!this.browser || !this.browser.isConnected()) return false;
+     try {
+-      const page = this.pages.get(this.activeTabId);
++      const page = this.pages.get(this.getActiveTabId());
+       if (!page) return true; // connected but no pages — still healthy
+       await Promise.race([
+         page.evaluate('1'),
+@@ -1026,7 +1028,7 @@ export class BrowserManager {
+   }
+ 
+   async closeTab(id?: number): Promise<void> {
+-    const tabId = id ?? this.activeTabId;
++    const tabId = id ?? this.getActiveTabId();
+     const page = this.pages.get(tabId);
+     if (!page) throw new Error(`Tab ${tabId} not found`);
+ 
+@@ -1115,7 +1117,7 @@ export class BrowserManager {
+   }
+ 
+   getActiveTabId(): number {
+-    return this.activeTabId;
++    return this.commandContext.getStore()?.tabId ?? this.activeTabId;
+   }
+ 
+   getTabCount(): number {
+@@ -1194,7 +1196,7 @@ export class BrowserManager {
+         id,
+         url: page.url(),
+         title: await page.title().catch(() => ''),
+-        active: id === this.activeTabId,
++        active: id === this.getActiveTabId(),
+       });
+     }
+     return tabs;
+@@ -1203,6 +1205,8 @@ export class BrowserManager {
+   // ─── Session Access ────────────────────────────────────────
+   /** Get the TabSession for the active tab. */
+   getActiveSession(): TabSession {
++    const tabId = this.commandContext.getStore()?.tabId;
++    if (tabId !== undefined) return this.getSession(tabId);
+     const session = this.tabSessions.get(this.activeTabId);
+     if (!session) throw new Error('No active page. Use "browse goto <url>" first.');
+     return session;
+@@ -1551,7 +1555,7 @@ export class BrowserManager {
+ 
+       pages.push({
+         url: url === 'about:blank' ? '' : url,
+-        isActive: id === this.activeTabId,
++        isActive: id === this.getActiveTabId(),
+         storage,
+         loadedHtml: loaded?.html,
+         loadedHtmlWaitUntil: loaded?.waitUntil,
+diff --git a/browse/src/server.ts b/browse/src/server.ts
+index 6a74c897b..e056fa341 100644
+--- a/browse/src/server.ts
++++ b/browse/src/server.ts
+@@ -1060,18 +1060,6 @@ async function handleCommandInternalImpl(
+     if (!opts?.skipRateCheck && tokenInfo.token) recordCommand(tokenInfo.token);
+   }
+ 
+-  // Pin to a specific tab if requested (set by BROWSE_TAB env var, e.g. per-tab agent contexts).
+-  // This prevents parallel agents from interfering with each other's tab context.
+-  // Safe because Bun's event loop is single-threaded — no concurrent handleCommand.
+-  let savedTabId: number | null = null;
+-  if (tabId !== undefined && tabId !== null) {
+-    savedTabId = browserManager.getActiveTabId();
+-    // bringToFront: false — internal tab pinning must NOT steal window focus
+-    try { browserManager.switchTab(tabId, { bringToFront: false }); } catch (err: any) {
+-      console.warn('[browse] Failed to pin tab', tabId, ':', err.message);
+-    }
+-  }
+-
+   // ─── Tab ownership check (own-only tokens / pair-agent isolation) ──
+   //
+   // Only `own-only` tokens (pair-agent over tunnel) are bound to their own
+@@ -1165,13 +1153,13 @@ async function handleCommandInternalImpl(
+             const target = session.getActiveFrameOrPage();
+             result = await getCleanTextWithStripping(target);
+           } else {
+-            result = await handleReadCommand(command, args, session, browserManager, { tabId: tabId ?? undefined });
++            result = await handleReadCommand(command, args, session, browserManager, { tabId: browserManager.commandContext.getStore()?.tabId });
+           }
+         } finally {
+           await cleanupHiddenMarkers(page);
+         }
+       } else {
+-        result = await handleReadCommand(command, args, session, browserManager, { tabId: tabId ?? undefined });
++        result = await handleReadCommand(command, args, session, browserManager, { tabId: browserManager.commandContext.getStore()?.tabId });
+       }
+     } else if (WRITE_COMMANDS.has(command)) {
+       result = await handleWriteCommand(command, args, session, browserManager);
+@@ -1286,21 +1274,8 @@ async function handleCommandInternalImpl(
+     });
+ 
+     browserManager.resetFailures();
+-    // Restore original active tab if we pinned to a specific one
+-    if (savedTabId !== null) {
+-      try { browserManager.switchTab(savedTabId, { bringToFront: false }); } catch (restoreErr: any) {
+-        console.warn('[browse] Failed to restore tab after command:', restoreErr.message);
+-      }
+-    }
+     return { status: 200, result };
+   } catch (err: any) {
+-    // Restore original active tab even on error
+-    if (savedTabId !== null) {
+-      try { browserManager.switchTab(savedTabId, { bringToFront: false }); } catch (restoreErr: any) {
+-        console.warn('[browse] Failed to restore tab after error:', restoreErr.message);
+-      }
+-    }
+-
+     // Activity: emit command_end (error) — skipped for chain subcommands
+     const errorDuration = Date.now() - startTime;
+     if (!opts?.skipActivity) {
+@@ -1350,7 +1325,15 @@ async function handleCommandInternal(
+   tokenInfo?: TokenInfo | null,
+   opts?: { skipRateCheck?: boolean; skipActivity?: boolean; chainDepth?: number },
+ ): Promise<CommandResult> {
+-  const cr = await handleCommandInternalImpl(body, tokenInfo, opts);
++  const execute = () => handleCommandInternalImpl(body, tokenInfo, opts);
++  const { tabId } = body;
++  if (tabId !== undefined && tabId !== null && !browserManager.getPageForTab(tabId)) {
++    return { status: 404, result: JSON.stringify({ error: `tab ${tabId} not found` }), json: true };
++  }
++  // Nested chain commands inherit their parent's pin unless they name a tab.
++  const cr = await (tabId !== undefined && tabId !== null
++    ? browserManager.commandContext.run({ tabId }, execute)
++    : execute());
+   return { ...cr, result: stripLoneSurrogates(cr.result) };
+ }
+ 
+diff --git a/browse/test/pinned-tab-context.test.ts b/browse/test/pinned-tab-context.test.ts
+new file mode 100644
+index 000000000..266338f69
+--- /dev/null
++++ b/browse/test/pinned-tab-context.test.ts
+@@ -0,0 +1,133 @@
++/** Commands pinned to a tab reject missing tabs and stay isolated across awaits. */
++import { afterAll, beforeAll, expect, test } from 'bun:test';
++import * as fs from 'fs';
++import * as os from 'os';
++import * as path from 'path';
++import { spawn, type ChildProcess } from 'node:child_process';
++
++const root = fs.mkdtempSync(path.join(os.tmpdir(), 'browse-pinned-context-'));
++const token = 'pinned-tab-context-test-token';
++let daemon: ChildProcess;
++let apiUrl: string;
++let pages: ReturnType<typeof Bun.serve>;
++let tabA: number;
++let tabB: number;
++let base: string;
++const gates = new Map<string, { entered: () => void; released: Promise<void> }>();
++
++function hold(name: string) {
++  let entered!: () => void;
++  let release!: () => void;
++  const arrived = new Promise<void>(resolve => { entered = resolve; });
++  const released = new Promise<void>(resolve => { release = resolve; });
++  gates.set(name, { entered, released });
++  return { arrived, release };
++}
++
++const command = (tabId: number | undefined, command: string, args: string[] = []) =>
++  fetch(`${apiUrl}/command`, {
++    method: 'POST',
++    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
++    body: JSON.stringify({ tabId, command, args }),
++  });
++
++beforeAll(async () => {
++  const env = {
++    ...process.env, AUTH_TOKEN: token, BROWSE_PORT: '0',
++    BROWSE_STATE_FILE: path.join(root, 'state', 'browse.json'),
++    CHROMIUM_PROFILE: path.join(root, 'profile'), BROWSE_PARENT_PID: '0',
++    BROWSE_PERSIST_STATE: '0', BROWSE_TUNNEL: '0', BROWSE_TUNNEL_LOCAL_ONLY: '0',
++    BROWSE_HEADLESS_SKIP: '0',
++  };
++  delete env.BROWSE_HEADED;
++  delete env.BROWSE_EXTENSIONS_DIR;
++  daemon = spawn(process.execPath, [path.resolve(import.meta.dir, '../src/server.ts')], { env });
++  const log = fs.createWriteStream(path.join(root, 'daemon.log'));
++  daemon.stdout!.pipe(log);
++  daemon.stderr!.pipe(log);
++  await new Promise<void>((resolve, reject) => {
++    let output = '';
++    const timeout = setTimeout(() => reject(new Error('daemon startup timed out')), 20_000);
++    daemon.once('exit', code => { clearTimeout(timeout); reject(new Error(`daemon exited: ${code}`)); });
++    daemon.stdout!.on('data', chunk => {
++      output += chunk;
++      if (output.includes('[browse] Server running on ')) {
++        const state = JSON.parse(fs.readFileSync(env.BROWSE_STATE_FILE, 'utf8'));
++        apiUrl = `http://127.0.0.1:${state.port}`;
++        clearTimeout(timeout);
++        resolve();
++      }
++    });
++  });
++  pages = Bun.serve({
++    port: 0, hostname: '127.0.0.1',
++    async fetch(req) {
++      const gate = gates.get(new URL(req.url).pathname);
++      if (gate) { gate.entered(); await gate.released; }
++      return new Response('<p>page</p>', { headers: { 'Content-Type': 'text/html' } });
++    },
++  });
++  base = `http://127.0.0.1:${pages.port}`;
++  tabA = (await (await command(undefined, 'newtab', [`${base}/a`, '--json'])).json()).tabId;
++  tabB = (await (await command(undefined, 'newtab', [`${base}/b`, '--json'])).json()).tabId;
++}, 30_000);
++
++afterAll(async () => {
++  pages?.stop(true);
++  if (daemon && daemon.exitCode === null) {
++    daemon.kill('SIGINT');
++    await new Promise<void>(resolve => daemon.once('exit', () => resolve()));
++  }
++  fs.rmSync(root, { recursive: true, force: true });
++}, 15_000);
++
++test('missing pinned tab returns 404 without executing on any tab', async () => {
++  const response = await command(999999, 'js', ['window.wrongTabExecuted = true']);
++  const result = await response.json();
++  const executed = await Promise.all([tabA, tabB].map(id =>
++    command(id, 'js', ['window.wrongTabExecuted === true']).then(r => r.json())));
++  expect({ status: response.status, result, executed }).toEqual({
++    status: 404, result: { error: 'tab 999999 not found' }, executed: [false, false],
++  });
++});
++
++test('concurrent pinned commands keep their own tab across awaits', async () => {
++  const a = hold('/hold-a');
++  const b = hold('/hold-b');
++  const run = (tabId: number, name: string) => command(tabId, 'chain', [JSON.stringify([
++    ['js', `fetch('/hold-${name}').then(() => location.href)`],
++    ['js', 'location.href'],
++    ['console'],
++    ['network'],
++  ])]);
++  for (const [id, label] of [[tabA, 'a'], [tabB, 'b']] as const) {
++    await command(id, 'js', [`console.log('log-from-${label}')`]);
++  }
++  await command(undefined, 'tab', [String(tabA)]);
++  const pendingA = run(tabA, 'a');
++  let pendingB: Promise<Response> | undefined;
++  try {
++    await a.arrived;
++    pendingB = run(tabB, 'b');
++    await b.arrived;
++    a.release();
++    const responseA = await pendingA;
++    const outputA = await responseA.text();
++    b.release();
++    const responseB = await pendingB;
++    const outputB = await responseB.text();
++    expect(responseA.status).toBe(200);
++    expect(responseB.status).toBe(200);
++    for (const [output, own, other] of [[outputA, 'a', 'b'], [outputB, 'b', 'a']] as const) {
++      expect(output.match(new RegExp(`\\[js\\] ${base}/${own}`, 'g'))?.length).toBe(2);
++      expect(output).not.toContain(`${base}/${other}`);
++      expect(output).toContain(`log-from-${own}`);
++      expect(output).not.toContain(`log-from-${other}`);
++    }
++    expect(await (await command(undefined, 'js', ['location.href'])).text()).toBe(`${base}/a`);
++  } finally {
++    a.release();
++    b.release();
++    await Promise.all([pendingA, pendingB]);
++  }
++}, 15_000);

@@ -34,6 +34,7 @@ To change an existing patch, recreate the baseline before it and amend that patc
 | `0006-type-into-headed-windows-started-from-background-shells.patch` | On macOS, headed daemons started outside Aqua launch through a temporary GUI LaunchAgent, preserving their environment, working directory and logs; bootout leaves the daemon alive; adds `browse/test/aqua-launch.test.ts` without opening a browser |
 | `0007-focus-raises-the-browse-window.patch` | `focus` resolves this daemon's Chromium PID through CDP and activates that process with AppKit, reporting missing processes or failed activation; removes app-name activation from the daemon and CLI; adds `browse/test/focus-window.test.ts` using headless browsers |
 | `0008-refuse-a-profile-another-browser-is-using.patch` | Only a dead local SingletonLock owner permits cleanup; live or foreign-host owners stop headed startup with a profile/PID error; removes CLI killing by shared-profile locks and shutdown cleanup of shared locks; adds `browse/test/profile-lock.test.ts` |
+| `0009-keep-pinned-commands-on-their-own-tab.patch` | Commands pinned to a tab return 404 when it is missing and stay on their own tab across concurrent awaits, including chained commands and tab-scoped logs; adds `browse/test/pinned-tab-context.test.ts` using headless browsers |
 
 The build checks out only `browse/`, `lib/`, `patches/` and the root files, so these upstream parts are absent from an install:
 
@@ -85,7 +86,6 @@ Run these from this skill's directory.
 
 - `./scripts/build.sh [--dest <dir>]` — fetches gstack at `GSTACK_COMMIT`, applies the patches, installs and compiles; default dest `${CLAUDE_PLUGIN_DATA:-~/.claude/plugins/data/web-blockchainian}/browse/<build id>`
 - `../../bin/browse` — the launcher runs `build.sh` on first use of each build id (`scripts/build-id.sh`: a digest of `GSTACK_COMMIT`, the patches and the build scripts)
-- A launcher from a superseded install, still on an older session's PATH, runs the install `installed_plugins.json` records for its plugin directory instead
 
 A new build id means a new binary, and each running daemon restarts on its next command, losing its tabs.
 

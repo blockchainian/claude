@@ -57,3 +57,38 @@ fn pinned_invalid_records_do_not_discard_other_groups() {
     assert!(actual[..4].iter().all(Option::is_none));
     assert!(actual[4].is_some());
 }
+
+#[test]
+fn task_notifications_have_a_source_and_restore_from_it() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for fixture in [
+        "claude-background-notifications.jsonl",
+        "claude-task-notifications.jsonl",
+    ] {
+        let path = root.join(fixture);
+        let notifications: Vec<_> = tail(&path, usize::MAX)
+            .unwrap()
+            .into_iter()
+            .filter(|event| {
+                event
+                    .calls
+                    .iter()
+                    .any(|call| call.name == "task-notification")
+            })
+            .collect();
+        assert!(!notifications.is_empty(), "{fixture}");
+        let groups: Vec<_> = notifications
+            .iter()
+            .map(|event| event.source_records.clone())
+            .collect();
+        let restored = Reader::new(path, false).read_events(&groups).unwrap();
+        for (event, restored) in notifications.iter().zip(restored) {
+            assert!(
+                event.source.as_deref().is_some_and(|source| !source.is_empty()),
+                "{fixture}: {}",
+                event.body
+            );
+            assert_eq!(restored.unwrap().source, event.source, "{fixture}");
+        }
+    }
+}
