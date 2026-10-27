@@ -145,7 +145,7 @@ class PrivacyTests(unittest.TestCase):
 
     def test_home_paths_and_json_fields(self):
         for prefix in ("/Users/", "/home/"):
-            for name in ("realname", "user"):
+            for name in ("realname", "user", "runner"):
                 for field in (None, "cwd", "gitBranch"):
                     for escaped in (False, True) if field else (False,):
                         with self.subTest(prefix=prefix, name=name, field=field,
@@ -180,8 +180,7 @@ class PrivacyTests(unittest.TestCase):
         self.assertEqual(code, 0, output)
 
     def test_allowed_home_paths(self):
-        values = [prefix + name + "/project/" for prefix in ("/Users/", "/home/")
-                  for name in ("example-user", "runner")]
+        values = [prefix + "example-user/project/" for prefix in ("/Users/", "/home/")]
         for escaped in (False, True):
             with self.subTest(escaped=escaped):
                 content = json.dumps([
@@ -195,8 +194,7 @@ class PrivacyTests(unittest.TestCase):
 
     def test_allowed_plain_home_paths(self):
         self.commit("fixtures/allowed.txt", "\n".join(
-            prefix + name + "/project/" for prefix in ("/Users/", "/home/")
-            for name in ("example-user", "runner")
+            prefix + "example-user/project/" for prefix in ("/Users/", "/home/")
         ))
         code, output = self.scan_secrets()
         self.assertEqual(code, 0, output)
