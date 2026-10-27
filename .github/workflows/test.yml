@@ -30,8 +30,12 @@ jobs:
           awk -v archive="$archive" '$2 == archive' checksums.txt | sha256sum --check --strict
           tar -xzf "$archive" gitleaks
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Test privacy checks
+        run: npm run test:privacy
       - name: Scan commits for secrets and home paths
-        run: python3 .github/scripts/privacy.py gitleaks
+        run: |
+          revisions=$(python3 .github/scripts/commit_range.py)
+          gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="--diff-merges=first-parent $revisions"
       - name: Scan added lines for private terms
         if: ${{ !cancelled() }}
         env:
