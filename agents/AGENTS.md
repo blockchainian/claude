@@ -2,7 +2,7 @@
 
 > The user runs the installed `agents`, never the source.
 
-This directory is `agents`, the Rust terminal dashboard for Claude Code and Codex sessions, with prompt input and Claude background task creation.
+This directory is `agents`, the terminal command center for Claude Code and Codex sessions.
 
 ## Modules
 
@@ -22,11 +22,11 @@ This directory is `agents`, the Rust terminal dashboard for Claude Code and Code
 
 ## Development
 
-- A rendering change updates the snapshots it moves in `tests/ui_snapshots/`.
-
 ## Tools
 
 ### Install
+
+> Install whenever a requested change is finished, not after every commit.
 
 - `cargo install --path . --locked` — builds and installs the current source
 
