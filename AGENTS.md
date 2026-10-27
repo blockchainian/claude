@@ -1,15 +1,18 @@
 # AGENTS.md
 
-> Before working in a component, read its `AGENTS.md` and `README.md`.  
-> Never hard-code a path of this machine: the repo is public.  
+> Before working in a component, read its `AGENTS.md` and `README.md`.
+> Never hard-code a path of this machine: the repo is public.
 > Never import a plugin script by its versioned cache path.
 
 This repo is the `blockchainian` plugin marketplace for Claude Code and Codex, and the only home of all its plugins.
 
+## Catalogs
+
+- .claude-plugin/marketplace.json -- the Claude Code catalog
+- .agents/plugins/marketplace.json -- the Codex catalog
+
 ## Modules
 
-- .claude-plugin/ -- the Claude Code catalog
-- .agents/plugins/ -- the Codex catalog
 - plugins/ -- one directory per plugin
 - agents/ -- `agents`, the Rust session dashboard
 - git/ -- `git`, the VS Code extension that opens a commit, a repository folder or a pull request from a `vscode://blockchainian.git/` link
@@ -27,10 +30,6 @@ The per-plugin gate a plan's `Checks` command composes:
 
 - **validate**: `claude plugin validate --strict .`
 - **tests**: the plugin's own test command
-
-## Tests
-
-- `cargo test --manifest-path agents/Cargo.toml` — the `agents` dashboard
 
 ## Version control
 
