@@ -63,6 +63,15 @@ fn wait_for(description: &str, mut ready: impl FnMut() -> bool) {
     }
 }
 
+/// Claude keeps a session's task outputs under the project it started in, which no later cwd matches.
+fn started_directory(tasks: &Tasks, session: &Session) -> PathBuf {
+    tasks
+        .root
+        .join("-started-elsewhere")
+        .join(&session.id.id)
+        .join("tasks")
+}
+
 #[test]
 fn files_control_liveness_and_descriptions_survive_transcript_changes() {
     let dir = tempfile::tempdir().unwrap();
@@ -85,7 +94,7 @@ fn files_control_liveness_and_descriptions_survive_transcript_changes() {
         Utc::now(),
     )];
     sessions[0].cwd = PathBuf::from("/tmp/project.with punctuation");
-    let directory = tasks.directory(&sessions[0]);
+    let directory = started_directory(&tasks, &sessions[0]);
     fs::create_dir_all(&directory).unwrap();
     let running = directory.join(format!("{id}.output"));
     fs::write(
@@ -192,7 +201,7 @@ fn bg_sessions_scan_tasks_without_adoption_and_deduplicate_adopted_outputs() {
         needs: None,
         awaits_prompt: false,
     });
-    let directory = tasks.directory(&session);
+    let directory = started_directory(&tasks, &session);
     fs::create_dir_all(&directory).unwrap();
     let output = directory.join(format!("{id}.output"));
     fs::write(
@@ -304,13 +313,6 @@ fn adopted_shells_use_pid_and_footer_in_the_bg_session() {
 }
 
 #[test]
-fn slug_matches_claudes_utf16_replacement_and_long_path_hash() {
-    assert_eq!(project_slug("/tmp/a.b_中😀"), "-tmp-a-b----");
-    let cwd = format!("/{}", "a".repeat(210));
-    assert_eq!(project_slug(&cwd), format!("-{}-djaaup", "a".repeat(199)));
-}
-
-#[test]
 fn notifications_hide_cached_tasks_and_background_results_retry_foreground_files() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
@@ -329,7 +331,7 @@ fn notifications_hide_cached_tasks_and_background_results_retry_foreground_files
     let id = records[1]["toolUseResult"]["backgroundTaskId"]
         .as_str()
         .unwrap();
-    let directory = tasks.directory(&sessions[0]);
+    let directory = started_directory(&tasks, &sessions[0]);
     fs::create_dir_all(&directory).unwrap();
     let output = directory.join(format!("{id}.output"));
     fs::write(&output, b"").unwrap();
@@ -361,7 +363,7 @@ fn symlink_task_outputs_are_not_candidates() {
         None,
         Utc::now(),
     )];
-    let directory = tasks.directory(&sessions[0]);
+    let directory = started_directory(&tasks, &sessions[0]);
     fs::create_dir_all(&directory).unwrap();
     let target = root.join("subagent.jsonl");
     fs::write(
@@ -405,7 +407,7 @@ fn real_sleep_output_liveness_and_refresh_cost() {
         Some(path),
         Utc::now(),
     )];
-    let directory = tasks.directory(&sessions[0]);
+    let directory = started_directory(&tasks, &sessions[0]);
     fs::create_dir_all(&directory).unwrap();
     let output = directory.join(format!("{id}.output"));
     let file = File::create(&output).unwrap();
@@ -533,7 +535,7 @@ fn background_await_start_times_survive_cached_and_chunked_refreshes() {
         Utc::now(),
     )];
     sessions[0].status = crate::model::SessionStatus::Working;
-    let directory = tasks.directory(&sessions[0]);
+    let directory = started_directory(&tasks, &sessions[0]);
     fs::create_dir_all(&directory).unwrap();
     struct Children(Vec<std::process::Child>);
     impl Drop for Children {

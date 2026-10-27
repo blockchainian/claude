@@ -111,11 +111,17 @@ impl Tasks {
         );
     }
 
-    fn directory(&self, session: &Session) -> PathBuf {
-        self.root
-            .join(project_slug(&session.cwd.to_string_lossy()))
-            .join(&session.id.id)
-            .join("tasks")
+    /// Project directories under the root; Claude keeps a session's task outputs under the project
+    /// it started in, which a later cwd change does not move.
+    fn projects(&self) -> io::Result<Vec<PathBuf>> {
+        let entries = match fs::read_dir(&self.root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        entries
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect()
     }
 
     fn finished(&mut self, path: &Path) -> io::Result<bool> {
@@ -147,6 +153,7 @@ impl Tasks {
         liveness: &impl Liveness,
     ) -> io::Result<()> {
         let mut candidates = Vec::new();
+        let projects = self.projects()?;
         for (index, session) in sessions.iter_mut().enumerate() {
             session.background.clear();
             if session
@@ -156,24 +163,33 @@ impl Tasks {
             {
                 self.adopted(config, session, liveness)?;
             }
-            let entries = match fs::read_dir(self.directory(session)) {
-                Ok(entries) => entries,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error),
-            };
-            for entry in entries {
-                let entry = entry?;
-                let path = entry.path();
-                if !entry.file_type()?.is_file()
-                    || path.extension().is_none_or(|ext| ext != "output")
-                {
-                    continue;
-                }
-                match self.finished(&path) {
-                    Ok(false) => candidates.push((index, path)),
-                    Ok(true) => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            for project in &projects {
+                let entries = match fs::read_dir(project.join(&session.id.id).join("tasks")) {
+                    Ok(entries) => entries,
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                        ) =>
+                    {
+                        continue;
+                    }
                     Err(error) => return Err(error),
+                };
+                for entry in entries {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if !entry.file_type()?.is_file()
+                        || path.extension().is_none_or(|ext| ext != "output")
+                    {
+                        continue;
+                    }
+                    match self.finished(&path) {
+                        Ok(false) => candidates.push((index, path)),
+                        Ok(true) => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error),
+                    }
                 }
             }
         }
@@ -293,39 +309,6 @@ impl Tasks {
         }
         Ok(())
     }
-}
-
-fn project_slug(cwd: &str) -> String {
-    let slug: String = cwd
-        .encode_utf16()
-        .map(|unit| {
-            if unit <= 127 && (unit as u8).is_ascii_alphanumeric() {
-                char::from(unit as u8)
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    if slug.len() <= 200 {
-        return slug;
-    }
-    let hash = cwd.encode_utf16().fold(0i32, |hash, unit| {
-        hash.wrapping_mul(31).wrapping_add(i32::from(unit))
-    });
-    let mut value = i64::from(hash).unsigned_abs();
-    let mut suffix = Vec::new();
-    loop {
-        suffix.push(char::from_digit((value % 36) as u32, 36).unwrap());
-        value /= 36;
-        if value == 0 {
-            break;
-        }
-    }
-    format!(
-        "{}-{}",
-        &slug[..200],
-        suffix.iter().rev().collect::<String>()
-    )
 }
 
 fn footer(tail: &str) -> bool {
