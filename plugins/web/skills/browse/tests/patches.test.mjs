@@ -18,7 +18,7 @@ const GSTACK = join(SKILL_DIR, "gstack");
 const SCRIPTS = join(SKILL_DIR, "scripts");
 const PINNED = readFileSync(join(SKILL_DIR, "GSTACK_COMMIT"), "utf8").trim();
 const PATCH_COUNT = readdirSync(join(SKILL_DIR, "patches")).filter((name) => /^\d{4}-.+\.patch$/.test(name)).length;
-const PATCH_TESTS = ["browser-display", "background-tab", "tab-scoped-logs", "headed-newtab"]
+const PATCH_TESTS = ["browser-display", "background-tab", "tab-scoped-logs", "headed-newtab", "aqua-launch"]
   .map((stem) => `browse/test/${stem}.test.ts`);
 
 function exec(command, args, cwd, env = process.env) {
