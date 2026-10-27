@@ -26,11 +26,6 @@ The per-plugin gate a plan's `Checks` command composes:
 - **validate**: `claude plugin validate --strict .`
 - **tests**: the plugin's own test command
 
-## Version control
-
-- Bump the plugin's version in the same commit as the change; keep its manifest versions equal.
-- Land every change on main through a pull request whose CI passes, then update the installed plugin; main rejects direct pushes, force pushes and deletion.
-
 ## Tools
 
 ### Install
@@ -43,3 +38,8 @@ The per-plugin gate a plan's `Checks` command composes:
 ### Set up
 
 - Add a new plugin dir to Codex `writable_roots` in `~/.codex/config.toml`.
+
+## Version control
+
+- Bump the plugin's version in the same commit as the change; keep its manifest versions equal.
+- Land every change on main through a pull request whose CI passes, then update the installed plugin; main rejects direct pushes, force pushes and deletion.
