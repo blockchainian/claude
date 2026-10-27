@@ -2053,7 +2053,7 @@ impl View {
                     if !self.selected_capabilities().archive {
                         return Some(Action::Unsupported("Archive"));
                     }
-                    if let Some(path) = crate::tasks::removable_worktree(&session.cwd) {
+                    if let Some(path) = crate::tasks::linked_worktree(&session.cwd) {
                         self.confirm_dialog = Some(ConfirmDialog {
                             action: ConfirmAction::Archive(session.id.clone()),
                             title: session.display_title().to_owned(),
@@ -2078,7 +2078,7 @@ impl View {
                         action: ConfirmAction::Delete(session.id.clone()),
                         title: session.display_title().to_owned(),
                         selected: 0,
-                        worktree: crate::tasks::removable_worktree(&session.cwd),
+                        worktree: crate::tasks::linked_worktree(&session.cwd),
                     });
                 }
             }
