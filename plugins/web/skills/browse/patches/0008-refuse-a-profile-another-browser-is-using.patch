@@ -1,0 +1,436 @@
+diff --git a/browse/src/browser-manager.ts b/browse/src/browser-manager.ts
+index f290a0b29..a45cf8514 100644
+--- a/browse/src/browser-manager.ts
++++ b/browse/src/browser-manager.ts
+@@ -707,8 +707,7 @@ export class BrowserManager {
+     // ProcessSingleton refuses to start when these exist from a prior crash
+     // (SIGKILL, hard crash) — the lockfiles point at a PID that may no longer
+     // exist. Shutdown cleanup doesn't run on hard crashes, so we clean here
+-    // too. Safe under external coordination: gbd.lock for gbrowser,
+-    // single-instance CLI check for gstack.
++    // too. The owner check refuses profiles held by a live process or another host.
+     cleanSingletonLocks(userDataDir);
+ 
+     // Support custom Chromium binary via GSTACK_CHROMIUM_PATH env var.
+diff --git a/browse/src/cli.ts b/browse/src/cli.ts
+index e7e5edf97..8432bd254 100644
+--- a/browse/src/cli.ts
++++ b/browse/src/cli.ts
+@@ -16,7 +16,7 @@ import { needsAquaLaunch, bootstrapLaunchAgent } from './aqua-launch';
+ import { safeUnlink, safeUnlinkQuiet, safeKill, isProcessAlive } from './error-handling';
+ import { readPidStartTime, readPidCmdline } from './xvfb';
+ import { writeSecureFile, mkdirSecure } from './file-permissions';
+-import { resolveConfig, ensureStateDir, readVersionHash, isPairAgentEnabled, resolveChromiumProfile } from './config';
++import { resolveConfig, ensureStateDir, readVersionHash, isPairAgentEnabled } from './config';
+ import { parseProxyConfig, computeConfigHash, ProxyConfigError } from './proxy-config';
+ import { redactProxyUrl } from './proxy-redact';
+ import { spawnTerminalAgent } from './terminal-agent-control';
+@@ -261,48 +261,11 @@ function cleanupLegacyState(): void {
+   }
+ }
+ 
+-// ─── Chromium profile lock helpers (#1781) ─────────────────────
+-/** Profile dir used by headed/connect Chromium sessions. Must resolve exactly
+- * as browser-manager does (config.resolveChromiumProfile), or the lock cleanup
+- * and orphan kill below target a different profile than the one being launched
+- * and evict an unrelated browser. */
+-function chromiumProfileDir(): string {
+-  return resolveChromiumProfile();
+-}
+-
+-/** Remove Chromium SingletonLock/Socket/Cookie so a relaunch can acquire the
+- * profile. Safe to call when absent. */
+-function cleanChromiumProfileLocks(profileDir: string = chromiumProfileDir()): void {
+-  for (const lockFile of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+-    safeUnlinkQuiet(path.join(profileDir, lockFile));
+-  }
+-}
+-
+-/** Kill an orphaned Chromium that still holds the profile's SingletonLock. The
+- * lock symlink target is "hostname-PID"; killing that PID tears down its
+- * renderer tree so the next launch starts clean. No-op when absent/stale. */
+-async function killOrphanChromium(profileDir: string = chromiumProfileDir()): Promise<void> {
+-  try {
+-    const lockTarget = fs.readlinkSync(path.join(profileDir, 'SingletonLock')); // "hostname-12345"
+-    const orphanPid = parseInt(lockTarget.split('-').pop() || '', 10);
+-    if (orphanPid && isProcessAlive(orphanPid)) {
+-      safeKill(orphanPid, 'SIGTERM');
+-      await new Promise(r => setTimeout(r, 1000));
+-      if (isProcessAlive(orphanPid)) {
+-        safeKill(orphanPid, 'SIGKILL');
+-        await new Promise(r => setTimeout(r, 500));
+-      }
+-    }
+-  } catch (err: any) {
+-    if (err?.code !== 'ENOENT' && err?.code !== 'EINVAL') throw err;
+-  }
+-}
+-
++// ─── Chromium process cleanup ─────────────────────────────────
+ /**
+  * Reap the launched Chromium recorded in the state file (#2709). The headless
+- * launch has no userDataDir, so it never writes the SingletonLock that
+- * killOrphanChromium walks — `browse stop` reported success while the
+- * orphaned GPU process kept spinning (~800% CPU on macOS 26). Identity is
++ * launch has no userDataDir or SingletonLock — `browse stop` reported success
++ * while the orphaned GPU process kept spinning (~800% CPU on macOS 26). Identity is
+  * verified TWO ways before any signal — start time matches the recorded
+  * value AND the executable looks like Chromium — so a recycled PID (even one
+  * now running a different, legitimate Chromium) is never killed.
+@@ -485,8 +448,7 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
+ 
+   // Clean up stale state file and error log. Reap the previous daemon's
+   // recorded headless Chromium first — the state file is the only carrier of
+-  // its identity, and the lock-less headless child is invisible to
+-  // killOrphanChromium below (#2709). Identity-gated, so safe when stale.
++  // its identity (#2709). Identity-gated, so safe when stale.
+   {
+     const staleState = readState();
+     if (staleState) await reapRecordedChromium(staleState);
+@@ -494,13 +456,6 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
+   safeUnlink(config.stateFile);
+   safeUnlink(path.join(config.stateDir, 'browse-startup-error.log'));
+ 
+-  // #1781: clear a stale Chromium profile lock (and kill the orphan still
+-  // holding it) before launch, so an auto-restart after an abrupt kill isn't
+-  // blocked by the previous Chromium's SingletonLock — the self-inflicted
+-  // crash-loop. Previously only the manual connect preamble did this.
+-  await killOrphanChromium();
+-  cleanChromiumProfileLocks();
+-
+   // Allow the caller to opt out of the parent-process watchdog by setting
+   // BROWSE_PARENT_PID=0 in the environment. Useful for CI, non-interactive
+   // shells, and short-lived Bash invocations that need the server to outlive
+@@ -909,8 +864,7 @@ async function sendCommand(state: ServerState, command: string, args: string[],
+       if (oldState && oldState.pid) {
+         await killServer(oldState.pid);
+       }
+-      // startServer() now clears the Chromium SingletonLock + reaps the orphan,
+-      // so the relaunch isn't blocked by the dead Chromium's profile lock (#1781).
++      // startServer() reaps this backend's recorded Chromium child before relaunch.
+       //
+       // Reapply --proxy / --headed when restarting. headed comes from THIS
+       // invocation OR the persisted server mode, so a restart triggered by a
+@@ -1601,17 +1555,11 @@ Refs:           After 'snapshot', use @e1, @e2... as selectors:
+       }
+     }
+ 
+-    // Kill an orphaned Chromium still holding the profile lock (the Bun server
+-    // PID's Chromium child can outlive an abrupt kill/crash), then clear the
+-    // lock files so the launch is clean. Shared with the auto-restart path (#1781).
+-    // Also reap the lock-less headless child recorded in the state file before
+-    // deleting it — killOrphanChromium can't see it (#2709).
+-    await killOrphanChromium();
++    // Reap only the Chromium identity recorded by this backend (#2709).
+     {
+       const staleState = readState();
+       if (staleState) await reapRecordedChromium(staleState);
+     }
+-    cleanChromiumProfileLocks();
+ 
+     // Delete stale state file
+     safeUnlinkQuiet(config.stateFile);
+@@ -1816,11 +1764,6 @@ Refs:           After 'snapshot', use @e1, @e2... as selectors:
+         safeKill(existingState.pid, 'SIGKILL');
+       }
+     }
+-    // #1781: killing the daemon can orphan its Chromium child tree, which keeps
+-    // holding the SingletonLock and makes the next `connect` fail to launch.
+-    // Reap the orphan via the lock, then clear the lock files + state.
+-    await killOrphanChromium();
+-    cleanChromiumProfileLocks();
+     // Xvfb orphan cleanup: if the recorded PID still matches our Xvfb (by
+     // cmdline AND start-time), kill it. PID-only would risk killing a
+     // recycled PID belonging to an unrelated process.
+@@ -1873,13 +1816,8 @@ Refs:           After 'snapshot', use @e1, @e2... as selectors:
+     // directly.
+     if (isProcessAlive(stopState.pid) && globalFlags.forceRestart) {
+       await killServer(stopState.pid);
+-      // Reap the orphaned Chromium child + clear its profile locks so the
+-      // NEXT launch is clean (same cleanup as the disconnect force path).
+-      // The headless child has no SingletonLock — reap it via the recorded
+-      // identity too (#2709).
+-      await killOrphanChromium();
++      // Reap only the Chromium identity recorded by this backend (#2709).
+       await reapRecordedChromium(stopState);
+-      cleanChromiumProfileLocks();
+       safeUnlinkQuiet(config.stateFile);
+       console.log('Daemon stopped (forced — tabs/cookies/logins discarded).');
+       process.exit(0);
+diff --git a/browse/src/config.ts b/browse/src/config.ts
+index f7d7eeefa..3a327f449 100644
+--- a/browse/src/config.ts
++++ b/browse/src/config.ts
+@@ -14,7 +14,6 @@ import * as fs from 'fs';
+ import * as os from 'os';
+ import * as path from 'path';
+ import { mkdirSecure } from './file-permissions';
+-import { safeUnlinkQuiet } from './error-handling';
+ 
+ export interface BrowseConfig {
+   projectDir: string;
+@@ -279,7 +278,7 @@ export function resolveChromiumProfile(explicit?: string): string {
+ }
+ 
+ /**
+- * Pre-launch / shutdown cleanup of stale Chromium singleton lockfiles
++ * Pre-launch cleanup of stale Chromium singleton lockfiles
+  * (SingletonLock, SingletonSocket, SingletonCookie). Chromium's
+  * ProcessSingleton refuses to start when these exist from a prior crash
+  * (SIGKILL, hard crash, etc.) since they point at a PID that no longer exists.
+@@ -292,9 +291,8 @@ export function resolveChromiumProfile(explicit?: string): string {
+  * Prevents accidentally deleting lock files from an unrelated directory if
+  * profile resolution is misconfigured upstream (CWD drift, env injection).
+  *
+- * Caller MUST ensure external coordination has already guaranteed no live
+- * peer is using this profile (gbd.lock for gbrowser; single-instance CLI
+- * check for gstack).
++ * Only a local SingletonLock owner proven dead authorizes removal. Live,
++ * foreign-host and unrecognized owners must keep all three lockfiles.
+  */
+ export function cleanSingletonLocks(userDataDir: string): void {
+   if (!path.isAbsolute(userDataDir)) {
+@@ -312,7 +310,37 @@ export function cleanSingletonLocks(userDataDir: string): void {
+     console.warn(`[browse] cleanSingletonLocks: refusing to clean unrecognized profile dir: ${resolved}`);
+     return;
+   }
+-  for (const lockFile of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+-    safeUnlinkQuiet(path.join(resolved, lockFile));
++  const lockPath = path.join(resolved, 'SingletonLock');
++  let target: string;
++  try {
++    target = fs.readlinkSync(lockPath);
++  } catch (error: any) {
++    if (error.code === 'ENOENT') return;
++    throw new Error(`Cannot inspect SingletonLock for profile ${resolved}: ${error.message}`);
++  }
++  const owner = target.match(/^(.+)-([1-9]\d*)$/);
++  const pid = owner ? Number(owner[2]) : NaN;
++  if (!owner || !Number.isSafeInteger(pid) || pid > 2147483647) {
++    throw new Error(`Unrecognized SingletonLock owner for profile ${resolved}: ${target}`);
++  }
++  if (owner[1] !== os.hostname()) {
++    throw new Error(`Chromium profile ${resolved} is locked by host ${owner[1]} (PID ${pid}); stop its browser on that host before retrying.`);
++  }
++  let alive = true;
++  try {
++    process.kill(pid, 0);
++  } catch (error: any) {
++    if (error.code === 'ESRCH') alive = false;
++    else if (error.code !== 'EPERM') throw error;
++  }
++  if (alive) {
++    throw new Error(`Chromium profile ${resolved} is in use by PID ${pid}. Run browse stop from the owning backend's project (or with its BROWSE_STATE_FILE), then retry; use a separate CHROMIUM_PROFILE for another browser.`);
++  }
++  for (const lockFile of ['SingletonSocket', 'SingletonCookie', 'SingletonLock']) {
++    try {
++      fs.unlinkSync(path.join(resolved, lockFile));
++    } catch (error: any) {
++      if (error.code !== 'ENOENT') throw error;
++    }
+   }
+ }
+diff --git a/browse/src/server.ts b/browse/src/server.ts
+index 2cb5b0f10..6a74c897b 100644
+--- a/browse/src/server.ts
++++ b/browse/src/server.ts
+@@ -36,7 +36,7 @@ import {
+   assertValidTokenOptions, revokeSetupKeys, getClientSession, grantReducesAccess,
+ } from './token-registry';
+ import { validateTempPath } from './path-security';
+-import { resolveConfig, ensureStateDir, readVersionHash, resolveChromiumProfile, cleanSingletonLocks, isPairAgentEnabled } from './config';
++import { resolveConfig, ensureStateDir, readVersionHash, isPairAgentEnabled } from './config';
+ import {
+   isSessionPersistEnabled, persistSessionState, restoreSessionState,
+   sessionPersistIntervalMs, SESSION_STATE_FILE,
+@@ -1465,11 +1465,8 @@ function emergencyCleanup() {
+         } catch { /* best effort */ }
+       }
+     }
+-  } catch { /* state file unparseable — fall through to lock + state cleanup */ }
++  } catch { /* state file unparseable — fall through to state cleanup */ }
+ 
+-  // Clean Chromium profile locks via the shared helper (defensive guard
+-  // refuses to operate on unrecognized profile dirs).
+-  cleanSingletonLocks(resolveChromiumProfile());
+   safeUnlinkQuiet(config.stateFile);
+ }
+ // Same import.meta.main gate as SIGINT/SIGTERM — embedders register their
+@@ -1704,7 +1701,6 @@ export function buildFetchHandler(cfg: ServerConfig): ServerHandle {
+ 
+     await cfgBrowserManager.close();
+ 
+-    cleanSingletonLocks(resolveChromiumProfile());
+     safeUnlinkQuiet(config.stateFile);
+     process.exit(exitCode);
+   }
+diff --git a/browse/test/config.test.ts b/browse/test/config.test.ts
+index c20bad8f2..c5f004eb0 100644
+--- a/browse/test/config.test.ts
++++ b/browse/test/config.test.ts
+@@ -4,6 +4,7 @@ import { resolveConfig, ensureStateDir, readVersionHash, getGitRoot, getRemoteSl
+ import * as fs from 'fs';
+ import * as path from 'path';
+ import * as os from 'os';
++import { spawnSync } from 'child_process';
+ 
+ describe('config', () => {
+   describe('getGitRoot', () => {
+@@ -458,15 +459,21 @@ describe('resolveChromiumProfile', () => {
+ });
+ 
+ describe('cleanSingletonLocks', () => {
++  function staleLock(): string {
++    const child = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
++    if (child.status !== 0) throw new Error('Failed to create an exited lock owner');
++    return `${os.hostname()}-${child.pid}`;
++  }
+   test('removes SingletonLock/Socket/Cookie when basename is chromium-profile', () => {
+     const tmpDir = path.join(os.tmpdir(), `clean-locks-${Date.now()}`, 'chromium-profile');
+     fs.mkdirSync(tmpDir, { recursive: true });
+     for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+-      fs.writeFileSync(path.join(tmpDir, f), 'stale');
++      if (f === 'SingletonLock') fs.symlinkSync(staleLock(), path.join(tmpDir, f));
++      else fs.writeFileSync(path.join(tmpDir, f), 'stale');
+     }
+     cleanSingletonLocks(tmpDir);
+     for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+-      expect(fs.existsSync(path.join(tmpDir, f))).toBe(false);
++      expect(() => fs.lstatSync(path.join(tmpDir, f))).toThrow();
+     }
+     fs.rmSync(path.dirname(tmpDir), { recursive: true, force: true });
+   });
+@@ -492,12 +499,12 @@ describe('cleanSingletonLocks', () => {
+   test('respects explicit CHROMIUM_PROFILE env even with non-standard basename', () => {
+     const tmpDir = path.join(os.tmpdir(), `custom-name-${Date.now()}`);
+     fs.mkdirSync(tmpDir, { recursive: true });
+-    fs.writeFileSync(path.join(tmpDir, 'SingletonLock'), 'stale');
++    fs.symlinkSync(staleLock(), path.join(tmpDir, 'SingletonLock'));
+     const orig = process.env.CHROMIUM_PROFILE;
+     process.env.CHROMIUM_PROFILE = tmpDir;
+     try {
+       cleanSingletonLocks(tmpDir);
+-      expect(fs.existsSync(path.join(tmpDir, 'SingletonLock'))).toBe(false);
++      expect(() => fs.lstatSync(path.join(tmpDir, 'SingletonLock'))).toThrow();
+     } finally {
+       if (orig === undefined) delete process.env.CHROMIUM_PROFILE;
+       else process.env.CHROMIUM_PROFILE = orig;
+diff --git a/browse/test/headless-gpu-and-reap.test.ts b/browse/test/headless-gpu-and-reap.test.ts
+index 79866fdf6..5dca11559 100644
+--- a/browse/test/headless-gpu-and-reap.test.ts
++++ b/browse/test/headless-gpu-and-reap.test.ts
+@@ -168,11 +168,10 @@ describe('stop-reap wiring pins (#2709)', () => {
+       /const staleState = readState\(\);\s*\n\s*if \(staleState\) await reapRecordedChromium\(staleState\);/,
+     );
+ 
+-    // 4. Headed-connect stale path: reap sits between killOrphanChromium()
+-    //    (which cannot see the lock-less headless child) and the unlink.
++    // 4. Headed-connect stale path reaps the recorded child before unlinking state.
+     const connect = between("if (command === 'connect')", 'Launching headed Chromium');
+     expect(connect).toMatch(
+-      /await killOrphanChromium\(\);[\s\S]*if \(staleState\) await reapRecordedChromium\(staleState\);[\s\S]*safeUnlinkQuiet\(config\.stateFile\);/,
++      /if \(staleState\) await reapRecordedChromium\(staleState\);[\s\S]*safeUnlinkQuiet\(config\.stateFile\);/,
+     );
+ 
+     // 5. Post-graceful-stop: the daemon closed Chromium via Playwright, but a
+diff --git a/browse/test/profile-lock.test.ts b/browse/test/profile-lock.test.ts
+new file mode 100644
+index 000000000..a5a7b977b
+--- /dev/null
++++ b/browse/test/profile-lock.test.ts
+@@ -0,0 +1,95 @@
++import { expect, test } from 'bun:test';
++import * as fs from 'fs';
++import * as os from 'os';
++import * as path from 'path';
++import { cleanSingletonLocks } from '../src/config';
++
++const lockNames = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
++function profile(target: string) {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'browse-lock-'));
++  const dir = path.join(root, 'chromium-profile');
++  fs.mkdirSync(dir);
++  fs.symlinkSync(target, path.join(dir, 'SingletonLock'));
++  fs.symlinkSync('/nonexistent/browse-test-socket', path.join(dir, 'SingletonSocket'));
++  fs.symlinkSync('test-cookie', path.join(dir, 'SingletonCookie'));
++  return { root, dir };
++}
++function assertLocks(dir: string, target: string) {
++  expect(fs.readlinkSync(path.join(dir, 'SingletonLock'))).toBe(target);
++  for (const name of lockNames) expect(fs.lstatSync(path.join(dir, name)).isSymbolicLink()).toBe(true);
++}
++
++test('a dead local process allows all three stale locks to be removed', async () => {
++  const child = Bun.spawn([process.execPath, '-e', 'process.exit(0)'], { stdout: 'ignore', stderr: 'ignore' });
++  await child.exited;
++  const { root, dir } = profile(`${os.hostname()}-${child.pid}`);
++  try {
++    cleanSingletonLocks(dir);
++    for (const name of lockNames) expect(() => fs.lstatSync(path.join(dir, name))).toThrow();
++  } finally { fs.rmSync(root, { recursive: true, force: true }); }
++});
++
++test('a live local owner preserves every lock and reports the profile, PID and next step', () => {
++  const target = `${os.hostname()}-${process.pid}`;
++  const { root, dir } = profile(target);
++  try {
++    expect(() => cleanSingletonLocks(dir)).toThrow(String(process.pid));
++    expect(() => cleanSingletonLocks(dir)).toThrow(dir);
++    expect(() => cleanSingletonLocks(dir)).toThrow('browse stop');
++    assertLocks(dir, target);
++  } finally { fs.rmSync(root, { recursive: true, force: true }); }
++});
++
++test('a lock from another host is preserved even when its PID is absent locally', () => {
++  const target = `another-host-${os.hostname()}-2147483647`;
++  const { root, dir } = profile(target);
++  try {
++    expect(() => cleanSingletonLocks(dir)).toThrow('another-host');
++    assertLocks(dir, target);
++  } finally { fs.rmSync(root, { recursive: true, force: true }); }
++});
++
++test('unknown lock formats and missing lock owners never authorize cleanup', () => {
++  const { root, dir } = profile('unrecognized');
++  try {
++    expect(() => cleanSingletonLocks(dir)).toThrow('SingletonLock');
++    assertLocks(dir, 'unrecognized');
++    fs.unlinkSync(path.join(dir, 'SingletonLock'));
++    cleanSingletonLocks(dir);
++    expect(fs.lstatSync(path.join(dir, 'SingletonSocket')).isSymbolicLink()).toBe(true);
++    expect(fs.lstatSync(path.join(dir, 'SingletonCookie')).isSymbolicLink()).toBe(true);
++  } finally { fs.rmSync(root, { recursive: true, force: true }); }
++});
++
++test('a headless CLI neither kills a profile owner nor removes its locks', async () => {
++  const owner = Bun.spawn([process.execPath, '-e', 'setInterval(()=>{},1000)'], { stdout: 'ignore', stderr: 'ignore' });
++  const target = `${os.hostname()}-${owner.pid}`;
++  const { root, dir } = profile(target);
++  const env = { ...process.env, GSTACK_HOME: path.join(root, 'home'), CHROMIUM_PROFILE: dir,
++    BROWSE_STATE_FILE: path.join(root, '.gstack', 'browse.json'), BROWSE_PARENT_PID: '0' };
++  delete env.BROWSE_HEADED;
++  delete env.BROWSE_HEADLESS_SKIP;
++  const cli = path.resolve(import.meta.dir, '../src/cli.ts');
++  async function run(command: string) {
++    const proc = Bun.spawn([process.execPath, 'run', cli, command], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' });
++    const [stdout, stderr, status] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
++    return { stdout, stderr, status };
++  }
++  try {
++    const result = await run('status');
++    const logs = ['browse-daemon.log', 'browse-startup-error.log'].map(name => {
++      const file = path.join(root, '.gstack', name);
++      return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
++    }).join('\n');
++    expect(result.status, result.stderr + logs).toBe(0);
++    const stopped = await run('stop');
++    expect(stopped.status, stopped.stderr).toBe(0);
++    expect(() => process.kill(owner.pid, 0)).not.toThrow();
++    assertLocks(dir, target);
++  } finally {
++    await run('stop');
++    if (owner.exitCode === null) owner.kill();
++    await owner.exited;
++    fs.rmSync(root, { recursive: true, force: true });
++  }
++}, 30_000);

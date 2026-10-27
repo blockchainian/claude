@@ -1,0 +1,290 @@
+diff --git a/browse/src/aqua-launch.ts b/browse/src/aqua-launch.ts
+new file mode 100644
+index 000000000..11b9853fb
+--- /dev/null
++++ b/browse/src/aqua-launch.ts
+@@ -0,0 +1,73 @@
++/** Start headed macOS daemons in the user's Aqua bootstrap session. */
++import { execFileSync } from 'child_process';
++import { createHash, randomUUID } from 'crypto';
++import * as fs from 'fs';
++import * as path from 'path';
++import { writeSecureFile } from './file-permissions';
++
++export function needsAquaLaunch(
++  platform: string, env: NodeJS.ProcessEnv, managerName: string,
++): boolean {
++  return platform === 'darwin' && env.BROWSE_HEADED === '1' && managerName.trim() !== 'Aqua';
++}
++
++interface LaunchOptions {
++  stateFile: string;
++  stateDir: string;
++  args: string[];
++  cwd: string;
++  env: NodeJS.ProcessEnv;
++  logPath: string;
++}
++
++function xml(value: string): string {
++  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]/.test(value)) {
++    throw new Error('LaunchAgent value contains an invalid XML character');
++  }
++  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
++    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
++}
++
++export function createLaunchAgent(options: LaunchOptions) {
++  const digest = createHash('sha256').update(path.resolve(options.stateFile)).digest('hex').slice(0, 16);
++  const label = `com.gstack.browse.${digest}.${randomUUID()}`;
++  // launchd owns the launcher, while its detached child owns the daemon.
++  // AbandonProcessGroup keeps that child alive when the job is booted out.
++  const launcher = `const {spawn}=require('child_process');` +
++    `spawn(process.argv[1],process.argv.slice(2),` +
++    `{detached:true,stdio:['ignore','inherit','inherit'],env:process.env}).unref();`;
++  const args = [options.args[0], '-e', launcher, ...options.args];
++  const string = (value: string) => `<string>${xml(value)}</string>`;
++  const env = Object.entries(options.env).filter((entry): entry is [string, string] => entry[1] !== undefined);
++  const plist = `<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0"><dict>
++<key>Label</key>${string(label)}
++<key>ProgramArguments</key><array>${args.map(string).join('')}</array>
++<key>WorkingDirectory</key>${string(options.cwd)}
++<key>EnvironmentVariables</key><dict>${env.map(([key, value]) => `<key>${xml(key)}</key>${string(value)}`).join('')}</dict>
++<key>LimitLoadToSessionType</key><string>Aqua</string>
++<key>RunAtLoad</key><true/>
++<key>AbandonProcessGroup</key><true/>
++<key>StandardOutPath</key>${string(options.logPath)}
++<key>StandardErrorPath</key>${string(options.logPath)}
++</dict></plist>\n`;
++  return { label, plistPath: path.join(path.resolve(options.stateDir), `${label}.plist`), plist };
++}
++
++/** Returns the cleanup to run after the daemon's startup probe, including on timeout. */
++export function bootstrapLaunchAgent(options: LaunchOptions): () => void {
++  const job = createLaunchAgent(options);
++  const domain = `gui/${process.getuid!()}`;
++  writeSecureFile(job.plistPath, job.plist);
++  try {
++    execFileSync('/bin/launchctl', ['bootstrap', domain, job.plistPath], { stdio: 'pipe', timeout: 5000 });
++  } catch (error) {
++    fs.unlinkSync(job.plistPath);
++    throw error;
++  }
++  return () => {
++    execFileSync('/bin/launchctl', ['bootout', `${domain}/${job.label}`], { stdio: 'pipe', timeout: 5000 });
++    fs.unlinkSync(job.plistPath);
++  };
++}
+diff --git a/browse/src/cli.ts b/browse/src/cli.ts
+index 7cc4fe668..b577df2ce 100644
+--- a/browse/src/cli.ts
++++ b/browse/src/cli.ts
+@@ -11,7 +11,8 @@
+ 
+ import * as fs from 'fs';
+ import * as path from 'path';
+-import { spawn as nodeSpawn } from 'child_process';
++import { spawn as nodeSpawn, execFileSync } from 'child_process';
++import { needsAquaLaunch, bootstrapLaunchAgent } from './aqua-launch';
+ import { safeUnlink, safeUnlinkQuiet, safeKill, isProcessAlive } from './error-handling';
+ import { readPidStartTime, readPidCmdline } from './xvfb';
+ import { writeSecureFile, mkdirSecure } from './file-permissions';
+@@ -526,7 +527,21 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
+   // server's own parseInt at server.ts:760.
+   const parentPid = parseInt(process.env.BROWSE_PARENT_PID || '', 10) === 0 ? '0' : String(process.pid);
+ 
+-  if (IS_WINDOWS && NODE_SERVER_SCRIPT) {
++  let releaseLaunchAgent: (() => void) | undefined;
++  const serverEnv = { ...process.env, BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, BROWSE_BINARY_VERSION: readVersionHash() || '', ...extraEnv };
++  const managerName = process.platform === 'darwin' && serverEnv.BROWSE_HEADED === '1'
++    ? execFileSync('/bin/launchctl', ['managername'], { encoding: 'utf8', timeout: 5000 })
++    : 'Aqua';
++
++  if (needsAquaLaunch(process.platform, serverEnv, managerName)) {
++    const bun = Bun.which('bun');
++    if (!bun) throw new Error('Cannot find bun on PATH to start the Aqua daemon');
++    releaseLaunchAgent = bootstrapLaunchAgent({
++      stateFile: config.stateFile, stateDir: config.stateDir,
++      args: [bun, 'run', SERVER_SCRIPT], cwd: process.cwd(),
++      env: serverEnv, logPath: daemonLogPath(),
++    });
++  } else if (IS_WINDOWS && NODE_SERVER_SCRIPT) {
+     // Windows: Bun.spawn() + proc.unref() doesn't truly detach on Windows —
+     // when the CLI exits, the server dies with it. Use Node's child_process.spawn
+     // with { detached: true } instead, which is the gold standard for Windows
+@@ -563,46 +578,50 @@ async function startServer(extraEnv?: Record<string, string>): Promise<ServerSta
+       detached: true,
+       windowsHide: true,
+       stdio: ['ignore', daemonLogFd, daemonLogFd],
+-      env: { ...process.env, BROWSE_STATE_FILE: config.stateFile, BROWSE_PARENT_PID: parentPid, BROWSE_BINARY_VERSION: readVersionHash() || '', ...extraEnv },
++      env: serverEnv,
+     }).unref();
+   }
+ 
+-  // Wait for server to become healthy.
+-  // Use HTTP health check (not isProcessAlive) — it's fast (~instant ECONNREFUSED)
+-  // and works reliably on all platforms including Windows.
+-  const start = Date.now();
+-  while (Date.now() - start < MAX_START_WAIT) {
+-    const state = readState();
+-    if (state && await isServerHealthy(state.port)) {
+-      return state;
++  try {
++    // Wait for server to become healthy.
++    // Use HTTP health check (not isProcessAlive) — it's fast (~instant ECONNREFUSED)
++    // and works reliably on all platforms including Windows.
++    const start = Date.now();
++    while (Date.now() - start < MAX_START_WAIT) {
++      const state = readState();
++      if (state && await isServerHealthy(state.port)) {
++        return state;
++      }
++      await Bun.sleep(100);
+     }
+-    await Bun.sleep(100);
+-  }
+ 
+-  // One last check before declaring failure. The daemon is detached + unref'd,
+-  // so on a loaded machine it can become healthy in the gap between the poll
+-  // loop's final tick and now — the probe timed out, the launch did not
+-  // (#1846). Re-checking here turns that false negative into a success, and
+-  // mirrors the post-loop recovery already done in ensureServer(). A genuinely
+-  // failed server is still unhealthy, so this falls through to the error report.
+-  const lateState = readState();
+-  if (lateState && await isServerHealthy(lateState.port)) {
+-    return lateState;
+-  }
++    // One last check before declaring failure. The daemon is detached + unref'd,
++    // so on a loaded machine it can become healthy in the gap between the poll
++    // loop's final tick and now — the probe timed out, the launch did not
++    // (#1846). Re-checking here turns that false negative into a success, and
++    // mirrors the post-loop recovery already done in ensureServer(). A genuinely
++    // failed server is still unhealthy, so this falls through to the error report.
++    const lateState = readState();
++    if (lateState && await isServerHealthy(lateState.port)) {
++      return lateState;
++    }
+ 
+-  // Server didn't start in time — check the on-disk startup error log.
+-  // Both platforms now spawn with stdio: 'ignore', so the server writes
+-  // errors to disk for the CLI to read (see server.ts start().catch).
+-  const errorLogPath = path.join(config.stateDir, 'browse-startup-error.log');
+-  try {
+-    const errorLog = fs.readFileSync(errorLogPath, 'utf-8').trim();
+-    if (errorLog) {
+-      throw new Error(`Server failed to start:\n${errorLog}`);
++    // Server didn't start in time — check the on-disk startup error log.
++    // Both platforms now spawn with stdio: 'ignore', so the server writes
++    // errors to disk for the CLI to read (see server.ts start().catch).
++    const errorLogPath = path.join(config.stateDir, 'browse-startup-error.log');
++    try {
++      const errorLog = fs.readFileSync(errorLogPath, 'utf-8').trim();
++      if (errorLog) {
++        throw new Error(`Server failed to start:\n${errorLog}`);
++      }
++    } catch (e: any) {
++      if (e.code !== 'ENOENT') throw e;
+     }
+-  } catch (e: any) {
+-    if (e.code !== 'ENOENT') throw e;
++    throw new Error(`Server failed to start within ${MAX_START_WAIT / 1000}s`);
++  } finally {
++    releaseLaunchAgent?.();
+   }
+-  throw new Error(`Server failed to start within ${MAX_START_WAIT / 1000}s`);
+ }
+ 
+ export class ServerLockError extends Error {
+diff --git a/browse/test/aqua-launch.test.ts b/browse/test/aqua-launch.test.ts
+new file mode 100644
+index 000000000..23aeaca70
+--- /dev/null
++++ b/browse/test/aqua-launch.test.ts
+@@ -0,0 +1,85 @@
++import { expect, test } from 'bun:test';
++import { execFileSync } from 'child_process';
++import * as fs from 'fs';
++import * as os from 'os';
++import * as path from 'path';
++import { needsAquaLaunch, createLaunchAgent, bootstrapLaunchAgent } from '../src/aqua-launch';
++
++test('only macOS headed daemons outside Aqua need a LaunchAgent', () => {
++  for (const platform of ['darwin', 'linux', 'win32']) {
++    for (const headed of [undefined, '0', '1']) {
++      for (const manager of ['Aqua', 'Background', 'System', ' Aqua\n']) {
++        expect(needsAquaLaunch(platform, { BROWSE_HEADED: headed }, manager))
++          .toBe(platform === 'darwin' && headed === '1' && manager.trim() !== 'Aqua');
++      }
++    }
++  }
++});
++
++test.skipIf(process.platform !== 'darwin')('plist preserves arguments, cwd, all defined env and daemon logs', () => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'browse-plist-'));
++  try {
++    const env = {
++      BROWSE_HEADED: '1', BROWSE_STATE_FILE: path.join(root, 'browse.json'),
++      BROWSE_PARENT_PID: '0', BROWSE_BINARY_VERSION: 'version',
++      CHROMIUM_PROFILE: 'profile & < > " \'', BROWSER_DISPLAY: 'display',
++      PATH: '/bin:/custom path', HOME: root, OTHER: 'line one\nline two', OMIT: undefined,
++    };
++    const options = { stateFile: env.BROWSE_STATE_FILE, stateDir: root, cwd: root,
++      args: ['/path with spaces/bun', 'run', 'server & < > " \'.ts'], env,
++      logPath: path.join(root, 'browse-daemon.log') };
++    const job = createLaunchAgent(options);
++    fs.writeFileSync(job.plistPath, job.plist);
++    const plist = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', job.plistPath], { encoding: 'utf8' }));
++    expect(plist.Label).toBe(job.label);
++    expect(createLaunchAgent(options).label).not.toBe(job.label);
++    expect(path.dirname(job.plistPath)).toBe(root);
++    expect(plist.ProgramArguments.slice(3)).toEqual(options.args);
++    expect(plist.WorkingDirectory).toBe(root);
++    expect(plist.EnvironmentVariables).toEqual(Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined)));
++    expect(plist.LimitLoadToSessionType).toBe('Aqua');
++    expect(plist.RunAtLoad).toBe(true);
++    expect(plist.AbandonProcessGroup).toBe(true);
++    expect(plist.StandardOutPath).toBe(options.logPath);
++    expect(plist.StandardErrorPath).toBe(options.logPath);
++    expect(plist.KeepAlive).toBeUndefined();
++  } finally { fs.rmSync(root, { recursive: true, force: true }); }
++});
++
++test.skipIf(process.platform !== 'darwin')('real LaunchAgent enters Aqua and bootout leaves its daemon alive', async () => {
++  // No Chromium: this process only records its launch context and stays alive.
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'browse-aqua-'));
++  const resultPath = path.join(root, 'result.json');
++  const script = path.join(root, 'daemon.ts');
++  const logPath = path.join(root, 'browse-daemon.log');
++  fs.writeFileSync(logPath, 'previous daemon log\n');
++  fs.writeFileSync(script, `import {execFileSync} from 'child_process';
++    await Bun.write(process.argv[2], JSON.stringify({pid:process.pid, cwd:process.cwd(),
++      env:process.env.AQUA_TEST, shellLevel:process.env.SHLVL, arg:process.argv[3], manager:execFileSync('/bin/launchctl',['managername'],{encoding:'utf8'}).trim()}));
++    console.log('aqua stdout'); console.error('aqua stderr'); setInterval(()=>{},1000);`);
++  let cleanup: (() => void) | undefined;
++  let pid: number | undefined;
++  try {
++    cleanup = bootstrapLaunchAgent({ stateFile: path.join(root, 'browse.json'), stateDir: root,
++      cwd: root, args: [process.execPath, 'run', script, resultPath, 'literal $HOME & <value>'],
++      env: { ...process.env, AQUA_TEST: 'literal & <value>\nnext', SHLVL: '73' }, logPath });
++    const deadline = Date.now() + 10_000;
++    while ((!fs.existsSync(resultPath) || !fs.existsSync(logPath) || !fs.readFileSync(logPath, 'utf8').includes('aqua stderr')) && Date.now() < deadline) await Bun.sleep(50);
++    const result = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
++    pid = result.pid;
++    expect(result).toEqual({pid, cwd: fs.realpathSync(root), env:'literal & <value>\nnext', shellLevel:'73', arg:'literal $HOME & <value>', manager:'Aqua'});
++    cleanup(); cleanup = undefined;
++    await Bun.sleep(200);
++    expect(() => process.kill(pid!, 0)).not.toThrow();
++    expect(fs.readFileSync(logPath, 'utf8')).toContain('previous daemon log');
++    expect(fs.readFileSync(logPath, 'utf8')).toContain('aqua stdout');
++    expect(fs.readFileSync(logPath, 'utf8')).toContain('aqua stderr');
++    expect(fs.readdirSync(root).filter(f => f.endsWith('.plist'))).toEqual([]);
++  } finally {
++    if (!pid && fs.existsSync(resultPath)) pid = JSON.parse(fs.readFileSync(resultPath, 'utf8')).pid;
++    try { cleanup?.(); } finally {
++      if (pid) process.kill(pid, 'SIGTERM');
++      fs.rmSync(root, { recursive: true, force: true });
++    }
++  }
++}, 15_000);
