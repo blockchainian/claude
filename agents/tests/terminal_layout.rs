@@ -1873,15 +1873,52 @@ fn terminal_task_details_section_positions() {
         std::fs::read_to_string(&transcript).unwrap(),
         include_str!("fixtures/claude-todos.jsonl")
     );
+    let checkout = _directory.path().join("pr-origin/claude");
+    std::fs::create_dir_all(&checkout).unwrap();
+    for args in [
+        vec!["init"],
+        vec![
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example-user/panel.git",
+        ],
+    ] {
+        assert!(
+            Command::new("git")
+                .current_dir(&checkout)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+    let with_cwd = |records: &str| {
+        records
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(|line| {
+                let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+                if record.get("cwd").is_some() {
+                    record["cwd"] = serde_json::json!(checkout);
+                }
+                record.to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let original = with_cwd(&original);
+    let pr = with_cwd(include_str!("fixtures/claude-pr-create/foreground.jsonl"));
     for has_pr in [false, true, false] {
         let content = if has_pr {
-            format!("{original}\n{}", include_str!("fixtures/pr-link.jsonl"))
+            format!("{original}\n{pr}\n")
         } else {
             original.clone()
         };
         std::fs::write(&transcript, content).unwrap();
         tmux.wait_for(|capture| {
-            capture.contains("#763") == has_pr
+            capture.contains("#1") == has_pr
                 && capture.contains("Task 1")
                 && capture.contains("Background")
                 && capture.contains("Running checks")
@@ -1971,7 +2008,7 @@ fn terminal_task_details_section_positions() {
             assert!(title.starts_with("┴╴claude "), "{title}");
             let end = if width >= 150 { "╶┴" } else { "╶─" };
             if has_pr {
-                assert!(title.ends_with(&format!(" #763{end}")), "{title}");
+                assert!(title.ends_with(&format!(" #1{end}")), "{title}");
                 assert!(!title.contains("main"), "{title}");
             } else {
                 assert!(title.ends_with(&format!(" main{end}")), "{title}");

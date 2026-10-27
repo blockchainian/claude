@@ -853,11 +853,16 @@ fn hub_reports_visible_read_errors() {
 fn session_reads_pr_from_rollout() {
     let (dir, mut provider) = fixture();
     let path = dir.path().join("pr.jsonl");
-    std::fs::write(
-        &path,
-        include_str!("../../../tests/fixtures/codex-pr-create.jsonl"),
-    )
-    .unwrap();
+    let checkout =
+        crate::providers::pull_request::tests::checkout("git@github.com:example-org/wallet.git");
+    let mut records: Vec<serde_json::Value> =
+        include_str!("../../../tests/fixtures/codex-pr-create.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+    records[0]["payload"]["cwd"] = checkout.path().to_str().unwrap().into();
+    let text: String = records.iter().map(|record| format!("{record}\n")).collect();
+    std::fs::write(&path, text).unwrap();
     Connection::open(dir.path().join("state_5.sqlite"))
         .unwrap()
         .execute(
@@ -874,8 +879,8 @@ fn session_reads_pr_from_rollout() {
     assert_eq!(
         session.pr,
         Some(crate::model::PullRequest {
-            number: 850,
-            url: "https://github.com/example/project/pull/850".into(),
+            number: 679,
+            url: "https://github.com/example-org/wallet/pull/679".into(),
         })
     );
 }

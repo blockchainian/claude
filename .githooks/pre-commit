@@ -1,0 +1,3 @@
+#!/bin/sh
+# Blocks secrets and personal home paths before they reach a pull request.
+exec python3 .github/scripts/privacy.py staged

@@ -1,5 +1,6 @@
 use crate::event::SourceRecord;
 use crate::model::{Activity, BackgroundTask, PullRequest, SessionTask, TaskStatus};
+use crate::providers::pull_request::{CreatedPullRequest, creates_pull_request};
 use crate::providers::text::printable;
 use crate::providers::tool::question_texts;
 use chrono::{DateTime, Utc};
@@ -15,6 +16,7 @@ const CHUNK: u64 = 64 * 1024;
 pub(super) struct Summary {
     pub tasks: Vec<SessionTask>,
     task_replay: TaskReplay,
+    pr_replay: PullRequestReplay,
     model_history: ModelHistory,
     prompt_cache: PromptCache,
     pub task_details_sources: [Option<String>; 3],
@@ -153,6 +155,82 @@ impl TaskReplay {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+struct PullRequestReplay {
+    created: CreatedPullRequest,
+    calls: HashSet<String>,
+    background: HashSet<String>,
+}
+
+impl PullRequestReplay {
+    fn record(&mut self, record: &Value, cwd: Option<&Path>) -> io::Result<()> {
+        let Some(cwd) = cwd else {
+            return Ok(());
+        };
+        if record["type"] == "assistant" {
+            if let Some(blocks) = record["message"]["content"].as_array() {
+                for block in blocks {
+                    if block["type"] == "tool_use"
+                        && block["name"] == "Bash"
+                        && block["input"]["command"]
+                            .as_str()
+                            .is_some_and(creates_pull_request)
+                        && let Some(id) = block["id"].as_str()
+                    {
+                        self.calls.insert(id.to_owned());
+                    }
+                }
+            }
+        } else if record["type"] == "user" {
+            if let Some(blocks) = record["message"]["content"].as_array() {
+                for block in blocks {
+                    if block["type"] != "tool_result" {
+                        continue;
+                    }
+                    let Some(id) = block["tool_use_id"]
+                        .as_str()
+                        .filter(|id| self.calls.remove(*id))
+                    else {
+                        continue;
+                    };
+                    let result = &record["toolUseResult"];
+                    let has_pr = self
+                        .created
+                        .record(cwd, result["stdout"].as_str().unwrap_or_default());
+                    if !has_pr && result["backgroundTaskId"].as_str().is_some() {
+                        self.background.insert(id.to_owned());
+                    }
+                }
+            }
+        } else if record["type"] == "queue-operation"
+            && record["operation"] == "enqueue"
+            && let Some(content) = record["content"].as_str()
+            && content.trim_start().starts_with("<task-notification>")
+            && let Some(id) = notification_field(content, "tool-use-id")
+            && self.background.contains(id)
+            && let Some(path) = notification_field(content, "output-file")
+        {
+            match std::fs::read_to_string(path) {
+                Ok(output) => {
+                    self.created.record(cwd, &output);
+                    self.background.remove(id);
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+}
+
+fn notification_field<'a>(content: &'a str, name: &str) -> Option<&'a str> {
+    content
+        .split_once(&format!("<{name}>"))?
+        .1
+        .split_once(&format!("</{name}>"))
+        .map(|(value, _)| value.trim())
+}
+
 fn task_status(status: &str) -> Option<TaskStatus> {
     match status {
         "pending" => Some(TaskStatus::Pending),
@@ -176,6 +254,7 @@ fn read_history(
             .extend(previous.model_identities.clone());
         summary.tasks = previous.tasks.clone();
         summary.task_replay = previous.task_replay.clone();
+        summary.pr_replay = previous.pr_replay.clone();
         summary.model_history = previous.model_history.clone();
         summary.prompt_cache = previous.prompt_cache.clone();
         summary.cache_expires_at = previous.cache_expires_at;
@@ -209,6 +288,7 @@ fn read_history(
             && (sidechains || record["isSidechain"] != true)
         {
             summary.task_replay.record(&record, &mut summary.tasks);
+            summary.pr_replay.record(&record, summary.cwd.as_deref())?;
             summary
                 .model_history
                 .record(&record, &mut summary.model_identities);
@@ -220,6 +300,7 @@ fn read_history(
             }
         }
     }
+    summary.pr = summary.pr_replay.created.pr.clone();
     summary.model = summary.model_history.model.clone();
     Ok(())
 }
@@ -295,7 +376,6 @@ pub(super) fn start_time(path: &Path) -> io::Result<Option<DateTime<Utc>>> {
 
 impl Summary {
     fn record_metadata(&mut self, record: &Value) {
-        self.record_pr(record);
         if let Some(timestamp) = record["timestamp"]
             .as_str()
             .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
@@ -347,15 +427,6 @@ impl Summary {
         }
         if let Some(effort) = text(record, "effort") {
             self.effort = Some(effort);
-        }
-    }
-
-    fn record_pr(&mut self, record: &Value) {
-        if record["type"] == "pr-link"
-            && let Some(number) = record["prNumber"].as_u64()
-            && let Some(url) = text(record, "prUrl")
-        {
-            self.pr = Some(PullRequest { number, url });
         }
     }
 }
@@ -883,7 +954,6 @@ fn read_summary(path: &Path, len: u64) -> io::Result<Summary> {
     }
     let mut summary = Summary::default();
     for record in records(&head) {
-        summary.record_pr(&record);
         if !matches!(record["type"].as_str(), Some("user" | "assistant")) {
             continue;
         }
@@ -1851,8 +1921,6 @@ pub(super) mod tests {
         );
     }
 
-    const PR: &str = include_str!("../../../tests/fixtures/pr-link.jsonl");
-
     fn write_tool_traffic(file: &mut impl Write, bytes: usize) {
         let tool_use = serde_json::json!({
             "type": "assistant",
@@ -2613,51 +2681,179 @@ pub(super) mod tests {
         }
     }
 
+    fn pr_fixture(file: &mut impl Write, fixture: &str, cwd: &Path, output: Option<&Path>) {
+        for line in fixture.lines() {
+            let mut record: Value = serde_json::from_str(line).unwrap();
+            record["cwd"] = cwd.to_str().unwrap().into();
+            if let Some(output) = output
+                && let Some(content) = record["content"].as_str()
+                && let Some((before, rest)) = content.split_once("<output-file>")
+                && let Some((_, after)) = rest.split_once("</output-file>")
+            {
+                record["content"] = format!(
+                    "{before}<output-file>{}</output-file>{after}",
+                    output.display()
+                )
+                .into();
+            }
+            writeln!(file, "{record}").unwrap();
+        }
+    }
+
+    const PR_FOREGROUND: &str =
+        include_str!("../../../tests/fixtures/claude-pr-create/foreground.jsonl");
+    const PR_BACKGROUND: &str =
+        include_str!("../../../tests/fixtures/claude-pr-create/background.jsonl");
+
     #[test]
-    fn pull_request_absent() {
-        let mut file = tempfile::NamedTempFile::new().unwrap();
-        file.write_all(FIXTURE.as_bytes()).unwrap();
-        assert!(
-            read(file.path(), file.as_file().metadata().unwrap().len())
-                .unwrap()
-                .pr
-                .is_none()
-        );
+    fn pull_request_foreground_and_background_output() {
+        for (fixture, repository, output, expected) in [
+            (PR_FOREGROUND, "example-user/panel", None, Some(1)),
+            (
+                PR_BACKGROUND,
+                "blockchainian/claude",
+                Some("background.output"),
+                Some(50),
+            ),
+            (
+                PR_BACKGROUND,
+                "blockchainian/claude",
+                Some("failed.output"),
+                None,
+            ),
+        ] {
+            let checkout = crate::providers::pull_request::tests::checkout(&format!(
+                "https://github.com/{repository}.git"
+            ));
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            let output = output.map(|name| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/claude-pr-create")
+                    .join(name)
+            });
+            pr_fixture(&mut file, fixture, checkout.path(), output.as_deref());
+            assert_eq!(summary(&file).pr.map(|pr| pr.number), expected);
+        }
     }
 
     #[test]
-    fn pull_request_last_wins_in_head_and_tail() {
-        let expected: Value = serde_json::from_str(PR).unwrap();
-        for large in [false, true] {
-            let mut file = tempfile::NamedTempFile::new().unwrap();
-            file.write_all(FIXTURE.as_bytes()).unwrap();
-            file.write_all(PR.as_bytes()).unwrap();
-            let summary = read(file.path(), file.as_file().metadata().unwrap().len()).unwrap();
-            let pr = summary.pr.unwrap();
-            assert_eq!(pr.number, expected["prNumber"].as_u64().unwrap());
-            assert_eq!(pr.url, expected["prUrl"].as_str().unwrap());
-            if large {
-                for _ in 0..2000 {
-                    writeln!(file, "{}", FIXTURE.lines().nth(2).unwrap()).unwrap();
-                }
-                assert!(
-                    read(file.path(), file.as_file().metadata().unwrap().len())
-                        .unwrap()
-                        .pr
-                        .is_some()
-                );
-            }
-            let mut last = expected.clone();
-            last["prNumber"] = 833.into();
-            last["prUrl"] = "https://github.com/example/example/pull/833".into();
-            writeln!(file, "{last}").unwrap();
-            let pr = read(file.path(), file.as_file().metadata().unwrap().len())
+    fn pull_request_replay_retains_matching_origin_and_last_match() {
+        let checkout =
+            crate::providers::pull_request::tests::checkout("git@github.com:example-user/panel.git");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let mut header: Value =
+            serde_json::from_str(PR_FOREGROUND.lines().next().unwrap()).unwrap();
+        header["message"]["content"] = serde_json::json!([]);
+        pr_fixture(&mut file, &header.to_string(), checkout.path(), None);
+        // Keep creation outside both bounded chunks.
+        write_tool_traffic(&mut file, CHUNK as usize * 2);
+        pr_fixture(&mut file, PR_FOREGROUND, checkout.path(), None);
+        write_tool_traffic(&mut file, CHUNK as usize * 2);
+        let mut previous = summary(&file);
+        assert_eq!(previous.pr.as_ref().map(|pr| pr.number), Some(1));
+        assert!(
+            std::process::Command::new("git")
+                .current_dir(checkout.path())
+                .args([
+                    "remote",
+                    "set-url",
+                    "origin",
+                    "https://github.com/example-org/wallet"
+                ])
+                .status()
                 .unwrap()
-                .pr
-                .unwrap();
-            assert_eq!(pr.number, 833);
-            assert_eq!(pr.url, last["prUrl"].as_str().unwrap());
+                .success()
+        );
+        for (url, expected) in [
+            ("https://github.com/example-org/wallet/pull/850", 1),
+            ("https://github.com/EXAMPLE-USER/PANEL/pull/2", 2),
+        ] {
+            pr_fixture(
+                &mut file,
+                &PR_FOREGROUND.replace("https://github.com/example-user/panel/pull/1", url),
+                checkout.path(),
+                None,
+            );
+            let updated = read_cached(
+                file.path(),
+                file.as_file().metadata().unwrap().len(),
+                Some(&previous),
+            )
+            .unwrap();
+            assert_eq!(updated.pr.as_ref().unwrap().number, expected);
+            previous = updated;
         }
+    }
+
+    #[test]
+    fn pull_request_background_call_survives_incremental_refreshes() {
+        let checkout = crate::providers::pull_request::tests::checkout(
+            "https://github.com/blockchainian/claude",
+        );
+        let output = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude-pr-create/background.output");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let records: Vec<_> = PR_BACKGROUND.lines().collect();
+        let mut previous = Summary::default();
+        for (index, record) in records.iter().enumerate() {
+            if index == 2 {
+                let unrelated = record.replace("toolu_01CnLyE4YFzWEDPdsYbGa4Ub", "unrelated");
+                pr_fixture(&mut file, &unrelated, checkout.path(), Some(&output));
+                previous = read_cached(
+                    file.path(),
+                    file.as_file().metadata().unwrap().len(),
+                    Some(&previous),
+                )
+                .unwrap();
+                assert!(previous.pr.is_none());
+            }
+            pr_fixture(&mut file, record, checkout.path(), Some(&output));
+            previous = read_cached(
+                file.path(),
+                file.as_file().metadata().unwrap().len(),
+                Some(&previous),
+            )
+            .unwrap();
+            assert_eq!(
+                previous.pr.as_ref().map(|pr| pr.number),
+                (index == 2).then_some(50)
+            );
+        }
+    }
+
+    #[test]
+    fn pull_request_only_assistant_bash_create_calls() {
+        let checkout =
+            crate::providers::pull_request::tests::checkout("https://github.com/example-user/panel");
+        for (field, replacement) in [
+            ("type", "api-request-blob"),
+            ("name", "Write"),
+            ("command", "gh pr view"),
+        ] {
+            let mut records: Vec<Value> = PR_FOREGROUND
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            if field == "type" {
+                records[0][field] = replacement.into();
+            } else if field == "name" {
+                records[0]["message"]["content"][0][field] = replacement.into();
+                records[0]["message"]["content"][0]["input"]["content"] = "gh pr create".into();
+            } else {
+                records[0]["message"]["content"][0]["input"][field] = replacement.into();
+            }
+            let fixture = records
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            pr_fixture(&mut file, &fixture, checkout.path(), None);
+            assert!(summary(&file).pr.is_none());
+        }
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "{}", serde_json::json!({"type":"pr-link", "prNumber":1,"prUrl":"https://github.com/example-user/panel/pull/1"})).unwrap();
+        assert!(summary(&file).pr.is_none());
     }
 
     #[test]
