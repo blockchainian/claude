@@ -503,7 +503,7 @@ impl View {
                 .feedback
                 .as_ref()
                 .map(|(feedback, _)| feedback.line())
-                .or_else(|| self.selection_failure().map(|failure| failure.line())),
+                .or_else(|| self.selection_feedback().map(|feedback| feedback.line())),
         }
         .render(area, large, buf);
         self.viewport.borrow_mut().hint_targets.extend(keys);

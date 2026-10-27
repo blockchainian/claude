@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> Before working in a plugin, read its `README.md`.  
+> Before working in a component, read its `AGENTS.md` and `README.md`.  
 > Never hard-code a path of this machine: the repo is public.  
 > Never import a plugin script by its versioned cache path.
 
