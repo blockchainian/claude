@@ -2078,7 +2078,8 @@ impl View {
                         action: ConfirmAction::Delete(session.id.clone()),
                         title: session.display_title().to_owned(),
                         selected: 0,
-                        worktree: crate::tasks::linked_worktree(&session.cwd),
+                        worktree: crate::tasks::linked_worktree(&session.cwd)
+                            .filter(|path| !crate::tasks::is_trunk(path)),
                     });
                 }
             }

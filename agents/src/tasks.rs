@@ -231,6 +231,11 @@ pub fn repository(directory: &Path) -> io::Result<Repository> {
         trunk,
     })
 }
+/// Whether the checkout is on the repository's trunk branch.
+pub fn is_trunk(directory: &Path) -> bool {
+    repository(directory).is_ok_and(|repository| repository.branch == repository.trunk)
+}
+
 /// The branch a new task runs on: one the repository has, or a new one from its checked-out commit.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BranchChoice {
@@ -683,6 +688,64 @@ pub(crate) mod tests {
         remove_worktree(&linked).unwrap();
         assert!(!linked.exists());
         assert!(repo.path().exists());
+    }
+
+    #[test]
+    fn is_trunk_uses_origin_head_in_linked_worktree() {
+        let (repo, linked) = worktree();
+        git(
+            repo.path(),
+            &["update-ref", "refs/remotes/origin/linked", "HEAD"],
+        );
+        git(
+            repo.path(),
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/linked",
+            ],
+        );
+        assert!(is_trunk(&linked));
+        assert!(is_trunk(&linked.join("sub")));
+        assert!(!is_trunk(repo.path()));
+    }
+
+    #[test]
+    fn is_trunk_uses_local_main_without_remote() {
+        let (repo, linked) = worktree();
+        git(repo.path(), &["checkout", "-b", "feature"]);
+        git(&linked, &["checkout", "main"]);
+        assert!(is_trunk(&linked));
+    }
+
+    #[test]
+    fn is_trunk_uses_local_master_without_main() {
+        let (repo, linked) = worktree();
+        git(repo.path(), &["branch", "-m", "master"]);
+        git(repo.path(), &["checkout", "-b", "feature"]);
+        git(&linked, &["checkout", "master"]);
+        assert!(is_trunk(&linked));
+    }
+
+    #[test]
+    fn is_trunk_excludes_feature_branch() {
+        let (_repo, linked) = worktree();
+        assert!(!is_trunk(&linked));
+    }
+
+    #[test]
+    fn is_trunk_excludes_detached_head() {
+        let (_repo, linked) = worktree();
+        git(&linked, &["checkout", "--detach", "main"]);
+        assert!(!is_trunk(&linked));
+    }
+
+    #[test]
+    fn is_trunk_excludes_repository_without_trunk() {
+        let (repo, linked) = worktree();
+        git(repo.path(), &["branch", "-m", "feature"]);
+        git(&linked, &["config", "init.defaultBranch", "linked"]);
+        assert!(!is_trunk(&linked));
     }
 
     #[test]

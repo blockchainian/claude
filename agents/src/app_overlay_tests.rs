@@ -129,6 +129,52 @@ fn delete_dialog_covers_project_link_underlines_through_app() {
 }
 
 #[test]
+fn delete_dialog_trunk_worktree_through_app() {
+    let (repo, linked) = crate::tasks::tests::worktree();
+    crate::tasks::tests::git(repo.path(), &["checkout", "-b", "feature"]);
+    crate::tasks::tests::git(&linked, &["checkout", "main"]);
+    let (_directory, mut app, transcript) = deletion_fixture(&linked.join("sub"));
+    let id = app.sessions[0].id.clone();
+    super::live_tests::select(&mut app, &id);
+    key(&mut app, KeyCode::Backspace);
+    let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(120, 48)).unwrap();
+    app.draw(&mut terminal).unwrap();
+    let rendered = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(rendered.contains("1. Cancel"));
+    assert!(rendered.contains("2. Permanently delete task and child agents"));
+    assert!(!rendered.contains("3. Permanently delete"));
+    key(&mut app, KeyCode::Char('3'));
+    key(&mut app, KeyCode::End);
+    app.draw(&mut terminal).unwrap();
+    key(&mut app, KeyCode::Enter);
+    let mut schedule = RefreshSchedule::new(Instant::now(), POLLING_INTERVAL);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let event = app.next_input(deadline.saturating_duration_since(Instant::now()));
+        let deleted = matches!(event, Input::Deleted { .. });
+        app.handle_inputs(event, &mut None, &mut schedule).unwrap();
+        if deleted {
+            break;
+        }
+        assert!(Instant::now() < deadline, "task deletion timed out");
+    }
+    app.finish_refreshes();
+    assert!(!transcript.exists());
+    assert!(app.sessions.is_empty());
+    assert!(linked.exists());
+    assert_eq!(
+        crate::tasks::tests::git(&linked, &["branch", "--show-current"]),
+        "main"
+    );
+}
+
+#[test]
 fn delete_dialog_worktree_removal_through_app() {
     for (choice, dirty_file) in [
         ('2', None),

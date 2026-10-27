@@ -12454,6 +12454,34 @@ fn dialog_worktree(name: &str) -> (tempfile::TempDir, PathBuf) {
 }
 
 #[test]
+fn delete_dialog_trunk_worktree_options_and_controls() {
+    let (repo, linked) = dialog_worktree("trunk");
+    crate::tasks::tests::git(repo.path(), &["checkout", "-b", "feature"]);
+    crate::tasks::tests::git(&linked, &["checkout", "main"]);
+    let mut view = fixture();
+    view.rows[view.selected].cwd = linked.join("sub");
+    key(&mut view, KeyCode::Backspace);
+    let rendered = screen(&view, 120, 48);
+    assert!(rendered.contains("1. Cancel"));
+    assert!(rendered.contains("2. Permanently delete task and child agents"));
+    assert!(!rendered.contains("3. Permanently delete"));
+    assert_eq!(view.viewport.borrow().confirm_options.len(), 2);
+    assert_eq!(view.confirm_dialog.as_ref().unwrap().options(), 2);
+    assert_eq!(key(&mut view, KeyCode::Char('3')), None);
+    assert_eq!(view.confirm_dialog.as_ref().unwrap().selected, 0);
+    key(&mut view, KeyCode::Up);
+    assert_eq!(view.confirm_dialog.as_ref().unwrap().selected, 1);
+    key(&mut view, KeyCode::Down);
+    assert_eq!(view.confirm_dialog.as_ref().unwrap().selected, 0);
+    key(&mut view, KeyCode::End);
+    assert_eq!(view.confirm_dialog.as_ref().unwrap().selected, 1);
+    assert_eq!(
+        key(&mut view, KeyCode::Enter),
+        Some(Action::Delete(session_key("42")))
+    );
+}
+
+#[test]
 fn delete_dialog_linked_worktree_options_and_controls() {
     let (repo, linked) = dialog_worktree("fix-claude-session-input");
     let mut view = fixture();
@@ -12467,6 +12495,8 @@ fn delete_dialog_linked_worktree_options_and_controls() {
     key(&mut view, KeyCode::Backspace);
     let rendered = screen(&view, 120, 48);
     assert!(rendered.contains(label), "{rendered}");
+    assert_eq!(view.viewport.borrow().confirm_options.len(), 3);
+    assert_eq!(view.confirm_dialog.as_ref().unwrap().options(), 3);
     let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 10));
     view.render_confirm_dialog(
         view.confirm_dialog.as_ref().unwrap(),
