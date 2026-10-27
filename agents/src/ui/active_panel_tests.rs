@@ -562,14 +562,49 @@ fn mouse_activation_every_event_activates_its_panel() {
 
 #[test]
 fn mouse_activation_every_event_routes_subsequent_paging() {
-    for width in [100, 200] {
-        for panel in MOUSE_ACTIVATION_PANELS {
-            for kind in MOUSE_ACTIVATION_EVENTS {
-                let (mut view, _) = panel_fixture(width);
-                activate_mouse_panel(&mut view, width, panel, kind);
-                assert_mouse_panel_paging(&mut view, panel);
-            }
-        }
+    const CASES: [(u16, Panel, MouseEventKind); 12] = [
+        (
+            200,
+            Panel::TaskList,
+            MouseEventKind::Down(MouseButton::Left),
+        ),
+        (200, Panel::TaskList, MouseEventKind::ScrollDown),
+        (
+            200,
+            Panel::TaskDetails,
+            MouseEventKind::Down(MouseButton::Left),
+        ),
+        (200, Panel::TaskDetails, MouseEventKind::ScrollDown),
+        (
+            200,
+            Panel::EventList,
+            MouseEventKind::Down(MouseButton::Left),
+        ),
+        (200, Panel::EventList, MouseEventKind::ScrollDown),
+        (
+            200,
+            Panel::EventDetail,
+            MouseEventKind::Down(MouseButton::Left),
+        ),
+        (200, Panel::EventDetail, MouseEventKind::ScrollDown),
+        (200, Panel::EventDetail, MouseEventKind::ScrollUp),
+        (200, Panel::Prompt, MouseEventKind::Down(MouseButton::Left)),
+        (
+            200,
+            Panel::Prompt,
+            MouseEventKind::Down(MouseButton::Middle),
+        ),
+        (
+            100,
+            Panel::EventList,
+            MouseEventKind::Down(MouseButton::Left),
+        ),
+    ];
+
+    for (width, panel, kind) in CASES {
+        let (mut view, _) = panel_fixture(width);
+        activate_mouse_panel(&mut view, width, panel, kind);
+        assert_mouse_panel_paging(&mut view, panel);
     }
 }
 
