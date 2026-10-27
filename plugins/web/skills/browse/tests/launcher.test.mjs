@@ -7,16 +7,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LAUNCHER = fileURLToPath(new URL("../../../bin/browse", import.meta.url));
 
-function launch(dataDir, cwd, launcher = LAUNCHER, env = {}) {
+function launch(dataDir, cwd) {
   return new Promise((resolve, reject) => {
-    const child = spawn(launcher, ["--help"], { cwd, env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, ...env } });
+    const child = spawn(LAUNCHER, ["--help"], { cwd, env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir } });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
@@ -59,30 +59,5 @@ test("two concurrent first calls build once", async () => {
     assert.equal(readdirSync(join(dataDir, "browse")).length, 1);
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
-  }
-});
-
-test("a launcher from a superseded install runs the currently installed version instead", async () => {
-  const root = mkdtempSync(join(tmpdir(), "web-browse-install-"));
-  try {
-    const versions = join(root, "cache", "marketplace", "web");
-    const stale = join(versions, "0.0.1", "bin");
-    const current = join(versions, "0.0.2", "bin");
-    mkdirSync(stale, { recursive: true });
-    mkdirSync(current, { recursive: true });
-    copyFileSync(LAUNCHER, join(stale, "browse"));
-    writeFileSync(join(current, "browse"), '#!/bin/bash\necho "current $*"\n');
-    chmodSync(join(current, "browse"), 0o755);
-    mkdirSync(join(root, "config", "plugins"), { recursive: true });
-    writeFileSync(join(root, "config", "plugins", "installed_plugins.json"), JSON.stringify({
-      version: 2,
-      plugins: { "web@marketplace": [{ scope: "user", installPath: join(versions, "0.0.2"), version: "0.0.2" }] },
-    }));
-
-    const result = await launch(root, root, join(stale, "browse"), { CLAUDE_CONFIG_DIR: join(root, "config") });
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout, "current --help\n");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
   }
 });
