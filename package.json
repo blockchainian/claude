@@ -7,7 +7,6 @@
     "node": ">=18.18"
   },
   "scripts": {
-    "prepare": "git config core.hooksPath .githooks",
-    "validate": "claude plugin validate --strict ."
+    "prepare": "git config core.hooksPath .githooks"
   }
 }

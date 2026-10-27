@@ -25,7 +25,7 @@ This repo is the `blockchainian` plugin marketplace for Claude Code and Codex, a
 
 The per-plugin gate a plan's `Checks` command composes:
 
-- **validate**: `npm run validate`
+- **validate**: `claude plugin validate --strict .`
 - **tests**: the plugin's own test command
 
 ## Tests
