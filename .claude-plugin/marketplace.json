@@ -4,12 +4,12 @@
     "name": "blockchainian"
   },
   "metadata": {
-    "description": "Claude Code plugin marketplace for blockchainian's plugins: the feature pipeline (ship, verify, handoff, retro), Codex review/delegation tooling, iOS debugging, profiling, and whole-screen capture on simulator or device, and the Render and Cloudflare plugins carrying only the skills this desk uses."
+    "description": "Claude Code plugin marketplace for blockchainian's plugins: the UX implementer, autofixer and verifier agents, Codex review/delegation tooling, iOS debugging, profiling, and whole-screen capture on simulator or device, and the Render and Cloudflare plugins carrying only the skills this desk uses."
   },
   "plugins": [
     {
       "name": "feature",
-      "description": "Ship a feature from a written plan: orchestrate the codex and UX workstreams to a merged, verified, deployed PR, with the UX and UX-verifier agents and the handoff and retro skills.",
+      "description": "The UX agents: implement a frontend workstream, fix the UX findings routed to it, and drive a scripted UI check to a verdict.",
       "author": {
         "name": "blockchainian"
       },

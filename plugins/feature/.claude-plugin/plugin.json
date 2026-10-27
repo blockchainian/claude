@@ -1,7 +1,7 @@
 {
   "name": "feature",
-  "version": "0.16.5",
-  "description": "Ship a feature from a written plan: the ship skill takes any plan.md with Workstreams, Dependencies and Checks sections, runs one codex-manager thread or UX agent per workstream in its own worktree, checks each merged batch once, reviews with codex's review mode and ships a verified, deployed PR; the ux-implementer, ux-autofixer and ux-verifier agents staff the UX workstream; the handoff skill records a mid-phase stop; the retro skill ranks a finished session's biggest wastes by token cost and routes fixes back to ship and the plan template.",
+  "version": "0.17.0",
+  "description": "The UX agents: ux-implementer implements one frontend workstream and commits each step, ux-autofixer fixes the UX findings routed to it, and ux-verifier drives a scripted UI check (browse or iOS simulator) to a verdict with evidence paths.",
   "author": {
     "name": "blockchainian"
   },
@@ -9,10 +9,8 @@
   "homepage": "https://github.com/blockchainian/claude",
   "repository": "https://github.com/blockchainian/claude",
   "keywords": [
-    "orchestration",
-    "codex",
     "ux",
     "verification",
-    "handoff"
+    "agents"
   ]
 }
