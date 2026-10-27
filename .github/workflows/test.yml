@@ -9,10 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      PRIVACY_EVENT: ${{ github.event_name }}
-      PRIVACY_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-      PRIVACY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:

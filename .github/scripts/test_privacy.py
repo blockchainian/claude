@@ -67,15 +67,26 @@ class PrivacyTests(unittest.TestCase):
     def scan_secrets(self, event="push", base=None):
         return self.run_scan(["bash", "-eo", "pipefail", "-c", CI_COMMAND], "", event, base)
 
-    def run_scan(self, command, denylist="", event="push", base=None):
-        result = subprocess.run(
-            command, cwd=self.repo, text=True,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            env={**os.environ, "PRIVACY_EVENT": event,
-                 "PRIVACY_BASE": self.base if base is None else base,
-                 "PRIVACY_HEAD": self.git("rev-parse", "HEAD").strip(),
-                 "PRIVACY_DENYLIST": denylist},
+    def run_scan(self, command, denylist="", event="push", base=None, event_content=None):
+        head = self.git("rev-parse", "HEAD").strip()
+        base = self.base if base is None else base
+        payload = (
+            {"pull_request": {"base": {"sha": base}, "head": {"sha": head}}}
+            if event == "pull_request" else {"before": base, "after": head}
         )
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "event.json"
+            event_path.write_text(
+                json.dumps(payload) if event_content is None else event_content
+            )
+            result = subprocess.run(
+                command, cwd=self.repo, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                env={**{key: value for key, value in os.environ.items()
+                        if key not in ("PRIVACY_BASE", "PRIVACY_HEAD", "PRIVACY_EVENT")},
+                     "GITHUB_EVENT_NAME": event, "GITHUB_EVENT_PATH": str(event_path),
+                     "PRIVACY_DENYLIST": denylist},
+            )
         return result.returncode, result.stdout
 
     def test_invalid_cli_is_rejected_without_echoing_input(self):
@@ -183,6 +194,56 @@ class PrivacyTests(unittest.TestCase):
                             ("unsupported", self.base)):
             code, output = self.run_scan(["python3", str(RANGE)], event=event, base=base)
             self.assertEqual((code, output), (2, "Commit range could not be resolved.\n"))
+
+    def test_ci_invalid_event_json_is_redacted(self):
+        for event in ("push", "pull_request"):
+            for content in (
+                "", "private-input", "null", "[]", "{}", '{"before": null}',
+                '{"pull_request": []}', '{"pull_request": {"base": null}}',
+            ):
+                with self.subTest(event=event, content=content):
+                    code, output = self.run_scan(
+                        ["python3", str(RANGE)], event=event, event_content=content
+                    )
+                    self.assertEqual(
+                        (code, output), (2, "Commit range could not be resolved.\n")
+                    )
+            for field in ("base", "head"):
+                for sha in (None, 123, [], {}, "a" * 39, "g" * 40, "f" * 40,
+                            "private-input", "0" * 40):
+                    if field == "base" and sha == "0" * 40 and event == "push":
+                        continue
+                    base = sha if field == "base" else self.base
+                    head = sha if field == "head" else self.base
+                    payload = (
+                        {"pull_request": {"base": {"sha": base}, "head": {"sha": head}}}
+                        if event == "pull_request" else {"before": base, "after": head}
+                    )
+                    with self.subTest(event=event, field=field, sha=sha):
+                        code, output = self.run_scan(
+                            ["python3", str(RANGE)], event=event,
+                            event_content=json.dumps(payload),
+                        )
+                        self.assertEqual(
+                            (code, output), (2, "Commit range could not be resolved.\n")
+                        )
+
+    def test_ci_missing_event_environment_or_file_is_redacted(self):
+        env = {key: value for key, value in os.environ.items()
+               if key not in ("GITHUB_EVENT_NAME", "GITHUB_EVENT_PATH",
+                              "PRIVACY_BASE", "PRIVACY_HEAD", "PRIVACY_EVENT")}
+        for extra in ({}, {"GITHUB_EVENT_NAME": "push"},
+                      {"GITHUB_EVENT_NAME": "push",
+                       "GITHUB_EVENT_PATH": str(self.repo / "missing-event.json")}):
+            with self.subTest(extra=extra):
+                result = subprocess.run(
+                    ["python3", str(RANGE)], cwd=self.repo, text=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env={**env, **extra},
+                )
+                self.assertEqual(
+                    (result.returncode, result.stdout),
+                    (2, "Commit range could not be resolved.\n"),
+                )
 
     def test_ci_pull_request_uses_merge_base(self):
         self.git("checkout", "-b", "topic")
