@@ -71,5 +71,5 @@ until the person closes its shown browser.
 ## Tests
 
 ```sh
-npm run test:creator
+node --test plugins/creator/skills/upload-tiktok-video/tests/*.mjs plugins/creator/skills/fetch-tiktok-stats/tests/*.mjs plugins/creator/skills/fetch-tiktok-sounds/tests/*.mjs plugins/creator/skills/open-tiktok-account/tests/*.mjs
 ```

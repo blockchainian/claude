@@ -44,7 +44,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm run test:codex
+      - run: node --test plugins/codex/tests/*.mjs
   marketplace:
     runs-on: ubuntu-latest
     steps:
@@ -52,4 +52,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm run test:marketplace
+      - run: node --test tests/marketplace.test.mjs

@@ -76,5 +76,5 @@ Web pages usually have no fixed chrome, so leave `--mask-top` and `--mask-bottom
 ## Tests
 
 ```sh
-npm run test:web
+node --test plugins/web/skills/heap-snapshot-leaks/tests/*.mjs plugins/web/skills/browse/tests/*.mjs && uv run plugins/web/skills/check-web-design/tests/test_check_design.py
 ```

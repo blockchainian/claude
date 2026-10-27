@@ -98,11 +98,11 @@ local-step times include nested work and phase totals can overlap.
 
 ## Tests
 
-Run `npm run test:intel` from the marketplace root. The unminify real-model test is skipped
+Run `npm ci --prefix plugins/intel/skills/fetch-x-mentions/scripts && npm ci --prefix plugins/intel/skills/fetch-app-reviews/scripts && npm ci --prefix plugins/intel/skills/unminify/scripts && node --test plugins/intel/skills/transcribe/tests/*.mjs && uv run plugins/intel/skills/digest/tests/test_fetch_source.py && node --test plugins/intel/skills/digest/tests/*.mjs && uv run plugins/intel/skills/digest/tests/test_pdf_highlights.py && node --test plugins/intel/skills/translate/epub/tests/*.mjs && uv run plugins/intel/skills/translate/epub/tests/test_render.py && node --test plugins/intel/skills/find-domain-names/tests/check.test.mjs && node --test plugins/intel/skills/download-book/tests/*.mjs && node --test plugins/intel/skills/case-study/tests/*.mjs && node --test plugins/intel/skills/analyze-appstore-reviews/tests/*.mjs && node --test plugins/intel/skills/fetch-x-mentions/tests/*.mjs plugins/intel/skills/fetch-x-posts/tests/*.mjs plugins/intel/skills/fetch-x-user-posts/tests/*.mjs plugins/intel/skills/analyze-x-mentions/tests/*.mjs plugins/intel/skills/analyze-x-user/tests/*.mjs plugins/intel/skills/analyze-x-users/tests/*.mjs plugins/intel/skills/fetch-tiktok-mentions/tests/*.mjs plugins/intel/skills/fetch-x-feed/tests/*.test.mjs plugins/intel/skills/manage-x-account/tests/*.test.mjs && node --test plugins/intel/skills/unminify/tests/*.test.mjs` from the marketplace root. The unminify real-model test is skipped
 unless `UNMINIFY_E2E=1`. Run its authored small JavaScript modules with the current Codex login:
 
 ```sh
-npm run test:intel:unminify:e2e
+UNMINIFY_E2E=1 node --test plugins/intel/skills/unminify/tests/e2e.test.mjs
 ```
 
 It checks syntax checkpoints, binding safety, preserved exports, renamed imports and execution.
