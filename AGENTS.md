@@ -6,11 +6,6 @@
 
 This repo is the `blockchainian` plugin marketplace for Claude Code and Codex, and the only home of all its plugins.
 
-## Catalogs
-
-- .claude-plugin/marketplace.json -- the Claude Code catalog
-- .agents/plugins/marketplace.json -- the Codex catalog
-
 ## Modules
 
 - plugins/ -- one directory per plugin
