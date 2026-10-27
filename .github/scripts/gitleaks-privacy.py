@@ -8,7 +8,32 @@ import re
 import subprocess
 import sys
 
-from commit_range import commit_range, git
+
+def git(*args):
+    return subprocess.check_output(["git", *args], stderr=subprocess.DEVNULL).decode(
+        "utf-8", errors="replace"
+    )
+
+
+def revisions_from_args(args):
+    if not args or args[0] != "git":
+        raise ValueError("Expected git command")
+    flags = args[1:]
+    if len(flags) == 2 and set(flags) == {"--pre-commit", "--staged"}:
+        return None
+    if len(flags) == 1 and flags[0].startswith("--log-opts="):
+        options = flags[0].removeprefix("--log-opts=")
+    elif len(flags) == 2 and flags[0] == "--log-opts":
+        options = flags[1]
+    else:
+        raise ValueError("Invalid scanner arguments")
+    match = re.fullmatch(
+        r"--diff-merges=first-parent ([0-9a-fA-F]{40}(?:\.\.[0-9a-fA-F]{40})?)",
+        options,
+    )
+    if not match:
+        raise ValueError("Invalid log options")
+    return match[1]
 
 
 def location(filename, line):
@@ -25,17 +50,16 @@ def denylist():
     return [word.strip().casefold() for word in content.splitlines() if word.strip()]
 
 
-def scan_denylist(staged=False):
+def scan_denylist(revisions):
     words = denylist()
     if not words:
         print("PRIVACY_DENYLIST is empty; skipping denylist scan.")
         return 0
-    if staged:
+    if revisions is None:
         patches = [git("-c", "core.quotePath=true", "diff", "--cached",
                        "--unified=0", "--no-ext-diff", "--no-textconv",
                        "--no-renames", "--text")]
     else:
-        revisions = commit_range()
         patches = (git("-c", "core.quotePath=true", "show", "--format=",
                        "--first-parent", "--root", "--unified=0", "--no-ext-diff",
                        "--no-textconv", "--no-renames", "--text", commit)
@@ -72,12 +96,7 @@ def scan_denylist(staged=False):
 
 def main():
     try:
-        # The pre-commit hook scans what is about to be committed.
-        if sys.argv[1:] == ["staged"]:
-            return scan_denylist(staged=True)
-        if sys.argv[1:] == ["denylist"]:
-            return scan_denylist()
-        raise ValueError("Invalid scanner")
+        return scan_denylist(revisions_from_args(sys.argv[1:]))
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError):
         # Tool errors can contain source text or local paths; never echo them.
         print("Privacy scan could not complete.", file=sys.stderr)
