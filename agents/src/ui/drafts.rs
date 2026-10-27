@@ -74,7 +74,12 @@ impl Session {
             effort: draft.setup.effort.clone(),
             git_branch: (!draft.branch_name().is_empty()).then(|| draft.branch_name().to_owned()),
             pr: None,
-            status: SessionStatus::New,
+            // A submitted draft lists as the task it becomes until that task's row arrives.
+            status: if draft.working || draft.job.is_some() {
+                SessionStatus::Working
+            } else {
+                SessionStatus::New
+            },
             process: None,
             background_job: None,
             updated_at: draft.updated_at,
@@ -175,7 +180,7 @@ impl View {
 
     fn refresh_draft_rows(&mut self) {
         let selected = self.selected_id().cloned();
-        self.rows.retain(|row| row.status != SessionStatus::New);
+        self.rows.retain(|row| row.id.id.parse::<DraftKey>().is_err());
         self.rows.extend(self.draft_rows());
         self.rows.sort_by(|a, b| {
             a.status
@@ -1044,6 +1049,27 @@ mod recovery_tests {
         assert!(view.drafts.is_empty());
         assert_eq!(view.selected_id(), Some(&key));
         assert!(view.input_box.editor.is_empty());
+    }
+
+    #[test]
+    fn submitted_draft_lists_as_working_until_its_task_arrives() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut view = View::default();
+        let id = submitted(&mut view, dir.path());
+        let row = |view: &View| {
+            view.rows
+                .iter()
+                .filter(|row| row.id.id == id.to_string())
+                .map(|row| row.status)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(row(&view), [SessionStatus::Working]);
+        view.draft_created(id, Ok("30eaab0c".into()));
+        assert_eq!(row(&view), [SessionStatus::Working]);
+        let arrived = background_session("30eaab0c-9be5-4854-a2b7-f7a8795ce742", "30eaab0c");
+        view.set_sessions(vec![arrived], false);
+        assert!(row(&view).is_empty());
+        assert_eq!(view.rows.len(), 1);
     }
 
     #[test]

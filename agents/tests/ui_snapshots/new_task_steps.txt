@@ -46,6 +46,6 @@ New branch ❯ feature/probe
 
 
 ---
- ○ named task                                            New                now │
+ ● named task                                            Working            now │
 ─╴Opus 5.5 ───────────────────────────────────────────────────────────── medium╶┴╴repository ───────────────────── named task ────────────────── feature/probe╶─
  named task ❯

@@ -947,6 +947,9 @@ impl View {
             .filter(|_| self.selected_draft().is_none());
         let status = match (session, self.selected_draft()) {
             (Some(session), _) => Self::status(session).0,
+            (None, Some(draft)) if draft.working || draft.job.is_some() => {
+                SessionStatus::Working.label()
+            }
             (None, Some(_)) => SessionStatus::New.label(),
             (None, None) => return,
         };
