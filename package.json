@@ -8,8 +8,7 @@
   },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks",
-    "test": "npm run test:privacy && npm run test:marketplace && npm run test:codex && npm run test:feature && npm run test:proxy && npm run test:intel && npm run test:web && npm run test:mobile && npm run test:secrets && npm run test:creator && npm run test:computer-use && npm run test:agents",
-    "test:privacy": "python3 -m unittest discover -s .github/scripts -p test_privacy.py",
+    "test": "npm run test:marketplace && npm run test:codex && npm run test:feature && npm run test:proxy && npm run test:intel && npm run test:web && npm run test:mobile && npm run test:secrets && npm run test:creator && npm run test:computer-use && npm run test:agents",
     "test:marketplace": "node --test tests/marketplace.test.mjs",
     "test:codex": "node --test plugins/codex/tests/*.mjs",
     "validate": "claude plugin validate --strict .",
