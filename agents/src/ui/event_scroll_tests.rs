@@ -906,33 +906,84 @@ fn output_border_terminal_without_scrollback_only_activates_output() {
     }
 }
 
-#[test]
-fn output_border_layout_reserves_one_row_and_keeps_hit_regions_separate() {
+fn assert_output_border_rows(width: u16) {
     let (view, now) = fixture(true);
-    for width in [100, 149, 150, 200] {
-        for height in 2..60 {
-            let area = Rect::new(0, 0, width, height);
-            let mut buffer = Buffer::empty(area);
-            view.render_at(area, &mut buffer, now);
-            let layout = view.center_layout(area);
-            let viewport = view.viewport.borrow();
-            if !layout.event_detail.is_empty() {
-                let [top, bottom] = viewport.output_borders;
-                assert_eq!(top.y, viewport.event_detail.y);
-                assert_eq!(bottom.y, layout.footer.y - 1);
-                assert_eq!(viewport.event_detail.bottom(), bottom.y);
-                assert_eq!(bottom.width, width);
-                assert!(viewport.event_panel.bottom() <= top.y);
-                assert!(viewport.prompt.bottom() <= top.y);
-                assert!(!viewport.event_detail.contains((bottom.x, bottom.y).into()));
-                for x in [0, width - 1] {
-                    assert_eq!(buffer[(x, bottom.y)].symbol(), "─");
-                }
-            } else {
-                assert!(viewport.output_borders.iter().all(|rect| rect.is_empty()));
+    for height in 2..60 {
+        let area = Rect::new(0, 0, width, height);
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, now);
+        let layout = view.center_layout(area);
+        let viewport = view.viewport.borrow();
+        if !layout.event_detail.is_empty() {
+            let [top, bottom] = viewport.output_borders;
+            assert_eq!(top.y, viewport.event_detail.y);
+            assert_eq!(bottom.y, layout.footer.y - 1);
+            assert_eq!(viewport.event_detail.bottom(), bottom.y);
+            assert_eq!(bottom.width, width);
+            for x in [0, width - 1] {
+                assert_eq!(buffer[(x, bottom.y)].symbol(), "─");
             }
+        } else {
+            assert!(viewport.output_borders.iter().all(|rect| rect.is_empty()));
         }
     }
+}
+
+fn assert_output_border_hit_regions(width: u16) {
+    let (view, now) = fixture(true);
+    for height in 2..60 {
+        let area = Rect::new(0, 0, width, height);
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, now);
+        let layout = view.center_layout(area);
+        let viewport = view.viewport.borrow();
+        if !layout.event_detail.is_empty() {
+            let [top, bottom] = viewport.output_borders;
+            assert!(viewport.event_panel.bottom() <= top.y);
+            assert!(viewport.prompt.bottom() <= top.y);
+            assert!(!viewport.event_detail.contains((bottom.x, bottom.y).into()));
+        }
+    }
+}
+
+#[test]
+fn output_border_rows_width_100() {
+    assert_output_border_rows(100);
+}
+
+#[test]
+fn output_border_rows_width_149() {
+    assert_output_border_rows(149);
+}
+
+#[test]
+fn output_border_rows_width_150() {
+    assert_output_border_rows(150);
+}
+
+#[test]
+fn output_border_rows_width_200() {
+    assert_output_border_rows(200);
+}
+
+#[test]
+fn output_border_hit_regions_width_100() {
+    assert_output_border_hit_regions(100);
+}
+
+#[test]
+fn output_border_hit_regions_width_149() {
+    assert_output_border_hit_regions(149);
+}
+
+#[test]
+fn output_border_hit_regions_width_150() {
+    assert_output_border_hit_regions(150);
+}
+
+#[test]
+fn output_border_hit_regions_width_200() {
+    assert_output_border_hit_regions(200);
 }
 
 #[test]

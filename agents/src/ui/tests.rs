@@ -11671,12 +11671,11 @@ fn task_header_weekly_usage_mirrored_modes_and_widths() {
     assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
 }
 
-#[test]
-fn task_header_weekly_usage_symmetric_bars_and_styles() {
+fn for_each_symmetric_weekly_usage(mut check: impl FnMut(&View, &Buffer, u16, f64, bool)) {
+    let mut view = weekly_usage_view();
     for width in [200, 160, 150, 149, 80] {
         for used in [0.0, 5.0, 23.0, 50.0, 95.0, 96.0, 99.0, 100.0] {
             for colors in [false, true] {
-                let mut view = weekly_usage_view();
                 view.use_colors = colors;
                 for usage in view.weekly_usage.values_mut() {
                     usage.used_percent = used;
@@ -11684,107 +11683,182 @@ fn task_header_weekly_usage_symmetric_bars_and_styles() {
                 let area = Rect::new(0, 0, width, 40);
                 let mut buffer = Buffer::empty(area);
                 view.render_at(area, &mut buffer, Utc::now());
-                let viewport = view.viewport.borrow();
-                let y = viewport.tab_bar.y;
-                let target = viewport
-                    .field_targets
-                    .iter()
-                    .find(|(_, f)| *f == Field::WeeklyUsage)
-                    .unwrap()
-                    .0;
-                for (_, tab) in &viewport.tabs {
-                    assert!(target.right() < tab.x || target.x > tab.right());
-                    let gap = if tab.x < target.x {
-                        tab.right()
-                    } else {
-                        target.right()
-                    };
-                    assert_eq!(buffer[(gap, y)].symbol(), " ");
-                    assert_eq!(buffer[(gap, y)].bg, buffer[(width / 2, y)].bg);
-                }
-                let half = (target.width - 1) / 2;
-                let number = format!("{used:.0}%");
-                let capacity = half - 8;
-                let dots = (f64::from(capacity * 2) * used / 100.0).round() as u16;
-                let center = width / 2;
-                assert_eq!(buffer[(center, y)].symbol(), "·");
-                let mut starts = [0; 2];
-                for (side, start) in starts.iter_mut().enumerate() {
-                    let limit = half - 6 - 3 - number.len() as u16;
-                    let visible = dots.min(limit * 2);
-                    let cells = visible.div_ceil(2);
-                    let anchor = if side == 0 {
-                        target.x
-                    } else {
-                        target.right() - 1
-                    };
-                    *start = if side == 0 {
-                        anchor + cells + u16::from(cells > 0)
-                    } else {
-                        anchor + 1 - cells - u16::from(cells > 0) - number.len() as u16
-                    };
-                    for dot in 0..visible {
-                        let x = if side == 0 {
-                            anchor + dot / 2
-                        } else {
-                            anchor - dot / 2
-                        };
-                        let bit = if (dot % 2 == 0) == (side == 1) {
-                            0xb8
-                        } else {
-                            0x47
-                        };
-                        let cell = &buffer[(x, y)];
-                        let bits = cell_text(cell.symbol()).chars().next().unwrap() as u32;
-                        assert!((0x2800..=0x28ff).contains(&bits));
-                        assert_eq!((bits - 0x2800) & bit, bit, "{width}, {used}, {dot}");
-                        let bar_style = if used > 95.0 {
-                            style::error_style()
-                        } else {
-                            style::timeline_style(colors)
-                        };
-                        assert_eq!(cell.style(), buffer[(0, y)].style().patch(bar_style));
-                    }
-                    if visible % 2 == 1 {
-                        let x = if side == 0 {
-                            anchor + cells - 1
-                        } else {
-                            anchor + 1 - cells
-                        };
-                        assert_eq!(
-                            cell_text(buffer[(x, y)].symbol()),
-                            if side == 0 { "⡇" } else { "⢸" }
-                        );
-                    }
-                    let outside = if side == 0 {
-                        *start + number.len() as u16..center - 8
-                    } else {
-                        center + 7..*start
-                    };
-                    for x in outside {
-                        assert_eq!(buffer[(x, y)].symbol(), " ");
-                    }
-                }
-                let [left_number, right_number] = starts;
-                for start in [left_number, right_number] {
-                    for (i, c) in number.chars().enumerate() {
-                        let cell = &buffer[(start + i as u16, y)];
-                        assert_eq!(cell_text(cell.symbol()), c.to_string());
-                        let expected = if used > 95.0 {
-                            style::error_style()
-                        } else {
-                            ratatui::style::Style::default()
-                        };
-                        assert_eq!(cell.style(), buffer[(0, y)].style().patch(expected));
-                    }
-                }
-                let text = (0..width)
-                    .map(|x| cell_text(buffer[(x, y)].symbol()))
-                    .collect::<String>();
-                assert!(text.contains("Claude · Codex"), "{text}");
+                check(&view, &buffer, width, used, colors);
             }
         }
     }
+}
+
+#[test]
+fn task_header_weekly_usage_does_not_overlap_tabs() {
+    let view = weekly_usage_view();
+    for width in [200, 160, 150, 149, 80] {
+        let area = Rect::new(0, 0, width, 40);
+        let mut buffer = Buffer::empty(area);
+        view.render_at(area, &mut buffer, Utc::now());
+        let viewport = view.viewport.borrow();
+        let y = viewport.tab_bar.y;
+        let target = viewport
+            .field_targets
+            .iter()
+            .find(|(_, f)| *f == Field::WeeklyUsage)
+            .unwrap()
+            .0;
+        for (_, tab) in &viewport.tabs {
+            assert!(target.right() < tab.x || target.x > tab.right());
+            let gap = if tab.x < target.x {
+                tab.right()
+            } else {
+                target.right()
+            };
+            assert_eq!(buffer[(gap, y)].symbol(), " ");
+            assert_eq!(buffer[(gap, y)].bg, buffer[(width / 2, y)].bg);
+        }
+    }
+}
+
+#[test]
+fn task_header_weekly_usage_symmetric_dots_and_half_cells() {
+    for_each_symmetric_weekly_usage(|view, buffer, width, used, _| {
+        let viewport = view.viewport.borrow();
+        let y = viewport.tab_bar.y;
+        let target = viewport
+            .field_targets
+            .iter()
+            .find(|(_, f)| *f == Field::WeeklyUsage)
+            .unwrap()
+            .0;
+        let half = (target.width - 1) / 2;
+        let number = format!("{used:.0}%");
+        let capacity = half - 8;
+        let dots = (f64::from(capacity * 2) * used / 100.0).round() as u16;
+        let center = width / 2;
+        assert_eq!(buffer[(center, y)].symbol(), "·");
+        let mut starts = [0; 2];
+        for (side, start) in starts.iter_mut().enumerate() {
+            let limit = half - 6 - 3 - number.len() as u16;
+            let visible = dots.min(limit * 2);
+            let cells = visible.div_ceil(2);
+            let anchor = if side == 0 {
+                target.x
+            } else {
+                target.right() - 1
+            };
+            *start = if side == 0 {
+                anchor + cells + u16::from(cells > 0)
+            } else {
+                anchor + 1 - cells - u16::from(cells > 0) - number.len() as u16
+            };
+            for dot in 0..visible {
+                let x = if side == 0 {
+                    anchor + dot / 2
+                } else {
+                    anchor - dot / 2
+                };
+                let bit = if (dot % 2 == 0) == (side == 1) {
+                    0xb8
+                } else {
+                    0x47
+                };
+                let cell = &buffer[(x, y)];
+                let bits = cell_text(cell.symbol()).chars().next().unwrap() as u32;
+                assert!((0x2800..=0x28ff).contains(&bits));
+                assert_eq!((bits - 0x2800) & bit, bit, "{width}, {used}, {dot}");
+            }
+            if visible % 2 == 1 {
+                let x = if side == 0 {
+                    anchor + cells - 1
+                } else {
+                    anchor + 1 - cells
+                };
+                assert_eq!(
+                    cell_text(buffer[(x, y)].symbol()),
+                    if side == 0 { "⡇" } else { "⢸" }
+                );
+            }
+            let outside = if side == 0 {
+                *start + number.len() as u16..center - 8
+            } else {
+                center + 7..*start
+            };
+            for x in outside {
+                assert_eq!(buffer[(x, y)].symbol(), " ");
+            }
+        }
+        let [left_number, right_number] = starts;
+        for start in [left_number, right_number] {
+            for (i, c) in number.chars().enumerate() {
+                let cell = &buffer[(start + i as u16, y)];
+                assert_eq!(cell_text(cell.symbol()), c.to_string());
+            }
+        }
+        let text = (0..width)
+            .map(|x| cell_text(buffer[(x, y)].symbol()))
+            .collect::<String>();
+        assert!(text.contains("Claude · Codex"), "{text}");
+    });
+}
+
+#[test]
+fn task_header_weekly_usage_colors_and_error_styles() {
+    let error_style = style::error_style();
+    let timeline_styles = [style::timeline_style(false), style::timeline_style(true)];
+    for_each_symmetric_weekly_usage(|view, buffer, _width, used, colors| {
+        let viewport = view.viewport.borrow();
+        let y = viewport.tab_bar.y;
+        let target = viewport
+            .field_targets
+            .iter()
+            .find(|(_, f)| *f == Field::WeeklyUsage)
+            .unwrap()
+            .0;
+        let bar_style = if used > 95.0 {
+            error_style
+        } else {
+            timeline_styles[usize::from(colors)]
+        };
+        let expected = if used > 95.0 {
+            error_style
+        } else {
+            ratatui::style::Style::default()
+        };
+        let half = (target.width - 1) / 2;
+        let number = format!("{used:.0}%");
+        let capacity = half - 8;
+        let dots = (f64::from(capacity * 2) * used / 100.0).round() as u16;
+        let mut starts = [0; 2];
+        for (side, start) in starts.iter_mut().enumerate() {
+            let limit = half - 6 - 3 - number.len() as u16;
+            let visible = dots.min(limit * 2);
+            let cells = visible.div_ceil(2);
+            let anchor = if side == 0 {
+                target.x
+            } else {
+                target.right() - 1
+            };
+            *start = if side == 0 {
+                anchor + cells + u16::from(cells > 0)
+            } else {
+                anchor + 1 - cells - u16::from(cells > 0) - number.len() as u16
+            };
+            for dot in 0..visible {
+                let x = if side == 0 {
+                    anchor + dot / 2
+                } else {
+                    anchor - dot / 2
+                };
+                let cell = &buffer[(x, y)];
+                assert_eq!(cell.style(), buffer[(0, y)].style().patch(bar_style));
+            }
+        }
+        let [left_number, right_number] = starts;
+        for start in [left_number, right_number] {
+            for (i, _) in number.chars().enumerate() {
+                let cell = &buffer[(start + i as u16, y)];
+                assert_eq!(cell.style(), buffer[(0, y)].style().patch(expected));
+            }
+        }
+    });
 }
 
 #[test]

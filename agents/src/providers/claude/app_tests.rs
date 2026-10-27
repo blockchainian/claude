@@ -314,17 +314,18 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
+    let area = ratatui::layout::Rect::new(0, 0, 150, 19);
+    let visible = app.view.event_read_count(area);
+    let copies = visible * 2 + 1;
     let transcript = format!(
         "{}{}{}",
         transcript_copies(&payload, 20, 0),
         include_str!("../../../tests/fixtures/claude-task-notifications.jsonl"),
-        transcript_copies(&payload, 20, 20)
+        transcript_copies(&payload, copies, 20)
     );
     std::fs::write(&path, transcript).unwrap();
-    let area = ratatui::layout::Rect::new(0, 0, 150, 19);
     let column = area.x + area.width * 2 / 3 + 1;
     let row = area.y + 2;
-    let visible = app.view.event_read_count(area);
     let wheel = |app: &mut App, kind| {
         app.handle_event(Event::Mouse(MouseEvent {
             kind,
@@ -339,9 +340,15 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
     app.refresh_event_for_list_rows(visible);
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
-    for _ in 0..45 {
+    // Each complete copy contributes two events; stop six events before copy 20.
+    let loaded = app.view.event_panel.len();
+    for _ in 0..(copies * 2 + 5) {
         wheel(&mut app, MouseEventKind::ScrollUp);
     }
+    assert!(
+        app.view.event_panel.len() > loaded,
+        "older navigation must reload the window"
+    );
     let before = event_detail_at(&app, area);
     if let Some(code) = navigation {
         for kind in [
@@ -412,15 +419,25 @@ fn home_loads_first_event_of_whole_event() {
 
 #[test]
 fn top_border_loads_first_event_of_whole_event() {
+    top_border_first_event_fixture(None);
+}
+
+fn top_border_first_event_fixture(last_copy: Option<usize>) -> (tempfile::TempDir, App) {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    replace_transcript(&path, transcript_copies(&payload, 200, 0));
-    app.refresh_event_for_list_rows(8);
-    assert_eq!(app.view.event_panel.len(), 8);
     let area = ratatui::layout::Rect::new(0, 0, 200, 45);
     let visible = app.view.event_read_count(area);
+    // More than three windows plus their next pages keeps copy 0 out of a page load.
+    let copies = 3 * (visible * 2) + 1;
+    let mut transcript = transcript_copies(&payload, copies, 0);
+    if let Some(copy) = last_copy {
+        transcript.push_str(&transcript_copies(&payload, 1, copy));
+    }
+    replace_transcript(&path, transcript);
+    app.refresh_event_for_list_rows(8);
+    assert_eq!(app.view.event_panel.len(), 8);
     let scroll = |app: &mut App, kind| {
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
@@ -444,72 +461,105 @@ fn top_border_loads_first_event_of_whole_event() {
             }));
         }
     };
+    app.view
+        .render(area, &mut ratatui::buffer::Buffer::empty(area));
+    click(&mut app, 1);
+    click(&mut app, 1);
+    app.refresh_event_for_list_rows(visible);
+    super::event_search_tests::finish_search(&mut app);
+    let detail = event_detail_at(&app, area);
+    assert!(detail.contains("Transcript copy 0"), "{detail}");
+    scroll(&mut app, MouseEventKind::ScrollDown);
+    scroll(&mut app, MouseEventKind::ScrollDown);
+    app.refresh_event_for_list_rows(visible);
+    assert!(event_detail_at(&app, area).contains("Transcript copy 1"));
+    scroll(&mut app, MouseEventKind::ScrollUp);
+    scroll(&mut app, MouseEventKind::ScrollUp);
+    app.refresh_event_for_list_rows(visible);
+    assert!(event_detail_at(&app, area).contains("Transcript copy 0"));
+    app.view
+        .render(area, &mut ratatui::buffer::Buffer::empty(area));
+    (_dir, app)
+}
+
+#[test]
+fn new_indicator_loads_latest_event_after_top_border() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let (_dir, mut app) = top_border_first_event_fixture(None);
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let payload = include_str!("../../../tests/fixtures/transcript.jsonl");
+    let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+    let visible = app.view.event_read_count(area);
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(transcript_copies(payload, 1, 200).as_bytes())
+        .unwrap();
+    app.refresh_event_for_list_rows(visible);
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    app.view.render(area, &mut buffer);
+    let row = (0..45)
+        .find(|&y| {
+            (130..200)
+                .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
+                .collect::<String>()
+                .contains(" New╶")
+        })
+        .unwrap();
+    let line = (0..200)
+        .map(|x| crate::ui::cell_text(buffer[(x, row)].symbol()))
+        .collect::<String>();
+    let column = line.chars().position(|c| c == '↓').unwrap() as u16;
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }));
+    }
+    app.refresh_event_for_list_rows(visible);
+    assert!(event_detail_at(&app, area).contains("Transcript copy 200"));
+    assert_eq!(app.view.event_scroll(), app.view.event_max_scroll());
+    app.view
+        .render(area, &mut ratatui::buffer::Buffer::empty(area));
+}
+
+#[test]
+fn bottom_border_loads_latest_event_after_top_border() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let (_dir, mut app) = top_border_first_event_fixture(Some(200));
+    let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+    let visible = app.view.event_read_count(area);
+    app.refresh_event_for_list_rows(visible);
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
     let bottom = (2..45)
         .find(|&y| (100..200).any(|x| buffer[(x, y)].symbol() == "┴"))
         .expect("event list bottom rule joins its visible column separator");
-    for latest in [false, true] {
-        click(&mut app, 1);
-        click(&mut app, 1);
-        app.refresh_event_for_list_rows(visible);
-        super::event_search_tests::finish_search(&mut app);
-        let detail = event_detail_at(&app, area);
-        assert!(detail.contains("Transcript copy 0"), "{detail}");
-        scroll(&mut app, MouseEventKind::ScrollDown);
-        scroll(&mut app, MouseEventKind::ScrollDown);
-        app.refresh_event_for_list_rows(visible);
-        assert!(event_detail_at(&app, area).contains("Transcript copy 1"));
-        scroll(&mut app, MouseEventKind::ScrollUp);
-        scroll(&mut app, MouseEventKind::ScrollUp);
-        app.refresh_event_for_list_rows(visible);
-        assert!(event_detail_at(&app, area).contains("Transcript copy 0"));
-        app.view
-            .render(area, &mut ratatui::buffer::Buffer::empty(area));
-        if latest {
-            click(&mut app, bottom);
-            click(&mut app, bottom);
-        } else {
-            use std::io::Write;
-            std::fs::OpenOptions::new()
-                .append(true)
-                .open(&path)
-                .unwrap()
-                .write_all(transcript_copies(&payload, 1, 200).as_bytes())
-                .unwrap();
-            app.refresh_event_for_list_rows(visible);
-            let mut buffer = ratatui::buffer::Buffer::empty(area);
-            app.view.render(area, &mut buffer);
-            let row = (0..45)
-                .find(|&y| {
-                    (130..200)
-                        .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
-                        .collect::<String>()
-                        .contains(" New╶")
-                })
-                .unwrap();
-            let line = (0..200)
-                .map(|x| crate::ui::cell_text(buffer[(x, row)].symbol()))
-                .collect::<String>();
-            let column = line.chars().position(|c| c == '↓').unwrap() as u16;
-            for kind in [
-                MouseEventKind::Down(MouseButton::Left),
-                MouseEventKind::Up(MouseButton::Left),
-            ] {
-                app.handle_event(Event::Mouse(MouseEvent {
-                    kind,
-                    column,
-                    row,
-                    modifiers: KeyModifiers::NONE,
-                }));
-            }
+    for _ in 0..2 {
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            app.handle_event(Event::Mouse(MouseEvent {
+                kind,
+                column: 134,
+                row: bottom,
+                modifiers: KeyModifiers::NONE,
+            }));
         }
-        app.refresh_event_for_list_rows(visible);
-        assert!(event_detail_at(&app, area).contains("Transcript copy 200"));
-        assert_eq!(app.view.event_scroll(), app.view.event_max_scroll());
-        app.view
-            .render(area, &mut ratatui::buffer::Buffer::empty(area));
     }
+    app.refresh_event_for_list_rows(visible);
+    assert!(event_detail_at(&app, area).contains("Transcript copy 200"));
+    assert_eq!(app.view.event_scroll(), app.view.event_max_scroll());
+    app.view
+        .render(area, &mut ratatui::buffer::Buffer::empty(area));
 }
 
 #[test]

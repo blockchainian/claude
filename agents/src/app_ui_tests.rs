@@ -308,10 +308,18 @@ fn event_selection_follows_appends_and_jump_resumes_tail_through_app() {
     }
 }
 
-#[test]
-fn event_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
-    // Nineteen rows keep all three panels visible in both layouts.
-    for width in [120, 180] {
+struct EventSelectionFixture {
+    _directory: tempfile::TempDir,
+    app: App,
+    record: serde_json::Value,
+    body: String,
+    start: chrono::DateTime<chrono::FixedOffset>,
+    payload: String,
+    wheel_position: (u16, u16),
+}
+
+impl EventSelectionFixture {
+    fn after_wheel_burst(width: u16) -> Self {
         let (_directory, mut app) = fixture();
         let path = app.sessions[0].transcript.clone().unwrap();
         let mut record: serde_json::Value = serde_json::from_str(
@@ -342,21 +350,72 @@ fn event_selection_loads_older_rows_and_keeps_window_edge_across_appends() {
         for _ in 0..12 {
             wheel(&mut app, MouseEventKind::ScrollUp, x, y);
         }
+        Self {
+            _directory,
+            app,
+            record,
+            body,
+            start,
+            payload,
+            wheel_position: (x, y),
+        }
+    }
+
+    fn append(&mut self) {
+        self.record["uuid"] = "selection-40".into();
+        self.record["timestamp"] = (self.start + chrono::Duration::seconds(40)).to_rfc3339().into();
+        self.record["message"]["content"] = format!("event-40 {}", self.body).into();
+        self.payload.push_str(&format!("{}\n", self.record));
+        let path = self.app.sessions[0].transcript.as_ref().unwrap();
+        std::fs::write(path, &self.payload).unwrap();
+        self.app.refresh();
+    }
+}
+
+#[test]
+fn event_selection_wheel_burst_selects_event_27() {
+    // Nineteen rows keep all three panels visible in both layouts.
+    for width in [120, 180] {
+        let EventSelectionFixture {
+            _directory, mut app, ..
+        } = EventSelectionFixture::after_wheel_burst(width);
         let buffer = draw_size(&mut app, width, 19);
         assert!(event_detail_content(&buffer).contains("event-27"));
         assert_event_cursor(&buffer, event_position(&buffer, "event-27").1);
+    }
+}
+
+#[test]
+fn event_selection_append_keeps_selection_and_window_edge() {
+    for width in [120, 180] {
+        let mut fixture = EventSelectionFixture::after_wheel_burst(width);
+        let buffer = draw_size(&mut fixture.app, width, 19);
         let selected_position = event_position(&buffer, "event-27");
-        record["uuid"] = "selection-40".into();
-        record["timestamp"] = (start + chrono::Duration::seconds(40)).to_rfc3339().into();
-        record["message"]["content"] = format!("event-40 {body}").into();
-        payload.push_str(&format!("{record}\n"));
-        std::fs::write(&path, &payload).unwrap();
-        app.refresh();
+        fixture.append();
+        let EventSelectionFixture {
+            _directory, mut app, ..
+        } = fixture;
         let buffer = draw_size(&mut app, width, 19);
         assert!(event_detail_content(&buffer).contains("event-27"));
         assert_event_cursor(&buffer, event_position(&buffer, "event-27").1);
         assert!(lines(&buffer).join("\n").contains("↓ 1 New"));
         assert_eq!(event_position(&buffer, "event-27"), selected_position);
+    }
+}
+
+#[test]
+fn event_selection_scrolls_to_first_row_across_windows_after_append() {
+    for width in [120, 180] {
+        let mut fixture = EventSelectionFixture::after_wheel_burst(width);
+        draw_size(&mut fixture.app, width, 19);
+        fixture.append();
+        let EventSelectionFixture {
+            _directory,
+            mut app,
+            wheel_position: (x, y),
+            ..
+        } = fixture;
+        draw_size(&mut app, width, 19);
         for expected in (0..27).rev() {
             wheel(&mut app, MouseEventKind::ScrollUp, x, y);
             let buffer = draw_size(&mut app, width, 19);

@@ -902,40 +902,57 @@ fn duration_running_rows_redraw_only_while_visible_and_keep_update_order() {
 }
 
 #[test]
-fn event_jump_follows_event_panel_visibility_and_width() {
-    for width in [90, 120, 160] {
-        for panel in [
-            Panel::TaskList,
-            Panel::TaskDetails,
-            Panel::EventList,
-            Panel::EventDetail,
-        ] {
-            for commands in ["", "|", "_", "|_"] {
-                let (_dir, mut view, events) = fixture();
-                view.set_event(events);
-                view.select_event(Some(3));
-                view.event_list.unseen.set(3);
-                view.active_panel = panel;
-                let area = Rect::new(0, 0, width, 50);
-                view.render(area, &mut Buffer::empty(area));
-                for key in commands.chars() {
-                    view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
-                    view.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::SHIFT));
-                }
-                view.render(area, &mut Buffer::empty(area));
-                let viewport = view.viewport.borrow();
-                if viewport.event_panel.is_empty() {
-                    assert!(
-                        viewport.event_jump.is_empty(),
-                        "{width} {panel:?} {commands}"
-                    );
-                } else {
-                    assert_eq!(viewport.event_jump.y, viewport.event_borders[1].y);
-                    assert_eq!(
-                        viewport.event_jump.right(),
-                        viewport.event_panel.right() - 1
-                    );
-                }
+fn event_jump_follows_event_panel_visibility_at_width_90() {
+    assert_event_jump_follows_event_panel_visibility(90);
+}
+
+#[test]
+fn event_jump_follows_event_panel_visibility_at_width_120() {
+    assert_event_jump_follows_event_panel_visibility(120);
+}
+
+#[test]
+fn event_jump_follows_event_panel_visibility_at_width_160() {
+    assert_event_jump_follows_event_panel_visibility(160);
+}
+
+fn assert_event_jump_follows_event_panel_visibility(width: u16) {
+    let (_dir, parsed_view, events) = fixture();
+    let sessions = parsed_view.rows;
+    for panel in [
+        Panel::TaskList,
+        Panel::TaskDetails,
+        Panel::EventList,
+        Panel::EventDetail,
+    ] {
+        for commands in ["", "|", "_", "|_"] {
+            let mut view = View::new(Grouping::Project, false);
+            view.set_sessions(sessions.clone(), false);
+            view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+            view.event_session = view.selected_id().cloned();
+            view.set_event(events.clone());
+            view.select_event(Some(3));
+            view.event_list.unseen.set(3);
+            view.active_panel = panel;
+            let area = Rect::new(0, 0, width, 50);
+            view.render(area, &mut Buffer::empty(area));
+            for key in commands.chars() {
+                view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+                view.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::SHIFT));
+            }
+            view.render(area, &mut Buffer::empty(area));
+            let viewport = view.viewport.borrow();
+            if viewport.event_panel.is_empty() {
+                assert!(
+                    viewport.event_jump.is_empty(),
+                    "{width} {panel:?} {commands}"
+                );
+            } else {
+                assert_eq!(viewport.event_jump.y, viewport.event_borders[1].y);
+                assert_eq!(
+                    viewport.event_jump.right(),
+                    viewport.event_panel.right() - 1
+                );
             }
         }
     }

@@ -341,37 +341,14 @@ mod tests {
 
     #[test]
     fn large_image_upload_keeps_each_command_in_its_own_passthrough() {
-        use base64::{Engine, engine::general_purpose::STANDARD};
         // Preserve the real Read result shape, using public slide pixels instead of a terminal capture.
         let fixture = include_str!("../tests/fixtures/claude-read-image.jsonl");
         let record: serde_json::Value =
             serde_json::from_str(fixture.lines().nth(1).unwrap()).unwrap();
         let pointer = "/message/content/0/content/0/source/data";
-        let bytes = STANDARD
-            .decode(record.pointer(pointer).unwrap().as_str().unwrap())
-            .unwrap();
-        let slide = image::load_from_memory(&bytes).unwrap();
-        let mut tall = slide
-            .resize_exact(1353, 2000, image::imageops::FilterType::Triangle)
-            .to_rgb8();
-        // Low-bit texture makes the slide's upload large enough to exercise transport framing.
-        let mut texture = 1_u32;
-        for byte in tall.iter_mut() {
-            texture ^= texture << 13;
-            texture ^= texture >> 17;
-            texture ^= texture << 5;
-            *byte = (*byte & !3) | (texture as u8 & 3);
-        }
-        let mut png = std::io::Cursor::new(Vec::new());
-        use image::ImageEncoder;
-        image::codecs::png::PngEncoder::new_with_quality(
-            &mut png,
-            image::codecs::png::CompressionType::Fast,
-            image::codecs::png::FilterType::NoFilter,
-        )
-        .write_image(tall.as_raw(), 1353, 2000, image::ExtendedColorType::Rgb8)
-        .unwrap();
-        let encoded = STANDARD.encode(png.into_inner());
+        let data = record.pointer(pointer).unwrap().as_str().unwrap();
+        // Transport framing only needs a large payload; it does not decode the image.
+        let encoded = data.repeat(1_048_576 / data.len() + 1);
         let chunks: Vec<_> = encoded.as_bytes().chunks(4096).collect();
         let mut commands = Vec::new();
         for (index, chunk) in chunks.iter().enumerate() {

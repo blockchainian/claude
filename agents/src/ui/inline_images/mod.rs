@@ -807,6 +807,29 @@ mod tests {
     }
 
     #[test]
+    fn inline_images_assigns_ids_in_order() {
+        use std::io::Write;
+
+        let mut source = fixture();
+        let fixture = std::fs::read(&record(&source).path).unwrap();
+        let record = &fixture[record(&source).offset as usize..];
+        let mut temp = tempfile::NamedTempFile::new().unwrap();
+        for _ in 0..3 {
+            temp.write_all(record).unwrap();
+        }
+        record_mut(&mut source).path = temp.path().to_owned();
+        let mut images = InlineImages::new(None);
+        let area = Rect::new(0, 0, 1, 1);
+        let mut buf = Buffer::empty(area);
+        for index in 0..3 {
+            record_mut(&mut source).offset = index * record.len() as u64;
+            images.draw(&source, Zoom::default(), 0, area, &mut buf);
+            assert_eq!(buf[(0, 0)].fg, Color::Indexed((index + 1) as u8));
+            images.take_commands();
+        }
+    }
+
+    #[test]
     fn inline_images_reuses_lru_id_when_all_255_ids_are_taken() {
         use std::io::Write;
 
@@ -821,12 +844,18 @@ mod tests {
         let mut images = InlineImages::new(None);
         let area = Rect::new(0, 0, 1, 1);
         let mut buf = Buffer::empty(area);
+        record_mut(&mut source).offset = 0;
+        let bytes = images.raster.png(&source, (1, 1)).unwrap().len().max(4);
         for index in 0..255 {
             record_mut(&mut source).offset = index * record.len() as u64;
-            images.draw(&source, Zoom::default(), 0, area, &mut buf);
-            assert_eq!(buf[(0, 0)].fg, Color::Indexed((index + 1) as u8));
-            images.take_commands();
+            images.uploaded.push_back(Uploaded {
+                source: source.clone(),
+                id: (index + 1) as u8,
+                placements: vec![((1, 1), (index + 1) as u32)],
+                bytes,
+            });
         }
+        images.bytes = images.uploaded.iter().map(|entry| entry.bytes).sum();
         record_mut(&mut source).offset = 0;
         images.draw(&source, Zoom::default(), 0, area, &mut buf);
         assert!(images.take_commands().is_empty());

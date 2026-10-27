@@ -653,23 +653,33 @@ mod tests {
             branch: "main".into(),
         }
     }
-    #[test]
-    fn draft_keeps_identity_selection_and_exact_input_across_refresh() {
+    fn refreshed_draft() -> (tempfile::TempDir, View, DraftKey) {
         let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().join("cwd");
+        std::fs::create_dir(&cwd).unwrap();
         let mut view = View::default();
-        let first = view.add_draft(setup(directory.path()));
+        let first = view.add_draft(setup(&cwd));
         view.set_active_panel(Panel::TaskDetails);
         view.handle_paste("probe");
         view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         view.close_selector();
         view.set_active_panel(Panel::Prompt);
-        let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
-        view.handle_paste(text);
+        view.handle_paste(include_str!("../../tests/fixtures/claude-peer-message.txt"));
         view.set_sessions(Vec::new(), false);
+        (directory, view, first)
+    }
+    #[test]
+    fn draft_keeps_identity_selection_and_exact_input_across_refresh() {
+        let (_directory, view, first) = refreshed_draft();
+        let text = include_str!("../../tests/fixtures/claude-peer-message.txt");
         assert_eq!(view.selected_draft, Some(first));
         assert!(view.selected_id().is_some());
         assert_eq!(view.input_box.editor.text(), text);
-        let second = view.add_draft(setup(directory.path()));
+    }
+    #[test]
+    fn second_draft_has_distinct_identity_and_empty_input() {
+        let (directory, mut view, first) = refreshed_draft();
+        let second = view.add_draft(setup(&directory.path().join("cwd")));
         assert_ne!(first, second);
         assert_eq!(view.drafts.len(), 2);
         assert!(view.input_box.editor.is_empty());
@@ -795,9 +805,11 @@ mod recovery_tests {
             .remove(0)
     }
     fn named(view: &mut View, path: &Path, name: &str) -> DraftKey {
+        let cwd = path.join("cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
         let id = view.add_draft(DraftSetup {
             provider: ProviderId::Claude,
-            cwd: path.into(),
+            cwd,
             model: None,
             effort: None,
             branch: String::new(),
@@ -843,19 +855,21 @@ mod recovery_tests {
     }
 
     #[test]
-    fn launched_draft_clears_prompt_and_keeps_focus() {
+    fn launched_draft_clears_prompt() {
         for parked in [false, true] {
             for panel in [Panel::Prompt, Panel::EventDetail] {
                 let dir = tempfile::tempdir().unwrap();
+                let cwd = dir.path().join("cwd");
+                std::fs::create_dir(&cwd).unwrap();
                 let mut view = View::default();
                 view.set_capabilities(HashMap::from([(
                     ProviderId::Claude,
                     crate::providers::claude::ClaudeProvider::new(dir.path().into()).capabilities(),
                 )]));
-                let draft = submitted(&mut view, dir.path());
+                let draft = submitted(&mut view, &cwd);
                 view.set_active_panel(panel);
                 if parked {
-                    named(&mut view, dir.path(), "Other");
+                    named(&mut view, &cwd, "Other");
                 }
                 view.draft_created(draft, Ok("launch-job".into()));
                 let stored = view.stored_drafts();
@@ -874,9 +888,6 @@ mod recovery_tests {
                 });
                 let key = row.id.clone();
                 view.set_sessions(vec![row], false);
-                assert_eq!(view.selected_id(), Some(&key));
-                assert_eq!(view.selected_draft, None);
-                assert_eq!(view.active_panel, panel);
                 assert!(view.input_box.editor.is_empty());
                 assert!(view.input_box.editor.image_paths().is_empty());
                 assert!(
@@ -885,7 +896,7 @@ mod recovery_tests {
                         .contains_key(&draft_controls::TaskKey::Draft(draft))
                 );
                 // Park the session again to check the prompt saved in TaskUi too.
-                named(&mut view, dir.path(), "Park session");
+                named(&mut view, &cwd, "Park session");
                 let ui = &view.task_uis[&draft_controls::TaskKey::Session(key.clone())];
                 assert!(ui.prompt.editor.is_empty());
                 assert!(ui.prompt.editor.image_paths().is_empty());
@@ -893,6 +904,40 @@ mod recovery_tests {
                 view.set_active_panel(Panel::Prompt);
                 assert!(view.input_disabled().is_none());
                 assert_eq!(view.handle_key(KeyCode::Enter.into()), None);
+            }
+        }
+    }
+
+    #[test]
+    fn launched_draft_keeps_focus() {
+        for parked in [false, true] {
+            for panel in [Panel::Prompt, Panel::EventDetail] {
+                let dir = tempfile::tempdir().unwrap();
+                let cwd = dir.path().join("cwd");
+                std::fs::create_dir(&cwd).unwrap();
+                let mut view = View::default();
+                view.set_capabilities(HashMap::from([(
+                    ProviderId::Claude,
+                    crate::providers::claude::ClaudeProvider::new(dir.path().into()).capabilities(),
+                )]));
+                let draft = submitted(&mut view, &cwd);
+                view.set_active_panel(panel);
+                if parked {
+                    named(&mut view, &cwd, "Other");
+                }
+                view.draft_created(draft, Ok("launch-job".into()));
+                let mut row = session();
+                row.status = SessionStatus::Ready;
+                row.background_job = Some(crate::model::BackgroundJob {
+                    id: "launch-job".into(),
+                    needs: None,
+                    awaits_prompt: false,
+                });
+                let key = row.id.clone();
+                view.set_sessions(vec![row], false);
+                assert_eq!(view.selected_id(), Some(&key));
+                assert_eq!(view.selected_draft, None);
+                assert_eq!(view.active_panel, panel);
             }
         }
     }
@@ -924,11 +969,9 @@ mod recovery_tests {
         }
     }
 
-    #[test]
-    fn two_drafts_restore_fields_text_images_and_focus_when_selected_by_row() {
-        let dir = tempfile::tempdir().unwrap();
+    fn two_drafts_with_input(cwd: &Path) -> (View, DraftKey, DraftKey, String, Vec<PathBuf>) {
         let mut view = View::default();
-        let first = named(&mut view, dir.path(), "First");
+        let first = named(&mut view, cwd, "First");
         view.handle_paste("half prompt");
         view.attach_image(
             crate::images::ImageAttachment::from_image(
@@ -939,11 +982,31 @@ mod recovery_tests {
         let paths = view.input_box.editor.image_paths();
         let text = view.input_box.editor.text().to_owned();
         view.drafts[0].setup.model = Some("opus".into());
-        let second = named(&mut view, dir.path(), "Second");
+        let second = named(&mut view, cwd, "Second");
         view.handle_paste("second prompt");
         view.set_sessions(Vec::new(), false);
+        (view, first, second, text, paths)
+    }
+
+    #[test]
+    fn newest_draft_row_is_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("project");
+        std::fs::create_dir(&cwd).unwrap();
+        let (view, _, second, _, paths) = two_drafts_with_input(&cwd);
         assert_eq!(view.rows.len(), 2);
         assert_eq!(view.rows[0].id.id, second.to_string());
+        for path in paths {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn selecting_draft_rows_restores_fields_text_images_and_focus() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("project");
+        std::fs::create_dir(&cwd).unwrap();
+        let (mut view, first, second, text, paths) = two_drafts_with_input(&cwd);
         let index = view
             .rows
             .iter()
@@ -971,19 +1034,21 @@ mod recovery_tests {
         }
     }
     #[test]
-    fn draft_sort_filter_and_attention_follow_named_but_keep_unnamed_modal() {
+    fn draft_attention_follows_named_but_keeps_unnamed_modal() {
         let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("cwd");
+        std::fs::create_dir(&cwd).unwrap();
         for named_draft in [false, true] {
             let mut view = View::default();
             let mut row = session();
             row.status = SessionStatus::Working;
             view.set_sessions(vec![row.clone()], false);
             let id = if named_draft {
-                named(&mut view, dir.path(), "Draft")
+                named(&mut view, &cwd, "Draft")
             } else {
                 view.add_draft(DraftSetup {
                     provider: ProviderId::Claude,
-                    cwd: dir.path().into(),
+                    cwd: cwd.clone(),
                     model: None,
                     effort: None,
                     branch: String::new(),
@@ -993,15 +1058,43 @@ mod recovery_tests {
             view.set_sessions(vec![row.clone()], false);
             if named_draft {
                 assert_eq!(view.selected_id(), Some(&row.id));
-                assert_eq!(view.rows[0].status, SessionStatus::NeedsInput);
-                assert_eq!(view.rows[1].status, SessionStatus::New);
-                view.status_filter = 1;
-                assert!(view.visible_indices().is_empty());
             } else {
                 assert_eq!(view.selected_draft, Some(id));
             }
         }
     }
+    #[test]
+    fn named_draft_sorts_after_session_needing_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("cwd");
+        std::fs::create_dir(&cwd).unwrap();
+        let mut view = View::default();
+        let mut row = session();
+        row.status = SessionStatus::Working;
+        view.set_sessions(vec![row.clone()], false);
+        named(&mut view, &cwd, "Draft");
+        row.status = SessionStatus::NeedsInput;
+        view.set_sessions(vec![row.clone()], false);
+        assert_eq!(view.rows[0].status, SessionStatus::NeedsInput);
+        assert_eq!(view.rows[1].status, SessionStatus::New);
+    }
+
+    #[test]
+    fn status_filter_hides_named_draft() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("cwd");
+        std::fs::create_dir(&cwd).unwrap();
+        let mut view = View::default();
+        let mut row = session();
+        row.status = SessionStatus::Working;
+        view.set_sessions(vec![row.clone()], false);
+        named(&mut view, &cwd, "Draft");
+        row.status = SessionStatus::NeedsInput;
+        view.set_sessions(vec![row.clone()], false);
+        view.status_filter = 1;
+        assert!(view.visible_indices().is_empty());
+    }
+
     #[test]
     fn deleting_draft_by_backspace_uses_confirmation_and_persists_without_delete_action() {
         let dir = tempfile::tempdir().unwrap();
@@ -1075,8 +1168,10 @@ mod recovery_tests {
     #[test]
     fn job_notification_hands_off_the_draft_before_image_delivery_finishes() {
         let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("project");
+        std::fs::create_dir(&cwd).unwrap();
         let mut view = View::default();
-        let id = submitted(&mut view, dir.path());
+        let id = submitted(&mut view, &cwd);
         view.draft_job_created(id, "30eaab0c".into());
         assert!(view.selected_draft().unwrap().working);
         assert!(view.input_box.editor.is_empty());
@@ -1087,32 +1182,73 @@ mod recovery_tests {
         assert!(view.drafts.is_empty());
         assert_eq!(view.selected_id(), Some(&key));
         assert!(view.input_box.editor.is_empty());
+    }
+
+    #[test]
+    fn late_draft_creation_after_handoff_preserves_next_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("project");
+        std::fs::create_dir(&cwd).unwrap();
+        let mut view = View::default();
+        let id = submitted(&mut view, &cwd);
+        view.draft_job_created(id, "30eaab0c".into());
+        let row = background_session("30eaab0c-9be5-4854-a2b7-f7a8795ce742", "30eaab0c");
+        view.set_sessions(vec![row], false);
         view.handle_paste("next prompt");
         view.draft_created(id, Ok("30eaab0c".into()));
         assert_eq!(view.input_box.editor.text(), "next prompt");
     }
 
-    #[test]
-    fn load_repairs_missing_directory_branch_and_interrupted_jobs() {
-        let dir = tempfile::tempdir().unwrap();
+    fn stored_draft_with_missing_directory_and_interrupted_job(cwd: &Path) -> Vec<StoredDraft> {
         let mut original = View::default();
-        named(&mut original, dir.path(), "Recover");
+        named(&mut original, cwd, "Recover");
         let mut stored = original.stored_drafts();
-        stored[0].cwd = dir.path().join("missing");
+        stored[0].cwd = cwd.join("missing");
         stored[0].branch = DraftBranch::Existing("gone".into());
         stored[0].repository_confirmed = true;
         stored[0].job = Some("interrupted-job".into());
+        stored
+    }
+
+    #[test]
+    fn load_resets_missing_repository_directory_and_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("project");
+        std::fs::create_dir(&cwd).unwrap();
+        let stored = stored_draft_with_missing_directory_and_interrupted_job(&cwd);
         let mut view = View::default();
         view.set_drafts(&stored);
         assert!(!view.drafts[0].repository_confirmed);
         assert_eq!(view.drafts[0].branch, DraftBranch::Unchosen);
         assert!(view.drafts[0].error.is_some());
+        assert_eq!(
+            view.drafts[0].error.as_deref(),
+            Some("Repository directory is missing")
+        );
+    }
+
+    #[test]
+    fn first_snapshot_reports_interrupted_draft_creation() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("project");
+        std::fs::create_dir(&cwd).unwrap();
+        let stored = stored_draft_with_missing_directory_and_interrupted_job(&cwd);
+        let mut view = View::default();
+        view.set_drafts(&stored);
         view.set_sessions(Vec::new(), false);
         assert!(view.drafts[0].job.is_none());
         assert_eq!(
             view.drafts[0].error.as_deref(),
             Some("Creation was interrupted")
         );
+    }
+
+    #[test]
+    fn arrived_session_takes_over_loaded_draft() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path().join("project");
+        std::fs::create_dir(&cwd).unwrap();
+        let stored = stored_draft_with_missing_directory_and_interrupted_job(&cwd);
         let mut arrived = session();
         arrived.background_job = Some(crate::model::BackgroundJob {
             id: "interrupted-job".into(),
@@ -1127,43 +1263,61 @@ mod recovery_tests {
         assert_eq!(view.selected_id(), Some(&key));
         assert!(view.stored_drafts().is_empty());
     }
-    #[test]
-    fn loaded_branch_tracks_checkout_changes_and_missing_local_branch() {
+    fn git(path: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(path)
+            .output()
+            .unwrap();
+        assert!(
+            status.status.success(),
+            "{}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+    }
+
+    fn branch_after_checkout() -> (tempfile::TempDir, PathBuf, Vec<StoredDraft>) {
         let dir = tempfile::tempdir().unwrap();
-        let git = |args: &[&str]| {
-            let status = std::process::Command::new("git")
-                .args(args)
-                .current_dir(dir.path())
-                .output()
-                .unwrap();
-            assert!(
-                status.status.success(),
-                "{}",
-                String::from_utf8_lossy(&status.stderr)
-            );
-        };
-        git(&["init", "-b", "main"]);
-        git(&[
-            "-c",
-            "user.name=Probe",
-            "-c",
-            "user.email=probe@example.test",
-            "commit",
-            "--allow-empty",
-            "-m",
-            "probe",
-        ]);
-        git(&["branch", "feature"]);
+        let repository = dir.path().join("repository");
+        std::fs::create_dir(&repository).unwrap();
+        git(&repository, &["init", "-b", "main"]);
+        git(
+            &repository,
+            &[
+                "-c",
+                "user.name=Probe",
+                "-c",
+                "user.email=probe@example.test",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "probe",
+            ],
+        );
+        git(&repository, &["branch", "feature"]);
         let mut original = View::default();
-        named(&mut original, dir.path(), "Branch recovery");
+        named(&mut original, &repository, "Branch recovery");
         let mut stored = original.stored_drafts();
         stored[0].branch = DraftBranch::Existing("main".into());
-        git(&["checkout", "feature"]);
+        git(&repository, &["checkout", "feature"]);
+        (dir, repository, stored)
+    }
+
+    #[test]
+    fn loaded_branch_tracks_checkout_changes() {
+        let (_dir, _repository, stored) = branch_after_checkout();
         let mut view = View::default();
         view.set_drafts(&stored);
         assert_eq!(view.drafts[0].setup.branch, "feature");
         assert_eq!(view.drafts[0].branch, DraftBranch::Existing("main".into()));
-        git(&["branch", "-D", "main"]);
+    }
+
+    #[test]
+    fn missing_local_branch_resets_loaded_draft() {
+        let (_dir, repository, stored) = branch_after_checkout();
+        let mut view = View::default();
+        view.set_drafts(&stored);
+        git(&repository, &["branch", "-D", "main"]);
         let mut view = View::default();
         view.set_drafts(&stored);
         assert_eq!(view.drafts[0].branch, DraftBranch::Unchosen);
@@ -1214,10 +1368,12 @@ mod confirmation_attention_tests {
             .refresh(1)
             .sessions
             .remove(0);
+        let cwd = directory.path().join("cwd");
+        std::fs::create_dir(&cwd).unwrap();
         let mut view = View::default();
         view.add_draft(DraftSetup {
             provider: ProviderId::Claude,
-            cwd: directory.path().into(),
+            cwd,
             model: None,
             effort: None,
             branch: String::new(),
