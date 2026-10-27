@@ -8,7 +8,6 @@
   },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks",
-    "test": "npm run test:marketplace && npm run test:codex && npm run test:proxy && npm run test:intel && npm run test:web && npm run test:mobile && npm run test:secrets && npm run test:creator && npm run test:computer-use",
     "test:marketplace": "node --test tests/marketplace.test.mjs",
     "test:codex": "node --test plugins/codex/tests/*.mjs",
     "validate": "claude plugin validate --strict .",

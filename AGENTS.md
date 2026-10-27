@@ -32,7 +32,6 @@ The per-plugin gate a plan's `Checks` command composes:
 
 > Run the relevant tests.
 
-- `npm test` — every suite but `agents`
 - `npm run test:marketplace` — the marketplace manifest and shared-engine checks
 - `npm run test:codex` — codex-manager against a fake app-server daemon
 - `npm run test:proxy` — the capture logic and WireGuard key derivation
