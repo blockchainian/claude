@@ -1272,10 +1272,8 @@ impl View {
             .and_then(|row| self.draft_of(&row.id))
             .map(|draft| draft.id);
         self.show_selected_panels();
-        if let Some(id) = self.selected_draft
-            && let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id)
-        {
-            self.input_box = std::mem::take(&mut draft.input);
+        if let Some(id) = self.selected_draft {
+            self.restore_draft_input(id);
         }
     }
 
