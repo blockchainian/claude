@@ -1676,7 +1676,7 @@ fn draft_branch_edit_prompt_click_parks_until_branch_enter() {
     assert!(
         matches!(key(&mut view, KeyCode::Enter), Some(Action::CreateTask { branch: Some(crate::tasks::BranchChoice::New(ref name)), .. }) if name == "feature/pending")
     );
-    assert_eq!(view.input_box.editor.text(), "Prompt kept");
+    assert!(view.input_box.editor.is_empty());
 }
 
 #[test]

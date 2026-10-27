@@ -146,14 +146,20 @@ impl View {
             .iter()
             .filter(|draft| draft.name.is_some())
             .map(|draft| {
-                let editor = if self.selected_draft == Some(draft.id) {
-                    &self.input_box.editor
-                } else {
-                    &draft.input.editor
-                };
-                Session::from_draft(draft, editor)
+                Session::from_draft(draft, &self.draft_input(draft).editor)
             })
             .collect()
+    }
+
+    /// The prompt box holding the draft's text: the shared input box while the draft is selected
+    /// and unsubmitted, otherwise the draft's own box, which keeps a submitted prompt until creation
+    /// succeeds or fails.
+    fn draft_input<'a>(&'a self, draft: &'a Draft) -> &'a prompt_box::PromptBox {
+        if self.selected_draft == Some(draft.id) && !draft.working && draft.job.is_none() {
+            &self.input_box
+        } else {
+            &draft.input
+        }
     }
 
     pub(super) fn draft_changed(&mut self, id: DraftKey) {
@@ -250,20 +256,19 @@ impl View {
         let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) else {
             return;
         };
+        let submitted = draft.working || draft.job.is_some();
         draft.working = false;
         match result {
             Ok(job) => {
                 draft.job = Some(job);
-                let input = if self.selected_draft == Some(id) {
-                    &mut self.input_box
-                } else {
-                    &mut draft.input
-                };
-                input.editor.clear();
+                draft.input.editor.clear();
             }
             Err(error) => {
                 draft.job = None;
                 draft.error = Some(error.to_string());
+                if submitted && self.selected_draft == Some(id) {
+                    self.input_box = std::mem::take(&mut draft.input);
+                }
             }
         }
         self.draft_changed(id);
@@ -327,7 +332,11 @@ impl View {
 
     pub(super) fn leave_draft(&mut self) {
         if let Some(id) = self.selected_draft.take() {
-            if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
+            if let Some(draft) = self
+                .drafts
+                .iter_mut()
+                .find(|draft| draft.id == id && !draft.working && draft.job.is_none())
+            {
                 if draft.name.is_some() {
                     self.input_box.editor.preserve_images();
                     draft.updated_at = chrono::Utc::now();
@@ -439,15 +448,28 @@ impl View {
             self.selected = index;
         }
         self.show_selected_panels();
-        if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
+        self.restore_draft_input(id);
+    }
+
+    /// Moves an unsubmitted draft's prompt into the input box; a submitted draft keeps its prompt.
+    pub(super) fn restore_draft_input(&mut self, id: DraftKey) {
+        if let Some(draft) = self
+            .drafts
+            .iter_mut()
+            .find(|draft| draft.id == id && !draft.working && draft.job.is_none())
+        {
             self.input_box = std::mem::take(&mut draft.input);
         }
     }
 
+    /// Clears the input box at once; the draft keeps the submitted prompt until creation ends.
     pub(super) fn submit_draft(&mut self, id: DraftKey) {
         self.close_draft_selector(id);
         if let Some(draft) = self.drafts.iter_mut().find(|draft| draft.id == id) {
             draft.working = true;
+            if self.selected_draft == Some(id) {
+                draft.input = std::mem::take(&mut self.input_box);
+            }
         }
         self.draft_changed(id);
     }
@@ -519,11 +541,7 @@ impl View {
             .iter()
             .filter_map(|draft| {
                 let name = draft.name.clone()?;
-                let editor = if self.selected_draft == Some(draft.id) {
-                    &self.input_box.editor
-                } else {
-                    &draft.input.editor
-                };
+                let editor = &self.draft_input(draft).editor;
                 editor.preserve_images();
                 Some(StoredDraft {
                     id: draft.id.to_string(),
@@ -814,7 +832,13 @@ mod recovery_tests {
         };
         assert_eq!(request.prompt, "submitted prompt");
         assert_eq!(request.images.len(), 1);
-        assert!(!view.input_box.editor.is_empty());
+        assert!(view.input_box.editor.is_empty());
+        let stored = view.stored_drafts();
+        let saved = stored
+            .iter()
+            .find(|entry| entry.id == draft.to_string())
+            .unwrap();
+        assert_eq!(saved.input.text, "submitted prompt[Image #1]");
         draft
     }
 
@@ -879,8 +903,10 @@ mod recovery_tests {
             let dir = tempfile::tempdir().unwrap();
             let mut view = View::default();
             let draft = submitted(&mut view, dir.path());
-            let text = view.input_box.editor.text().to_owned();
-            let images = view.input_box.editor.image_paths();
+            let submission = &view.drafts.iter().find(|entry| entry.id == draft).unwrap().input;
+            let text = submission.editor.text().to_owned();
+            let images = submission.editor.image_paths();
+            assert!(!images.is_empty());
             view.set_active_panel(Panel::EventDetail);
             if parked {
                 named(&mut view, dir.path(), "Other");
@@ -1053,7 +1079,7 @@ mod recovery_tests {
         let id = submitted(&mut view, dir.path());
         view.draft_job_created(id, "30eaab0c".into());
         assert!(view.selected_draft().unwrap().working);
-        assert!(!view.input_box.editor.is_empty());
+        assert!(view.input_box.editor.is_empty());
         let row = background_session("30eaab0c-9be5-4854-a2b7-f7a8795ce742", "30eaab0c");
         let key = row.id.clone();
         view.set_sessions(vec![row], false);
