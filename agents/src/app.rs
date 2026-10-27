@@ -1306,7 +1306,7 @@ impl App {
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     crate::tasks::create_worktree(&cwd, &root, &branch, &config)
-                        .map(|cwd| (cwd, branch.name().to_owned()))
+                        .and_then(draft_location)
                 }))
                 .unwrap_or_else(|_| Err(io::Error::other("Worktree job panicked")));
                 let _ = sender.send(Input::WorktreeCreated {

@@ -231,6 +231,11 @@ pub fn repository(directory: &Path) -> io::Result<Repository> {
         trunk,
     })
 }
+/// Whether the checkout is on the repository's trunk branch.
+pub fn is_trunk(directory: &Path) -> bool {
+    repository(directory).is_ok_and(|repository| repository.branch == repository.trunk)
+}
+
 /// The branch a new task runs on: one the repository has, or a new one from its checked-out commit.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BranchChoice {
@@ -307,7 +312,8 @@ fn latest_head(root: &Path) -> io::Result<String> {
 }
 
 /// The directory a new task on `choice` runs in: the checkout that already has the branch, or a
-/// new worktree under `root/<repository>/<branch>`, with `/` in the branch written as `+`.
+/// primary checkout for trunk, or a new worktree under `root/<repository>/<branch>`,
+/// with `/` in the branch written as `+`.
 pub fn create_worktree(
     directory: &Path,
     root: &Path,
@@ -321,10 +327,15 @@ pub fn create_worktree(
         .strip_prefix(&repo.root)
         .map_err(io::Error::other)?;
     let name = choice.name();
-    if let BranchChoice::Existing(branch) = choice
-        && let Some(checkout) = branch_checkout(&repo.root, branch)?
-    {
-        return Ok(checkout.join(relative));
+    if let BranchChoice::Existing(branch) = choice {
+        if let Some(checkout) = branch_checkout(&repo.root, branch)? {
+            return Ok(checkout.join(relative));
+        }
+        if branch == &repo.trunk {
+            let identity = crate::repository::repository_identity(&repo.root)
+                .ok_or_else(|| io::Error::other("Cannot identify worktree repository"))?;
+            return Ok(identity.primary_root.join(relative));
+        }
     }
     git(
         &repo.root,
@@ -677,6 +688,86 @@ pub(crate) mod tests {
         remove_worktree(&linked).unwrap();
         assert!(!linked.exists());
         assert!(repo.path().exists());
+    }
+
+    #[test]
+    fn is_trunk_uses_origin_head_in_linked_worktree() {
+        let (repo, linked) = worktree();
+        git(
+            repo.path(),
+            &["update-ref", "refs/remotes/origin/linked", "HEAD"],
+        );
+        git(
+            repo.path(),
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/linked",
+            ],
+        );
+        assert!(is_trunk(&linked));
+        assert!(is_trunk(&linked.join("sub")));
+        assert!(!is_trunk(repo.path()));
+    }
+
+    #[test]
+    fn is_trunk_uses_local_main_without_remote() {
+        let (repo, linked) = worktree();
+        git(repo.path(), &["checkout", "-b", "feature"]);
+        git(&linked, &["checkout", "main"]);
+        assert!(is_trunk(&linked));
+    }
+
+    #[test]
+    fn is_trunk_uses_local_master_without_main() {
+        let (repo, linked) = worktree();
+        git(repo.path(), &["branch", "-m", "master"]);
+        git(repo.path(), &["checkout", "-b", "feature"]);
+        git(&linked, &["checkout", "master"]);
+        assert!(is_trunk(&linked));
+    }
+
+    #[test]
+    fn is_trunk_excludes_feature_branch() {
+        let (_repo, linked) = worktree();
+        assert!(!is_trunk(&linked));
+    }
+
+    #[test]
+    fn is_trunk_excludes_detached_head() {
+        let (_repo, linked) = worktree();
+        git(&linked, &["checkout", "--detach", "main"]);
+        assert!(!is_trunk(&linked));
+    }
+
+    #[test]
+    fn is_trunk_excludes_repository_without_trunk() {
+        let (repo, linked) = worktree();
+        git(repo.path(), &["branch", "-m", "feature"]);
+        git(&linked, &["config", "init.defaultBranch", "linked"]);
+        assert!(!is_trunk(&linked));
+    }
+
+    #[test]
+    fn existing_trunk_reuses_primary_without_switching_or_creating_worktree() {
+        let repo = repo();
+        git(repo.path(), &["checkout", "-b", "feature"]);
+        let trees = tempfile::tempdir().unwrap();
+        let before = git(repo.path(), &["worktree", "list", "--porcelain"]);
+        let cwd = create_worktree(
+            &repo.path().join("sub"),
+            trees.path(),
+            &BranchChoice::Existing("main".into()),
+            &trees.path().join("config"),
+        )
+        .unwrap();
+        assert_eq!(cwd, fs::canonicalize(repo.path()).unwrap().join("sub"));
+        assert_eq!(git(&cwd, &["branch", "--show-current"]), "feature");
+        assert_eq!(
+            git(repo.path(), &["worktree", "list", "--porcelain"]),
+            before
+        );
+        assert_eq!(fs::read_dir(trees.path()).unwrap().count(), 0);
     }
 
     #[test]

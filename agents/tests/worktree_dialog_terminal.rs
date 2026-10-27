@@ -48,7 +48,7 @@ fn worktree_confirmation_options_show_directory_and_ellipsis() {
         let directory = tempfile::tempdir().unwrap();
         let primary = directory.path().join("repository");
         std::fs::create_dir(&primary).unwrap();
-        git(&primary, &["init"]);
+        git(&primary, &["init", "-b", "main"]);
         git(
             &primary,
             &[
@@ -176,6 +176,29 @@ fn worktree_confirmation_options_show_directory_and_ellipsis() {
                     "opening a dialog must preserve the worktree"
                 );
             }
+            git(&primary, &["checkout", "-B", "feature"]);
+            git(&worktree, &["checkout", "main"]);
+            tmux.run(&["send-keys", "-t", "probe", "BSpace"]);
+            capture_when(&tmux, deadline, &progress, |text| {
+                text.contains("1. Cancel")
+            });
+            tmux.run(&["send-keys", "-t", "probe", "3"]);
+            tmux.run(&["send-keys", "-t", "probe", "End"]);
+            let path = evidence.join(format!("delete-trunk-{width}.txt"));
+            let capture = capture_when(&tmux, deadline, &path, |text| {
+                text.contains("❯ 2. Permanently delete task and child agents")
+            });
+            checks.push(serde_json::json!({
+                "action": "delete-trunk",
+                "terminal_width": width,
+                "capture": path,
+                "passed": !capture.contains("3. Permanently delete") && worktree.exists(),
+            }));
+            tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+            capture_when(&tmux, deadline, &progress, |text| {
+                !text.contains("1. Cancel")
+            });
+            git(&worktree, &["checkout", "linked"]);
         }
         assert!(
             checks.iter().all(|check| check["passed"] == true),

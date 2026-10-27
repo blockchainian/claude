@@ -373,6 +373,43 @@ fn app_refresh_reads_live_and_stopped_background_jobs_from_disk() {
 }
 
 #[test]
+fn app_trunk_task_reports_the_checkout_branch() {
+    let repo = crate::tasks::tests::repo();
+    crate::tasks::tests::git(repo.path(), &["checkout", "-b", "feature"]);
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = App::new(
+        Hub::new(vec![Box::new(
+            crate::providers::claude::ClaudeProvider::new(directory.path().join("claude")),
+        )]),
+        directory.path().join("preferences"),
+    );
+    app.preferences.worktree_root = Some(directory.path().join("trees"));
+    app.create_task_in_worktree(
+        DraftKey {
+            millis: 0,
+            counter: 1,
+        },
+        ProviderId::Claude,
+        crate::tasks::NewTask {
+            cwd: repo.path().join("sub"),
+            name: None,
+            model: None,
+            effort: None,
+            prompt: "probe".into(),
+            images: Vec::new(),
+        },
+        crate::tasks::BranchChoice::Existing("main".into()),
+    );
+    let event = app.receiver.recv_timeout(Duration::from_secs(15)).unwrap();
+    let Input::WorktreeCreated { result, .. } = event else {
+        panic!("Expected worktree result")
+    };
+    let (cwd, branch) = result.unwrap();
+    assert_eq!(branch, "feature");
+    assert_eq!(cwd, fs::canonicalize(repo.path()).unwrap().join("sub"));
+}
+
+#[test]
 #[ignore = "writes and restores the real Claude trust config; run serially with live CLI tests"]
 fn app_creates_worktree_with_the_task_request() {
     struct RestoreTrust {
