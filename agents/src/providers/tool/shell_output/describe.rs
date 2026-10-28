@@ -591,7 +591,7 @@ fn opening(kind: &Kind) -> Option<Pattern> {
     let extension = std::path::Path::new(path).extension()?.to_str()?;
     let pattern = match extension {
         "py" => r"(?:import |from \S+ import |#!)",
-        "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => r"(?:import |#!/usr/bin/env node$)",
+        "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => r"import ",
         "go" => r"package ",
         "rs" => r"(?:use |//!|#!\[)",
         _ => return None,
@@ -1467,11 +1467,6 @@ mod shape_tests {
             ("cat a.py", "import os", "package main"),
             ("head a.rs", "use std::io;", "import os"),
             ("sed -n '1,3p' a.go", "package main", "use std::io;"),
-            (
-                "sed -n '1,100p' a.mjs",
-                "#!/usr/bin/env node",
-                "#!/usr/bin/env python3",
-            ),
         ] {
             let shape = one(command);
             let hint = shape.outcomes[0].first.as_ref().expect(command);
