@@ -184,6 +184,8 @@ fn task_labels_follow_visible_owner_and_borrow_only_visible_list_edges() {
 #[test]
 fn frame_joints_exist_only_at_visible_column_separators() {
     for width in [90, 120, 160] {
+        let (_dir, mut view, now) = fixture();
+        let area = Rect::new(0, 0, width, 24);
         for panel in [
             Panel::TaskList,
             Panel::TaskDetails,
@@ -191,8 +193,8 @@ fn frame_joints_exist_only_at_visible_column_separators() {
             Panel::EventDetail,
         ] {
             for commands in ["", "|", "_", "|_"] {
-                let (_dir, mut view, now) = fixture();
-                let area = Rect::new(0, 0, width, 60);
+                view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+                view.handle_key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::NONE));
                 draw(&view, area, now);
                 view.set_active_panel(panel);
                 for c in commands.chars() {
