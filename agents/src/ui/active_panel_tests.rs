@@ -71,40 +71,55 @@ fn assert_lists_unchanged(view: &View, selected: usize, event: Option<usize>, sc
     assert_eq!(view.event_list.scroll.get(), scroll, "log list moved");
 }
 
-#[test]
-fn active_panel_task_details_navigation_scrolls_only_its_content() {
-    for width in [100, 200] {
-        for panel in [Panel::TaskDetails, Panel::EventDetail] {
-            let (mut view, now) = panel_fixture(width);
-            view.set_active_panel(panel);
-            for (forward, backward) in navigation_pairs() {
-                key(&mut view, KeyCode::Home);
-                let selected = view.selected;
-                let event = view.event_list.cursor;
-                let scroll = view.event_list.scroll.get();
-                let other = if panel == Panel::TaskDetails {
-                    Panel::EventDetail
-                } else {
-                    Panel::TaskDetails
-                };
-                let other_before = task_details_position(&view, other);
-                let before = task_details_position(&view, panel);
-                assert_eq!(view.handle_key(forward), None);
-                let after = task_details_position(&view, panel);
-                assert!(after > before, "width={width}, key={forward:?}");
-                assert_lists_unchanged(&view, selected, event, scroll);
-                assert_eq!(task_details_position(&view, other), other_before);
-                event_screen(&view, width, 45, now);
-                assert_eq!(view.handle_key(backward), None);
-                assert!(
-                    task_details_position(&view, panel) < after,
-                    "width={width}, key={backward:?}"
-                );
-                assert_lists_unchanged(&view, selected, event, scroll);
-                assert_eq!(task_details_position(&view, other), other_before);
-            }
-        }
+fn detail_navigation_scrolls_only_its_content(panel: Panel, width: u16) {
+    let (mut view, now) = panel_fixture(width);
+    view.set_active_panel(panel);
+    for (forward, backward) in navigation_pairs() {
+        key(&mut view, KeyCode::Home);
+        let selected = view.selected;
+        let event = view.event_list.cursor;
+        let scroll = view.event_list.scroll.get();
+        let other = if panel == Panel::TaskDetails {
+            Panel::EventDetail
+        } else {
+            Panel::TaskDetails
+        };
+        let other_before = task_details_position(&view, other);
+        let before = task_details_position(&view, panel);
+        assert_eq!(view.handle_key(forward), None);
+        let after = task_details_position(&view, panel);
+        assert!(after > before, "width={width}, key={forward:?}");
+        assert_lists_unchanged(&view, selected, event, scroll);
+        assert_eq!(task_details_position(&view, other), other_before);
+        event_screen(&view, width, 45, now);
+        assert_eq!(view.handle_key(backward), None);
+        assert!(
+            task_details_position(&view, panel) < after,
+            "width={width}, key={backward:?}"
+        );
+        assert_lists_unchanged(&view, selected, event, scroll);
+        assert_eq!(task_details_position(&view, other), other_before);
     }
+}
+
+#[test]
+fn active_panel_task_details_navigation_scrolls_only_its_content_narrow() {
+    detail_navigation_scrolls_only_its_content(Panel::TaskDetails, 100);
+}
+
+#[test]
+fn active_panel_task_details_navigation_scrolls_only_its_content_wide() {
+    detail_navigation_scrolls_only_its_content(Panel::TaskDetails, 200);
+}
+
+#[test]
+fn active_panel_event_detail_navigation_scrolls_only_its_content_narrow() {
+    detail_navigation_scrolls_only_its_content(Panel::EventDetail, 100);
+}
+
+#[test]
+fn active_panel_event_detail_navigation_scrolls_only_its_content_wide() {
+    detail_navigation_scrolls_only_its_content(Panel::EventDetail, 200);
 }
 
 #[test]
