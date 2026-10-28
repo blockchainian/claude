@@ -5,7 +5,7 @@ mod tmux;
 use tmux::Tmux;
 
 fn capture_when(tmux: &Tmux, ready: impl Fn(&str) -> bool) -> String {
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         if ready(&capture) {

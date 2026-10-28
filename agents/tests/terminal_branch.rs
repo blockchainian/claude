@@ -39,7 +39,7 @@ fn installed_background_branch_border() {
         &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
         binary.to_str().unwrap(),
     ]);
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(5);
     let mut selected = false;
     loop {
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);

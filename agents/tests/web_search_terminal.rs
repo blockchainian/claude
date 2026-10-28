@@ -8,7 +8,7 @@ use tmux::Tmux;
 
 impl Tmux {
     fn capture_when(&self, ready: impl Fn(&str) -> bool, evidence: &Path) -> String {
-        let deadline = Instant::now() + Duration::from_secs(30);
+        let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let capture = self.run(&["capture-pane", "-t", "probe", "-p"]);
             std::fs::write(evidence, &capture).unwrap();

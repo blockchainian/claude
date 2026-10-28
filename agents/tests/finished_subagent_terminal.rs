@@ -9,7 +9,7 @@ use std::{
 mod tmux;
 
 fn capture_status(tmux: &tmux::Tmux, status: &str) -> String {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         if capture

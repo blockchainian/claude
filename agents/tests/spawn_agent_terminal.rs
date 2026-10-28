@@ -12,7 +12,7 @@ impl Tmux {
     }
 
     fn capture_when(&self, ready: impl Fn(&str) -> bool) -> String {
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
             let capture = self.run(&["capture-pane", "-t", "probe", "-p"]);
             if ready(&capture) {

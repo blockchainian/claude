@@ -8,7 +8,7 @@ mod tmux;
 use tmux::Tmux;
 impl Tmux {
     fn wait(&self, ready: impl Fn(&str) -> bool) -> String {
-        let deadline = Instant::now() + Duration::from_secs(30);
+        let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let screen = self.run(&["capture-pane", "-t", "probe", "-p"]);
             if ready(&screen) {
