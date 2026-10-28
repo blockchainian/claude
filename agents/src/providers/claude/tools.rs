@@ -91,7 +91,7 @@ pub(super) const RULES: &[ToolRule] = &[
         name: "SendMessage",
         title: &[Pick::With(recipient_title)],
         input: Some((Pick::Field(Source::Input, "/message"), Format::Markdown)),
-        output: Some((Pick::With(markdown_output), Format::Text)),
+        output: Some((Pick::Field(Source::Result, "/message"), Format::Text)),
         ..DEFAULT_RULE
     },
     ToolRule {
