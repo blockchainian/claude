@@ -3,7 +3,7 @@
 | 2.00 (timed out) | ui::tests::focus_rules_tests | rule_8_draft_branch_editor_updates_same_panel_focus | | |
 | 1.00 | state::tests | concurrent_processes_preserve_independent_fields | | |
 
-## Probes
+## Slow probes
 
 From one parallel run of `cargo nextest run --run-ignored only` without the slow-timeout. Failing probes are not listed.
 
@@ -62,7 +62,7 @@ From one parallel run of `cargo nextest run --run-ignored only` without the slow
 | 1.06 | terminal_layout::terminal_path_display | terminal_task_details_directory_precedes_title_and_branch | partly fixable | split directory, branch<br>wait_for, not sleep |
 | 1.04 | web_search_terminal | web_search_details_and_browser_link | fixable | one fixture, not 3<br>split details, link |
 
-## Failing
+## Failing probes
 
 Probes that failed in a parallel run without the slow-timeout, with the time they failed at.
 
