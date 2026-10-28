@@ -1169,8 +1169,17 @@ fn terminal_layout_tracks_width() {
             "-y",
             &height.to_string(),
         ]);
-        std::thread::sleep(Duration::from_secs(1));
-        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        wait_for_size(&tmux, width, height);
+        let capture = tmux.capture_when(|capture| {
+            let rows: Vec<_> = capture.lines().collect();
+            let Some(header) = rows.iter().rposition(|line| line.contains("Assistant")) else { return false; };
+            if header + 3 >= rows.len() { return false; }
+            if width >= 150 {
+                rows[header + 3..rows.len() - 1].iter().any(|line| line.width() > width as usize * 2 / 3)
+            } else {
+                rows[header + 1..].join("\n").contains("decision")
+            }
+        });
         println!("{width} columns:\n{capture}");
         let lines: Vec<_> = capture.lines().collect();
         assert!(
@@ -1333,8 +1342,7 @@ fn terminal_layout_tracks_width() {
                 "-l",
                 &format!("\x1b[<0;2;{}M\x1b[<0;2;{}m", user_row + 1, user_row + 1),
             ]);
-            std::thread::sleep(Duration::from_secs(1));
-            let opened = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            let opened = tmux.capture_when(|capture| capture.lines().skip(event_rule + 1).any(|line| line.contains("codex thread 01a11210-f266-7182-b202-269b6b4fe157")));
             let opened_lines: Vec<_> = opened.lines().collect();
             assert_eq!(
                 opened_lines[prompt + 2..event_rule].join("\n"),
@@ -1352,8 +1360,7 @@ fn terminal_layout_tracks_width() {
             tmux.mouse(0, 1, event_rule + 1, true);
             tmux.run(&["send-keys", "-t", "probe", "/"]);
             tmux.run(&["send-keys", "-t", "probe", "-l", "await"]);
-            std::thread::sleep(Duration::from_millis(200));
-            let searched = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            let searched = tmux.capture_when(|capture| capture.lines().skip(event_rule + 1).any(|line| line.contains("Search ❯ await")));
             assert!(
                 searched
                     .lines()
@@ -1363,7 +1370,7 @@ fn terminal_layout_tracks_width() {
             );
             tmux.run(&["send-keys", "-t", "probe", "Escape"]);
             // Select the real newest event so each resize starts with the same detail.
-            std::thread::sleep(Duration::from_millis(200));
+            tmux.wait_for(|capture| !capture.contains("Search ❯"));
             let assistant_row = (prompt + 2..event_rule)
                 .find(|&row| opened_lines[row].contains("对，必须"))
                 .expect("newest assistant row");
@@ -1378,7 +1385,7 @@ fn terminal_layout_tracks_width() {
                     assistant_row + 1
                 ),
             ]);
-            std::thread::sleep(Duration::from_secs(1));
+            tmux.wait_for(|capture| capture.lines().skip(event_rule + 1).any(|line| line.contains("decision")));
         }
     }
 }
