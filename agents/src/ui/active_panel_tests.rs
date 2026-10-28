@@ -616,8 +616,7 @@ fn mouse_activation_every_event_activates_its_panel() {
     }
 }
 
-#[test]
-fn mouse_activation_every_event_routes_subsequent_paging() {
+fn mouse_panel_routes_subsequent_paging(width: u16, active: Panel) {
     const CASES: [(u16, Panel, MouseEventKind); 12] = [
         (
             200,
@@ -657,11 +656,44 @@ fn mouse_activation_every_event_routes_subsequent_paging() {
         ),
     ];
 
-    for (width, panel, kind) in CASES {
+    for (width, panel, kind) in CASES
+        .into_iter()
+        .filter(|(case_width, panel, _)| *case_width == width && *panel == active)
+    {
         let (mut view, _) = panel_fixture(width);
         activate_mouse_panel(&mut view, width, panel, kind);
         assert_mouse_panel_paging(&mut view, panel);
     }
+}
+
+#[test]
+fn mouse_activation_every_event_routes_subsequent_paging_task_list_wide() {
+    mouse_panel_routes_subsequent_paging(200, Panel::TaskList);
+}
+
+#[test]
+fn mouse_activation_every_event_routes_subsequent_paging_task_details_wide() {
+    mouse_panel_routes_subsequent_paging(200, Panel::TaskDetails);
+}
+
+#[test]
+fn mouse_activation_every_event_routes_subsequent_paging_event_list_wide() {
+    mouse_panel_routes_subsequent_paging(200, Panel::EventList);
+}
+
+#[test]
+fn mouse_activation_every_event_routes_subsequent_paging_event_detail_wide() {
+    mouse_panel_routes_subsequent_paging(200, Panel::EventDetail);
+}
+
+#[test]
+fn mouse_activation_every_event_routes_subsequent_paging_prompt_wide() {
+    mouse_panel_routes_subsequent_paging(200, Panel::Prompt);
+}
+
+#[test]
+fn mouse_activation_every_event_routes_subsequent_paging_event_list_narrow() {
+    mouse_panel_routes_subsequent_paging(100, Panel::EventList);
 }
 
 fn press_mouse_panel(view: &mut View, panel: Panel) -> Rect {
