@@ -1,7 +1,6 @@
 use super::*;
 
-#[test]
-fn terminal_shell_heredoc_formatting() {
+fn shell_heredoc_formatting(provider: &str) {
     use std::io::Write;
 
     let fixture = include_str!("../fixtures/claude-shell-heredoc.jsonl");
@@ -34,68 +33,76 @@ fn terminal_shell_heredoc_formatting() {
         });
     std::fs::create_dir_all(&output).unwrap();
 
-    for provider in ["claude", "codex"] {
-        // The real upstream command is displayed by the app, never executed.
-        let (_directory, tmux) = if provider == "claude" {
-            let (directory, tmux, transcript) = start_probe("heredoc-format-claude");
-            let mut file = std::fs::OpenOptions::new()
-                .append(true)
-                .open(transcript)
-                .unwrap();
-            write!(file, "{fixture}").unwrap();
-            file.flush().unwrap();
-            (directory, tmux)
-        } else {
-            let mut record = include_str!("../fixtures/codex-tool-calls.jsonl")
-                .lines()
-                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-                .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
-                .unwrap();
-            record["payload"]["item"]["command"][2] = command.into();
-            record["payload"]["item"]["aggregated_output"] = "".into();
-            terminal_codex_exit::start_codex_probe("heredoc-format-codex", &format!("{record}\n"))
-        };
-        tmux.run(&["resize-window", "-t", "probe", "-x", "360", "-y", "80"]);
-        tmux.run(&["send-keys", "-t", "probe", "End"]);
-        let capture = tmux.capture_when(|capture| {
-            capture.contains("beautiful-mermaid") && capture.contains("collections.Counter")
-        });
-        let text_path = output.join(format!("{provider}.txt"));
-        let ansi_path = output.join(format!("{provider}.ansi"));
-        std::fs::write(&text_path, &capture).unwrap();
-        std::fs::write(
-            &ansi_path,
-            tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]),
-        )
-        .unwrap();
-
-        let formatted = capture.contains("import { readFileSync } from 'node:fs';")
-            && capture.contains("import { renderMermaidASCII } from 'beautiful-mermaid';");
-        let mut displayed_rows = capture
+    // The real upstream command is displayed by the app, never executed.
+    let (_directory, tmux) = if provider == "claude" {
+        let (directory, tmux, transcript) = start_probe("heredoc-format-claude");
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(transcript)
+            .unwrap();
+        write!(file, "{fixture}").unwrap();
+        file.flush().unwrap();
+        (directory, tmux)
+    } else {
+        let mut record = include_str!("../fixtures/codex-tool-calls.jsonl")
             .lines()
-            .map(|line| line.trim().trim_start_matches(['┌', '│', '└']).trim_start());
-        let shell_preserved = shell_rows
-            .iter()
-            .all(|expected| displayed_rows.any(|actual| actual == *expected));
-        let verdict = serde_json::json!({
-            "verdict": if formatted && shell_preserved { "pass" } else { "fail" },
-            "provider": provider,
-            "formatted": formatted,
-            "shell_preserved": shell_preserved,
-            "shell_rows": shell_rows,
-            "capture": text_path,
-            "ansi": ansi_path,
-        });
-        std::fs::write(
-            output.join(format!("{provider}.json")),
-            serde_json::to_vec_pretty(&verdict).unwrap(),
-        )
-        .unwrap();
-        println!("{verdict}");
-        assert!(
-            formatted,
-            "{provider}: heredoc was not formatted: {capture}"
-        );
-        assert!(shell_preserved, "{provider}: shell text changed: {capture}");
-    }
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|record| record["payload"]["item"]["type"] == "CommandExecution")
+            .unwrap();
+        record["payload"]["item"]["command"][2] = command.into();
+        record["payload"]["item"]["aggregated_output"] = "".into();
+        terminal_codex_exit::start_codex_probe("heredoc-format-codex", &format!("{record}\n"))
+    };
+    tmux.run(&["resize-window", "-t", "probe", "-x", "360", "-y", "80"]);
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
+    let capture = tmux.capture_when(|capture| {
+        capture.contains("beautiful-mermaid") && capture.contains("collections.Counter")
+    });
+    let text_path = output.join(format!("{provider}.txt"));
+    let ansi_path = output.join(format!("{provider}.ansi"));
+    std::fs::write(&text_path, &capture).unwrap();
+    std::fs::write(
+        &ansi_path,
+        tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]),
+    )
+    .unwrap();
+
+    let formatted = capture.contains("import { readFileSync } from 'node:fs';")
+        && capture.contains("import { renderMermaidASCII } from 'beautiful-mermaid';");
+    let mut displayed_rows = capture
+        .lines()
+        .map(|line| line.trim().trim_start_matches(['┌', '│', '└']).trim_start());
+    let shell_preserved = shell_rows
+        .iter()
+        .all(|expected| displayed_rows.any(|actual| actual == *expected));
+    let verdict = serde_json::json!({
+        "verdict": if formatted && shell_preserved { "pass" } else { "fail" },
+        "provider": provider,
+        "formatted": formatted,
+        "shell_preserved": shell_preserved,
+        "shell_rows": shell_rows,
+        "capture": text_path,
+        "ansi": ansi_path,
+    });
+    std::fs::write(
+        output.join(format!("{provider}.json")),
+        serde_json::to_vec_pretty(&verdict).unwrap(),
+    )
+    .unwrap();
+    println!("{verdict}");
+    assert!(
+        formatted,
+        "{provider}: heredoc was not formatted: {capture}"
+    );
+    assert!(shell_preserved, "{provider}: shell text changed: {capture}");
+}
+
+#[test]
+fn terminal_shell_heredoc_formatting_claude() {
+    shell_heredoc_formatting("claude");
+}
+
+#[test]
+fn terminal_shell_heredoc_formatting_codex() {
+    shell_heredoc_formatting("codex");
 }
