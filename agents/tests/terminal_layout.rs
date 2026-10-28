@@ -313,6 +313,16 @@ fn start_probe_with_command(
     setup: impl FnOnce(&Path),
     command_prefix: &[&str],
 ) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
+    launch_probe(name, contents, setup, command_prefix, true)
+}
+
+fn launch_probe(
+    name: &str,
+    contents: &str,
+    setup: impl FnOnce(&Path),
+    command_prefix: &[&str],
+    select_task: bool,
+) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("claude");
     let project = config.join("projects/project");
@@ -363,8 +373,10 @@ fn start_probe_with_command(
             .next()
             .is_some_and(|tabs| tabs.contains("Inactive 1"))
     });
-    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
-    tmux.wait_for(|capture| capture.contains("Update") || capture.contains("Last activity"));
+    if select_task {
+        tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+        tmux.wait_for(|capture| capture.contains("Update") || capture.contains("Last activity"));
+    }
     (directory, tmux, transcript)
 }
 
@@ -3568,7 +3580,7 @@ fn terminal_configuration_version_notices() {
     let message = "Version 2 configuration unsupported, using defaults";
     for upgraded_at_start in [true, false] {
         let bytes = b"{\n  \"version\":2, \"config\":{}, \"state\":{}\n}\n";
-        let (directory, tmux, _) = start_probe_with_setup(
+        let (directory, tmux, _) = launch_probe(
             if upgraded_at_start {
                 "version-start"
             } else {
@@ -3580,6 +3592,8 @@ fn terminal_configuration_version_notices() {
                     std::fs::write(root.join("claude/agents.json"), bytes).unwrap();
                 }
             },
+            &[],
+            !upgraded_at_start,
         );
         let path = directory.path().join("claude/agents.json");
         if upgraded_at_start {
