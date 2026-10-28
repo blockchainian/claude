@@ -23,13 +23,6 @@ Verdicts:
 | partly fixable | The allowed fixes make it faster, but at least one test stays over 1s. |
 | blank | None of the allowed fixes helps. |
 
-## Slow tests
-
-| Run-time (s) | Module | Test | Fixable | How |
-|---:|---|---|---|---|
-| 2.00 (timed out) | ui::tests::focus_rules_tests | rule_8_draft_branch_editor_updates_same_panel_focus | | |
-| 1.00 | state::tests | concurrent_processes_preserve_independent_fields | | |
-
 ## Slow probes
 
 From one parallel run of `cargo nextest run --run-ignored only` without the slow-timeout. Failing probes are not listed.
