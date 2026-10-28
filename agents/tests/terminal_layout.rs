@@ -1811,8 +1811,8 @@ fn terminal_running_tool_animates_without_input() {
     .unwrap();
     call["isSidechain"] = false.into();
     call["timestamp"] = chrono::Utc::now().to_rfc3339().into();
-    call["message"]["content"][0]["input"] = serde_json::json!({"command": "sleep 5"});
-    let mut tool = Command::new("sleep").arg("5").spawn().unwrap();
+    call["message"]["content"][0]["input"] = serde_json::json!({"command": "sleep 2"});
+    let mut tool = Command::new("sleep").arg("2").spawn().unwrap();
     writeln!(
         std::fs::OpenOptions::new()
             .append(true)
@@ -1822,8 +1822,8 @@ fn terminal_running_tool_animates_without_input() {
     )
     .unwrap();
     tmux.run(&["send-keys", "-t", "probe", "End"]);
-    std::thread::sleep(Duration::from_secs(1));
     let frames = ["•··", "·•·", "··•"];
+    tmux.wait_for(|capture| frames.iter().any(|frame| capture.contains(frame)));
     let mut seen = std::collections::BTreeSet::new();
     let mut position = None;
     for _ in 0..10 {
