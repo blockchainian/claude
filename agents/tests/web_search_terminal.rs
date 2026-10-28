@@ -52,11 +52,7 @@ fn web_search_details_and_browser_link() {
     let config = directory.path().join("claude");
     let project = config.join("projects/project");
     std::fs::create_dir_all(&project).unwrap();
-    let contents = format!(
-        "{}{}",
-        include_str!("fixtures/transcript.jsonl"),
-        include_str!("fixtures/claude-web-search.jsonl")
-    );
+    let contents = include_str!("fixtures/claude-web-search.jsonl");
     std::fs::write(
         project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
         contents,
