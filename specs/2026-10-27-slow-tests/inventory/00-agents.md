@@ -1,12 +1,12 @@
 | Run-time (s) | Module | Test | Fixable | How |
 |---:|---|---|---|---|
-| 2.55 | providers::codex::rollout::summary_cache_tests::latest_activity | summaries_match_full_parse_after_each_append | fixable | 156 行 fixture 去掉重复 wait/exec 和无关元数据 |
+| 2.55 | providers::codex::rollout::summary_cache_tests::latest_activity | summaries_match_full_parse_after_each_append | fixable | 直接删减专用 fixture 的重复轮次 |
 | 2.32 | ui::event_list::reading_tests | claude_detail_blocks_are_centered | fixable | 按详情类型拆分<br>删未用的 Codex fixture<br>缩短长代码块 |
-| 2.09 | app::tests | task_event_wheel_then_j_k_keys_reverse_across_reloaded_windows | fixable | fixture 正文缩成编号短句 |
-| 2.08 | app::tests | task_event_wheel_then_arrow_keys_reverse_across_reloaded_windows | fixable | fixture 正文缩成编号短句 |
-| 1.99 | app::tests | task_event_wheel_reverses_across_reloaded_windows | fixable | fixture 正文缩成编号短句 |
-| 1.84 | app::ui_tests | event_selection_scrolls_to_first_row_across_windows_after_append_at_width_180 | fixable | 40 条缩到刚够跨窗<br>正文只留编号 |
-| 1.39 | app::ui_tests | event_selection_scrolls_to_first_row_across_windows_after_append_at_width_120 | fixable | 40 条缩到刚够跨窗<br>正文只留编号 |
+| 2.09 | app::tests | task_event_wheel_then_j_k_keys_reverse_across_reloaded_windows | fixable | 改用短正文 fixture 副本 |
+| 2.08 | app::tests | task_event_wheel_then_arrow_keys_reverse_across_reloaded_windows | fixable | 改用短正文 fixture 副本 |
+| 1.99 | app::tests | task_event_wheel_reverses_across_reloaded_windows | fixable | 改用短正文 fixture 副本 |
+| 1.84 | app::ui_tests | event_selection_scrolls_to_first_row_across_windows_after_append_at_width_180 | fixable | 改用短正文 fixture 副本 |
+| 1.39 | app::ui_tests | event_selection_scrolls_to_first_row_across_windows_after_append_at_width_120 | fixable | 改用短正文 fixture 副本 |
 | 1.13 | ui::tests | selected_event_row_preserves_foreground_and_adds_bold | fixable | 拆成普通行、搜索行<br>组合渲染 576 次改成单元测试<br>只用所需 Tool，缩画布 |
 | 1.12 | ui::event_list::reading_tests | diff_backgrounds_preserve_text_positions | fixable | 250 行画布缩到刚够<br>只留 Edit、FileChange 记录 |
 | 1.08 | app::tests | task_event_search_loads_all_caches_matches_and_refreshes_growth | fixable | 拆成搜索滚动、缓存增长<br>transcript 20 份缩到 5 份<br>滚轮 30 次减到 6 次 |
@@ -15,24 +15,13 @@
 
 ### task_event_wheel_then_j_k_keys_reverse_across_reloaded_windows
 
-在 task_event_navigation_reverses_across_reloaded_windows 中先缩短 payload 正文，再交给 transcript_copies，保留编号、通知、跨窗往返和原有断言。
+从 `transcript.jsonl` 裁一份 `transcript-short.jsonl`，把正文缩成一两个词。`task_event_navigation_reverses_across_reloaded_windows` 改读这份副本，测试里不用再处理数据。
 
 ```rust
 // 现在
 let payload = std::fs::read_to_string(&path).unwrap();
 // 改成
-let payload = std::fs::read_to_string(&path).unwrap().lines()
-    .map(|line| {
-        let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
-        if let Some(content) = record.pointer_mut("/message/content") {
-            if content.is_string() { *content = "User".into(); } else {
-                let text = content.as_array_mut().unwrap().iter_mut()
-                    .find(|block| block["type"] == "text").unwrap();
-                text["text"] = "Assistant".into();
-            }
-        }
-        format!("{record}\n")
-    }).collect::<String>();
+let payload = include_str!("../../../tests/fixtures/transcript-short.jsonl");
 ```
 
 ### task_event_wheel_then_arrow_keys_reverse_across_reloaded_windows
@@ -45,15 +34,13 @@ let payload = std::fs::read_to_string(&path).unwrap().lines()
 
 ### event_selection_scrolls_to_first_row_across_windows_after_append_at_width_180
 
-在 EventSelectionFixture::after_wheel_burst 中去掉重复的长正文，保留 40 条事件、追加逻辑及所有逐行选中和首行断言。
+`EventSelectionFixture::after_wheel_burst` 改读同一份 `transcript-short.jsonl`，生成的 40 条事件就只剩编号加短正文。
 
 ```rust
 // 现在
-let body = record["message"]["content"].as_str().unwrap().to_owned();
-record["message"]["content"] = format!("event-{index:02} {body}").into();
+include_str!("../tests/fixtures/transcript.jsonl")
 // 改成
-let body = String::new();
-record["message"]["content"] = format!("event-{index:02} {body}").into();
+include_str!("../tests/fixtures/transcript-short.jsonl")
 ```
 
 ### event_selection_scrolls_to_first_row_across_windows_after_append_at_width_120
@@ -111,23 +98,7 @@ let mut before = Buffer::empty(panel);
 
 ### summaries_match_full_parse_after_each_append
 
-精简同一个 JSONL fixture 里的重复 wait/exec 轮次和无关元数据，保留各类状态、调用配对及逐行断言；Rust 调用不变，仍要求跨过 64 KiB。
-
-```rust
-// 现在：fixture 有 156 行，包含重复轮次
-summary_fixture!(
-    latest_activity,
-    "../../../tests/fixtures/codex-summary-activity.jsonl"
-);
-// 改成：精简同一 fixture，保留原有调用和跨页断言
-const _: () = assert!(
-    include_str!("../../../tests/fixtures/codex-summary-activity.jsonl").len() as u64 > CHUNK
-);
-summary_fixture!(
-    latest_activity,
-    "../../../tests/fixtures/codex-summary-activity.jsonl"
-);
-```
+`codex-summary-activity.jsonl` 只有这个测试在用，所以直接改这个文件：删掉重复的 wait/exec 轮次和无关元数据，测试代码不动。文件要保持超过 64 KiB，已有的 `assert!(… > CHUNK)` 会检查这一点。`codex-summary-activity.md` 里的生成脚本也要跟着改。
 
 ### task_event_search_loads_all_caches_matches_and_refreshes_growth
 
