@@ -37,8 +37,9 @@ fn panel_fixture(width: u16) -> (View, DateTime<Utc>) {
     // Only the selected event and the neighbours a wheel at the detail's edge
     // steps to need a detail that overflows its panel; the rest stay the
     // fixture's real size.
+    // At height 45 the widest layout shows 24 event rows, so 25 still pages.
     view.set_event(
-        (0..60)
+        (0..25)
             .map(|index| {
                 let mut event = event.clone();
                 event.source = Some(format!("active-panel-{index}"));
@@ -51,6 +52,7 @@ fn panel_fixture(width: u16) -> (View, DateTime<Utc>) {
     );
     view.select_event(Some(20));
     event_screen(&view, width, 45, now);
+    assert!(view.event_panel.len() > usize::from(view.viewport.borrow().event_panel.height));
     (view, now)
 }
 
