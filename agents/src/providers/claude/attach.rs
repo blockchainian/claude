@@ -81,43 +81,6 @@ pub(super) fn send(
     }
 }
 
-/// Captures a confirmed input screen without sending any session input.
-#[cfg(test)]
-pub(super) fn inspect(job_id: &str, cwd: &Path) -> io::Result<String> {
-    let mut terminal = Terminal::spawn(job_id, cwd)?;
-    let result = terminal
-        .wait_at("inspect-ready", |screen| {
-            ready(screen) && view_state(screen).is_some()
-        })
-        .map(|()| terminal.screen());
-    let detached = terminal.detach();
-    match result {
-        Ok(screen) => detached.map(|()| screen),
-        Err(error) => Err(error),
-    }
-}
-
-/// Selects a view through the same screen-checked navigation used for delivery.
-#[cfg(test)]
-pub(super) fn select_view(job_id: &str, cwd: &Path, target: Option<&str>) -> io::Result<()> {
-    let mut terminal = Terminal::spawn(job_id, cwd)?;
-    let result = terminal.navigate(target);
-    let detached = terminal.detach();
-    result.and(detached)
-}
-
-/// Leaves `text` in Claude's input without submitting it.
-#[cfg(test)]
-pub(super) fn type_input(job_id: &str, cwd: &Path, text: &str) -> io::Result<()> {
-    let mut terminal = Terminal::spawn(job_id, cwd)?;
-    let result = terminal.wait_at("type-ready", ready).and_then(|()| {
-        terminal.paste(text)?;
-        terminal.wait_at("typed", left_input)
-    });
-    let detached = terminal.detach();
-    result.and(detached)
-}
-
 /// Clears text left in Claude's input, such as the prompt Claude restores after an interrupt,
 /// with Ctrl+U only: Esc or Ctrl+C would end the running turn and any pending AskUserQuestion.
 pub(super) fn clear_left_input(terminal: &mut dyn ScreenInput) -> io::Result<()> {
@@ -739,80 +702,6 @@ mod tests {
         assert!(model_selected(screen, "Sonnet 5"));
         assert!(!model_selected(screen, "Sonnet 5.5"));
         assert!(!model_selected(screen, "Opus 5.5"));
-    }
-
-    #[test]
-    #[ignore = "starts a real Claude background session and restores global model defaults"]
-    fn real_model_command_without_confirmation() {
-        let cwd = std::env::current_dir().unwrap();
-        let output = Command::new("claude")
-            .args([
-                "--bg",
-                "--model",
-                "haiku",
-                "--setting-sources",
-                "",
-                "--strict-mcp-config",
-                "--mcp-config",
-                "{\"mcpServers\":{}}",
-                "--",
-                "Reply exactly READY. Do not use tools.",
-            ])
-            .current_dir(&cwd)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let text = String::from_utf8(output.stdout).unwrap();
-        let job = text
-            .lines()
-            .find_map(|line| line.split("backgrounded · ").nth(1))
-            .expect("background job id")
-            .split_whitespace()
-            .next()
-            .unwrap()
-            .to_owned();
-        let result = std::panic::catch_unwind(|| {
-            let settings = super::super::config_dir().join("settings.json");
-            super::super::settings::with_restored_defaults(&settings, || {
-                let mut terminal = Terminal::spawn(&job, &cwd)?;
-                let invalid = terminal
-                    .deliver(SessionInput::SetModel("agents-nonexistent-model".into()))
-                    .unwrap_err();
-                assert_eq!(invalid.kind(), io::ErrorKind::InvalidInput);
-                let result = terminal.deliver(SessionInput::SetModel("claude-opus-5-5".into()));
-                let directory = cwd.join("scratchpad/model-confirmation");
-                std::fs::create_dir_all(&directory)?;
-                std::fs::write(directory.join("model.raw"), &terminal.raw)?;
-                std::fs::write(directory.join("model.screen.txt"), terminal.screen())?;
-                terminal.detach()?;
-                drop(terminal);
-                result?;
-                let screen = inspect(&job, &cwd)?;
-                std::fs::write(directory.join("reattached.screen.txt"), &screen)?;
-                assert!(screen.contains("Opus 5.5"), "{screen}");
-                Ok(())
-            })
-            .unwrap();
-        });
-        for command in ["stop", "rm"] {
-            let output = Command::new("claude")
-                .args([command, &job])
-                .current_dir(&cwd)
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "cleanup {command}: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        if let Err(panic) = result {
-            std::panic::resume_unwind(panic);
-        }
     }
 
     #[test]

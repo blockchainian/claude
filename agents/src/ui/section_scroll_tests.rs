@@ -509,86 +509,92 @@ mod task_details_curtain {
 
 #[test]
 fn task_details_border_double_clicks_scroll_both_ends_in_both_layouts() {
-    for width in [100, 149, 150, 200] {
-        for height in [12, 30] {
-            for bottom in [false, true] {
-                let mut view = simple_fixture();
-                let row = &mut view.rows[view.selected];
-                row.prompt = (0..80).map(|i| format!("Prompt row {i}  \n")).collect();
-                row.last_message = Some(row.prompt.clone());
-                screen(&view, width, height);
-                let task_details = view.viewport.borrow().task_details;
-                assert!(!task_details.is_empty());
-                let pointer = task_details.y;
-                // Start between the boundaries, in both curtain and plain-offset layouts.
-                assert!(
-                    view.viewport
-                        .borrow_mut()
-                        .task_details_scroll
-                        .scroll_window(true, pointer)
-                );
-                screen(&view, width, height);
-                let before = view.viewport.borrow().task_details_scroll.position();
-                let max = {
+    // Cover each width, height and end without repeating their full product.
+    for (width, height, bottom) in [
+        (100, 12, false),
+        (100, 30, true),
+        (149, 12, true),
+        (149, 30, false),
+        (150, 12, false),
+        (150, 30, true),
+        (200, 12, true),
+        (200, 30, false),
+    ] {
+        let mut view = simple_fixture();
+        let row = &mut view.rows[view.selected];
+        row.prompt = (0..32).map(|i| format!("Prompt row {i}  \n")).collect();
+        row.last_message = Some(row.prompt.clone());
+        screen(&view, width, height);
+        let task_details = view.viewport.borrow().task_details;
+        assert!(!task_details.is_empty());
+        let pointer = task_details.y;
+        // Start between the boundaries, in both curtain and plain-offset layouts.
+        assert!(
+            view.viewport
+                .borrow_mut()
+                .task_details_scroll
+                .scroll_window(true, pointer)
+        );
+        screen(&view, width, height);
+        let before = view.viewport.borrow().task_details_scroll.position();
+        let max = {
+            let viewport = view.viewport.borrow();
+            let state = &viewport.task_details_scroll;
+            state
+                .fallback_max
+                .unwrap_or_else(|| state.hidden.iter().sum())
+        };
+        assert!(before > 0 && before < max, "{width}x{height}");
+        let click = mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            (task_details.x..task_details.right())
+                .find(|&x| {
+                    let position = (
+                        x,
+                        if bottom {
+                            task_details.bottom()
+                        } else {
+                            task_details.y - 1
+                        },
+                    )
+                        .into();
                     let viewport = view.viewport.borrow();
-                    let state = &viewport.task_details_scroll;
-                    state
-                        .fallback_max
-                        .unwrap_or_else(|| state.hidden.iter().sum())
-                };
-                assert!(before > 0 && before < max, "{width}x{height}");
-                let click = mouse(
-                    MouseEventKind::Down(MouseButton::Left),
-                    (task_details.x..task_details.right())
-                        .find(|&x| {
-                            let position = (
-                                x,
-                                if bottom {
-                                    task_details.bottom()
-                                } else {
-                                    task_details.y - 1
-                                },
-                            )
-                                .into();
-                            let viewport = view.viewport.borrow();
-                            !viewport.task_details_title.contains(position)
-                                && !viewport
-                                    .field_targets
-                                    .iter()
-                                    .any(|(rect, _)| rect.contains(position))
-                                && !viewport
-                                    .task_details_links
-                                    .iter()
-                                    .any(|(rect, _)| rect.contains(position))
-                        })
-                        .expect("plain border cell"),
-                    if bottom {
-                        task_details.bottom()
-                    } else {
-                        task_details.y - 1
-                    },
-                );
-                assert_eq!(click_mouse(&mut view, click), None);
-                assert_eq!(
-                    view.viewport.borrow().task_details_scroll.position(),
-                    before
-                );
-                assert_eq!(click_mouse(&mut view, click), None);
-                screen(&view, width, height);
-                assert_eq!(
-                    view.viewport.borrow().task_details_scroll.position(),
-                    if bottom { max } else { 0 },
-                    "{width}x{height}, bottom {bottom}"
-                );
-                assert!(
-                    !view
-                        .viewport
-                        .borrow_mut()
-                        .task_details_scroll
-                        .scroll_window(bottom, pointer)
-                );
-            }
-        }
+                    !viewport.task_details_title.contains(position)
+                        && !viewport
+                            .field_targets
+                            .iter()
+                            .any(|(rect, _)| rect.contains(position))
+                        && !viewport
+                            .task_details_links
+                            .iter()
+                            .any(|(rect, _)| rect.contains(position))
+                })
+                .expect("plain border cell"),
+            if bottom {
+                task_details.bottom()
+            } else {
+                task_details.y - 1
+            },
+        );
+        assert_eq!(click_mouse(&mut view, click), None);
+        assert_eq!(
+            view.viewport.borrow().task_details_scroll.position(),
+            before
+        );
+        assert_eq!(click_mouse(&mut view, click), None);
+        screen(&view, width, height);
+        assert_eq!(
+            view.viewport.borrow().task_details_scroll.position(),
+            if bottom { max } else { 0 },
+            "{width}x{height}, bottom {bottom}"
+        );
+        assert!(
+            !view
+                .viewport
+                .borrow_mut()
+                .task_details_scroll
+                .scroll_window(bottom, pointer)
+        );
     }
 }
 

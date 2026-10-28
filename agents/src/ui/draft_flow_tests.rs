@@ -595,93 +595,104 @@ fn clicking_another_field_switches_selector() {
 }
 
 #[test]
-fn branch_and_repository_selection_orders_create_in_selected_repository() {
-    for order in ["branch", "repository", "wizard"] {
-        for branch in ["feature/x", "main", "feature/new"] {
-            let (directory, mut view) = git_draft();
-            view.discard_selected_draft();
-            view.add_draft(setup(directory.path()));
-            view.set_active_panel(Panel::TaskDetails);
-            view.handle_paste("branch task");
-            assert_eq!(key(&mut view, KeyCode::Enter), None);
-            assert!(!view.selected_draft().unwrap().repository_confirmed);
-            if order != "branch" {
-                if order == "repository" {
-                    view.set_active_panel(Panel::TaskDetails);
-                    key(&mut view, KeyCode::Esc);
-                    assert!(view.selector.is_none());
-                    assert!(view.confirm_dialog.is_none());
-                    render(&view);
-                    click_field(&mut view, Field::Directory);
-                }
-                let selected = view.selector.as_ref().unwrap().selected;
-                let Some(Action::ChangeDraftDirectory { draft_key, cwd }) =
-                    view.apply_choice(selected)
-                else {
-                    panic!("repository choice");
-                };
-                view.draft_directory_changed(draft_key, cwd, "main".into());
-            }
-            if order != "wizard" {
-                render(&view);
-                click_field(&mut view, Field::Branch);
-            }
-            let index = match &view.selector.as_ref().unwrap().kind {
-                SelectorKind::Branch { branches, .. } => {
-                    assert_eq!(branches, &["feature/x", "main"]);
-                    branches
-                        .iter()
-                        .position(|name| name == branch)
-                        .unwrap_or(branches.len())
-                }
-                _ => panic!("branch selector"),
-            };
-            render(&view);
-            let row = view
-                .viewport
-                .borrow()
-                .picker_rows
-                .iter()
-                .find(|(_, choice)| *choice == index)
-                .unwrap()
-                .0;
-            assert_eq!(click(&mut view, row.x, row.y), None);
-            if branch == "feature/new" {
+fn branch_first_creates_in_selected_repository() {
+    selection_order_creates_in_selected_repository("branch");
+}
+
+#[test]
+fn repository_first_creates_in_selected_repository() {
+    selection_order_creates_in_selected_repository("repository");
+}
+
+#[test]
+fn wizard_creates_in_selected_repository() {
+    selection_order_creates_in_selected_repository("wizard");
+}
+
+fn selection_order_creates_in_selected_repository(order: &str) {
+    let (directory, mut view) = git_draft();
+    for branch in ["feature/x", "main", "feature/new"] {
+        view.discard_selected_draft();
+        view.add_draft(setup(directory.path()));
+        view.set_active_panel(Panel::TaskDetails);
+        view.handle_paste("branch task");
+        assert_eq!(key(&mut view, KeyCode::Enter), None);
+        assert!(!view.selected_draft().unwrap().repository_confirmed);
+        if order != "branch" {
+            if order == "repository" {
                 view.set_active_panel(Panel::TaskDetails);
-                view.handle_paste(branch);
-                assert_eq!(key(&mut view, KeyCode::Enter), None);
+                key(&mut view, KeyCode::Esc);
+                assert!(view.selector.is_none());
+                assert!(view.confirm_dialog.is_none());
+                render(&view);
+                click_field(&mut view, Field::Directory);
             }
-            assert!(view.selector.is_none(), "order={order}, branch={branch}");
-            view.set_active_panel(Panel::Prompt);
-            assert!(view.prompt_focused());
-            assert!(!view.selected_draft().unwrap().working);
-            view.handle_paste("use the chosen branch");
-            let action = key(&mut view, KeyCode::Enter);
-            assert!(
-                view.selector.is_none(),
-                "{order}: repository reopened for {branch}"
-            );
-            let Some(Action::CreateTask {
-                request,
-                branch: choice,
-                ..
-            }) = action
+            let selected = view.selector.as_ref().unwrap().selected;
+            let Some(Action::ChangeDraftDirectory { draft_key, cwd }) = view.apply_choice(selected)
             else {
-                panic!("{order}: task not created for {branch}");
+                panic!("repository choice");
             };
-            assert_eq!(
-                std::fs::canonicalize(request.cwd).unwrap(),
-                std::fs::canonicalize(directory.path()).unwrap()
-            );
-            assert_eq!(request.prompt, "use the chosen branch");
-            let expected = match branch {
-                "main" => None,
-                "feature/new" => Some(crate::tasks::BranchChoice::New(branch.into())),
-                _ => Some(crate::tasks::BranchChoice::Existing(branch.into())),
-            };
-            assert_eq!(choice, expected);
-            assert!(view.selected_draft().unwrap().repository_confirmed);
+            view.draft_directory_changed(draft_key, cwd, "main".into());
         }
+        if order != "wizard" {
+            render(&view);
+            click_field(&mut view, Field::Branch);
+        }
+        let index = match &view.selector.as_ref().unwrap().kind {
+            SelectorKind::Branch { branches, .. } => {
+                assert_eq!(branches, &["feature/x", "main"]);
+                branches
+                    .iter()
+                    .position(|name| name == branch)
+                    .unwrap_or(branches.len())
+            }
+            _ => panic!("branch selector"),
+        };
+        render(&view);
+        let row = view
+            .viewport
+            .borrow()
+            .picker_rows
+            .iter()
+            .find(|(_, choice)| *choice == index)
+            .unwrap()
+            .0;
+        assert_eq!(click(&mut view, row.x, row.y), None);
+        if branch == "feature/new" {
+            view.set_active_panel(Panel::TaskDetails);
+            view.handle_paste(branch);
+            assert_eq!(key(&mut view, KeyCode::Enter), None);
+        }
+        assert!(view.selector.is_none(), "order={order}, branch={branch}");
+        view.set_active_panel(Panel::Prompt);
+        assert!(view.prompt_focused());
+        assert!(!view.selected_draft().unwrap().working);
+        view.handle_paste("use the chosen branch");
+        let action = key(&mut view, KeyCode::Enter);
+        assert!(
+            view.selector.is_none(),
+            "{order}: repository reopened for {branch}"
+        );
+        let Some(Action::CreateTask {
+            request,
+            branch: choice,
+            ..
+        }) = action
+        else {
+            panic!("{order}: task not created for {branch}");
+        };
+        assert_eq!(
+            std::fs::canonicalize(request.cwd).unwrap(),
+            std::fs::canonicalize(directory.path()).unwrap()
+        );
+        assert_eq!(request.prompt, "use the chosen branch");
+        let expected = match branch {
+            "main" => None,
+            "feature/new" => Some(crate::tasks::BranchChoice::New(branch.into())),
+            _ => Some(crate::tasks::BranchChoice::Existing(branch.into())),
+        };
+        assert_eq!(choice, expected);
+        assert!(view.selected_draft().unwrap().repository_confirmed);
     }
 }
 

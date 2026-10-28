@@ -375,12 +375,12 @@ fn event_scroll_same_source_keeps_position_when_event_kind_changes() {
 
 #[test]
 fn event_scroll_chinese_json_round_trip() {
-    for height in 3..20 {
+    for height in [3, 4, 5, 10, 19] {
         let (mut view, now) = tool_fixture();
         view.event_panel[0].calls.truncate(1);
         view.event_panel[0].calls[0].input = vec![crate::event::Section::Prose {
             markdown: false,
-            text: "请检查会话面板的滚动行为，确保标题和内容都能完整显示。".repeat(80),
+            text: "请检查会话面板的滚动行为，确保标题和内容都能完整显示。".repeat(10),
         }];
         view.event_panel[0].calls[0].output = Some(vec![crate::event::Section::Structured {
             label: String::new(),
@@ -392,6 +392,10 @@ fn event_scroll_chinese_json_round_trip() {
             view.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
             panel_at(&view, now, height);
         }
+        assert!(
+            view.event_detail.scroll.borrow().offset > 0,
+            "height {height}"
+        );
         for step in 0..10 {
             let before = view.event_detail.scroll.borrow().offset;
             view.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));

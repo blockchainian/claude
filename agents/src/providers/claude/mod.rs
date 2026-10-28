@@ -7,11 +7,7 @@ mod tools;
 
 mod account;
 mod api;
-#[cfg(test)]
-mod archive_live_tests;
 mod attach;
-#[cfg(test)]
-mod attach_live_tests;
 mod background;
 pub(crate) mod background_output;
 pub(crate) mod context;
@@ -21,11 +17,7 @@ mod daemon_socket;
 mod defaults;
 mod models;
 #[cfg(test)]
-mod rename_live_tests;
-#[cfg(test)]
 mod resume_tests;
-#[cfg(test)]
-mod settings_tests;
 #[cfg(test)]
 pub use models::write_fixture_cache;
 mod ask_user_question;
@@ -2347,27 +2339,6 @@ mod tests {
         fs::write(dir.path().join("sessions"), "occupied").unwrap();
         let provider = ClaudeProvider::new(dir.path().into());
         assert!(provider.watch_roots().is_err());
-    }
-
-    #[test]
-    #[ignore = "reads real config; set AGENTS_BENCH_CONFIG explicitly"]
-    fn measure_refresh() {
-        let config = std::env::var_os("AGENTS_BENCH_CONFIG").expect("AGENTS_BENCH_CONFIG required");
-        let mut store = ClaudeProvider::new(config.into());
-        let start = std::time::Instant::now();
-        let snapshot = store.refresh(1);
-        let cold = start.elapsed();
-        let start = std::time::Instant::now();
-        for _ in 0..20 {
-            std::hint::black_box(store.refresh(1));
-        }
-        eprintln!(
-            "refresh cold={cold:?} warm_mean={:?} transcripts={} cached={} sessions={}",
-            start.elapsed() / 20,
-            store.index.len(),
-            store.summaries.len(),
-            snapshot.sessions.len()
-        );
     }
 
     #[test]

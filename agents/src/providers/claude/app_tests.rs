@@ -314,14 +314,40 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
+    // Navigation needs distinct events, not the captured messages' full bodies.
+    let payload = payload
+        .lines()
+        .map(|line| {
+            let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+            if let Some(content) = record.pointer_mut("/message/content") {
+                match content {
+                    serde_json::Value::String(body) => {
+                        *body = body.chars().take(80).collect();
+                    }
+                    serde_json::Value::Array(blocks) => {
+                        for block in blocks {
+                            let text = block["text"].as_str().unwrap();
+                            block["text"] = text.chars().take(80).collect::<String>().into();
+                        }
+                    }
+                    _ => panic!("unexpected captured message content"),
+                }
+            }
+            serde_json::to_string(&record).unwrap()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let area = ratatui::layout::Rect::new(0, 0, 150, 19);
     let visible = app.view.event_read_count(area);
-    let copies = visible * 2 + 1;
+    // One window of older copies behind the notification, and one window plus
+    // two events after it, so the walk reloads the window exactly once.
+    let first = visible;
+    let copies = visible / 2 + 1;
     let transcript = format!(
         "{}{}{}",
-        transcript_copies(&payload, 20, 0),
+        transcript_copies(&payload, first, 0),
         include_str!("../../../tests/fixtures/claude-task-notifications.jsonl"),
-        transcript_copies(&payload, copies, 20)
+        transcript_copies(&payload, copies, first)
     );
     std::fs::write(&path, transcript).unwrap();
     let column = area.x + area.width * 2 / 3 + 1;
@@ -340,7 +366,7 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
     app.refresh_event_for_list_rows(visible);
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
-    // Each complete copy contributes two events; stop six events before copy 20.
+    // Each complete copy contributes two events; stop five events before copy `first`.
     let loaded = app.view.event_panel.len();
     for _ in 0..(copies * 2 + 5) {
         wheel(&mut app, MouseEventKind::ScrollUp);
@@ -378,7 +404,7 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
     }
     let after = event_detail_at(&app, area);
     assert!(
-        after.contains("Transcript copy 20"),
+        after.contains(&format!("Transcript copy {first}")),
         "newer navigation must pass the notification: {after}"
     );
     for _ in 0..6 {
@@ -419,25 +445,10 @@ fn home_loads_first_event_of_whole_event() {
 
 #[test]
 fn top_border_loads_first_event_of_whole_event() {
-    top_border_first_event_fixture(None);
-}
-
-fn top_border_first_event_fixture(last_copy: Option<usize>) -> (tempfile::TempDir, App) {
-    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-    let (_dir, mut app) = fixture();
-    let path = app.sessions[0].transcript.clone().unwrap();
-    let payload = std::fs::read_to_string(&path).unwrap();
-    let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+    use crossterm::event::{MouseEvent, MouseEventKind};
+    let area = ratatui::layout::Rect::new(0, 0, 200, 19);
+    let (_dir, mut app) = top_border_first_event_fixture(area, None);
     let visible = app.view.event_read_count(area);
-    // More than three windows plus their next pages keeps copy 0 out of a page load.
-    let copies = 3 * (visible * 2) + 1;
-    let mut transcript = transcript_copies(&payload, copies, 0);
-    if let Some(copy) = last_copy {
-        transcript.push_str(&transcript_copies(&payload, 1, copy));
-    }
-    replace_transcript(&path, transcript);
-    app.refresh_event_for_list_rows(8);
-    assert_eq!(app.view.event_panel.len(), 8);
     let scroll = |app: &mut App, kind| {
         app.view
             .render(area, &mut ratatui::buffer::Buffer::empty(area));
@@ -448,6 +459,38 @@ fn top_border_first_event_fixture(last_copy: Option<usize>) -> (tempfile::TempDi
             modifiers: KeyModifiers::NONE,
         }));
     };
+    let detail = event_detail_at(&app, area);
+    assert!(detail.contains("Transcript copy 0"), "{detail}");
+    scroll(&mut app, MouseEventKind::ScrollDown);
+    scroll(&mut app, MouseEventKind::ScrollDown);
+    app.refresh_event_for_list_rows(visible);
+    assert!(event_detail_at(&app, area).contains("Transcript copy 1"));
+    scroll(&mut app, MouseEventKind::ScrollUp);
+    scroll(&mut app, MouseEventKind::ScrollUp);
+    app.refresh_event_for_list_rows(visible);
+    assert!(event_detail_at(&app, area).contains("Transcript copy 0"));
+    app.view
+        .render(area, &mut ratatui::buffer::Buffer::empty(area));
+}
+
+fn top_border_first_event_fixture(
+    area: ratatui::layout::Rect,
+    last_copy: Option<usize>,
+) -> (tempfile::TempDir, App) {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let (_dir, mut app) = fixture();
+    let path = app.sessions[0].transcript.clone().unwrap();
+    let payload = std::fs::read_to_string(&path).unwrap();
+    let visible = app.view.event_read_count(area);
+    // More than three windows plus their next pages keeps copy 0 out of a page load.
+    let copies = 3 * (visible * 2) + 1;
+    let mut transcript = transcript_copies(&payload, copies, 0);
+    if let Some(copy) = last_copy {
+        transcript.push_str(&transcript_copies(&payload, 1, copy));
+    }
+    replace_transcript(&path, transcript);
+    app.refresh_event_for_list_rows(8);
+    assert_eq!(app.view.event_panel.len(), 8);
     let click = |app: &mut App, row| {
         for kind in [
             MouseEventKind::Down(MouseButton::Left),
@@ -467,16 +510,6 @@ fn top_border_first_event_fixture(last_copy: Option<usize>) -> (tempfile::TempDi
     click(&mut app, 1);
     app.refresh_event_for_list_rows(visible);
     super::event_search_tests::finish_search(&mut app);
-    let detail = event_detail_at(&app, area);
-    assert!(detail.contains("Transcript copy 0"), "{detail}");
-    scroll(&mut app, MouseEventKind::ScrollDown);
-    scroll(&mut app, MouseEventKind::ScrollDown);
-    app.refresh_event_for_list_rows(visible);
-    assert!(event_detail_at(&app, area).contains("Transcript copy 1"));
-    scroll(&mut app, MouseEventKind::ScrollUp);
-    scroll(&mut app, MouseEventKind::ScrollUp);
-    app.refresh_event_for_list_rows(visible);
-    assert!(event_detail_at(&app, area).contains("Transcript copy 0"));
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
     (_dir, app)
@@ -485,10 +518,10 @@ fn top_border_first_event_fixture(last_copy: Option<usize>) -> (tempfile::TempDi
 #[test]
 fn new_indicator_loads_latest_event_after_top_border() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-    let (_dir, mut app) = top_border_first_event_fixture(None);
+    let area = ratatui::layout::Rect::new(0, 0, 200, 19);
+    let (_dir, mut app) = top_border_first_event_fixture(area, None);
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = include_str!("../../../tests/fixtures/transcript.jsonl");
-    let area = ratatui::layout::Rect::new(0, 0, 200, 45);
     let visible = app.view.event_read_count(area);
     use std::io::Write;
     std::fs::OpenOptions::new()
@@ -500,7 +533,7 @@ fn new_indicator_loads_latest_event_after_top_border() {
     app.refresh_event_for_list_rows(visible);
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
-    let row = (0..45)
+    let row = (0..area.height)
         .find(|&y| {
             (130..200)
                 .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
@@ -533,13 +566,13 @@ fn new_indicator_loads_latest_event_after_top_border() {
 #[test]
 fn bottom_border_loads_latest_event_after_top_border() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-    let (_dir, mut app) = top_border_first_event_fixture(Some(200));
-    let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+    let area = ratatui::layout::Rect::new(0, 0, 200, 19);
+    let (_dir, mut app) = top_border_first_event_fixture(area, Some(200));
     let visible = app.view.event_read_count(area);
     app.refresh_event_for_list_rows(visible);
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
-    let bottom = (2..45)
+    let bottom = (2..area.height)
         .find(|&y| (100..200).any(|x| buffer[(x, y)].symbol() == "┴"))
         .expect("event list bottom rule joins its visible column separator");
     for _ in 0..2 {
@@ -606,7 +639,7 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    replace_transcript(&path, transcript_copies(&payload, 20, 0));
+    replace_transcript(&path, transcript_copies(&payload, 3, 0));
     app.refresh_event_for_list_rows(1);
     click_event(&mut app);
     key(&mut app, KeyCode::Char('/'));
@@ -616,8 +649,8 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
     }
     super::event_search_tests::finish_search(&mut app);
     app.refresh_event_for_list_rows(1);
-    assert_eq!(app.view.matching_event_count(), 20);
-    for _ in 0..30 {
+    assert_eq!(app.view.matching_event_count(), 3);
+    for _ in 0..6 {
         scroll_event(&mut app, crossterm::event::MouseEventKind::ScrollUp);
     }
     app.refresh_event_for_list_rows(1);
@@ -629,7 +662,7 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
     std::fs::write(
         &path,
-        transcript_copies(&payload.replace("Codex", "other"), 20, 0),
+        transcript_copies(&payload.replace("Codex", "other"), 3, 0),
     )
     .unwrap();
     std::fs::File::options()
@@ -651,11 +684,11 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
         .unwrap();
     writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T17:00:00Z", "content":"Codex timeout"})).unwrap();
     app.refresh_event_for_list_rows(1);
-    assert_eq!(app.view.matching_event_count(), 21);
+    assert_eq!(app.view.matching_event_count(), 4);
     assert_eq!(app.view.event_panel.last().unwrap().body, "Codex timeout");
     key(&mut app, KeyCode::Esc);
     app.refresh_event_for_list_rows(1);
-    assert_eq!(app.view.event_panel.len(), 41);
+    assert_eq!(app.view.event_panel.len(), 7);
 }
 
 #[test]

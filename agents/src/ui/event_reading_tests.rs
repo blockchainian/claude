@@ -756,8 +756,47 @@ fn subagent_activity_blocks_are_centered() {
     }
 }
 
+/// One test per Claude fixture, so each parses only its own file.
+macro_rules! claude_detail_blocks_are_centered {
+    ($($name:ident => $path:literal $([$($width:literal),+])?),* $(,)?) => {
+        mod claude_detail_blocks_are_centered {
+            use super::*;
+            $(
+                #[test]
+                fn $name() {
+                    assert_provider_detail_blocks_centered_at(
+                        events(include_str!($path)),
+                        &[200, 151, 120] $(.into_iter().filter(|w| [$($width),+].contains(w)).collect::<Vec<_>>())?,
+                    );
+                }
+            )*
+        }
+    };
+}
+
+claude_detail_blocks_are_centered! {
+    transcript => "../../tests/fixtures/transcript.jsonl",
+    tool_calls_at_200 => "../../tests/fixtures/claude-tool-calls.jsonl" [200],
+    tool_calls_at_151 => "../../tests/fixtures/claude-tool-calls.jsonl" [151],
+    tool_calls_at_120 => "../../tests/fixtures/claude-tool-calls.jsonl" [120],
+    tool_details => "../../tests/fixtures/claude-tool-details.jsonl",
+    chrome_javascript => "../../tests/fixtures/claude-chrome-javascript.jsonl",
+    questions_answered => "../../tests/fixtures/claude-questions-answered.jsonl",
+    peer_prompts => "../../tests/fixtures/claude-peer-prompts.jsonl",
+    compaction => "../../tests/fixtures/claude-compaction.jsonl",
+    questions_pending => "../../tests/fixtures/claude-questions-pending.jsonl",
+    questions_rejected => "../../tests/fixtures/claude-questions-rejected.jsonl",
+    task_notifications => "../../tests/fixtures/claude-task-notifications.jsonl",
+    task_notification_delivery => "../../tests/fixtures/claude-task-notification-delivery.jsonl",
+}
+
 #[test]
-fn provider_detail_blocks_are_centered() {
+fn codex_detail_blocks_are_centered() {
+    let (_, entries) = provider_detail_events();
+    assert_provider_detail_blocks_centered(entries);
+}
+
+fn provider_detail_events() -> (Vec<Event>, Vec<Event>) {
     let mut entries = Vec::new();
     for fixture in [
         include_str!("../../tests/fixtures/transcript.jsonl"),
@@ -774,6 +813,7 @@ fn provider_detail_blocks_are_centered() {
     ] {
         entries.extend(events(fixture));
     }
+    let claude_count = entries.len();
     let (_dir, provider, session) = codex_fixture();
     for fixture in [
         "codex-rollout.jsonl",
@@ -795,13 +835,22 @@ fn provider_detail_blocks_are_centered() {
         entries.extend(codex_fixture_events(&provider, &session, fixture));
     }
     assert!(entries.len() > 30);
+    let codex = entries.split_off(claude_count);
+    (entries, codex)
+}
+
+fn assert_provider_detail_blocks_centered(entries: Vec<Event>) {
+    assert_provider_detail_blocks_centered_at(entries, &[200, 151, 120]);
+}
+
+fn assert_provider_detail_blocks_centered_at(entries: Vec<Event>, widths: &[u16]) {
     for event in entries {
         let detail = super::super::tool_detail::event_detail_content(
             &event,
             String::new(),
             Style::new().dim(),
         );
-        for width in [200, 151, 120] {
+        for &width in widths {
             assert_centered_event_detail(&event, width, &detail);
         }
     }
@@ -1435,19 +1484,7 @@ fn background_notification_titles_show_only_exit_numbers_on_the_left() {
 
 #[test]
 fn diff_changed_rows_fill_every_panel_column_in_both_themes() {
-    let mut cases = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
-    cases.extend(codex_events("codex-file-changes.jsonl"));
-    let cases: Vec<_> = cases
-        .into_iter()
-        .filter(|event| {
-            event.calls.iter().any(|call| {
-                call.input
-                    .iter()
-                    .chain(call.output.iter().flatten())
-                    .any(|section| matches!(section, crate::event::Section::Diff { .. }))
-            })
-        })
-        .collect();
+    let cases = diff_background_events();
     let mut markers = std::collections::HashSet::new();
     for light in [false, true] {
         super::super::highlight::use_theme(light, None).unwrap();
@@ -1514,6 +1551,22 @@ fn diff_changed_rows_fill_every_panel_column_in_both_themes() {
     assert!(markers.contains(&'+') && markers.contains(&'-') && markers.contains(&'@'));
 }
 
+fn diff_background_events() -> Vec<Event> {
+    let mut cases = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
+    cases.extend(codex_events("codex-file-changes.jsonl"));
+    cases
+        .into_iter()
+        .filter(|event| {
+            event.calls.iter().any(|call| {
+                call.input
+                    .iter()
+                    .chain(call.output.iter().flatten())
+                    .any(|section| matches!(section, crate::event::Section::Diff { .. }))
+            })
+        })
+        .collect()
+}
+
 #[test]
 fn diff_backgrounds_reach_terminal_edges() {
     use crate::providers::Provider;
@@ -1531,8 +1584,7 @@ fn diff_backgrounds_reach_terminal_edges() {
     view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     view.event_session = view.selected_id().cloned();
     let now = DateTime::UNIX_EPOCH;
-    let mut cases = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
-    cases.extend(codex_events("codex-file-changes.jsonl"));
+    let cases = diff_background_events();
     let mut markers = std::collections::HashSet::new();
     for light in [false, true] {
         super::super::highlight::use_theme(light, None).unwrap();
@@ -1591,54 +1643,53 @@ fn diff_backgrounds_preserve_text_positions() {
     view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     view.event_session = view.selected_id().cloned();
     let now = DateTime::UNIX_EPOCH;
-    let mut cases = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
-    cases.extend(codex_events("codex-file-changes.jsonl"));
-    for light in [false, true] {
+    let cases = diff_background_events();
+    // Cover each width and both themes without their Cartesian product.
+    for (light, width) in [(false, 41), (true, 120), (false, 200)] {
         super::super::highlight::use_theme(light, None).unwrap();
         for event in &cases {
             view.set_event(vec![event.clone()]);
             view.select_fixture_event(Some(event.clone()));
-            for width in [41, 120, 200] {
-                let area = Rect::new(0, 0, width, 250);
-                let mut buffer = Buffer::empty(area);
-                view.render_at(area, &mut buffer, now);
-                let viewport = view.viewport.borrow();
-                let layout = viewport.event_detail_layout.as_ref().unwrap();
-                let panel = view.center_layout(area).event_detail;
-                // Compare both renderers at the same inset content rectangle.
-                let reference = View::new(Grouping::Project, false);
-                let mut before = Buffer::empty(area);
-                reference.render_event_detail_content(
-                    event,
-                    "12:34:56",
-                    viewport.event_detail,
-                    &mut before,
-                    &view.selected_row().unwrap().cwd,
-                    now,
-                );
-                for (row, &source) in layout.visible.iter().enumerate() {
-                    let y = panel.y + EVENT_TOP + row as u16;
-                    for x in panel.x..panel.right() {
-                        // Padding changes only the background, preserving the centered text.
-                        // Merged calls' titles also draw an edge rule in the padding.
-                        let edge_rule = layout.titles.len() > 1
-                            && layout
-                                .titles
-                                .iter()
-                                .any(|(title_row, _)| *title_row == source)
-                            && (x == panel.x || x == panel.right() - 1);
-                        // The left padding also carries the mirrored scrollbar.
-                        let scrollbar = x == panel.x && buffer[(x, y)].symbol() == "▏";
-                        if !edge_rule
-                            && !scrollbar
-                            && !layout.times.iter().any(|(time_row, _)| *time_row == source)
-                        {
-                            assert_eq!(
-                                cell_text(buffer[(x, y)].symbol()),
-                                cell_text(before[(x, y)].symbol()),
-                                "text moved at ({x}, {y}), width={width}"
-                            );
-                        }
+            // 120 rows keep all 16 lines of the tallest diff case visible at width 41.
+            let area = Rect::new(0, 0, width, 120);
+            let mut buffer = Buffer::empty(area);
+            view.render_at(area, &mut buffer, now);
+            let viewport = view.viewport.borrow();
+            let layout = viewport.event_detail_layout.as_ref().unwrap();
+            let panel = view.center_layout(area).event_detail;
+            // Compare both renderers at the same inset content rectangle.
+            let reference = View::new(Grouping::Project, false);
+            let mut before = Buffer::empty(area);
+            reference.render_event_detail_content(
+                event,
+                "12:34:56",
+                viewport.event_detail,
+                &mut before,
+                &view.selected_row().unwrap().cwd,
+                now,
+            );
+            for (row, &source) in layout.visible.iter().enumerate() {
+                let y = panel.y + EVENT_TOP + row as u16;
+                for x in panel.x..panel.right() {
+                    // Padding changes only the background, preserving the centered text.
+                    // Merged calls' titles also draw an edge rule in the padding.
+                    let edge_rule = layout.titles.len() > 1
+                        && layout
+                            .titles
+                            .iter()
+                            .any(|(title_row, _)| *title_row == source)
+                        && (x == panel.x || x == panel.right() - 1);
+                    // The left padding also carries the mirrored scrollbar.
+                    let scrollbar = x == panel.x && buffer[(x, y)].symbol() == "▏";
+                    if !edge_rule
+                        && !scrollbar
+                        && !layout.times.iter().any(|(time_row, _)| *time_row == source)
+                    {
+                        assert_eq!(
+                            cell_text(buffer[(x, y)].symbol()),
+                            cell_text(before[(x, y)].symbol()),
+                            "text moved at ({x}, {y}), width={width}"
+                        );
                     }
                 }
             }

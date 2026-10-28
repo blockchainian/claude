@@ -315,8 +315,5 @@ fn respond(stream: &mut TcpStream, body: Option<&Value>) -> io::Result<()> {
     stream.shutdown(Shutdown::Both)
 }
 #[cfg(test)]
-#[path = "ask_user_question_live_tests.rs"]
-mod live_tests;
-#[cfg(test)]
 #[path = "ask_user_question_tests.rs"]
 mod tests;

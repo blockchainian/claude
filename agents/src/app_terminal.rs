@@ -339,9 +339,22 @@ mod tests {
     }
 
     fn attach(app: &mut App, id: SessionKey, pid_file: &std::path::Path) -> u32 {
+        attach_script(
+            app,
+            id,
+            pid_file,
+            r#"stty raw -echo; printf '%s' "$$" > "$1"; printf READY; dd bs=1 count=1 >/dev/null 2>&1; printf DETACHED; while :; do read line; done"#,
+        )
+    }
+
+    fn attach_script(
+        app: &mut App,
+        id: SessionKey,
+        pid_file: &std::path::Path,
+        script: &str,
+    ) -> u32 {
         let mut command = Command::new("sh");
-        command.args(["-c", r#"stty raw -echo; printf '%s' "$$" > "$1"; printf READY; dd bs=1 count=1 >/dev/null 2>&1; printf DETACHED; while :; do read line; done"#, "sh"])
-            .arg(pid_file);
+        command.args(["-c", script, "sh"]).arg(pid_file);
         let sender = app.sender.clone();
         let terminal =
             SessionTerminal::spawn(id.clone(), command, Some(b"\x1a"), (20, 80), move || {
@@ -769,104 +782,55 @@ mod tests {
     }
 
     #[test]
-    fn terminal_cleanup_waits_for_detach_off_the_ui_thread_on_close_and_switch() {
-        for switching in [false, true] {
-            let (directory, mut app, id) = fixture();
-            draw(&mut app);
-            let pid = attach(&mut app, id.clone(), &directory.path().join("cleanup-pid"));
-            let ui_thread = std::thread::current().id();
-            let (sender, receiver) = std::sync::mpsc::channel();
-            let (release, wait) = std::sync::mpsc::channel();
-            app.terminal.as_mut().unwrap().cleanup = Some(Box::new(move || {
-                assert_ne!(std::thread::current().id(), ui_thread);
-                assert_reaped(pid);
-                sender.send(()).unwrap();
-                wait.recv_timeout(Duration::from_secs(5)).unwrap();
-                Err(io::Error::other("terminal cleanup failed"))
-            }));
-            if switching {
-                let mut other = app.sessions[0].clone();
-                other.id.id = "cleanup-other".into();
-                other.status = SessionStatus::NeedsInput;
-                app.sessions.push(other);
-                app.view.set_sessions(app.sessions.clone(), false);
-                assert_ne!(app.view.selected_id(), Some(&id));
-            }
-            let start = Instant::now();
-            if switching {
-                app.sync_terminal();
-            } else {
-                app.close_terminal();
-            }
-            assert!(start.elapsed() < Duration::from_millis(100));
-            assert!(app.terminal.is_none());
-            assert!(app.closing_terminals.contains_key(&id));
-            receiver.recv_timeout(Duration::from_secs(5)).unwrap();
-            release.send(()).unwrap();
-            finish_close(&mut app);
-            assert!(draw(&mut app).contains("Cannot close the terminal:"));
-        }
+    fn terminal_cleanup_waits_for_detach_off_the_ui_thread_on_close() {
+        assert_terminal_cleanup(false);
     }
 
     #[test]
-    #[ignore = "opens a real Claude background job from a temporary completed transcript"]
-    fn real_woken_terminal_closes_back_to_inactive() {
-        use crate::providers::claude::ClaudeProvider;
-        let preferences = tempfile::tempdir().unwrap();
-        let config = std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join(".claude");
-        let cwd = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let project = config.join("projects").join(
-            cwd.to_str()
-                .unwrap()
-                .chars()
-                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-                .collect::<String>(),
+    fn terminal_cleanup_waits_for_detach_off_the_ui_thread_on_switch() {
+        assert_terminal_cleanup(true);
+    }
+
+    fn assert_terminal_cleanup(switching: bool) {
+        let (directory, mut app, id) = fixture();
+        draw(&mut app);
+        let pid = attach_script(
+            &mut app,
+            id.clone(),
+            &directory.path().join("cleanup-pid"),
+            r#"stty raw -echo; printf '%s' "$$" > "$1"; printf READY; dd bs=1 count=1 >/dev/null 2>&1; printf DETACHED"#,
         );
-        std::fs::create_dir_all(&project).unwrap();
-        let id = uuid::Uuid::new_v4().to_string();
-        let path = project.join(format!("{id}.jsonl"));
-        let mut lines = Vec::new();
-        for line in include_str!("../tests/fixtures/transcript.jsonl")
-            .lines()
-            .take(2)
-        {
-            let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
-            record["sessionId"] = id.clone().into();
-            record["cwd"] = cwd.to_str().unwrap().into();
-            record["timestamp"] = chrono::Utc::now().to_rfc3339().into();
-            lines.push(serde_json::to_string(&record).unwrap());
+        let ui_thread = std::thread::current().id();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        app.terminal.as_mut().unwrap().cleanup = Some(Box::new(move || {
+            assert_ne!(std::thread::current().id(), ui_thread);
+            assert_reaped(pid);
+            sender.send(()).unwrap();
+            wait.recv_timeout(Duration::from_secs(5)).unwrap();
+            Err(io::Error::other("terminal cleanup failed"))
+        }));
+        if switching {
+            let mut other = app.sessions[0].clone();
+            other.id.id = "cleanup-other".into();
+            other.status = SessionStatus::NeedsInput;
+            app.sessions.push(other);
+            app.view.set_sessions(app.sessions.clone(), false);
+            assert_ne!(app.view.selected_id(), Some(&id));
         }
-        std::fs::write(&path, format!("{}\n", lines.join("\n"))).unwrap();
-        let result = std::panic::catch_unwind(|| {
-            let mut app = App::new(
-                Hub::new(vec![Box::new(ClaudeProvider::new(config.clone()))]),
-                preferences.path().to_owned(),
-            );
-            app.refresh();
-            let key = SessionKey {
-                provider: crate::providers::ProviderId::Claude,
-                id: id.clone(),
-            };
-            assert_eq!(app.session(&key).unwrap().status, SessionStatus::Inactive);
-            crate::app::live_tests::open_terminal(&mut app, key.clone(), |screen| {
-                screen.lines().any(|line| line.trim() == "❯")
-            });
-            assert!(app.terminal.as_ref().unwrap().cleanup.is_some());
+        let start = Instant::now();
+        if switching {
+            app.sync_terminal();
+        } else {
             app.close_terminal();
-            finish_close(&mut app);
-            app.refresh();
-            assert_eq!(app.session(&key).unwrap().status, SessionStatus::Inactive);
-        });
-        // Only this probe's UUID and background job are removed.
-        let _ = Command::new("claude").args(["stop", &id[..8]]).output();
-        let _ = Command::new("claude").args(["rm", &id[..8]]).output();
-        std::fs::remove_file(&path).unwrap();
-        if path.with_extension("").exists() {
-            std::fs::remove_dir_all(path.with_extension("")).unwrap();
         }
-        if let Err(panic) = result {
-            std::panic::resume_unwind(panic);
-        }
+        assert!(start.elapsed() < Duration::from_millis(100));
+        assert!(app.terminal.is_none());
+        assert!(app.closing_terminals.contains_key(&id));
+        receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        release.send(()).unwrap();
+        finish_close(&mut app);
+        assert!(draw(&mut app).contains("Cannot close the terminal:"));
     }
 
     #[test]

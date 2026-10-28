@@ -1,5 +1,10 @@
 use super::*;
 
+fn render_window(view: &View, width: u16, height: u16, now: chrono::DateTime<Utc>) {
+    let area = Rect::new(0, 0, width, height);
+    view.render_at(area, &mut Buffer::empty(area), now);
+}
+
 fn chord(view: &mut View, direction: char) -> Option<Action> {
     assert_eq!(
         view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)),
@@ -39,18 +44,18 @@ fn window_navigation_all_directions_in_three_layouts() {
                     (bottom, [bottom, bottom, EventList, bottom]),
                 ]
             };
+            let (mut view, now) = event_fixture();
+            view.rows[0].process = None;
+            if terminal {
+                let screen = crate::session_terminal::TerminalScreen::new(10, 80);
+                view.show_terminal(
+                    session_key("log"),
+                    std::sync::Arc::new(std::sync::Mutex::new(screen)),
+                );
+            }
+            render_window(&view, width, 45, now);
             for (source, targets) in expected {
                 for (direction, target) in ['h', 'j', 'k', 'l'].into_iter().zip(targets) {
-                    let (mut view, now) = event_fixture();
-                    view.rows[0].process = None;
-                    if terminal {
-                        let screen = crate::session_terminal::TerminalScreen::new(10, 80);
-                        view.show_terminal(
-                            session_key("log"),
-                            std::sync::Arc::new(std::sync::Mutex::new(screen)),
-                        );
-                    }
-                    event_screen(&view, width, 45, now);
                     view.set_active_panel(source);
 
                     assert_eq!(chord(&mut view, direction), None);
@@ -284,78 +289,6 @@ fn window_navigation_help_lists_directions() {
 }
 
 #[test]
-#[ignore = "requires a real PTY"]
-fn window_navigation_real_terminal_probe() {
-    use crate::session_terminal::SessionTerminal;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let mut command = std::process::Command::new("/bin/bash");
-    command.args(["--noprofile", "--norc", "-i"]);
-    command.env("PS1", "WINDOW-PROBE> ");
-    let mut terminal =
-        SessionTerminal::spawn(session_key("log"), command, None, (12, 100), move || {
-            let _ = tx.send(());
-        })
-        .unwrap();
-    let wait = |needle: &str, terminal: &SessionTerminal| {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        loop {
-            let text = terminal.screen.lock().unwrap().screen().contents();
-            if text.contains(needle) {
-                break;
-            }
-            assert!(std::time::Instant::now() < deadline, "{text}");
-            terminal.drawn();
-            let _ = rx.recv_timeout(std::time::Duration::from_millis(100));
-        }
-    };
-    wait("WINDOW-PROBE>", &terminal);
-    for width in [100, 200] {
-        let (mut view, now) = event_fixture();
-        view.rows[0].process = None;
-        view.show_terminal(session_key("log"), terminal.screen.clone());
-        assert_eq!(view.active_panel, Panel::EventDetail);
-        event_screen(&view, width, 45, now);
-        assert_eq!(chord(&mut view, 'l'), None);
-        assert!(view.active_panel == Panel::EventDetail);
-        assert_eq!(chord(&mut view, 'k'), None);
-        assert!(
-            view.active_panel
-                == if width == 200 {
-                    Panel::Prompt
-                } else {
-                    Panel::EventList
-                }
-        );
-        view.show_terminal(session_key("log"), terminal.screen.clone());
-        view.set_active_panel(Panel::EventDetail);
-        // A real readline Ctrl-W deletes the last word before the following key.
-        let command = format!("echo one{width} two");
-        terminal.write(command.as_bytes()).unwrap();
-        wait(&command, &terminal);
-        let Some(Action::Batch(actions)) = chord(&mut view, 'x') else {
-            panic!("missing terminal fallback")
-        };
-        for action in actions {
-            let Action::TerminalInput(bytes) = action else {
-                panic!("not terminal input")
-            };
-            terminal.write(&bytes).unwrap();
-        }
-        terminal.write(b"\r").unwrap();
-        wait(&format!("one{width} x"), &terminal);
-        terminal.drawn();
-    }
-    terminal.close().unwrap();
-    let verdict = serde_json::json!({"verdict":"pass", "widths":[100,200], "terminal_navigation":true, "readline_ctrl_w_fallback":true});
-    std::fs::write(
-        std::env::temp_dir().join("agents-window-terminal-verdict.json"),
-        verdict.to_string(),
-    )
-    .unwrap();
-    println!("{verdict}");
-}
-
-#[test]
 fn opening_editors_activates_them_but_updates_preserve_activation() {
     let (mut view, _) = event_fixture();
     view.rows[view.selected].process = None;
@@ -570,6 +503,7 @@ fn panel_zoom_event_list_has_no_left_separator_joints() {
 #[test]
 fn panel_zoom_collapsed_panels_keep_frame_labels() {
     for width in [100, 149, 150, 200] {
+        let (mut view, now) = event_fixture();
         for panel in [
             Panel::TaskList,
             Panel::TaskDetails,
@@ -577,14 +511,14 @@ fn panel_zoom_collapsed_panels_keep_frame_labels() {
             Panel::EventDetail,
         ] {
             for commands in ["", "|", "_", "|_", "_|"] {
-                let (mut view, now) = event_fixture();
-                event_screen(&view, width, 110, now);
+                zoom_key(&mut view, '=', KeyModifiers::NONE);
+                render_window(&view, width, 45, now);
                 view.set_active_panel(panel);
                 for command in commands.chars() {
                     zoom_key(&mut view, command, KeyModifiers::SHIFT);
                 }
-                let layout = view.center_layout(Rect::new(0, 0, width, 110));
-                let screen = event_screen(&view, width, 110, now);
+                let layout = view.center_layout(Rect::new(0, 0, width, 45));
+                let screen = event_screen(&view, width, 45, now);
                 let rows: Vec<_> = screen.lines().collect();
                 let context = format!("{width} {panel:?} {commands}");
                 if layout.top.is_empty() {
@@ -777,11 +711,11 @@ fn panel_zoom_zero_sized_regions_render_without_panics() {
                 Panel::EventDetail,
             ] {
                 let (mut view, now) = event_fixture();
-                event_screen(&view, width, height, now);
+                render_window(&view, width, height, now);
                 view.set_active_panel(panel);
                 for c in ['|', '_', '='] {
                     zoom_key(&mut view, c, KeyModifiers::SHIFT);
-                    event_screen(&view, width, height, now);
+                    render_window(&view, width, height, now);
                 }
             }
         }
@@ -800,7 +734,7 @@ fn panel_zoom_frame_rules_survive_collapsed_panels() {
             for commands in ["", "|", "_", "|_", "_|"] {
                 let (mut view, now) = event_fixture();
                 let area = Rect::new(0, 0, width, 50);
-                event_screen(&view, width, 50, now);
+                render_window(&view, width, 50, now);
                 view.set_active_panel(panel);
                 for command in commands.chars() {
                     zoom_key(&mut view, command, KeyModifiers::SHIFT);
@@ -932,15 +866,15 @@ fn panel_zoom_prompt_up_returns_to_width_zoomed_top_panel() {
             }
             for commands in ["|", "_", "|_", "_|"] {
                 let (mut view, now) = event_fixture();
-                event_screen(&view, width, 50, now);
+                render_window(&view, width, 50, now);
                 view.set_active_panel(panel);
                 for command in commands.chars() {
                     zoom_key(&mut view, command, KeyModifiers::SHIFT);
                 }
-                event_screen(&view, width, 50, now);
+                render_window(&view, width, 50, now);
                 chord(&mut view, 'j');
                 assert_eq!(view.active_panel, Panel::Prompt);
-                event_screen(&view, width, 50, now);
+                render_window(&view, width, 50, now);
                 let zoom = (view.height_zoom, view.width_zoom);
                 chord(&mut view, 'k');
                 let expected = if commands.contains('_') {
@@ -955,54 +889,69 @@ fn panel_zoom_prompt_up_returns_to_width_zoomed_top_panel() {
     }
 }
 
-#[test]
-fn hidden_focus_resize_recovers_and_does_not_return_on_growth() {
-    for width in [200, 110] {
-        for source in [Panel::EventList, Panel::EventDetail] {
-            for zoom in ["", "|", "_", "|_"] {
-                for input in [true, false] {
-                    let (mut view, now) = event_fixture();
-                    if input {
-                        view.rows[0].process = None;
-                    }
-                    assert_eq!(view.input_disabled().is_none(), input);
-                    event_screen(&view, 200, 50, now);
-                    view.set_active_panel(source);
-                    for command in zoom.chars() {
-                        zoom_key(&mut view, command, KeyModifiers::SHIFT);
-                        event_screen(&view, 200, 50, now);
-                    }
-                    view.resize(width, 18);
-                    event_screen(&view, width, 18, now);
-                    let target = if input {
-                        Panel::Prompt
-                    } else {
-                        Panel::TaskList
-                    };
-                    assert_eq!(
-                        view.active_panel, target,
-                        "width={width} source={source:?} zoom={zoom} input={input}"
-                    );
-                    view.resize(200, 50);
-                    event_screen(&view, 200, 50, now);
-                    assert_eq!(view.active_panel, target);
-                    view.resize(width, 18);
-                    event_screen(&view, width, 18, now);
-                    if input {
-                        chord(&mut view, 'k');
-                        assert_eq!(view.active_panel, Panel::TaskList);
-                    }
-                    chord(&mut view, 'l');
-                    assert_eq!(view.active_panel, Panel::TaskDetails);
-                    zoom_key(&mut view, '|', KeyModifiers::SHIFT);
-                    zoom_key(&mut view, '_', KeyModifiers::SHIFT);
-                    let layout = view.center_layout(Rect::new(0, 0, width, 18));
-                    assert!(!layout.task_details.is_empty());
-                    assert!(layout.list.is_empty());
-                }
+fn hidden_focus_resize_recovers_and_does_not_return_on_growth(width: u16, source: Panel) {
+    for zoom in ["", "|", "_", "|_"] {
+        for input in [true, false] {
+            let (mut view, now) = event_fixture();
+            if input {
+                view.rows[0].process = None;
             }
+            assert_eq!(view.input_disabled().is_none(), input);
+            event_screen(&view, 200, 50, now);
+            view.set_active_panel(source);
+            for command in zoom.chars() {
+                zoom_key(&mut view, command, KeyModifiers::SHIFT);
+                event_screen(&view, 200, 50, now);
+            }
+            view.resize(width, 18);
+            event_screen(&view, width, 18, now);
+            let target = if input {
+                Panel::Prompt
+            } else {
+                Panel::TaskList
+            };
+            assert_eq!(
+                view.active_panel, target,
+                "width={width} source={source:?} zoom={zoom} input={input}"
+            );
+            view.resize(200, 50);
+            event_screen(&view, 200, 50, now);
+            assert_eq!(view.active_panel, target);
+            view.resize(width, 18);
+            event_screen(&view, width, 18, now);
+            if input {
+                chord(&mut view, 'k');
+                assert_eq!(view.active_panel, Panel::TaskList);
+            }
+            chord(&mut view, 'l');
+            assert_eq!(view.active_panel, Panel::TaskDetails);
+            zoom_key(&mut view, '|', KeyModifiers::SHIFT);
+            zoom_key(&mut view, '_', KeyModifiers::SHIFT);
+            let layout = view.center_layout(Rect::new(0, 0, width, 18));
+            assert!(!layout.task_details.is_empty());
+            assert!(layout.list.is_empty());
         }
     }
+}
+
+#[test]
+fn hidden_focus_resize_large_event_list_recovers_and_does_not_return_on_growth() {
+    hidden_focus_resize_recovers_and_does_not_return_on_growth(200, Panel::EventList);
+}
+
+#[test]
+fn hidden_focus_resize_large_event_detail_recovers_and_does_not_return_on_growth() {
+    hidden_focus_resize_recovers_and_does_not_return_on_growth(200, Panel::EventDetail);
+}
+
+#[test]
+fn hidden_focus_resize_medium_event_list_recovers_and_does_not_return_on_growth() {
+    hidden_focus_resize_recovers_and_does_not_return_on_growth(110, Panel::EventList);
+}
+
+#[test]
+fn hidden_focus_resize_medium_event_detail_recovers_and_does_not_return_on_growth() {
+    hidden_focus_resize_recovers_and_does_not_return_on_growth(110, Panel::EventDetail);
 }
 
 #[test]
@@ -1016,12 +965,12 @@ fn hidden_focus_navigation_recovers_without_resize_notification() {
                         if input {
                             view.rows[0].process = None;
                         }
-                        event_screen(&view, 200, 50, now);
+                        render_window(&view, 200, 50, now);
                         view.set_active_panel(source);
                         for command in zoom.chars() {
                             zoom_key(&mut view, command, KeyModifiers::SHIFT);
                         }
-                        event_screen(&view, width, 18, now);
+                        render_window(&view, width, 18, now);
                         chord(&mut view, direction);
                         assert_eq!(
                             view.active_panel,
@@ -1031,7 +980,7 @@ fn hidden_focus_navigation_recovers_without_resize_notification() {
                                 Panel::TaskList
                             }
                         );
-                        event_screen(&view, width, 18, now);
+                        render_window(&view, width, 18, now);
                         if input {
                             chord(&mut view, 'k');
                         }

@@ -5328,62 +5328,66 @@ mod summary_cache_tests {
         result
     }
 
-    fn summary_fixtures() -> [&'static str; 7] {
-        [
-            include_str!("../../../tests/fixtures/codex-rollout.jsonl"),
-            include_str!("../../../tests/fixtures/codex-todos.jsonl"),
-            include_str!("../../../tests/fixtures/codex-latest-activity.jsonl"),
-            include_str!("../../../tests/fixtures/codex-input/default-pending.jsonl"),
-            include_str!("../../../tests/fixtures/codex-input/default-answered.jsonl"),
-            include_str!("../../../tests/fixtures/codex-subagents/rollout.jsonl"),
-            include_str!("../../../tests/fixtures/prompt-cache/codex-requests.jsonl"),
-        ]
+    macro_rules! summary_fixture {
+        ($name:ident, $path:literal) => {
+            mod $name {
+                use super::*;
+
+                const TEXT: &str = include_str!($path);
+
+                #[test]
+                fn summaries_match_full_parse_after_each_append() {
+                    let text = TEXT;
+                    let mut file = tempfile::NamedTempFile::new().unwrap();
+                    let mut tasks = Tasks::default();
+                    for line in text.split_inclusive('\n') {
+                        file.write_all(line.as_bytes()).unwrap();
+                        let want = expected(file.path());
+                        assert_eq!(tasks.summary(file.path()).unwrap(), want);
+                    }
+                }
+
+                #[test]
+                fn summaries_parse_each_byte_once_across_appends() {
+                    let text = TEXT;
+                    let mut file = tempfile::NamedTempFile::new().unwrap();
+                    let mut tasks = Tasks::default();
+                    for line in text.split_inclusive('\n') {
+                        file.write_all(line.as_bytes()).unwrap();
+                        let want = tasks.summary(file.path()).unwrap();
+                        assert_eq!(tasks.summary(file.path()).unwrap(), want);
+                    }
+                    assert_eq!(tasks.parsed_bytes, text.len() as u64);
+                }
+            }
+        };
     }
 
-    #[test]
-    fn summaries_match_full_parse_after_each_append() {
-        for text in summary_fixtures() {
-            let mut file = tempfile::NamedTempFile::new().unwrap();
-            let mut tasks = Tasks::default();
-            for line in text.split_inclusive('\n') {
-                file.write_all(line.as_bytes()).unwrap();
-                let want = expected(file.path());
-                assert_eq!(tasks.summary(file.path()).unwrap(), want);
-            }
-        }
-    }
-
-    #[test]
-    fn summaries_do_not_reparse_unchanged_files() {
-        for text in summary_fixtures() {
-            let mut file = tempfile::NamedTempFile::new().unwrap();
-            let mut tasks = Tasks::default();
-            for line in text.split_inclusive('\n') {
-                file.write_all(line.as_bytes()).unwrap();
-                let want = tasks.summary(file.path()).unwrap();
-                let parsed = tasks.parsed_bytes;
-                assert_eq!(tasks.summary(file.path()).unwrap(), want);
-                assert_eq!(
-                    tasks.parsed_bytes, parsed,
-                    "unchanged file was parsed again"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn summaries_parse_each_byte_once_across_appends() {
-        for text in summary_fixtures() {
-            let mut file = tempfile::NamedTempFile::new().unwrap();
-            let mut tasks = Tasks::default();
-            for line in text.split_inclusive('\n') {
-                file.write_all(line.as_bytes()).unwrap();
-                tasks.summary(file.path()).unwrap();
-                tasks.summary(file.path()).unwrap();
-            }
-            assert_eq!(tasks.parsed_bytes, text.len() as u64);
-        }
-    }
+    summary_fixture!(rollout, "../../../tests/fixtures/codex-rollout.jsonl");
+    summary_fixture!(todos, "../../../tests/fixtures/codex-todos.jsonl");
+    const _: () = assert!(
+        include_str!("../../../tests/fixtures/codex-summary-activity.jsonl").len() as u64 > CHUNK
+    );
+    summary_fixture!(
+        latest_activity,
+        "../../../tests/fixtures/codex-summary-activity.jsonl"
+    );
+    summary_fixture!(
+        pending_input,
+        "../../../tests/fixtures/codex-input/default-pending.jsonl"
+    );
+    summary_fixture!(
+        answered_input,
+        "../../../tests/fixtures/codex-input/default-answered.jsonl"
+    );
+    summary_fixture!(
+        subagents,
+        "../../../tests/fixtures/codex-subagents/rollout.jsonl"
+    );
+    summary_fixture!(
+        prompt_cache,
+        "../../../tests/fixtures/prompt-cache/codex-requests.jsonl"
+    );
 
     #[test]
     fn summary_errors_remain_errors_on_unchanged_retries() {

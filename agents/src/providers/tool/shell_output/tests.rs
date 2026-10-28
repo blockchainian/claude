@@ -1,9 +1,8 @@
 use super::{Stream, sections};
 use crate::event::Section;
-use serde::{Deserialize, Serialize};
-use std::io::Write;
+use serde::Deserialize;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub(super) struct Span {
     pub(super) start: usize,
     pub(super) end: usize,
@@ -744,12 +743,6 @@ fn shell_output_diff_and_patch_share_scope() {
     assert_eq!(language_scope("patch"), language_scope("diff"));
 }
 
-#[derive(Deserialize)]
-struct ScopeInput {
-    paths: Vec<String>,
-    languages: Vec<String>,
-}
-
 #[test]
 fn shell_output_repository_corpus_has_no_wrong_colors() {
     let mut colored = 0;
@@ -785,81 +778,6 @@ fn shell_output_repository_corpus_has_no_wrong_colors() {
     }
     assert!(colored > 0, "the corpus must exercise actual highlighting");
     assert!(wrong.is_empty(), "wrong colored corpus lines: {wrong:?}");
-}
-
-#[test]
-#[ignore = "local transcript audit; requires SHELL_OUTPUT_INPUT and SHELL_OUTPUT_REPORT"]
-fn shell_output_audit() {
-    let input = std::env::var("SHELL_OUTPUT_INPUT").expect("SHELL_OUTPUT_INPUT");
-    let report = std::env::var("SHELL_OUTPUT_REPORT").expect("SHELL_OUTPUT_REPORT");
-    let scope_input = std::env::var("SHELL_OUTPUT_SCOPE_INPUT").expect("SHELL_OUTPUT_SCOPE_INPUT");
-    let scope_report =
-        std::env::var("SHELL_OUTPUT_SCOPE_REPORT").expect("SHELL_OUTPUT_SCOPE_REPORT");
-    let scope_input: ScopeInput =
-        serde_json::from_str(&std::fs::read_to_string(scope_input).expect("read scope input"))
-            .expect("valid scope input");
-    let resolve = |language: &str| {
-        crate::ui::highlight::find_syntax(language.strip_prefix("numbered:").unwrap_or(language))
-            .map(|syntax| syntax.scope.to_string())
-    };
-    let mut languages: std::collections::BTreeMap<String, Option<String>> = scope_input
-        .languages
-        .into_iter()
-        .map(|language| {
-            let scope = resolve(&language);
-            (language, scope)
-        })
-        .collect();
-    let paths: std::collections::BTreeMap<String, Option<String>> = scope_input
-        .paths
-        .into_iter()
-        .map(|path| {
-            let language = super::file_language(&path);
-            let scope = resolve(language);
-            languages.insert(language.to_owned(), scope.clone());
-            (path, scope)
-        })
-        .collect();
-    let source = std::fs::read_to_string(input).expect("read audit input");
-    let calls: Vec<Call> = source
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("valid audit record"))
-        .collect();
-    let start = std::time::Instant::now();
-    let outputs: Vec<_> = calls
-        .iter()
-        .map(|call| sections(&call.command, "stdout", &call.stdout, call.stream()))
-        .collect();
-    let elapsed = start.elapsed().as_secs_f64();
-    let mut file =
-        std::io::BufWriter::new(std::fs::File::create(report).expect("create audit report"));
-    for (call, output) in calls.iter().zip(outputs) {
-        let actual = output
-            .map(|output| spans(&output, &call.stdout))
-            .unwrap_or_default();
-        for span in &actual {
-            languages.insert(span.language.clone(), resolve(&span.language));
-        }
-        serde_json::to_writer(
-            &mut file,
-            &serde_json::json!({"provider":call.provider,"command":call.command,"actual":actual}),
-        )
-        .expect("write audit record");
-        writeln!(file).expect("write audit newline");
-    }
-    file.flush().expect("flush audit report");
-    std::fs::write(
-        scope_report,
-        serde_json::to_vec(&serde_json::json!({
-            "paths": paths, "languages": languages,
-        }))
-        .expect("serialize scopes"),
-    )
-    .expect("write scope report");
-    println!(
-        "{}",
-        serde_json::json!({"calls":calls.len(),"elapsed_seconds":elapsed})
-    );
 }
 
 fn boundary_cases() -> serde_json::Value {

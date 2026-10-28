@@ -581,40 +581,52 @@ fn filtered_event_labels_preserve_duration_and_model_labels() {
 }
 
 #[test]
-fn event_filter_follows_its_panel_through_zoom() {
+fn event_filter_follows_task_list_through_zoom() {
+    event_filter_follows_panel_through_zoom(Panel::TaskList);
+}
+
+#[test]
+fn event_filter_follows_task_details_through_zoom() {
+    event_filter_follows_panel_through_zoom(Panel::TaskDetails);
+}
+
+#[test]
+fn event_filter_follows_event_list_through_zoom() {
+    event_filter_follows_panel_through_zoom(Panel::EventList);
+}
+
+#[test]
+fn event_filter_follows_event_detail_through_zoom() {
+    event_filter_follows_panel_through_zoom(Panel::EventDetail);
+}
+
+fn event_filter_follows_panel_through_zoom(panel: Panel) {
+    let (_dir, mut view) = fixture();
+    view.event_list.filter = EventFilter::Tool;
     for width in [90, 120, 160] {
-        for panel in [
-            Panel::TaskList,
-            Panel::TaskDetails,
-            Panel::EventList,
-            Panel::EventDetail,
-        ] {
-            for height in [false, true] {
-                for width_zoom in [false, true] {
-                    let (_dir, mut view) = fixture();
-                    view.event_list.filter = EventFilter::Tool;
-                    view.height_zoom = height.then_some(panel);
-                    view.width_zoom = width_zoom.then_some(panel);
-                    let area = Rect::new(0, 0, width, 50);
-                    let mut buf = Buffer::empty(area);
-                    view.render(area, &mut buf);
-                    let viewport = view.viewport.borrow();
-                    let drawn: Vec<_> = (0..50)
-                        .filter(|&y| {
-                            (0..width)
-                                .map(|x| buf[(x, y)].symbol())
-                                .collect::<String>()
-                                .contains(" Tool ")
-                        })
-                        .collect();
-                    if viewport.event_panel.is_empty() {
-                        assert!(drawn.is_empty(), "{width} {panel:?}: {drawn:?}");
-                    } else {
-                        let x = viewport.event_panel.x.saturating_sub(2);
-                        let y = viewport.event_borders[1].y;
-                        let label: String = (x..x + 6).map(|x| buf[(x, y)].symbol()).collect();
-                        assert_eq!(label, " Tool ", "{width} {panel:?}");
-                    }
+        for height in [false, true] {
+            for width_zoom in [false, true] {
+                view.height_zoom = height.then_some(panel);
+                view.width_zoom = width_zoom.then_some(panel);
+                let area = Rect::new(0, 0, width, 50);
+                let mut buf = Buffer::empty(area);
+                view.render(area, &mut buf);
+                let viewport = view.viewport.borrow();
+                let drawn: Vec<_> = (0..50)
+                    .filter(|&y| {
+                        (0..width)
+                            .map(|x| buf[(x, y)].symbol())
+                            .collect::<String>()
+                            .contains(" Tool ")
+                    })
+                    .collect();
+                if viewport.event_panel.is_empty() {
+                    assert!(drawn.is_empty(), "{width} {panel:?}: {drawn:?}");
+                } else {
+                    let x = viewport.event_panel.x.saturating_sub(2);
+                    let y = viewport.event_borders[1].y;
+                    let label: String = (x..x + 6).map(|x| buf[(x, y)].symbol()).collect();
+                    assert_eq!(label, " Tool ", "{width} {panel:?}");
                 }
             }
         }

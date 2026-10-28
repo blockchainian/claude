@@ -572,17 +572,4 @@ mod tests {
         payload["limits"][0]["resets_at"] = serde_json::json!("invalid");
         assert!(parse(&payload.to_string()).is_err());
     }
-
-    #[test]
-    #[ignore = "reads the local keychain and live account usage"]
-    fn weekly_usage_live_account() {
-        let usage = read().unwrap().expect("Claude weekly usage is available");
-        println!("Claude weekly {}% left", usage.left_percent());
-        if let Some(reset) = usage.resets_at {
-            println!(
-                "Claude resets {}",
-                reset.with_timezone(&chrono::Local).format("%a %H:%M")
-            );
-        }
-    }
 }

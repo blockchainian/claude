@@ -4144,7 +4144,9 @@ mod task_details_header {
     fn centered_status_truncates_before_elapsed_is_dropped() {
         let (mut view, now) = event_fixture();
         view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
-        for columns in 10..=100 {
+        // Include every truncated status length, the elapsed cutoff on both sides,
+        // the full status, and the transition from Small to Medium.
+        for columns in [10, 11, 12, 13, 22, 23, 24, 25, 26, 27, 28, 29, 30, 99, 100] {
             let (buf, top) = rule_at_width(&view, now, columns);
             let rule = Rect::new(
                 top.x,
@@ -6043,84 +6045,122 @@ fn non_current_event_time_matches_unselected_task_and_task_details_times() {
     );
 }
 
-#[test]
-fn selected_event_row_preserves_foreground_and_adds_bold() {
-    use crate::event::Kind;
-    use ratatui::style::Modifier;
-    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+const SELECTED_ROW_KINDS: [crate::event::Kind; 9] = [
+    crate::event::Kind::User,
+    crate::event::Kind::Assistant,
+    crate::event::Kind::Agent,
+    crate::event::Kind::Session,
+    crate::event::Kind::Tool,
+    crate::event::Kind::Error,
+    crate::event::Kind::Denied,
+    crate::event::Kind::QueuedUser,
+    crate::event::Kind::QueuedSystem,
+];
+
+/// The Tool event the selected-row tests restyle for each kind.
+fn selected_row_event() -> crate::event::Event {
     let source =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude-tool-calls.jsonl");
-    let event = crate::providers::claude::event_reader::tail_session(&source, 200, true)
+    crate::providers::claude::event_reader::tail_session(&source, 200, true)
         .unwrap()
         .into_iter()
-        .find(|event| event.kind == Kind::Tool)
-        .unwrap();
-    for light in [false, true] {
-        let cursor = super::style::selection_style_for(false, true, light);
-        super::style::with_selection_style(cursor, || {
-            for width in [100, 149, 150, 200] {
-                for kind in [
-                    Kind::User,
-                    Kind::Assistant,
-                    Kind::Agent,
-                    Kind::Session,
-                    Kind::Tool,
-                    Kind::Error,
-                    Kind::Denied,
-                    Kind::QueuedUser,
-                    Kind::QueuedSystem,
-                ] {
-                    for search in [false, true] {
-                        let (mut view, now) = event_fixture();
-                        let mut event = event.clone();
-                        event.kind = kind.clone();
-                        // Include a visible link and a search match alongside plain body text.
-                        event.body =
-                            "Read `code` **bold** [link](https://example.com) and results".into();
-                        event.calls.clear();
-                        event.paths.clear();
-                        let mut older = event.clone();
-                        older.started_at -= Duration::seconds(1);
-                        view.set_event(vec![older, event]);
-                        if search {
-                            view.event_list.search.input.set_text("Read");
-                            view.rematch_event();
-                        }
-                        let area = Rect::new(0, 0, width, 60);
-                        let event_panel = view.center_layout(area).event_panel;
-                        view.event_list.cursor = None;
-                        for index in 0..2 {
-                            let mut baseline = Buffer::empty(area);
-                            view.event_list.cursor = None;
-                            view.render_event(event_panel, &mut baseline, now);
-                            view.select_fixture_event(Some(view.event_panel[index].clone()));
-                            let mut selected = Buffer::empty(area);
-                            view.render_event(event_panel, &mut selected, now);
-                            let y = event_panel.y + index as u16;
-                            for x in event_panel.x - 1..=event_panel.right() {
-                                let before = &baseline[(x, y)];
-                                let after = &selected[(x, y)];
-                                assert_eq!(after.symbol(), before.symbol());
-                                assert_eq!(
-                                    after.fg, before.fg,
-                                    "{kind:?}, width {width}, ({x}, {y})"
-                                );
-                                assert_eq!(
-                                    after.modifier,
-                                    before.modifier | Modifier::BOLD,
-                                    "{kind:?}, width {width}, ({x}, {y})"
-                                );
-                                assert_eq!(
-                                    after.bg,
-                                    cursor.bg.unwrap(),
-                                    "padding included at ({x}, {y})"
-                                );
-                            }
-                        }
-                    }
-                }
+        .find(|event| event.kind == crate::event::Kind::Tool)
+        .unwrap()
+}
+
+/// Selecting either row keeps its symbols and foreground, adds bold and paints the cursor background.
+fn assert_selected_row_preserves_foreground_and_adds_bold(
+    event: &crate::event::Event,
+    light: bool,
+    width: u16,
+    kind: crate::event::Kind,
+    search: bool,
+) {
+    use ratatui::style::Modifier;
+    let cursor = super::style::selection_style_for(false, true, light);
+    super::style::with_selection_style(cursor, || {
+        let (mut view, now) = event_fixture();
+        let mut event = event.clone();
+        event.kind = kind.clone();
+        // Include a visible link and a search match alongside plain body text.
+        event.body = "Read `code` **bold** [link](https://example.com) and results".into();
+        event.calls.clear();
+        event.paths.clear();
+        let mut older = event.clone();
+        older.started_at -= Duration::seconds(1);
+        view.event_list.search.input.close();
+        view.set_event(vec![older, event]);
+        if search {
+            view.event_list.search.input.set_text("Read");
+            view.rematch_event();
+        }
+        let area = Rect::new(0, 0, width, 60);
+        let event_panel = view.center_layout(area).event_panel;
+        view.event_list.cursor = None;
+        for index in 0..2 {
+            let mut baseline = Buffer::empty(area);
+            view.event_list.cursor = None;
+            view.render_event(event_panel, &mut baseline, now);
+            view.select_fixture_event(Some(view.event_panel[index].clone()));
+            let mut selected = Buffer::empty(area);
+            view.render_event(event_panel, &mut selected, now);
+            let y = event_panel.y + index as u16;
+            for x in event_panel.x - 1..=event_panel.right() {
+                let before = &baseline[(x, y)];
+                let after = &selected[(x, y)];
+                assert_eq!(after.symbol(), before.symbol());
+                assert_eq!(after.fg, before.fg, "{kind:?}, width {width}, ({x}, {y})");
+                assert_eq!(
+                    after.modifier,
+                    before.modifier | Modifier::BOLD,
+                    "{kind:?}, width {width}, ({x}, {y})"
+                );
+                assert_eq!(
+                    after.bg,
+                    cursor.bg.unwrap(),
+                    "padding included at ({x}, {y})"
+                );
             }
-        });
+        }
+    });
+}
+
+#[test]
+fn selected_event_row_preserves_foreground_and_adds_bold_for_each_kind() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let event = selected_row_event();
+    for kind in SELECTED_ROW_KINDS {
+        assert_selected_row_preserves_foreground_and_adds_bold(&event, false, 150, kind, false);
+    }
+}
+
+#[test]
+fn selected_event_row_preserves_foreground_and_adds_bold_at_each_width() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let event = selected_row_event();
+    for width in [100, 149, 150, 200] {
+        assert_selected_row_preserves_foreground_and_adds_bold(
+            &event,
+            false,
+            width,
+            crate::event::Kind::Tool,
+            false,
+        );
+    }
+}
+
+#[test]
+fn selected_event_row_preserves_foreground_and_adds_bold_in_search_and_light_theme() {
+    let _guard = crate::theme::TEST_LOCK.lock().unwrap();
+    let event = selected_row_event();
+    for (light, search) in [(false, true), (true, false), (true, true)] {
+        assert_selected_row_preserves_foreground_and_adds_bold(
+            &event,
+            light,
+            150,
+            crate::event::Kind::Tool,
+            search,
+        );
     }
 }
 
@@ -10210,12 +10250,12 @@ fn wrapped_messages_keep_list_text_and_open_paragraphs() {
     for event in &events[6..12] {
         view.event_panel = vec![event.clone()];
         view.select_fixture_event(Some(event.clone()));
-        let area = Rect::new(0, 0, 2000, 100);
+        let area = Rect::new(0, 0, 200, 40);
         let mut buffer = Buffer::empty(area);
         view.render_event_detail(area, &mut buffer, now);
         let lines: Vec<String> = buffer
             .content
-            .chunks(2000)
+            .chunks(200)
             .map(|row| {
                 row.iter()
                     .map(|cell| cell_text(cell.symbol()))
@@ -10923,66 +10963,72 @@ mod event_navigation {
 
 #[test]
 fn task_border_double_clicks_select_both_ends_in_both_layouts() {
-    for width in [100, 149, 150, 200] {
-        for bottom in [false, true] {
-            for tab in [0, 1] {
-                let mut view = simple_fixture();
-                view.set_sessions(
-                    (0..80)
-                        .map(|i| {
-                            session(
-                                &format!("border-{i}"),
-                                &format!("Task {i}"),
-                                if i % 2 == 0 {
-                                    SessionStatus::Ready
-                                } else {
-                                    SessionStatus::Inactive
-                                },
-                                i,
-                            )
-                        })
-                        .collect(),
-                    false,
-                );
-                if tab == 1 {
-                    key(&mut view, KeyCode::Tab);
-                }
-                // Loading more is not a task row at the bottom of the inactive tab.
-                view.has_more = true;
-                let indices = view.visible_indices();
-                view.select(indices[indices.len() / 2]);
-                screen(&view, width, 30);
-                let list = view.viewport.borrow().list;
-                assert!(view.viewport.borrow().scroll > 0);
-                assert!(view.viewport.borrow().scroll < view.viewport.borrow().task_scroll_max);
-                let click = mouse(
-                    MouseEventKind::Down(MouseButton::Left),
-                    list.x + list.width / 3,
-                    if bottom { list.bottom() } else { list.y - 1 },
-                );
-                let before = view.selected;
-                assert_eq!(click_mouse(&mut view, click), None);
-                assert_eq!(view.selected, before, "single click, width {width}");
-                assert_eq!(click_mouse(&mut view, click), None);
-                let expected = if bottom {
-                    *indices.last().unwrap()
-                } else {
-                    indices[0]
-                };
-                assert_eq!(
-                    view.selected, expected,
-                    "width {width}, bottom {bottom}, tab {tab}"
-                );
-                screen(&view, width, 30);
-                let viewport = view.viewport.borrow();
-                assert_eq!(
-                    viewport.scroll,
-                    if bottom { viewport.task_scroll_max } else { 0 }
-                );
-                assert_eq!(view.status_filter, tab);
-                assert!(!view.prompt_focused());
-            }
+    // Each layout covers both tabs at both ends, including its boundary width.
+    for (width, bottom, tab) in [
+        (100, false, 0),
+        (100, true, 1),
+        (149, false, 1),
+        (149, true, 0),
+        (150, false, 0),
+        (150, true, 1),
+        (200, false, 1),
+        (200, true, 0),
+    ] {
+        let mut view = simple_fixture();
+        view.set_sessions(
+            (0..80)
+                .map(|i| {
+                    session(
+                        &format!("border-{i}"),
+                        &format!("Task {i}"),
+                        if i % 2 == 0 {
+                            SessionStatus::Ready
+                        } else {
+                            SessionStatus::Inactive
+                        },
+                        i,
+                    )
+                })
+                .collect(),
+            false,
+        );
+        if tab == 1 {
+            key(&mut view, KeyCode::Tab);
         }
+        // Loading more is not a task row at the bottom of the inactive tab.
+        view.has_more = true;
+        let indices = view.visible_indices();
+        view.select(indices[indices.len() / 2]);
+        screen(&view, width, 30);
+        let list = view.viewport.borrow().list;
+        assert!(view.viewport.borrow().scroll > 0);
+        assert!(view.viewport.borrow().scroll < view.viewport.borrow().task_scroll_max);
+        let click = mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            list.x + list.width / 3,
+            if bottom { list.bottom() } else { list.y - 1 },
+        );
+        let before = view.selected;
+        assert_eq!(click_mouse(&mut view, click), None);
+        assert_eq!(view.selected, before, "single click, width {width}");
+        assert_eq!(click_mouse(&mut view, click), None);
+        let expected = if bottom {
+            *indices.last().unwrap()
+        } else {
+            indices[0]
+        };
+        assert_eq!(
+            view.selected, expected,
+            "width {width}, bottom {bottom}, tab {tab}"
+        );
+        screen(&view, width, 30);
+        let viewport = view.viewport.borrow();
+        assert_eq!(
+            viewport.scroll,
+            if bottom { viewport.task_scroll_max } else { 0 }
+        );
+        assert_eq!(view.status_filter, tab);
+        assert!(!view.prompt_focused());
     }
 }
 
@@ -12037,72 +12083,6 @@ fn task_details_weekly_usage_keeps_model_and_effort_targets() {
             "{line}"
         );
     }
-}
-
-#[test]
-#[ignore = "reads local credentials and live provider usage; requires the running Codex daemon"]
-fn task_header_weekly_usage_live_accounts() {
-    let (mut hub, _) = crate::providers::configured().unwrap();
-    let sessions = hub.refresh().sessions;
-    let jobs = hub.weekly_usage_jobs(std::time::Instant::now());
-    let workers = jobs
-        .into_iter()
-        .map(|(provider, job)| (provider, std::thread::spawn(job)))
-        .collect::<Vec<_>>();
-    let mut errors = Vec::new();
-    for (provider, worker) in workers {
-        let result = worker.join().unwrap();
-        if let Err(error) = &result {
-            errors.push(format!("{provider}: {error}"));
-        }
-        hub.weekly_usage_complete(provider, result);
-    }
-    let mut lines = Vec::new();
-    for provider in [ProviderId::Claude, ProviderId::Codex] {
-        if !hub.weekly_usage().contains_key(&provider) {
-            errors.push(format!("{provider}: live weekly usage unavailable"));
-            continue;
-        }
-        let row = sessions
-            .iter()
-            .find(|row| row.id.provider == provider && row.model.is_some())
-            .expect("real session with model")
-            .clone();
-        let mut view = test_view(Grouping::Project, false);
-        view.weekly_usage = hub.weekly_usage().clone();
-        view.provider_names = hub.display_names();
-        view.status_filter = usize::from(row.status == SessionStatus::Inactive);
-        view.set_sessions(vec![row], false);
-        let area = Rect::new(0, 0, 160, 80);
-        let mut buffer = Buffer::empty(area);
-        view.render_at(area, &mut buffer, Utc::now());
-        let text = buffer
-            .content
-            .chunks(160)
-            .map(|row| {
-                row.iter()
-                    .map(|cell| cell_text(cell.symbol()))
-                    .collect::<String>()
-            })
-            .find(|line| line.contains('%') && line.contains("Active "))
-            .expect("rendered live usage line");
-        assert!(!text.contains("Model: "));
-        println!("{provider}: {}", text.trim());
-        lines.push(text.trim().to_owned());
-    }
-    if let Some(path) = std::env::var_os("AGENTS_USAGE_PROBE_RESULT") {
-        std::fs::write(
-            path,
-            serde_json::to_vec(&serde_json::json!({
-                "verdict": if errors.is_empty() { "passed" } else { "failed" },
-                "lines": lines,
-                "errors": errors,
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-    }
-    assert!(errors.is_empty(), "{}", errors.join("; "));
 }
 
 #[test]

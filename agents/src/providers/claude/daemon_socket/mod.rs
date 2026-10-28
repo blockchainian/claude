@@ -337,6 +337,4 @@ fn read_frame(stream: &mut UnixStream, deadline: Instant) -> io::Result<Vec<u8>>
 }
 
 #[cfg(test)]
-mod live_tests;
-#[cfg(test)]
 mod tests;

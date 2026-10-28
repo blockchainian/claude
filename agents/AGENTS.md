@@ -1,6 +1,7 @@
 # AGENTS.md
 
 > The user runs the installed `agents`, never the source.
+> Re-run a slow test terminated due to timeout separately. Fix it if it still fails.
 
 This directory is `agents`, the terminal command center for Claude Code and Codex sessions.
 
@@ -22,6 +23,26 @@ This directory is `agents`, the terminal command center for Claude Code and Code
 
 ## Development
 
+### Writing tests
+
+> Do not write UI tests. Write unit tests instead.
+
+One test should complete in under 1s, test one product behavior only, and use minimal test data or fixtures only. Do not:
+- test multiple unrelated product behaviors in one test
+- use unnecessarily large test data or fixtures
+- use combinatorial tests, i.e. all possible combinations of N behaviors that can be tested in O(n) if done separately.
+
+### Fixing slow tests
+
+Change test code only, and keep every assertion's coverage without faking the flow. Make a slow test faster by:
+
+- splitting unrelated behaviors, unless the parts stay slow or the total time grows
+- cutting redundant records and rounds
+- covering each dimension once instead of every combination
+- removing unneeded waits and sleeps
+
+Time the test alone with `cargo nextest run --bin agents -E 'test(=<path>)'` before and after the change. It must then pass three runs in a row under 0.7s. Never relax the nextest timeout.
+
 ## Tools
 
 ### Install
@@ -32,8 +53,8 @@ This directory is `agents`, the terminal command center for Claude Code and Code
 
 The gate every change passes:
 
-- **tests**: `cargo nextest run`
 - **lint**: `cargo clippy --all-targets`
+- **tests**: `cargo nextest run`
 - **build**: `cargo build --release`
 
 ## Tests

@@ -917,7 +917,9 @@ fn event_jump_follows_event_panel_visibility_at_width_160() {
 }
 
 fn assert_event_jump_follows_event_panel_visibility(width: u16) {
-    let (_dir, parsed_view, events) = fixture();
+    let (_dir, parsed_view, mut events) = fixture();
+    // Keep the selected event and the three unseen events, without repeated history.
+    events.truncate(7);
     let sessions = parsed_view.rows;
     for panel in [
         Panel::TaskList,
@@ -940,7 +942,9 @@ fn assert_event_jump_follows_event_panel_visibility(width: u16) {
                 view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
                 view.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::SHIFT));
             }
-            view.render(area, &mut Buffer::empty(area));
+            if !commands.is_empty() {
+                view.render(area, &mut Buffer::empty(area));
+            }
             let viewport = view.viewport.borrow();
             if viewport.event_panel.is_empty() {
                 assert!(

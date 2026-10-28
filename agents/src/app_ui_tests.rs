@@ -333,7 +333,7 @@ impl EventSelectionFixture {
         let start =
             chrono::DateTime::parse_from_rfc3339(record["timestamp"].as_str().unwrap()).unwrap();
         let mut payload = String::new();
-        for index in 0..40 {
+        for index in 0..20 {
             record["uuid"] = format!("selection-{index}").into();
             record["timestamp"] = (start + chrono::Duration::seconds(index))
                 .to_rfc3339()
@@ -345,7 +345,7 @@ impl EventSelectionFixture {
         app.refresh();
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, 19);
-        let (x, y) = event_position(&buffer, "event-39");
+        let (x, y) = event_position(&buffer, "event-19");
         // A burst is dispatched before the next frame, just like the real App loop.
         for _ in 0..12 {
             wheel(&mut app, MouseEventKind::ScrollUp, x, y);
@@ -362,9 +362,11 @@ impl EventSelectionFixture {
     }
 
     fn append(&mut self) {
-        self.record["uuid"] = "selection-40".into();
-        self.record["timestamp"] = (self.start + chrono::Duration::seconds(40)).to_rfc3339().into();
-        self.record["message"]["content"] = format!("event-40 {}", self.body).into();
+        self.record["uuid"] = "selection-20".into();
+        self.record["timestamp"] = (self.start + chrono::Duration::seconds(20))
+            .to_rfc3339()
+            .into();
+        self.record["message"]["content"] = format!("event-20 {}", self.body).into();
         self.payload.push_str(&format!("{}\n", self.record));
         let path = self.app.sessions[0].transcript.as_ref().unwrap();
         std::fs::write(path, &self.payload).unwrap();
@@ -373,15 +375,17 @@ impl EventSelectionFixture {
 }
 
 #[test]
-fn event_selection_wheel_burst_selects_event_27() {
+fn event_selection_wheel_burst_selects_event_07() {
     // Nineteen rows keep all three panels visible in both layouts.
     for width in [120, 180] {
         let EventSelectionFixture {
-            _directory, mut app, ..
+            _directory,
+            mut app,
+            ..
         } = EventSelectionFixture::after_wheel_burst(width);
         let buffer = draw_size(&mut app, width, 19);
-        assert!(event_detail_content(&buffer).contains("event-27"));
-        assert_event_cursor(&buffer, event_position(&buffer, "event-27").1);
+        assert!(event_detail_content(&buffer).contains("event-07"));
+        assert_event_cursor(&buffer, event_position(&buffer, "event-07").1);
     }
 }
 
@@ -390,42 +394,52 @@ fn event_selection_append_keeps_selection_and_window_edge() {
     for width in [120, 180] {
         let mut fixture = EventSelectionFixture::after_wheel_burst(width);
         let buffer = draw_size(&mut fixture.app, width, 19);
-        let selected_position = event_position(&buffer, "event-27");
-        fixture.append();
-        let EventSelectionFixture {
-            _directory, mut app, ..
-        } = fixture;
-        let buffer = draw_size(&mut app, width, 19);
-        assert!(event_detail_content(&buffer).contains("event-27"));
-        assert_event_cursor(&buffer, event_position(&buffer, "event-27").1);
-        assert!(lines(&buffer).join("\n").contains("↓ 1 New"));
-        assert_eq!(event_position(&buffer, "event-27"), selected_position);
-    }
-}
-
-#[test]
-fn event_selection_scrolls_to_first_row_across_windows_after_append() {
-    for width in [120, 180] {
-        let mut fixture = EventSelectionFixture::after_wheel_burst(width);
-        draw_size(&mut fixture.app, width, 19);
+        let selected_position = event_position(&buffer, "event-07");
         fixture.append();
         let EventSelectionFixture {
             _directory,
             mut app,
-            wheel_position: (x, y),
             ..
         } = fixture;
-        draw_size(&mut app, width, 19);
-        for expected in (0..27).rev() {
-            wheel(&mut app, MouseEventKind::ScrollUp, x, y);
-            let buffer = draw_size(&mut app, width, 19);
-            let label = format!("event-{expected:02}");
-            assert!(event_detail_content(&buffer).contains(&label));
-            assert_event_cursor(&buffer, event_position(&buffer, &label).1);
-        }
-        wheel(&mut app, MouseEventKind::ScrollUp, x, y);
-        assert!(event_detail_content(&draw_size(&mut app, width, 19)).contains("event-00"));
+        let buffer = draw_size(&mut app, width, 19);
+        assert!(event_detail_content(&buffer).contains("event-07"));
+        assert_event_cursor(&buffer, event_position(&buffer, "event-07").1);
+        assert!(lines(&buffer).join("\n").contains("↓ 1 New"));
+        assert_eq!(event_position(&buffer, "event-07"), selected_position);
     }
+}
+
+#[test]
+fn event_selection_scrolls_to_first_row_across_windows_after_append_at_width_120() {
+    event_selection_scrolls_to_first_row_across_windows_after_append(120);
+}
+
+#[test]
+fn event_selection_scrolls_to_first_row_across_windows_after_append_at_width_180() {
+    event_selection_scrolls_to_first_row_across_windows_after_append(180);
+}
+
+fn event_selection_scrolls_to_first_row_across_windows_after_append(width: u16) {
+    // Below nineteen rows, the layout hides the event panels.
+    let mut fixture = EventSelectionFixture::after_wheel_burst(width);
+    draw_size(&mut fixture.app, width, 19);
+    fixture.append();
+    let EventSelectionFixture {
+        _directory,
+        mut app,
+        wheel_position: (x, y),
+        ..
+    } = fixture;
+    draw_size(&mut app, width, 19);
+    for expected in (0..7).rev() {
+        wheel(&mut app, MouseEventKind::ScrollUp, x, y);
+        let buffer = draw_size(&mut app, width, 19);
+        let label = format!("event-{expected:02}");
+        assert!(event_detail_content(&buffer).contains(&label));
+        assert_event_cursor(&buffer, event_position(&buffer, &label).1);
+    }
+    wheel(&mut app, MouseEventKind::ScrollUp, x, y);
+    assert!(event_detail_content(&draw_size(&mut app, width, 19)).contains("event-00"));
 }
 
 #[test]
@@ -889,76 +903,88 @@ fn medium_real_transcript_keeps_three_panels_and_click_opens_event_detail() {
 }
 
 #[test]
-fn medium_and_large_event_panels_scroll_and_copy_independently() {
+fn event_panels_scroll_and_copy_independently_at_120x30() {
+    event_panels_scroll_and_copy_independently(120, 30);
+}
+
+#[test]
+fn event_panels_scroll_and_copy_independently_at_100x30() {
+    event_panels_scroll_and_copy_independently(100, 30);
+}
+
+#[test]
+fn event_panels_scroll_and_copy_independently_at_180x23() {
+    event_panels_scroll_and_copy_independently(180, 23);
+}
+
+fn event_panels_scroll_and_copy_independently(width: u16, height: u16) {
     // The large layout detail must stay one row short of its event so that the wheel has room to scroll.
-    for (width, height) in [(120, 30), (100, 30), (180, 23)] {
-        let (_directory, mut app) = border_fixture();
-        app.view.set_double_click_ms(20);
-        let buffer = draw_size(&mut app, width, height);
-        let (x, y) = event_position(&buffer, "⏺");
-        click(&mut app, x, y);
-        wait_for_click(&mut app);
-        let buffer = draw_size(&mut app, width, height);
-        let (text_x, text_y) = position(&buffer, "Stop hook error");
-        for kind in [
-            MouseEventKind::Down(MouseButton::Left),
-            MouseEventKind::Drag(MouseButton::Left),
-        ] {
-            let column = text_x
-                + if matches!(kind, MouseEventKind::Drag(_)) {
-                    9
-                } else {
-                    0
-                };
-            app.view.handle_mouse(MouseEvent {
-                kind,
-                column,
-                row: text_y,
-                modifiers: KeyModifiers::NONE,
-            });
-        }
-        assert_eq!(
-            app.view.handle_mouse(MouseEvent {
-                kind: MouseEventKind::Up(MouseButton::Left),
-                column: text_x + 9,
-                row: text_y,
-                modifiers: KeyModifiers::NONE,
-            }),
-            Some(Action::Copy {
-                text: "Stop hook".into(),
-                label: "Copied message".into()
-            }),
-            "copy the real event body at {width}x{height}"
-        );
-        let before = event_detail_content(&buffer);
-        for (kind, column, row) in [
-            (MouseEventKind::ScrollUp, x, y),
-            (MouseEventKind::ScrollDown, text_x, text_y),
-        ] {
-            app.handle_event(Event::Mouse(MouseEvent {
-                kind,
-                column,
-                row,
-                modifiers: KeyModifiers::NONE,
-            }));
-            draw_size(&mut app, width, height);
-        }
-        let scrolled = draw_size(&mut app, width, height);
-        assert_ne!(event_detail_content(&scrolled), before);
-        assert!(!lines(&scrolled).join("\n").contains("↓ Latest"));
-        assert!(!lines(&scrolled).join("\n").contains("↑ Top"));
-        click(&mut app, x, y);
-        app.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
-        let latest = draw_size(&mut app, width, height);
-        assert!(!lines(&latest).join("\n").contains("↓ Latest"));
-        assert_eq!(
-            event_detail_content(&latest)
-                .lines()
-                .skip(1)
-                .collect::<Vec<_>>(),
-            before.lines().skip(1).collect::<Vec<_>>()
-        );
+    let (_directory, mut app) = border_fixture();
+    app.view.set_double_click_ms(20);
+    let buffer = draw_size(&mut app, width, height);
+    let (x, y) = event_position(&buffer, "⏺");
+    click(&mut app, x, y);
+    wait_for_click(&mut app);
+    let buffer = draw_size(&mut app, width, height);
+    let (text_x, text_y) = position(&buffer, "Stop hook error");
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Drag(MouseButton::Left),
+    ] {
+        let column = text_x
+            + if matches!(kind, MouseEventKind::Drag(_)) {
+                9
+            } else {
+                0
+            };
+        app.view.handle_mouse(MouseEvent {
+            kind,
+            column,
+            row: text_y,
+            modifiers: KeyModifiers::NONE,
+        });
     }
+    assert_eq!(
+        app.view.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: text_x + 9,
+            row: text_y,
+            modifiers: KeyModifiers::NONE,
+        }),
+        Some(Action::Copy {
+            text: "Stop hook".into(),
+            label: "Copied message".into()
+        }),
+        "copy the real event body at {width}x{height}"
+    );
+    let before = event_detail_content(&buffer);
+    for (kind, column, row) in [
+        (MouseEventKind::ScrollUp, x, y),
+        (MouseEventKind::ScrollDown, text_x, text_y),
+    ] {
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }));
+        draw_size(&mut app, width, height);
+    }
+    let scrolled = draw_size(&mut app, width, height);
+    assert_ne!(event_detail_content(&scrolled), before);
+    assert!(!lines(&scrolled).join("\n").contains("↓ Latest"));
+    assert!(!lines(&scrolled).join("\n").contains("↑ Top"));
+    click(&mut app, x, y);
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
+    let latest = draw_size(&mut app, width, height);
+    assert!(!lines(&latest).join("\n").contains("↓ Latest"));
+    assert_eq!(
+        event_detail_content(&latest)
+            .lines()
+            .skip(1)
+            .collect::<Vec<_>>(),
+        before.lines().skip(1).collect::<Vec<_>>()
+    );
 }
 
 #[test]

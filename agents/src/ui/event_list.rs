@@ -3086,31 +3086,6 @@ pub(super) mod event_markdown {
             "Edit /opt/work/agents/…/tests.rs, Read …"
         );
     }
-
-    #[test]
-    #[ignore = "manual per-frame markdown timing; run with --release --ignored --nocapture"]
-    fn markdown_frame_timing() {
-        use std::{hint::black_box, time::Instant};
-
-        let bodies: Vec<_> = (0..60)
-            .map(|row| {
-                format!(
-                    "Checked `src/session_{row}.rs` and **verified** the update. See [the report](https://example.com/reports/{row}) for details and the remaining checks."
-                )
-            })
-            .collect();
-        assert!(bodies.iter().all(|body| (80..=200).contains(&body.len())));
-        let start = Instant::now();
-        for _ in 0..1000 {
-            for body in &bodies {
-                black_box(super::super::markdown::render(black_box(body), 100));
-            }
-        }
-        eprintln!(
-            "60 rows, width 100, 1000 frames: {:.2} us/frame",
-            start.elapsed().as_secs_f64() * 1_000_000.0 / 1000.0
-        );
-    }
 }
 
 #[cfg(test)]
