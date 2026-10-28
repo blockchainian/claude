@@ -1597,7 +1597,6 @@ fn terminal_event_selection_tracks_wheel_click_and_tail() {
 #[test]
 fn terminal_update_click_selects_source_row() {
     let (_directory, tmux, _transcript) = start_probe("details-source");
-    std::thread::sleep(Duration::from_secs(1));
     // Select the older user row before clicking the Update body.
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
     let lines: Vec<_> = capture.lines().collect();
@@ -1617,7 +1616,8 @@ fn terminal_update_click_selects_source_row() {
         })
         .expect("user log row");
     tmux.mouse(0, user_x, user_y, true);
-    let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let before =
+        tmux.capture_when(|capture| capture.lines().skip(22).any(|line| line.contains("User")));
     assert!(
         before.lines().skip(22).any(|line| line.contains("User")),
         "{before}"
@@ -1628,8 +1628,13 @@ fn terminal_update_click_selects_source_row() {
         .unwrap()
         + 2;
     tmux.mouse(0, body_x, update_y + 1, true);
-    std::thread::sleep(Duration::from_secs(1));
-    let after = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let after = tmux.capture_when(|capture| {
+        capture
+            .lines()
+            .skip(22)
+            .any(|line| line.contains("Assistant"))
+            && capture.lines().skip(22).any(|line| line.contains("Stop"))
+    });
     assert!(
         after
             .lines()
