@@ -2136,40 +2136,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "requires AGENTS_MEASURE_TRANSCRIPT pointing to a real large transcript"]
-    fn measure_incremental_transcript_bytes() {
-        use std::io::Write;
-        let source = std::env::var_os("AGENTS_MEASURE_TRANSCRIPT").unwrap();
-        let mut file = tempfile::NamedTempFile::new().unwrap();
-        std::io::copy(&mut std::fs::File::open(source).unwrap(), &mut file).unwrap();
-        let mut reader = super::Reader::new(file.path().to_owned(), false);
-        let initial = reader.refresh(50).unwrap();
-        let notification = include_str!("../../../tests/fixtures/claude-task-notifications.jsonl")
-            .split_inclusive('\n')
-            .find(|line| line.contains("<task-notification>"))
-            .unwrap();
-        file.write_all(notification.as_bytes()).unwrap();
-        super::super::transcript::take_parsed_bytes();
-        let baseline = super::tail(file.path(), 50).unwrap();
-        let before = super::super::transcript::take_parsed_bytes();
-        let after = reader.refresh(50).unwrap();
-        assert_eq!(
-            &after.events[after.events.len() - baseline.len()..],
-            baseline
-        );
-        assert_eq!(after.parsed_bytes, notification.len() as u64);
-        println!(
-            "transcript_bytes={} initial_parsed_bytes={} before_refresh_bytes={} after_refresh_bytes={} appended_record_bytes={} events={}",
-            file.as_file().metadata().unwrap().len(),
-            initial.parsed_bytes,
-            before,
-            after.parsed_bytes,
-            notification.len(),
-            after.events.len()
-        );
-    }
-
-    #[test]
     fn incremental_older_pages_and_resets_match_real_transcript() {
         use std::io::Write;
         let fixture = include_bytes!("../../../tests/fixtures/claude-bg-metadata.jsonl");
