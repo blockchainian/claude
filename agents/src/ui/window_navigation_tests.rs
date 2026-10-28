@@ -956,54 +956,69 @@ fn panel_zoom_prompt_up_returns_to_width_zoomed_top_panel() {
     }
 }
 
-#[test]
-fn hidden_focus_resize_recovers_and_does_not_return_on_growth() {
-    for width in [200, 110] {
-        for source in [Panel::EventList, Panel::EventDetail] {
-            for zoom in ["", "|", "_", "|_"] {
-                for input in [true, false] {
-                    let (mut view, now) = event_fixture();
-                    if input {
-                        view.rows[0].process = None;
-                    }
-                    assert_eq!(view.input_disabled().is_none(), input);
-                    event_screen(&view, 200, 50, now);
-                    view.set_active_panel(source);
-                    for command in zoom.chars() {
-                        zoom_key(&mut view, command, KeyModifiers::SHIFT);
-                        event_screen(&view, 200, 50, now);
-                    }
-                    view.resize(width, 18);
-                    event_screen(&view, width, 18, now);
-                    let target = if input {
-                        Panel::Prompt
-                    } else {
-                        Panel::TaskList
-                    };
-                    assert_eq!(
-                        view.active_panel, target,
-                        "width={width} source={source:?} zoom={zoom} input={input}"
-                    );
-                    view.resize(200, 50);
-                    event_screen(&view, 200, 50, now);
-                    assert_eq!(view.active_panel, target);
-                    view.resize(width, 18);
-                    event_screen(&view, width, 18, now);
-                    if input {
-                        chord(&mut view, 'k');
-                        assert_eq!(view.active_panel, Panel::TaskList);
-                    }
-                    chord(&mut view, 'l');
-                    assert_eq!(view.active_panel, Panel::TaskDetails);
-                    zoom_key(&mut view, '|', KeyModifiers::SHIFT);
-                    zoom_key(&mut view, '_', KeyModifiers::SHIFT);
-                    let layout = view.center_layout(Rect::new(0, 0, width, 18));
-                    assert!(!layout.task_details.is_empty());
-                    assert!(layout.list.is_empty());
-                }
+fn hidden_focus_resize_recovers_and_does_not_return_on_growth(width: u16, source: Panel) {
+    for zoom in ["", "|", "_", "|_"] {
+        for input in [true, false] {
+            let (mut view, now) = event_fixture();
+            if input {
+                view.rows[0].process = None;
             }
+            assert_eq!(view.input_disabled().is_none(), input);
+            event_screen(&view, 200, 50, now);
+            view.set_active_panel(source);
+            for command in zoom.chars() {
+                zoom_key(&mut view, command, KeyModifiers::SHIFT);
+                event_screen(&view, 200, 50, now);
+            }
+            view.resize(width, 18);
+            event_screen(&view, width, 18, now);
+            let target = if input {
+                Panel::Prompt
+            } else {
+                Panel::TaskList
+            };
+            assert_eq!(
+                view.active_panel, target,
+                "width={width} source={source:?} zoom={zoom} input={input}"
+            );
+            view.resize(200, 50);
+            event_screen(&view, 200, 50, now);
+            assert_eq!(view.active_panel, target);
+            view.resize(width, 18);
+            event_screen(&view, width, 18, now);
+            if input {
+                chord(&mut view, 'k');
+                assert_eq!(view.active_panel, Panel::TaskList);
+            }
+            chord(&mut view, 'l');
+            assert_eq!(view.active_panel, Panel::TaskDetails);
+            zoom_key(&mut view, '|', KeyModifiers::SHIFT);
+            zoom_key(&mut view, '_', KeyModifiers::SHIFT);
+            let layout = view.center_layout(Rect::new(0, 0, width, 18));
+            assert!(!layout.task_details.is_empty());
+            assert!(layout.list.is_empty());
         }
     }
+}
+
+#[test]
+fn hidden_focus_resize_large_event_list_recovers_and_does_not_return_on_growth() {
+    hidden_focus_resize_recovers_and_does_not_return_on_growth(200, Panel::EventList);
+}
+
+#[test]
+fn hidden_focus_resize_large_event_detail_recovers_and_does_not_return_on_growth() {
+    hidden_focus_resize_recovers_and_does_not_return_on_growth(200, Panel::EventDetail);
+}
+
+#[test]
+fn hidden_focus_resize_medium_event_list_recovers_and_does_not_return_on_growth() {
+    hidden_focus_resize_recovers_and_does_not_return_on_growth(110, Panel::EventList);
+}
+
+#[test]
+fn hidden_focus_resize_medium_event_detail_recovers_and_does_not_return_on_growth() {
+    hidden_focus_resize_recovers_and_does_not_return_on_growth(110, Panel::EventDetail);
 }
 
 #[test]
