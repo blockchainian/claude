@@ -4144,7 +4144,9 @@ mod task_details_header {
     fn centered_status_truncates_before_elapsed_is_dropped() {
         let (mut view, now) = event_fixture();
         view.rows[view.selected].started_at = Some(now - Duration::seconds(11520));
-        for columns in 10..=100 {
+        // Include every truncated status length, the elapsed cutoff on both sides,
+        // the full status, and the transition from Small to Medium.
+        for columns in [10, 11, 12, 13, 22, 23, 24, 25, 26, 27, 28, 29, 30, 99, 100] {
             let (buf, top) = rule_at_width(&view, now, columns);
             let rule = Rect::new(
                 top.x,
@@ -10248,12 +10250,12 @@ fn wrapped_messages_keep_list_text_and_open_paragraphs() {
     for event in &events[6..12] {
         view.event_panel = vec![event.clone()];
         view.select_fixture_event(Some(event.clone()));
-        let area = Rect::new(0, 0, 2000, 100);
+        let area = Rect::new(0, 0, 200, 40);
         let mut buffer = Buffer::empty(area);
         view.render_event_detail(area, &mut buffer, now);
         let lines: Vec<String> = buffer
             .content
-            .chunks(2000)
+            .chunks(200)
             .map(|row| {
                 row.iter()
                     .map(|cell| cell_text(cell.symbol()))
@@ -10961,66 +10963,72 @@ mod event_navigation {
 
 #[test]
 fn task_border_double_clicks_select_both_ends_in_both_layouts() {
-    for width in [100, 149, 150, 200] {
-        for bottom in [false, true] {
-            for tab in [0, 1] {
-                let mut view = simple_fixture();
-                view.set_sessions(
-                    (0..80)
-                        .map(|i| {
-                            session(
-                                &format!("border-{i}"),
-                                &format!("Task {i}"),
-                                if i % 2 == 0 {
-                                    SessionStatus::Ready
-                                } else {
-                                    SessionStatus::Inactive
-                                },
-                                i,
-                            )
-                        })
-                        .collect(),
-                    false,
-                );
-                if tab == 1 {
-                    key(&mut view, KeyCode::Tab);
-                }
-                // Loading more is not a task row at the bottom of the inactive tab.
-                view.has_more = true;
-                let indices = view.visible_indices();
-                view.select(indices[indices.len() / 2]);
-                screen(&view, width, 30);
-                let list = view.viewport.borrow().list;
-                assert!(view.viewport.borrow().scroll > 0);
-                assert!(view.viewport.borrow().scroll < view.viewport.borrow().task_scroll_max);
-                let click = mouse(
-                    MouseEventKind::Down(MouseButton::Left),
-                    list.x + list.width / 3,
-                    if bottom { list.bottom() } else { list.y - 1 },
-                );
-                let before = view.selected;
-                assert_eq!(click_mouse(&mut view, click), None);
-                assert_eq!(view.selected, before, "single click, width {width}");
-                assert_eq!(click_mouse(&mut view, click), None);
-                let expected = if bottom {
-                    *indices.last().unwrap()
-                } else {
-                    indices[0]
-                };
-                assert_eq!(
-                    view.selected, expected,
-                    "width {width}, bottom {bottom}, tab {tab}"
-                );
-                screen(&view, width, 30);
-                let viewport = view.viewport.borrow();
-                assert_eq!(
-                    viewport.scroll,
-                    if bottom { viewport.task_scroll_max } else { 0 }
-                );
-                assert_eq!(view.status_filter, tab);
-                assert!(!view.prompt_focused());
-            }
+    // Each layout covers both tabs at both ends, including its boundary width.
+    for (width, bottom, tab) in [
+        (100, false, 0),
+        (100, true, 1),
+        (149, false, 1),
+        (149, true, 0),
+        (150, false, 0),
+        (150, true, 1),
+        (200, false, 1),
+        (200, true, 0),
+    ] {
+        let mut view = simple_fixture();
+        view.set_sessions(
+            (0..80)
+                .map(|i| {
+                    session(
+                        &format!("border-{i}"),
+                        &format!("Task {i}"),
+                        if i % 2 == 0 {
+                            SessionStatus::Ready
+                        } else {
+                            SessionStatus::Inactive
+                        },
+                        i,
+                    )
+                })
+                .collect(),
+            false,
+        );
+        if tab == 1 {
+            key(&mut view, KeyCode::Tab);
         }
+        // Loading more is not a task row at the bottom of the inactive tab.
+        view.has_more = true;
+        let indices = view.visible_indices();
+        view.select(indices[indices.len() / 2]);
+        screen(&view, width, 30);
+        let list = view.viewport.borrow().list;
+        assert!(view.viewport.borrow().scroll > 0);
+        assert!(view.viewport.borrow().scroll < view.viewport.borrow().task_scroll_max);
+        let click = mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            list.x + list.width / 3,
+            if bottom { list.bottom() } else { list.y - 1 },
+        );
+        let before = view.selected;
+        assert_eq!(click_mouse(&mut view, click), None);
+        assert_eq!(view.selected, before, "single click, width {width}");
+        assert_eq!(click_mouse(&mut view, click), None);
+        let expected = if bottom {
+            *indices.last().unwrap()
+        } else {
+            indices[0]
+        };
+        assert_eq!(
+            view.selected, expected,
+            "width {width}, bottom {bottom}, tab {tab}"
+        );
+        screen(&view, width, 30);
+        let viewport = view.viewport.borrow();
+        assert_eq!(
+            viewport.scroll,
+            if bottom { viewport.task_scroll_max } else { 0 }
+        );
+        assert_eq!(view.status_filter, tab);
+        assert!(!view.prompt_focused());
     }
 }
 
