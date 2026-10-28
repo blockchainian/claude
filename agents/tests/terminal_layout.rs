@@ -3198,52 +3198,62 @@ fn terminal_weekly_usage_on_task_header() {
 }
 
 #[test]
-fn terminal_context_usage_on_task_details_border() {
-    let (_claude_directory, claude, _transcript) = start_probe("claude-context-border");
-    let capture = claude.capture_when(|capture| capture.contains("Update"));
-    let claude_border = capture.lines().nth(1).unwrap().to_owned();
-    assert!(claude_border.contains("╴5% "), "{capture}");
-    assert!(claude_border.contains("Inactive"), "{capture}");
+fn terminal_context_usage_on_task_details_border_claude() {
+    let (_directory, tmux, _transcript) = start_probe("claude-context-border");
+    let capture = tmux.capture_when(|capture| capture.contains("Update"));
+    let border = capture.lines().nth(1).unwrap().to_owned();
+    assert!(border.contains("╴5% "), "{capture}");
+    assert!(border.contains("Inactive"), "{capture}");
+}
 
-    let mut claude_cases = Vec::new();
-    for (name, fixture, percent) in [
-        (
-            "native",
-            include_str!("fixtures/claude-context/opus.jsonl"),
-            Some(24),
-        ),
-        (
-            "200k",
-            include_str!("fixtures/claude-context/old.jsonl"),
-            Some(12),
-        ),
-        (
-            "unknown",
-            include_str!("fixtures/claude-context/unknown.jsonl"),
-            None,
-        ),
-    ] {
-        let contents = format!("{}{fixture}", include_str!("fixtures/transcript.jsonl"));
-        let (_directory, tmux, _) =
-            start_probe_with_transcript(&format!("claude-context-{name}"), &contents);
-        let capture = tmux.capture_when(|capture| {
-            capture.lines().nth(1).is_some_and(|border| match percent {
-                Some(percent) => border.contains(&format!("╴{percent}% ")),
-                None => !border.contains('%'),
-            })
-        });
-        let border = capture.lines().nth(1).unwrap();
-        assert!(border.contains("Inactive"), "{capture}");
-        if let Some(percent) = percent {
-            assert!(percent <= 100);
-            assert!(
-                border.find('%').unwrap() < border.find("Inactive").unwrap(),
-                "{capture}"
-            );
-        }
-        claude_cases.push(serde_json::json!({"case":name,"percent":percent,"border":border}));
+fn context_usage_on_task_details_border(name: &str, fixture: &str, percent: Option<u64>) {
+    let (_directory, tmux, _) = start_probe_with_transcript(name, fixture);
+    let capture = tmux.capture_when(|capture| {
+        capture.lines().nth(1).is_some_and(|border| match percent {
+            Some(percent) => border.contains(&format!("╴{percent}% ")),
+            None => !border.contains('%'),
+        })
+    });
+    let border = capture.lines().nth(1).unwrap();
+    assert!(border.contains("Inactive"), "{capture}");
+    if let Some(percent) = percent {
+        assert!(percent <= 100);
+        assert!(
+            border.find('%').unwrap() < border.find("Inactive").unwrap(),
+            "{capture}"
+        );
     }
+}
 
+#[test]
+fn terminal_context_usage_on_task_details_border_native() {
+    context_usage_on_task_details_border(
+        "claude-context-native",
+        include_str!("fixtures/claude-context/opus.jsonl"),
+        Some(24),
+    );
+}
+
+#[test]
+fn terminal_context_usage_on_task_details_border_200k() {
+    context_usage_on_task_details_border(
+        "claude-context-200k",
+        include_str!("fixtures/claude-context/old.jsonl"),
+        Some(12),
+    );
+}
+
+#[test]
+fn terminal_context_usage_on_task_details_border_unknown() {
+    context_usage_on_task_details_border(
+        "claude-context-unknown",
+        include_str!("fixtures/claude-context/unknown.jsonl"),
+        None,
+    );
+}
+
+#[test]
+fn terminal_context_usage_on_task_details_border_codex() {
     let (_codex_directory, codex) = terminal_codex_exit::start_codex_probe(
         "codex-context-border",
         include_str!("fixtures/codex-latest-activity.jsonl"),
@@ -3260,11 +3270,6 @@ fn terminal_context_usage_on_task_details_border() {
         codex_border.find("9%").unwrap() < codex_border.find("Inactive").unwrap(),
         "{capture}"
     );
-    let result = serde_json::json!({"verdict":"passed", "claude":claude_border, "claude_cases":claude_cases, "codex":codex_border});
-    if let Some(path) = std::env::var_os("AGENTS_CONTEXT_TERMINAL_RESULT") {
-        std::fs::write(path, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
-    }
-    println!("{result}");
 }
 
 #[path = "support/terminal_summary.rs"]
