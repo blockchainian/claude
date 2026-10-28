@@ -4,7 +4,7 @@
 |---|---|---|---|---|
 | 8.86 (iso 5.73) | providers::codex::rollout::summary_cache_tests | summaries_match_full_parse_after_each_append | partly | split per fixture<br>truncate long strings in the 536 KB fixture, keep it over 64 KB |
 | 3.42 (iso 1.97) | ui::tests::active_panel_tests | active_panel_task_details_navigation_scrolls_only_its_content | partly | split per panel<br>fewer events in panel_fixture |
-| 3.30 (iso 1.92) | ui::event_list::reading_tests | provider_detail_blocks_are_centered | partly | split claude and codex fixtures |
+| 1.669 | ui::event_list::reading_tests | claude_detail_blocks_are_centered | partly | 11 fixtures at 3 widths |
 | 1.639 | app::ui_tests | event_selection_scrolls_to_first_row_across_windows_after_append_at_width_120 | partly | product prepare_event_search cost; minimum height 19 |
 | 1.871 | app::ui_tests | event_selection_scrolls_to_first_row_across_windows_after_append_at_width_180 | partly | product prepare_event_search cost; minimum height 19 |
 | 2.61 (iso 1.46) | ui::tests::active_panel_tests | mouse_activation_every_event_routes_subsequent_paging | partly | fewer events in panel_fixture<br>split per width |
@@ -23,8 +23,6 @@
 
 | Run-time (s) | Module | Test | Fixable | How |
 |---|---|---|---|---|
-| 6.22 (iso 3.54) | ui::event_list::reading_tests | diff_backgrounds_preserve_text_positions | yes | render only diff-producing events |
-| 3.80 (iso 2.19) | ui::event_list::reading_tests | diff_backgrounds_reach_terminal_edges | yes | render only diff-producing events |
 | 2.08 (iso 1.54) | providers::codex::rollout::summary_cache_tests | summaries_do_not_reparse_unchanged_files | yes | redundant: move its one assert, delete it |
 | 2.05 (iso 1.54) | app::tests | task_event_wheel_then_j_k_keys_reverse_across_reloaded_windows | yes | smaller area height |
 | 2.00 (iso 1.48) | app::tests | task_event_wheel_reverses_across_reloaded_windows | yes | smaller area height |
