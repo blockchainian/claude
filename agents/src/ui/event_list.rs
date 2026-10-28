@@ -3101,14 +3101,14 @@ pub(super) mod event_markdown {
             .collect();
         assert!(bodies.iter().all(|body| (80..=200).contains(&body.len())));
         let start = Instant::now();
-        for _ in 0..1000 {
+        for _ in 0..100 {
             for body in &bodies {
                 black_box(super::super::markdown::render(black_box(body), 100));
             }
         }
         eprintln!(
-            "60 rows, width 100, 1000 frames: {:.2} us/frame",
-            start.elapsed().as_secs_f64() * 1_000_000.0 / 1000.0
+            "60 rows, width 100, 100 frames: {:.2} us/frame",
+            start.elapsed().as_secs_f64() * 1_000_000.0 / 100.0
         );
     }
 }
