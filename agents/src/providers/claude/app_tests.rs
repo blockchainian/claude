@@ -492,7 +492,7 @@ fn top_border_first_event_fixture(
 #[test]
 fn new_indicator_loads_latest_event_after_top_border() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-    let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+    let area = ratatui::layout::Rect::new(0, 0, 200, 19);
     let (_dir, mut app) = top_border_first_event_fixture(area, None);
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = include_str!("../../../tests/fixtures/transcript.jsonl");
@@ -507,7 +507,7 @@ fn new_indicator_loads_latest_event_after_top_border() {
     app.refresh_event_for_list_rows(visible);
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
-    let row = (0..45)
+    let row = (0..area.height)
         .find(|&y| {
             (130..200)
                 .map(|x| crate::ui::cell_text(buffer[(x, y)].symbol()))
