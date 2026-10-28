@@ -39,7 +39,10 @@ fn terminal_finished_wait_updates_from_metadata() {
     fs::create_dir(&codex).unwrap();
     fs::write(
         project.join(format!("{id}.jsonl")),
-        include_str!("fixtures/transcript.jsonl"),
+        include_str!("fixtures/transcript.jsonl")
+            .lines()
+            .next()
+            .unwrap(),
     )
     .unwrap();
     fs::write(
