@@ -76,13 +76,13 @@ fn failed_send_shows_its_reason_in_red_in_tmux() {
         s.lines().any(|line| {
             line.trim_start().starts_with("Composer ")
                 && !line.contains("Composer ❯")
-                && line.trim_end().ends_with("❯ retry me")
+                && line.trim_end().ends_with("❮ retry me")
         })
     };
     let screen = tmux.wait(failed);
     let heading = screen
         .lines()
-        .find(|line| line.trim_end().ends_with("❯ retry me"))
+        .find(|line| line.trim_end().ends_with("❮ retry me"))
         .unwrap()
         .trim()
         .to_owned();
@@ -94,7 +94,7 @@ fn failed_send_shows_its_reason_in_red_in_tmux() {
         .find(|&row| screen.contents_between(row, 0, row, 100).contains(&heading))
         .unwrap();
     let text = screen.contents_between(row, 0, row, 100);
-    let marker = text[..text.find('❯').unwrap()].chars().count() as u16;
+    let marker = text[..text.find('❮').unwrap()].chars().count() as u16;
     let start = (text.len() - text.trim_start().len()) as u16;
     for column in start..=marker {
         assert_eq!(
