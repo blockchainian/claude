@@ -570,6 +570,7 @@ fn panel_zoom_event_list_has_no_left_separator_joints() {
 #[test]
 fn panel_zoom_collapsed_panels_keep_frame_labels() {
     for width in [100, 149, 150, 200] {
+        let (mut view, now) = event_fixture();
         for panel in [
             Panel::TaskList,
             Panel::TaskDetails,
@@ -577,14 +578,14 @@ fn panel_zoom_collapsed_panels_keep_frame_labels() {
             Panel::EventDetail,
         ] {
             for commands in ["", "|", "_", "|_", "_|"] {
-                let (mut view, now) = event_fixture();
-                event_screen(&view, width, 110, now);
+                zoom_key(&mut view, '=', KeyModifiers::NONE);
+                event_screen(&view, width, 45, now);
                 view.set_active_panel(panel);
                 for command in commands.chars() {
                     zoom_key(&mut view, command, KeyModifiers::SHIFT);
                 }
-                let layout = view.center_layout(Rect::new(0, 0, width, 110));
-                let screen = event_screen(&view, width, 110, now);
+                let layout = view.center_layout(Rect::new(0, 0, width, 45));
+                let screen = event_screen(&view, width, 45, now);
                 let rows: Vec<_> = screen.lines().collect();
                 let context = format!("{width} {panel:?} {commands}");
                 if layout.top.is_empty() {
