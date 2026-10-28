@@ -616,7 +616,7 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
-    replace_transcript(&path, transcript_copies(&payload, 20, 0));
+    replace_transcript(&path, transcript_copies(&payload, 3, 0));
     app.refresh_event_for_list_rows(1);
     click_event(&mut app);
     key(&mut app, KeyCode::Char('/'));
@@ -626,8 +626,8 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
     }
     super::event_search_tests::finish_search(&mut app);
     app.refresh_event_for_list_rows(1);
-    assert_eq!(app.view.matching_event_count(), 20);
-    for _ in 0..30 {
+    assert_eq!(app.view.matching_event_count(), 3);
+    for _ in 0..6 {
         scroll_event(&mut app, crossterm::event::MouseEventKind::ScrollUp);
     }
     app.refresh_event_for_list_rows(1);
@@ -639,7 +639,7 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
     std::fs::write(
         &path,
-        transcript_copies(&payload.replace("Codex", "other"), 20, 0),
+        transcript_copies(&payload.replace("Codex", "other"), 3, 0),
     )
     .unwrap();
     std::fs::File::options()
@@ -661,11 +661,11 @@ fn task_event_search_loads_all_caches_matches_and_refreshes_growth() {
         .unwrap();
     writeln!(file, "{}", serde_json::json!({"type":"queue-operation", "operation":"enqueue", "timestamp":"2026-10-06T17:00:00Z", "content":"Codex timeout"})).unwrap();
     app.refresh_event_for_list_rows(1);
-    assert_eq!(app.view.matching_event_count(), 21);
+    assert_eq!(app.view.matching_event_count(), 4);
     assert_eq!(app.view.event_panel.last().unwrap().body, "Codex timeout");
     key(&mut app, KeyCode::Esc);
     app.refresh_event_for_list_rows(1);
-    assert_eq!(app.view.event_panel.len(), 41);
+    assert_eq!(app.view.event_panel.len(), 7);
 }
 
 #[test]

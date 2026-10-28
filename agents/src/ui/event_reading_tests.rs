@@ -756,10 +756,38 @@ fn subagent_activity_blocks_are_centered() {
     }
 }
 
-#[test]
-fn claude_detail_blocks_are_centered() {
-    let (entries, _) = provider_detail_events();
-    assert_provider_detail_blocks_centered(entries);
+/// One test per Claude fixture, so each parses only its own file.
+macro_rules! claude_detail_blocks_are_centered {
+    ($($name:ident => $path:literal $([$($width:literal),+])?),* $(,)?) => {
+        mod claude_detail_blocks_are_centered {
+            use super::*;
+            $(
+                #[test]
+                fn $name() {
+                    assert_provider_detail_blocks_centered_at(
+                        events(include_str!($path)),
+                        &[200, 151, 120] $(.into_iter().filter(|w| [$($width),+].contains(w)).collect::<Vec<_>>())?,
+                    );
+                }
+            )*
+        }
+    };
+}
+
+claude_detail_blocks_are_centered! {
+    transcript => "../../tests/fixtures/transcript.jsonl",
+    tool_calls_at_200 => "../../tests/fixtures/claude-tool-calls.jsonl" [200],
+    tool_calls_at_151 => "../../tests/fixtures/claude-tool-calls.jsonl" [151],
+    tool_calls_at_120 => "../../tests/fixtures/claude-tool-calls.jsonl" [120],
+    tool_details => "../../tests/fixtures/claude-tool-details.jsonl",
+    chrome_javascript => "../../tests/fixtures/claude-chrome-javascript.jsonl",
+    questions_answered => "../../tests/fixtures/claude-questions-answered.jsonl",
+    peer_prompts => "../../tests/fixtures/claude-peer-prompts.jsonl",
+    compaction => "../../tests/fixtures/claude-compaction.jsonl",
+    questions_pending => "../../tests/fixtures/claude-questions-pending.jsonl",
+    questions_rejected => "../../tests/fixtures/claude-questions-rejected.jsonl",
+    task_notifications => "../../tests/fixtures/claude-task-notifications.jsonl",
+    task_notification_delivery => "../../tests/fixtures/claude-task-notification-delivery.jsonl",
 }
 
 #[test]
@@ -812,13 +840,17 @@ fn provider_detail_events() -> (Vec<Event>, Vec<Event>) {
 }
 
 fn assert_provider_detail_blocks_centered(entries: Vec<Event>) {
+    assert_provider_detail_blocks_centered_at(entries, &[200, 151, 120]);
+}
+
+fn assert_provider_detail_blocks_centered_at(entries: Vec<Event>, widths: &[u16]) {
     for event in entries {
         let detail = super::super::tool_detail::event_detail_content(
             &event,
             String::new(),
             Style::new().dim(),
         );
-        for width in [200, 151, 120] {
+        for &width in widths {
             assert_centered_event_detail(&event, width, &detail);
         }
     }

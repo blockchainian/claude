@@ -363,7 +363,9 @@ impl EventSelectionFixture {
 
     fn append(&mut self) {
         self.record["uuid"] = "selection-20".into();
-        self.record["timestamp"] = (self.start + chrono::Duration::seconds(20)).to_rfc3339().into();
+        self.record["timestamp"] = (self.start + chrono::Duration::seconds(20))
+            .to_rfc3339()
+            .into();
         self.record["message"]["content"] = format!("event-20 {}", self.body).into();
         self.payload.push_str(&format!("{}\n", self.record));
         let path = self.app.sessions[0].transcript.as_ref().unwrap();
@@ -377,7 +379,9 @@ fn event_selection_wheel_burst_selects_event_07() {
     // Nineteen rows keep all three panels visible in both layouts.
     for width in [120, 180] {
         let EventSelectionFixture {
-            _directory, mut app, ..
+            _directory,
+            mut app,
+            ..
         } = EventSelectionFixture::after_wheel_burst(width);
         let buffer = draw_size(&mut app, width, 19);
         assert!(event_detail_content(&buffer).contains("event-07"));
@@ -393,7 +397,9 @@ fn event_selection_append_keeps_selection_and_window_edge() {
         let selected_position = event_position(&buffer, "event-07");
         fixture.append();
         let EventSelectionFixture {
-            _directory, mut app, ..
+            _directory,
+            mut app,
+            ..
         } = fixture;
         let buffer = draw_size(&mut app, width, 19);
         assert!(event_detail_content(&buffer).contains("event-07"));
