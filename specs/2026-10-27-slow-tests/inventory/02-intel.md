@@ -6,7 +6,7 @@ From one full `npm test` run on 2026-10-27, branch `fix-slow-tests`. Node tests 
 |---:|---:|---|---|
 | 1 | 85.14 | hundreds of files bound planning through writeback while filling request slots and resuming | plugins/intel/skills/unminify/tests/files-memory.test.mjs |
 | 2 | 31.06 | live segments a generated clip and prints a JSON summary | plugins/intel/skills/transcribe/tests/transcribe.test.mjs |
-| 3 | 25.29 | (whole file) | plugins/intel/skills/translate/epub/tests/test_render.py |
+| 3 | 25.29 |  | plugins/intel/skills/translate/epub/tests/test_render.py |
 | 4 | 23.54 | USAGE_LIMIT follows imports only in done files and resumes byte-identically | plugins/intel/skills/unminify/tests/imports-resume.test.mjs |
 | 5 | 22.65 | batch transcribes a generated clip and prints JSON | plugins/intel/skills/transcribe/tests/transcribe.test.mjs |
 | 6 | 21.10 | many real batches fill a local HTTP/2 session and persist valid rewrites | plugins/intel/skills/unminify/tests/render-performance.test.mjs |
@@ -23,7 +23,7 @@ From one full `npm test` run on 2026-10-27, branch `fix-slow-tests`. Node tests 
 | 17 | 11.50 | probe scenarios 1 and 2: sibling-only relative imports follow identically together and in batches | plugins/intel/skills/unminify/tests/sibling-follow.test.mjs |
 | 18 | 11.32 | C-shared: separate selections equal one run byte for byte | plugins/intel/skills/unminify/tests/batch-follow.test.mjs |
 | 19 | 11.02 | a busy caller cannot time out a valid module syntax check | plugins/intel/skills/unminify/tests/check-timeout.test.mjs |
-| 20 | 10.78 | (whole file) | plugins/intel/skills/digest/tests/test_pdf_highlights.py |
+| 20 | 10.78 |  | plugins/intel/skills/digest/tests/test_pdf_highlights.py |
 | 21 | 9.38 | three separate phases match the actual pre-split run byte for byte and each resumes | plugins/intel/skills/unminify/tests/split-commands.test.mjs |
 | 22 | 9.31 | sync-imports uses several real workers and preserves captured 0.71.4 source and journal bytes | plugins/intel/skills/unminify/tests/import-sync-parallel.test.mjs |
 | 23 | 9.11 | chunk guard checks cross-file and nested renames within a bounded worker heap | plugins/intel/skills/unminify/tests/chunk-check-memory.test.mjs |
@@ -121,7 +121,7 @@ From one full `npm test` run on 2026-10-27, branch `fix-slow-tests`. Node tests 
 | 115 | 2.40 | fragment task queue is bounded and no-Git fallback preserves input order | plugins/intel/skills/unminify/tests/fragment-index-parallel.test.mjs |
 | 116 | 2.39 | an irreducible collision budget failure leaves its chunk resumable and runs the next chunk | plugins/intel/skills/unminify/tests/chunk-budget-isolation.test.mjs |
 | 117 | 2.39 | default parameter collision completes through the local service (file) | plugins/intel/skills/unminify/tests/naming-pattern-scope.test.mjs |
-| 118 | 2.35 | (whole file) | plugins/intel/skills/digest/tests/test_fetch_source.py |
+| 118 | 2.35 |  | plugins/intel/skills/digest/tests/test_fetch_source.py |
 | 119 | 2.27 | outside chunk import declarations follow in sibling chunk members | plugins/intel/skills/unminify/tests/chunk-cli.test.mjs |
 | 120 | 2.26 | a journal error still follows completed imports without changing the unfinished file | plugins/intel/skills/unminify/tests/imports-resume.test.mjs |
 | 121 | 2.23 | rename-bindings lists every unrestored selected file and chunk sibling before any request | plugins/intel/skills/unminify/tests/split-commands.test.mjs |
