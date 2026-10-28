@@ -1154,239 +1154,270 @@ fn terminal_task_details_borders_keep_status_and_elapsed_separate() {
 
 // Runs the executable's terminal loop, provider discovery and event loading, rather
 // than constructing a View. AGENTS_PROBE_BIN also checks the installed artifact.
-#[test]
-fn terminal_layout_tracks_width() {
+fn layout_tracks_width(width: u16, height: u16) {
     let (_directory, tmux, _transcript) = start_probe("layout");
-    for (width, height) in [
-        (200, 50),
-        (120, 60),
-        (100, 45),
-        (149, 50),
-        (150, 50),
-        (151, 50),
-        (200, 50),
-    ] {
-        tmux.run(&[
-            "resize-window",
-            "-t",
-            "probe",
-            "-x",
-            &width.to_string(),
-            "-y",
-            &height.to_string(),
-        ]);
-        std::thread::sleep(Duration::from_secs(1));
-        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-        println!("{width} columns:\n{capture}");
-        let lines: Vec<_> = capture.lines().collect();
-        assert!(
-            capture.contains("Update"),
-            "update header missing: {capture}"
-        );
-        assert!(
-            !capture.contains("Latest update"),
-            "stale update header: {capture}"
-        );
-        assert!(
-            !capture.contains("Last activity"),
-            "stale activity header: {capture}"
-        );
-        assert!(
-            !capture.contains("Latest message"),
-            "stale message header: {capture}"
-        );
-        assert!(
-            capture.contains("4165651d") || capture.contains("Stop hook"),
-            "fixture not selected: {capture}"
-        );
-        assert!(
-            lines[1].contains(" Inactive ⏸\u{fe0e} "),
-            "status must stay on the top rule: {capture}"
-        );
-        let top = lines[2];
+    tmux.run(&[
+        "resize-window",
+        "-t",
+        "probe",
+        "-x",
+        &width.to_string(),
+        "-y",
+        &height.to_string(),
+    ]);
+    let capture = wait_for_size(&tmux, width, height);
+    println!("{width} columns:\n{capture}");
+    let lines: Vec<_> = capture.lines().collect();
+    assert!(
+        capture.contains("Update"),
+        "update header missing: {capture}"
+    );
+    assert!(
+        !capture.contains("Latest update"),
+        "stale update header: {capture}"
+    );
+    assert!(
+        !capture.contains("Last activity"),
+        "stale activity header: {capture}"
+    );
+    assert!(
+        !capture.contains("Latest message"),
+        "stale message header: {capture}"
+    );
+    assert!(
+        capture.contains("4165651d") || capture.contains("Stop hook"),
+        "fixture not selected: {capture}"
+    );
+    assert!(
+        lines[1].contains(" Inactive ⏸\u{fe0e} "),
+        "status must stay on the top rule: {capture}"
+    );
+    let top = lines[2];
+    assert_eq!(
+        top.matches('│').count(),
+        if width >= 150 { 2 } else { 1 },
+        "{capture}"
+    );
+    let separators: Vec<_> = top
+        .match_indices('│')
+        .map(|(index, _)| top[..index].width())
+        .collect();
+    let top_end = 2 + lines[2..]
+        .iter()
+        .take_while(|line| {
+            separators.iter().all(|column| {
+                line.match_indices('│')
+                    .any(|(index, _)| line[..index].width() == *column)
+            })
+        })
+        .count();
+    let prompt = top_end + 1;
+    assert!(lines[prompt].contains('❯'), "prompt missing: {capture}");
+    let event_rule = if width >= 150 {
+        top_end + 2
+    } else {
+        (prompt + 2..lines.len() - 1)
+            .find(|&row| lines[row].matches('─').count() > width as usize / 2)
+            .expect("separate list/detail border")
+    };
+    let top_height = top_end - 2;
+    let bottom_height = lines.len() - event_rule - 2;
+    if width >= 150 {
+        let content = height as usize - 6;
+        assert_eq!(top_height, content * 618 / 1000, "{capture}");
+        assert_eq!(top_height + bottom_height, content, "{capture}");
+    } else {
+        let list_height = event_rule - prompt - 2;
+        let content = height as usize - 7;
+        let expected = [content.div_ceil(3), (content + 1) / 3, content / 3];
         assert_eq!(
-            top.matches('│').count(),
-            if width >= 150 { 2 } else { 1 },
+            [top_height, list_height, bottom_height],
+            expected,
             "{capture}"
         );
-        let separators: Vec<_> = top
-            .match_indices('│')
-            .map(|(index, _)| top[..index].width())
-            .collect();
-        let top_end = 2 + lines[2..]
-            .iter()
-            .take_while(|line| {
-                separators.iter().all(|column| {
-                    line.match_indices('│')
-                        .any(|(index, _)| line[..index].width() == *column)
-                })
-            })
-            .count();
-        let prompt = top_end + 1;
-        assert!(lines[prompt].contains('❯'), "prompt missing: {capture}");
-        let event_rule = if width >= 150 {
-            top_end + 2
-        } else {
-            (prompt + 2..lines.len() - 1)
-                .find(|&row| lines[row].matches('─').count() > width as usize / 2)
-                .expect("separate list/detail border")
-        };
-        let top_height = top_end - 2;
-        let bottom_height = lines.len() - event_rule - 2;
-        if width >= 150 {
-            let content = height as usize - 6;
-            assert_eq!(top_height, content * 618 / 1000, "{capture}");
-            assert_eq!(top_height + bottom_height, content, "{capture}");
-        } else {
-            let list_height = event_rule - prompt - 2;
-            let content = height as usize - 7;
-            let expected = [content.div_ceil(3), (content + 1) / 3, content / 3];
-            assert_eq!(
-                [top_height, list_height, bottom_height],
-                expected,
-                "{capture}"
-            );
-            println!(
-                "{width}x{height} content heights: top={top_height}, list={list_height}, detail={bottom_height}"
-            );
-        }
-        assert!(
-            !lines[event_rule + 1].trim().is_empty(),
-            "blank row below log rule: {capture}"
+        println!(
+            "{width}x{height} content heights: top={top_height}, list={list_height}, detail={bottom_height}"
         );
-        let model = lines
-            .iter()
-            .find(|line| line.contains("claude-opus-5-5"))
-            .expect("model row");
-        assert!(
-            model.contains("claude-opus-5-5") && model.contains("medium"),
-            "model group missing: {capture}"
-        );
-        assert_task_details_borders(&tmux, width, height, &capture);
-        if width >= 150 {
-            let column_width = (width as usize - 8) / 4;
-            assert_eq!(separators, [column_width + 2, 2 * column_width + 5]);
-            for line in &lines[2..top_end] {
-                let event_panel = line.splitn(3, '│').nth(2).unwrap();
-                if !event_panel.trim().is_empty() {
-                    assert_eq!(
-                        event_panel.len() - event_panel.trim_start().len(),
-                        1,
-                        "log left: {line}"
-                    );
-                    assert_eq!(
-                        line.trim_end_matches([' ', '┐', '│', '┘']).width(),
-                        width as usize - 2,
-                        "log time right: {line}"
-                    );
-                }
-            }
-            assert!(
-                lines[top_end + 1].contains('❯'),
-                "prompt missing: {capture}"
-            );
-            let middle: Vec<_> = lines[top_end].chars().collect();
-            let task_details: String = middle[separators[0] + 2..separators[1] - 1]
-                .iter()
-                .collect();
-            assert!(
-                task_details.contains(match width {
-                    150 | 151 => " Codex manager 停止时… ",
-                    _ => " Codex manager 停止时线程处理 ",
-                }),
-                "task name missing from middle rule: {capture}"
-            );
-            for line in &lines[2..top_end] {
-                let event_panel = line.splitn(3, '│').nth(2).unwrap();
-                assert!(!event_panel.contains("────"), "extra log rule: {capture}");
-                assert!(!line.contains(" · Inactive"), "extra status row: {capture}");
-            }
-            assert!(lines[event_rule].trim().chars().all(|c| c == '─'));
-            assert!(
-                lines[event_rule + 4..lines.len() - 1]
-                    .iter()
-                    .any(|line| line.width() > width as usize * 2 / 3),
-                "detail does not span the terminal: {capture}"
-            );
-            assert!(
-                lines[2..top_end].iter().any(|line| {
-                    line.splitn(3, '│')
-                        .nth(2)
-                        .is_some_and(|event_panel| event_panel.contains("Stop hook"))
-                }),
-                "event list missing from top row: {capture}"
-            );
-        } else {
-            let list = lines[prompt + 2..event_rule].join("\n");
-            assert!(
-                list.contains("Stop hook"),
-                "event list missing below prompt: {capture}"
-            );
-            assert!(
-                lines[event_rule + 1..lines.len() - 1]
-                    .join("\n")
-                    .contains("decision"),
-                "newest event detail missing below list: {capture}"
-            );
-            let user_row = (prompt + 1..event_rule)
-                .find(|&row| lines[row].contains("⏺"))
-                .expect("real user event row");
-            // Feed the same SGR mouse press/release received by the terminal loop.
-            tmux.run(&[
-                "send-keys",
-                "-t",
-                "probe",
-                "-l",
-                &format!("\x1b[<0;2;{}M\x1b[<0;2;{}m", user_row + 1, user_row + 1),
-            ]);
-            std::thread::sleep(Duration::from_secs(1));
-            let opened = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-            let opened_lines: Vec<_> = opened.lines().collect();
-            assert_eq!(
-                opened_lines[prompt + 2..event_rule].join("\n"),
-                list,
-                "event list hidden after click: {opened}"
-            );
-            assert!(!opened_lines[event_rule].contains("↓ Latest"), "{opened}");
-            assert!(
-                opened_lines[event_rule + 1..opened_lines.len() - 1]
-                    .join("\n")
-                    .contains("codex thread 01a11210-f266-7182-b202-269b6b4fe157"),
-                "clicked user event missing from detail: {opened}"
-            );
-            // Search follows the last mouse panel, independently of the selected event.
-            tmux.mouse(0, 1, event_rule + 1, true);
-            tmux.run(&["send-keys", "-t", "probe", "/"]);
-            tmux.run(&["send-keys", "-t", "probe", "-l", "await"]);
-            std::thread::sleep(Duration::from_millis(200));
-            let searched = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-            assert!(
-                searched
-                    .lines()
-                    .skip(event_rule + 1)
-                    .any(|line| line.contains("Search ❯ await")),
-                "detail search missing: {searched}"
-            );
-            tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-            // Select the real newest event so each resize starts with the same detail.
-            std::thread::sleep(Duration::from_millis(200));
-            let assistant_row = (prompt + 2..event_rule)
-                .find(|&row| opened_lines[row].contains("对，必须"))
-                .expect("newest assistant row");
-            tmux.run(&[
-                "send-keys",
-                "-t",
-                "probe",
-                "-l",
-                &format!(
-                    "\x1b[<0;2;{}M\x1b[<0;2;{}m",
-                    assistant_row + 1,
-                    assistant_row + 1
-                ),
-            ]);
-            std::thread::sleep(Duration::from_secs(1));
-        }
     }
+    assert!(
+        !lines[event_rule + 1].trim().is_empty(),
+        "blank row below log rule: {capture}"
+    );
+    let model = lines
+        .iter()
+        .find(|line| line.contains("claude-opus-5-5"))
+        .expect("model row");
+    assert!(
+        model.contains("claude-opus-5-5") && model.contains("medium"),
+        "model group missing: {capture}"
+    );
+    assert_task_details_borders(&tmux, width, height, &capture);
+    if width >= 150 {
+        let column_width = (width as usize - 8) / 4;
+        assert_eq!(separators, [column_width + 2, 2 * column_width + 5]);
+        for line in &lines[2..top_end] {
+            let event_panel = line.splitn(3, '│').nth(2).unwrap();
+            if !event_panel.trim().is_empty() {
+                assert_eq!(
+                    event_panel.len() - event_panel.trim_start().len(),
+                    1,
+                    "log left: {line}"
+                );
+                assert_eq!(
+                    line.trim_end_matches([' ', '┐', '│', '┘']).width(),
+                    width as usize - 2,
+                    "log time right: {line}"
+                );
+            }
+        }
+        assert!(
+            lines[top_end + 1].contains('❯'),
+            "prompt missing: {capture}"
+        );
+        let middle: Vec<_> = lines[top_end].chars().collect();
+        let task_details: String = middle[separators[0] + 2..separators[1] - 1]
+            .iter()
+            .collect();
+        assert!(
+            task_details.contains(match width {
+                150 | 151 => " Codex manager 停止时… ",
+                _ => " Codex manager 停止时线程处理 ",
+            }),
+            "task name missing from middle rule: {capture}"
+        );
+        for line in &lines[2..top_end] {
+            let event_panel = line.splitn(3, '│').nth(2).unwrap();
+            assert!(!event_panel.contains("────"), "extra log rule: {capture}");
+            assert!(!line.contains(" · Inactive"), "extra status row: {capture}");
+        }
+        assert!(lines[event_rule].trim().chars().all(|c| c == '─'));
+        assert!(
+            lines[event_rule + 4..lines.len() - 1]
+                .iter()
+                .any(|line| line.width() > width as usize * 2 / 3),
+            "detail does not span the terminal: {capture}"
+        );
+        assert!(
+            lines[2..top_end].iter().any(|line| {
+                line.splitn(3, '│')
+                    .nth(2)
+                    .is_some_and(|event_panel| event_panel.contains("Stop hook"))
+            }),
+            "event list missing from top row: {capture}"
+        );
+    } else {
+        let list = lines[prompt + 2..event_rule].join("\n");
+        assert!(
+            list.contains("Stop hook"),
+            "event list missing below prompt: {capture}"
+        );
+        assert!(
+            lines[event_rule + 1..lines.len() - 1]
+                .join("\n")
+                .contains("decision"),
+            "newest event detail missing below list: {capture}"
+        );
+        let user_row = (prompt + 1..event_rule)
+            .find(|&row| lines[row].contains("⏺"))
+            .expect("real user event row");
+        // Feed the same SGR mouse press/release received by the terminal loop.
+        tmux.run(&[
+            "send-keys",
+            "-t",
+            "probe",
+            "-l",
+            &format!("\x1b[<0;2;{}M\x1b[<0;2;{}m", user_row + 1, user_row + 1),
+        ]);
+        let opened = tmux.capture_when(|capture| {
+            capture
+                .lines()
+                .skip(event_rule + 1)
+                .any(|line| line.contains("codex thread 01a11210-f266-7182-b202-269b6b4fe157"))
+        });
+        let opened_lines: Vec<_> = opened.lines().collect();
+        assert_eq!(
+            opened_lines[prompt + 2..event_rule].join("\n"),
+            list,
+            "event list hidden after click: {opened}"
+        );
+        assert!(!opened_lines[event_rule].contains("↓ Latest"), "{opened}");
+        assert!(
+            opened_lines[event_rule + 1..opened_lines.len() - 1]
+                .join("\n")
+                .contains("codex thread 01a11210-f266-7182-b202-269b6b4fe157"),
+            "clicked user event missing from detail: {opened}"
+        );
+        // Search follows the last mouse panel, independently of the selected event.
+        tmux.mouse(0, 1, event_rule + 1, true);
+        tmux.run(&["send-keys", "-t", "probe", "/"]);
+        tmux.run(&["send-keys", "-t", "probe", "-l", "await"]);
+        let searched = tmux.capture_when(|capture| {
+            capture
+                .lines()
+                .skip(event_rule + 1)
+                .any(|line| line.contains("Search ❯ await"))
+        });
+        assert!(
+            searched
+                .lines()
+                .skip(event_rule + 1)
+                .any(|line| line.contains("Search ❯ await")),
+            "detail search missing: {searched}"
+        );
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        // Select the real newest event so each resize starts with the same detail.
+        tmux.wait_for(|capture| !capture.contains("Search ❯"));
+        let assistant_row = (prompt + 2..event_rule)
+            .find(|&row| opened_lines[row].contains("对，必须"))
+            .expect("newest assistant row");
+        tmux.run(&[
+            "send-keys",
+            "-t",
+            "probe",
+            "-l",
+            &format!(
+                "\x1b[<0;2;{}M\x1b[<0;2;{}m",
+                assistant_row + 1,
+                assistant_row + 1
+            ),
+        ]);
+        tmux.wait_for(|capture| {
+            capture
+                .lines()
+                .skip(event_rule + 1)
+                .any(|line| line.contains("decision"))
+        });
+    }
+}
+
+#[test]
+fn terminal_layout_tracks_width_200() {
+    layout_tracks_width(200, 50);
+}
+
+#[test]
+fn terminal_layout_tracks_width_120() {
+    layout_tracks_width(120, 60);
+}
+
+#[test]
+fn terminal_layout_tracks_width_100() {
+    layout_tracks_width(100, 45);
+}
+
+#[test]
+fn terminal_layout_tracks_width_149() {
+    layout_tracks_width(149, 50);
+}
+
+#[test]
+fn terminal_layout_tracks_width_150() {
+    layout_tracks_width(150, 50);
+}
+
+#[test]
+fn terminal_layout_tracks_width_151() {
+    layout_tracks_width(151, 50);
 }
 
 #[test]
