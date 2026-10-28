@@ -208,36 +208,35 @@ fn assert_title_caret(tmux: &Tmux, title: &str, offset: usize) -> String {
     })
 }
 
-#[test]
-fn terminal_background_event_has_no_marker_and_keeps_its_time() {
-    let records = include_str!("fixtures/background/two-awaits.jsonl");
-    let contents = |count| {
-        format!(
-            "{}{}\n",
-            include_str!("fixtures/transcript.jsonl"),
-            records.lines().take(count).collect::<Vec<_>>().join("\n")
-        )
-    };
-    let (_directory, tmux, transcript) =
-        start_probe_with_transcript("background-log-marker", &contents(3));
-    for (count, time) in [(3, "3m 13s"), (4, "3m 15s")] {
-        if count == 4 {
-            std::fs::write(&transcript, contents(count)).unwrap();
-        }
-        let capture = tmux.capture_when(|capture| {
-            capture
-                .lines()
-                .any(|row| row.contains("等用量图颜色线程") && row.trim_end().ends_with(time))
-        });
-        let row = capture
+fn background_event_has_no_marker_and_keeps_its_time(count: usize, time: &str) {
+    let contents = include_str!("fixtures/background/two-awaits.jsonl")
+        .lines()
+        .take(count)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let (_directory, tmux, _transcript) =
+        start_probe_with_transcript("background-log-marker", &contents);
+    let capture = tmux.capture_when(|capture| {
+        capture
             .lines()
-            .find(|row| row.contains("等用量图颜色线程") && row.trim_end().ends_with(time))
-            .unwrap();
-        assert!(!row.contains(" *"), "{row}");
-    }
-    println!(
-        "{{\"verdict\":\"pass\",\"background_marker\":false,\"pending_time\":\"3m 13s\",\"completed_time\":\"3m 15s\"}}"
-    );
+            .any(|row| row.contains("等用量图颜色线程") && row.trim_end().ends_with(time))
+    });
+    let row = capture
+        .lines()
+        .find(|row| row.contains("等用量图颜色线程") && row.trim_end().ends_with(time))
+        .unwrap();
+    assert!(!row.contains(" *"), "{row}");
+}
+
+#[test]
+fn terminal_background_event_pending_has_no_marker_and_keeps_its_time() {
+    background_event_has_no_marker_and_keeps_its_time(3, "3m 13s");
+}
+
+#[test]
+fn terminal_background_event_completed_has_no_marker_and_keeps_its_time() {
+    background_event_has_no_marker_and_keeps_its_time(4, "3m 15s");
 }
 
 #[test]
