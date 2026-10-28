@@ -11,7 +11,7 @@ fn output_border_transcript() -> String {
     event["message"]["id"] = "output-border-message".into();
     event["message"]["content"] = serde_json::json!([{
         "type": "text",
-        "text": (1..=80).map(|row| format!("output border row {row:02}"))
+        "text": (1..=20).chain(std::iter::once(80)).map(|row| format!("output border row {row:02}"))
             .collect::<Vec<_>>().join("  \n"),
     }]);
     event["timestamp"] = "2026-10-18T01:00:00Z".into();
