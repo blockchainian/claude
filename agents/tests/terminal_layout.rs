@@ -129,6 +129,16 @@ impl Tmux {
     }
 }
 
+fn wait_for_size(tmux: &Tmux, width: u16, height: u16) -> String {
+    tmux.capture_when(|capture| {
+        capture.lines().count() == usize::from(height)
+            && capture.lines().nth(1).is_some_and(|line| line.width() == usize::from(width))
+            && capture.lines().nth(2).is_some_and(|line| {
+                line.matches('│').count() == if width >= 150 { 2 } else { 1 }
+            })
+    })
+}
+
 // tmux carries SGR state across capture rows. Position each row explicitly so
 // terminal-width wrapping cannot shift later rows, while preserving that state.
 fn captured_screen(capture: &str, width: u16, height: u16) -> vt100::Parser {
@@ -1123,7 +1133,7 @@ fn terminal_task_details_borders_keep_status_and_elapsed_separate() {
             "-y",
             "50",
         ]);
-        std::thread::sleep(Duration::from_millis(300));
+        wait_for_size(&tmux, width, 50);
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         println!("{width} columns:\n{capture}");
         assert_task_details_borders(&tmux, width, 50, &capture);
