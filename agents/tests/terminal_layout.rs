@@ -2791,20 +2791,11 @@ fn terminal_detail_reading_column_preserves_original_copy() {
 #[path = "support/terminal_chronological.rs"]
 mod terminal_chronological;
 
-#[test]
-fn terminal_manager_detach_title() {
-    use std::io::Write;
-    let (_directory, tmux, transcript) = start_probe("manager-detach-title");
-    let mut file = std::fs::OpenOptions::new()
-        .append(true)
-        .open(transcript)
-        .unwrap();
-    write!(
-        file,
-        "{}",
-        include_str!("fixtures/claude-manager-detach.jsonl")
-    )
-    .unwrap();
+fn manager_detach_title(width: u16) {
+    let (_directory, tmux, _transcript) = start_probe_with_transcript(
+        "manager-detach-title",
+        include_str!("fixtures/claude-manager-detach.jsonl"),
+    );
     tmux.run(&["send-keys", "-t", "probe", "End"]);
     tmux.wait_for(|capture| {
         capture.contains("codex-manager detach")
@@ -2812,88 +2803,107 @@ fn terminal_manager_detach_title() {
                 line.trim().trim_end_matches('│').trim() == "01a1489e-5020-7f40-90e8-c9413012630b"
             })
     });
-    for width in [200_u16, 120, 150, 149] {
-        tmux.run(&[
-            "resize-window",
-            "-t",
-            "probe",
-            "-x",
-            &width.to_string(),
-            "-y",
-            "50",
-        ]);
-        tmux.wait_for(|capture| {
-            capture.lines().count() == 50
-                && capture.lines().nth(1).is_some_and(|line| {
-                    line.matches('┬').count() == if width >= 150 { 2 } else { 1 }
-                })
-                && capture.lines().any(|line| {
-                    line.width() == usize::from(width)
-                        && line.matches('─').count() > usize::from(width / 2)
-                })
-                && capture.contains("codex-manager detach")
-                && capture.lines().any(|line| {
-                    line.trim().trim_end_matches('│').trim()
-                        == "01a1489e-5020-7f40-90e8-c9413012630b"
-                })
-        });
-        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-        let rows: Vec<_> = capture.lines().collect();
-        let rule = rows
-            .windows(2)
-            .rposition(|pair| {
-                pair[0].matches('─').count() > usize::from(width / 2)
-                    && pair[1].trim_start().starts_with("codex-manager detach")
+
+    tmux.run(&[
+        "resize-window",
+        "-t",
+        "probe",
+        "-x",
+        &width.to_string(),
+        "-y",
+        "50",
+    ]);
+    tmux.wait_for(|capture| {
+        capture.lines().count() == 50
+            && capture
+                .lines()
+                .nth(1)
+                .is_some_and(|line| line.matches('┬').count() == if width >= 150 { 2 } else { 1 })
+            && capture.lines().any(|line| {
+                line.width() == usize::from(width)
+                    && line.matches('─').count() > usize::from(width / 2)
             })
-            .unwrap_or_else(|| panic!("detach detail header not found: {capture}"));
-        let title = rows[rule + 1];
-        assert!(
-            rows[rule + 2].trim_end_matches('│').trim().is_empty(),
-            "{capture}"
-        );
-        assert!(
-            title.trim_start().starts_with("codex-manager detach"),
-            "{capture}"
-        );
-        let record: serde_json::Value = serde_json::from_str(
-            include_str!("fixtures/claude-manager-detach.jsonl")
-                .lines()
-                .next()
-                .unwrap(),
-        )
+            && capture.contains("codex-manager detach")
+            && capture.lines().any(|line| {
+                line.trim().trim_end_matches('│').trim() == "01a1489e-5020-7f40-90e8-c9413012630b"
+            })
+    });
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+    let rows: Vec<_> = capture.lines().collect();
+    let rule = rows
+        .windows(2)
+        .rposition(|pair| {
+            pair[0].matches('─').count() > usize::from(width / 2)
+                && pair[1].trim_start().starts_with("codex-manager detach")
+        })
+        .unwrap_or_else(|| panic!("detach detail header not found: {capture}"));
+    let title = rows[rule + 1];
+    assert!(
+        rows[rule + 2].trim_end_matches('│').trim().is_empty(),
+        "{capture}"
+    );
+    assert!(
+        title.trim_start().starts_with("codex-manager detach"),
+        "{capture}"
+    );
+    let record: serde_json::Value = serde_json::from_str(
+        include_str!("fixtures/claude-manager-detach.jsonl")
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    let subject = record["message"]["content"][0]["input"]["threadId"]
+        .as_str()
         .unwrap();
-        let subject = record["message"]["content"][0]["input"]["threadId"]
-            .as_str()
-            .unwrap();
-        assert!(title.contains(subject), "{capture}");
-        assert_eq!(
-            title[..title.find(subject).unwrap()].width(),
-            terminal_event_detail_width::event_detail_center(usize::from(width), subject.width()),
-            "thread title stays on the panel midline: {capture}"
-        );
-        assert_eq!(rows[rule + 3].trim(), "↓", "{capture}");
-        assert_eq!(
-            rows[rule + 3][..rows[rule + 3].find('↓').unwrap()].width(),
-            terminal_event_detail_width::event_detail_center(usize::from(width), 1),
-            "empty input arrow stays on the panel midline: {capture}"
-        );
-        assert!(
-            capture
-                .lines()
-                .any(|line| line.trim().trim_end_matches('│').trim() == subject),
-            "{capture}"
-        );
-        assert!(
-            !capture.contains("\"archived\"") && !capture.contains("\"detached\""),
-            "{capture}"
-        );
-        let path = std::env::temp_dir().join(format!("agents-manager-detach-title-{width}.txt"));
-        std::fs::write(&path, &capture).unwrap();
-        println!(
-            "{{\"verdict\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
-            path.display()
-        );
-    }
+    assert!(title.contains(subject), "{capture}");
+    assert_eq!(
+        title[..title.find(subject).unwrap()].width(),
+        terminal_event_detail_width::event_detail_center(usize::from(width), subject.width()),
+        "thread title stays on the panel midline: {capture}"
+    );
+    assert_eq!(rows[rule + 3].trim(), "↓", "{capture}");
+    assert_eq!(
+        rows[rule + 3][..rows[rule + 3].find('↓').unwrap()].width(),
+        terminal_event_detail_width::event_detail_center(usize::from(width), 1),
+        "empty input arrow stays on the panel midline: {capture}"
+    );
+    assert!(
+        capture
+            .lines()
+            .any(|line| line.trim().trim_end_matches('│').trim() == subject),
+        "{capture}"
+    );
+    assert!(
+        !capture.contains("\"archived\"") && !capture.contains("\"detached\""),
+        "{capture}"
+    );
+    let path = std::env::temp_dir().join(format!("agents-manager-detach-title-{width}.txt"));
+    std::fs::write(&path, &capture).unwrap();
+    println!(
+        "{{\"verdict\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
+        path.display()
+    );
+}
+
+#[test]
+fn terminal_manager_detach_title_200() {
+    manager_detach_title(200);
+}
+
+#[test]
+fn terminal_manager_detach_title_120() {
+    manager_detach_title(120);
+}
+
+#[test]
+fn terminal_manager_detach_title_150() {
+    manager_detach_title(150);
+}
+
+#[test]
+fn terminal_manager_detach_title_149() {
+    manager_detach_title(149);
 }
 
 #[path = "support/terminal_event_detail_width.rs"]
