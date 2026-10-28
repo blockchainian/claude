@@ -46,6 +46,15 @@ fn expanded_details_keep_directory_and_pull_request_links_separate() {
 #[test]
 fn task_labels_follow_visible_owner_and_borrow_only_visible_list_edges() {
     for width in [90, 120, 160] {
+        let (_dir, mut view, now) = fixture();
+        view.rows[0].title = "Name".into();
+        view.rows[0].git_branch = Some("topic".into());
+        view.rows[0].cwd = _dir.path().join("dir");
+        std::fs::create_dir(&view.rows[0].cwd).unwrap();
+        view.project_groups[view.selected].heading = "dir".into();
+        view.rows[0].started_at = Some(now - chrono::Duration::seconds(65));
+        view.set_context_usage(&view.rows[0].id.clone(), Some(12));
+        let area = Rect::new(3, 5, width, 24);
         for panel in [
             Panel::TaskList,
             Panel::TaskDetails,
@@ -53,15 +62,8 @@ fn task_labels_follow_visible_owner_and_borrow_only_visible_list_edges() {
             Panel::EventDetail,
         ] {
             for commands in ["", "|", "_", "|_", "_|"] {
-                let (_dir, mut view, now) = fixture();
-                view.rows[0].title = "Name".into();
-                view.rows[0].git_branch = Some("topic".into());
-                view.rows[0].cwd = _dir.path().join("dir");
-                std::fs::create_dir(&view.rows[0].cwd).unwrap();
-                view.project_groups[view.selected].heading = "dir".into();
-                view.rows[0].started_at = Some(now - chrono::Duration::seconds(65));
-                view.set_context_usage(&view.rows[0].id.clone(), Some(12));
-                let area = Rect::new(3, 5, width, 60);
+                view.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+                view.handle_key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::NONE));
                 draw(&view, area, now);
                 view.set_active_panel(panel);
                 for command in commands.chars() {
