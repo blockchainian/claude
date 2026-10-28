@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_model_command_refreshes_without_an_assistant_reply() {
     let fixture = include_str!("../fixtures/claude-model-command.jsonl");
     let (assistant, commands) = fixture.split_once('\n').unwrap();

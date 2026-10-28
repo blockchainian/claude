@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_event_search_finds_trailing_tool_after_unicode() {
     let fixture = include_str!("../fixtures/codex-inner/command.jsonl")
         .lines()

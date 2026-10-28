@@ -50,7 +50,6 @@ fn scroll_transcript() -> String {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_send_preserves_reading_position() {
     use std::io::Write;
     let (directory, tmux, transcript) =
@@ -161,7 +160,6 @@ fn terminal_send_preserves_reading_position() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_event_scroll_window_and_boundaries() {
     let (directory, tmux, _) = start_probe_with_transcript("log-scroll", &scroll_transcript());
     let capture = tmux.capture_when(|text| text.contains("scroll after"));

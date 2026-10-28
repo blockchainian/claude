@@ -19,7 +19,6 @@ fn output_border_transcript() -> String {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_output_border_double_clicks() {
     let mut evidence = Vec::new();
     for width in [100, 200] {

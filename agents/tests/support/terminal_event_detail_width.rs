@@ -15,7 +15,6 @@ pub(super) fn event_detail_center(width: usize, content_width: usize) -> usize {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_preformatted_detail_stays_in_content_column() {
     let calls: Vec<_> = include_str!("../fixtures/claude-tool-calls.jsonl")
         .lines()

@@ -83,7 +83,6 @@ fn evidence(name: &str, raw: &str) {
 }
 
 #[test]
-#[ignore = "requires tmux; real application prompt color probe"]
 fn terminal_prompt_accent_and_send_error_use_theme_colors() {
     let dir = tempfile::tempdir().unwrap();
     let codex = dir.path().join("codex");

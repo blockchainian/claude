@@ -84,7 +84,6 @@ fn assert_follow_screen(tmux: &Tmux, active: bool, task: &str, name: &str) -> St
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_follow_only_returns_to_active() {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("claude");
@@ -216,7 +215,6 @@ fn terminal_task_follow_only_returns_to_active() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_status_tabs_filter_children_and_preserve_ancestor_status() {
     let listed = |capture: &str, title: &str| {
         capture
@@ -363,7 +361,6 @@ fn terminal_status_tabs_filter_children_and_preserve_ancestor_status() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_pinned_separator_is_centered_and_not_selectable() {
     for width in [200, 201] {
         let (directory, tmux, _transcript) = start_probe("pinned-dot");

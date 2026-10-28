@@ -36,7 +36,6 @@ fn open_model(tmux: &Tmux, label: &str) {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_model_families_keep_headers_out_of_selection() {
     use sha2::{Digest, Sha256};
     let output = std::env::var_os("AGENTS_PROBE_CAPTURE_DIR")

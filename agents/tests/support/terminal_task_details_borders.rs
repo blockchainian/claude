@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_details_border_double_clicks() {
     let prompt = (0..80)
         .map(|i| format!("Border prompt row {i:02}  \n"))

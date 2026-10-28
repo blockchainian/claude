@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_path_suffixes_and_cwd_basename() {
     let change: serde_json::Value =
         include_str!("../fixtures/codex-inner/file-change-without-start.jsonl")
@@ -107,7 +106,6 @@ fn terminal_path_suffixes_and_cwd_basename() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_details_directory_precedes_title_and_branch() {
     let repository = tempfile::tempdir().unwrap();
     let cwd = repository.path().join("repo");

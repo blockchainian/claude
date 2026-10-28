@@ -9,7 +9,6 @@ fn picker_has_row(capture: &str, label: &str) -> bool {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_draft_delete_focus_allows_repeated_new_task() {
     let mut checks = Vec::new();
     for width in [120, 200] {
@@ -99,7 +98,6 @@ fn click_text(tmux: &Tmux, text: &str) {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_repository_browser_applies_single_clicks() {
     let root = tempfile::tempdir().unwrap();
     let source = root.path().join("source");
@@ -160,7 +158,6 @@ fn save_title_capture(tmux: &Tmux, name: &str) {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_names_edit_on_task_details_rule() {
     let (_directory, tmux, _transcript) = start_probe("inline-task-name");
     tmux.run(&["send-keys", "-t", "probe", "n"]);
@@ -279,7 +276,6 @@ fn terminal_task_names_edit_on_task_details_rule() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_new_task_status_is_capitalized_in_list_and_task_details() {
     let (_directory, tmux, _transcript) = start_probe("draft-status");
     begin_named_draft(&tmux, "Status probe");
@@ -307,7 +303,6 @@ fn terminal_new_task_status_is_capitalized_in_list_and_task_details() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_draft_name_blur_persists_without_enter() {
     for blur in [false, true] {
         let (directory, tmux, _transcript) =
@@ -356,7 +351,6 @@ fn terminal_draft_name_blur_persists_without_enter() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_draft_defaults_and_inherited_choices() {
     use sha2::{Digest, Sha256};
     let root = tempfile::tempdir().unwrap();
@@ -494,7 +488,6 @@ fn terminal_draft_defaults_and_inherited_choices() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_title_blur_saves_and_unchanged_enter_closes() {
     let (_directory, tmux, _transcript) = start_probe("title-blur-save");
     tmux.run(&["send-keys", "-t", "probe", "r"]);
@@ -557,7 +550,6 @@ fn assert_draft_prompt_caret(tmux: &Tmux, name: &str, offset: usize) {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_draft_wizard_focus_order_and_clicks() {
     use std::os::unix::fs::PermissionsExt;
     let mut checks = Vec::new();
@@ -695,7 +687,6 @@ fn terminal_draft_wizard_focus_order_and_clicks() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_draft_escape_follows_task_details_and_prompt_focus() {
     let mut checks = Vec::new();
     for width in [120, 200] {

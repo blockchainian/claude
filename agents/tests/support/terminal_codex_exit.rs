@@ -47,7 +47,6 @@ pub(super) fn start_codex_probe(name: &str, fixture: &str) -> (tempfile::TempDir
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_codex_exit_sections() {
     let (_directory, tmux) = start_codex_probe(
         "exit-status",
@@ -111,7 +110,6 @@ fn terminal_codex_exit_sections() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_codex_shell_titles() {
     let mut captures = Vec::new();
     for (name, fixture, command, summary) in [
@@ -158,7 +156,6 @@ fn terminal_codex_shell_titles() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_codex_completed_subagent_calls() {
     let (_directory, tmux) = start_codex_probe(
         "subagent-completed",
@@ -187,7 +184,6 @@ fn terminal_codex_completed_subagent_calls() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_failed_plain_output_uses_default_foreground() {
     for (name, fixture, (title_marker, title), message) in [
         (

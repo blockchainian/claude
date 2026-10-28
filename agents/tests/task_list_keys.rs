@@ -17,7 +17,6 @@ fn capture_when(tmux: &Tmux, ready: impl Fn(&str) -> bool) -> String {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn task_list_unknown_keys_and_help() {
     let directory = tempfile::tempdir().unwrap();
     let codex = directory.path().join("codex");

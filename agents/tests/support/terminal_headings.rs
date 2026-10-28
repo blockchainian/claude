@@ -14,7 +14,6 @@ fn section_rows(capture: &str, width: usize) -> Vec<&str> {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_event_section_titles_and_scrolling() {
     use std::io::Write;
 
@@ -114,7 +113,6 @@ fn terminal_event_section_titles_and_scrolling() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_parallel_tools_have_only_section_titles() {
     use std::io::Write;
 

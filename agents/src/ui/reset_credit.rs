@@ -431,7 +431,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires tmux; isolated real terminal surface, never consumes credits"]
     fn reset_credit_terminal_probe() {
         use std::time::{Duration as StdDuration, Instant};
         let directory = tempfile::tempdir().unwrap();

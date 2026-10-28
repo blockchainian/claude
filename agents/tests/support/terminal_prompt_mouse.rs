@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_prompt_mouse_click_places_caret() {
     let (_directory, tmux, _transcript) = start_probe("prompt-mouse");
     begin_named_draft(&tmux, "Mouse probe");

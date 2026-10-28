@@ -41,7 +41,6 @@ impl Tmux {
 }
 
 #[test]
-#[ignore = "requires tmux and opens the recorded result URL in the default browser"]
 fn web_search_details_and_browser_link() {
     use std::os::unix::fs::PermissionsExt;
 

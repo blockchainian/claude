@@ -26,13 +26,11 @@ impl Tmux {
     }
 }
 #[test]
-#[ignore = "requires tmux"]
 fn enhanced_keys_newlines_and_vertical_caret_in_tmux() {
     probe("csi-u");
 }
 
 #[test]
-#[ignore = "requires tmux"]
 fn xterm_tmux_keeps_fallbacks_and_dashboard_keys() {
     probe("xterm");
 }
@@ -172,7 +170,6 @@ fn probe(format: &str) {
 }
 
 #[test]
-#[ignore = "requires tmux"]
 fn readline_words_match_in_composer() {
     let directory = tempfile::tempdir().unwrap();
     let (codex, claude) = composer_session(directory.path());

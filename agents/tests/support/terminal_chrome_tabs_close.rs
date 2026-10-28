@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_claude_chrome_tabs_close() {
     use std::io::Write;
     let (_directory, tmux, transcript) = start_probe("chrome-tabs-close");

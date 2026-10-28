@@ -33,7 +33,6 @@ fn capture_when(
 }
 
 #[test]
-#[ignore = "requires tmux; real worktree confirmation dialogs at 80 and 120 columns"]
 fn worktree_confirmation_options_show_directory_and_ellipsis() {
     let deadline = Instant::now() + Duration::from_secs(150);
     let evidence = Path::new("/tmp")

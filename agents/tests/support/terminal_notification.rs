@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_notification_transcripts_show_only_the_report() {
     use std::io::Write;
     for (name, fixture, expected) in [
@@ -89,7 +88,6 @@ fn terminal_notification_transcripts_show_only_the_report() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_background_notifications_shorten_titles_and_color_exit_numbers() {
     use std::io::Write;
     let (directory, tmux, transcript) = start_probe("background-notification-titles");

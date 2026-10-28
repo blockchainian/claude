@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_message_text_shares_structured_layout() {
     let xml = include_str!("../fixtures/structured_text/real-theme.plist");
     let mut records: Vec<serde_json::Value> = include_str!("../fixtures/transcript.jsonl")
@@ -66,7 +65,6 @@ fn terminal_message_text_shares_structured_layout() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_background_text_expands_tabs_and_removes_ansi() {
     let (_directory, tmux, transcript) =
         background_text_probe("background-text", "\x1b[2mRunning\tchecks\x1b[0m\n");

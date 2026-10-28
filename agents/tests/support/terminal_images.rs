@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_middle_paste_uses_clicked_input() {
     use base64::Engine;
     let (directory, tmux, _transcript) = start_probe("middle-paste");
@@ -95,7 +94,6 @@ fn terminal_middle_paste_uses_clicked_input() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_image_path_and_clipboard_are_atomic() {
     use base64::Engine;
     let (directory, tmux, _transcript) = start_probe("input-images");

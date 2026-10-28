@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux and mermaid-ascii; run with --ignored --nocapture"]
 fn terminal_mermaid_diagrams_and_fallback() {
     let source = "```mermaid\ngraph LR\n A[Mermaid start] --> B[Mermaid finish]\n```";
     let mut records: Vec<serde_json::Value> = include_str!("../fixtures/transcript.jsonl")

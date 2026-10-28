@@ -13,7 +13,6 @@ fn bottom(tmux: &Tmux) {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_output_files_follow_appends_and_preserve_reading_position() {
     let evidence =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/event-output-watch/terminal");

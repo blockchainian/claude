@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_disabled_prompt_keeps_label_and_dim_marker() {
     let directory = tempfile::tempdir().unwrap();
     let codex = directory.path().join("codex");
@@ -119,7 +118,6 @@ fn terminal_disabled_prompt_keeps_label_and_dim_marker() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_foreground_prompt_shows_only_bg() {
     let (directory, tmux, _transcript) = start_probe("foreground-prompt");
     let config = directory.path().join("claude");
@@ -155,7 +153,6 @@ fn terminal_foreground_prompt_shows_only_bg() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_no_task_prompt_shows_only_label_and_marker() {
     let directory = tempfile::tempdir().unwrap();
     let codex = directory.path().join("codex");

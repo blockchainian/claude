@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_prompt_cache_countdown_on_task_details_border() {
     let mut borders = Vec::new();
     // Replay a real request with ten minutes of its recorded one-hour TTL left, then expired.

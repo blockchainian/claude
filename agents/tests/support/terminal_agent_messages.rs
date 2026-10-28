@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_codex_collaboration_navigation() {
     let directory = tempfile::tempdir().unwrap();
     let codex = directory.path().join("codex");
@@ -138,7 +137,6 @@ fn terminal_codex_collaboration_navigation() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_claude_agent_exchange() {
     let mut records = format!(
         "{}\n{}",

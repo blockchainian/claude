@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_cwd_relative_paths() {
     let project = tempfile::tempdir().unwrap();
     let target = project.path().join("agents/src/ui/draft_flow_tests.rs");

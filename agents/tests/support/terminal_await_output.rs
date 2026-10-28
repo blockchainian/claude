@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_background_await_shows_message_without_task_id() {
     use std::io::Write;
     let (_directory, tmux) = if let Some(path) = std::env::var_os("AGENTS_AWAIT_LIVE_TRANSCRIPT") {

@@ -27,7 +27,6 @@ fn capture_status(tmux: &tmux::Tmux, status: &str) -> String {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_finished_wait_updates_from_metadata() {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("claude");

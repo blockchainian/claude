@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_subagent_handback_list_and_details() {
     let evidence = Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/subagent-handback");
     std::fs::create_dir_all(&evidence).unwrap();

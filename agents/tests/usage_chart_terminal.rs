@@ -49,7 +49,6 @@ fn assert_matching_dot_columns(dots: &[Dot]) {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_usage_chart_stacks_active_tasks_and_preserves_search_layout() {
     let output = std::env::var_os("AGENTS_USAGE_CHART_OUTPUT")
         .map(PathBuf::from)

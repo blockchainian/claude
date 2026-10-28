@@ -26,7 +26,6 @@ fn token_color(capture: &str, token: &str, width: u16, height: u16) -> vt100::Co
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_claude_mcp_generic_event_detail() {
     use std::io::Write;
     let (_directory, tmux, transcript) = start_probe("mcp-claude-generic");
@@ -157,7 +156,6 @@ fn start_codex_mcp_probe(fixture: &str) -> (tempfile::TempDir, Tmux) {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_codex_mcp_generic_event_detail() {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("../fixtures/mcp-codex/structured.json")).unwrap();
@@ -191,7 +189,6 @@ fn terminal_codex_mcp_generic_event_detail() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_codex_claude_client_text() {
     for (tool, fixture, input_marker, reply_marker) in [
         (
@@ -221,7 +218,6 @@ fn terminal_codex_claude_client_text() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_claude_chrome_javascript() {
     use std::io::Write;
     let (_directory, tmux, transcript) = start_probe("chrome-javascript");
@@ -338,7 +334,6 @@ fn terminal_claude_chrome_javascript() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_claude_chrome_browser_batch() {
     use std::io::Write;
     let (_directory, tmux, transcript) = start_probe("chrome-browser-batch");

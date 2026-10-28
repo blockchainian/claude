@@ -64,7 +64,6 @@ fn write_verdict(name: &str, captures: &[String]) {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_claude_tool_list_names_groups_and_paths() {
     let project = tempfile::tempdir().unwrap();
     let mut records: Vec<serde_json::Value> = include_str!("../fixtures/transcript.jsonl")
@@ -148,7 +147,6 @@ fn terminal_claude_tool_list_names_groups_and_paths() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_codex_tool_list_shell_group() {
     let (_directory, tmux) = terminal_codex_exit::start_codex_probe(
         "codex-tool-list",
@@ -183,7 +181,6 @@ fn terminal_codex_tool_list_shell_group() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_claude_shell_commands_without_description() {
     let mut records: Vec<serde_json::Value> = include_str!("../fixtures/transcript.jsonl")
         .lines()

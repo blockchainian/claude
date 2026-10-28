@@ -186,7 +186,6 @@ fn assert_title_caret(tmux: &Tmux, title: &str, offset: usize) -> String {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_background_event_has_no_marker_and_keeps_its_time() {
     let records = include_str!("fixtures/background/two-awaits.jsonl");
     let contents = |count| {
@@ -295,7 +294,6 @@ fn start_probe_with_command(
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_show_more_keeps_label_while_loading() {
     let (directory, tmux, _transcript) = start_probe("show-more");
     let project = directory.path().join("claude/projects/project");
@@ -328,7 +326,6 @@ fn terminal_show_more_keeps_label_while_loading() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_branch_name_edits_in_task_details_and_preserves_input() {
     let repository = tempfile::tempdir().unwrap();
     for args in [
@@ -465,7 +462,6 @@ fn terminal_branch_name_edits_in_task_details_and_preserves_input() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_prompt_newline_entry() {
     let (_directory, tmux, _transcript) = start_probe("prompt-newlines");
     begin_named_draft(&tmux, "Prompt probe");
@@ -499,7 +495,6 @@ fn terminal_prompt_newline_entry() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_prompt_kill_copies_and_ctrl_y_pastes() {
     let (directory, tmux, _transcript) = start_probe("prompt-kill-yank");
     begin_named_draft(&tmux, "Prompt probe");
@@ -528,7 +523,6 @@ fn terminal_prompt_kill_copies_and_ctrl_y_pastes() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_prompt_marker_caret_and_mouse_alignment() {
     let (_directory, tmux, _transcript) = start_probe("prompt-marker");
     for width in [120, 200] {
@@ -609,7 +603,6 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_inline_code_follows_neovim_accent() {
     let (_directory, tmux, _transcript) = start_probe("text-accent");
     for (mode, notification, index) in [
@@ -644,7 +637,6 @@ fn terminal_inline_code_follows_neovim_accent() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_mcp_display_names() {
     use std::io::Write;
 
@@ -684,7 +676,6 @@ fn terminal_mcp_display_names() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_dashboard_tabs_and_footer() {
     let (_directory, tmux, _transcript) = start_probe("header-footer");
     for width in [200, 120] {
@@ -733,7 +724,6 @@ fn terminal_dashboard_tabs_and_footer() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_cursor_keeps_cell_colors() {
     let (_directory, tmux, _transcript) = start_probe("task-cursor");
     for width in [120, 200] {
@@ -910,7 +900,6 @@ fn assert_task_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &s
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_details_borders_keep_status_and_elapsed_separate() {
     let (_directory, tmux, _transcript) = start_probe("details-borders");
     for width in [112, 200] {
@@ -933,7 +922,6 @@ fn terminal_task_details_borders_keep_status_and_elapsed_separate() {
 // Runs the executable's terminal loop, provider discovery and event loading, rather
 // than constructing a View. AGENTS_PROBE_BIN also checks the installed artifact.
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_layout_tracks_width() {
     let (_directory, tmux, _transcript) = start_probe("layout");
     for (width, height) in [
@@ -1169,7 +1157,6 @@ fn terminal_layout_tracks_width() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_update_click_selects_source_row() {
     let (_directory, tmux, _transcript) = start_probe("details-source");
     std::thread::sleep(Duration::from_secs(1));
@@ -1220,7 +1207,6 @@ fn terminal_update_click_selects_source_row() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_notification_shows_summary_without_id_and_missing_file() {
     use std::io::Write;
     let (_directory, tmux, transcript) = start_probe("task-notification");
@@ -1273,7 +1259,6 @@ fn terminal_task_notification_shows_summary_without_id_and_missing_file() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_running_tool_animates_without_input() {
     use std::io::Write;
 
@@ -1389,7 +1374,6 @@ fn background_text_probe(name: &str, text: &str) -> (tempfile::TempDir, Tmux, st
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_details_section_positions() {
     let (_directory, tmux, transcript) =
         background_text_probe("details-sections", "Running checks\n");
@@ -1575,7 +1559,6 @@ fn terminal_task_details_section_positions() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_details_background_before_activity() {
     let (_directory, tmux, transcript) =
         background_text_probe("background-before-activity", "Running checks\n");
@@ -1597,7 +1580,6 @@ fn terminal_task_details_background_before_activity() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_details_needs_input_follows_prompt_before_tasks() {
     let (directory, tmux, transcript) = start_probe("details-needs-input");
     let job = directory.path().join("claude/jobs/details-needs-input");
@@ -1647,7 +1629,6 @@ fn terminal_task_details_needs_input_follows_prompt_before_tasks() {
 mod terminal_codex_exit;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_event_metadata_aligns_new_with_clock() {
     for width in [100, 200] {
         let (_directory, tmux, transcript) = start_probe("log-latest-border");
@@ -1802,7 +1783,6 @@ fn terminal_event_metadata_aligns_new_with_clock() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_event_border_double_clicks() {
     let (_directory, tmux, _transcript) = start_probe("log-borders");
     tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "45"]);
@@ -1852,7 +1832,6 @@ fn terminal_event_border_double_clicks() {
 mod terminal_chronological;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_manager_detach_title() {
     use std::io::Write;
     let (_directory, tmux, transcript) = start_probe("manager-detach-title");
@@ -1970,7 +1949,6 @@ mod paths;
 mod terminal_event_scroll;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_manager_detach_result_name() {
     use std::io::Write;
     let (_directory, tmux, transcript) = start_probe("manager-detach-result-name");
@@ -2051,7 +2029,6 @@ fn terminal_weekly_usage_on_task_header() {
 }
 
 #[test]
-#[ignore = "requires tmux; runs the real app with isolated preferences"]
 fn terminal_context_usage_on_task_details_border() {
     let (_claude_directory, claude, _transcript) = start_probe("claude-context-border");
     let capture = claude.capture_when(|capture| capture.contains("Update"));
@@ -2125,7 +2102,6 @@ fn terminal_context_usage_on_task_details_border() {
 mod terminal_await_output;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_duration_sort_jump_position() {
     let mut captures = Vec::new();
     for width in [100, 200] {
@@ -2182,7 +2158,6 @@ fn terminal_duration_sort_jump_position() {
 mod terminal_model_families;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_finished_claude_subagents_remain_under_inactive_parent() {
     let (_directory, tmux, transcript) = start_probe("claude-inactive-subagents");
     let children = transcript.with_extension("").join("subagents");
@@ -2234,7 +2209,6 @@ fn terminal_finished_claude_subagents_remain_under_inactive_parent() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_inactive_elapsed_stays_at_last_record() {
     let (_directory, tmux, _transcript) = start_probe("inactive-elapsed");
     let header = |capture: &str| {
@@ -2274,7 +2248,6 @@ mod terminal_window_navigation;
 mod terminal_transcript;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_filtered_event_labels_and_typed_prompts() {
     let output = Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/bottom-filter-label-probe");
     std::fs::create_dir_all(&output).unwrap();
@@ -2450,7 +2423,6 @@ mod terminal_output_follow;
 mod terminal_selection_display;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_configuration_version_notices() {
     let message = "Version 2 configuration unsupported, using defaults";
     for upgraded_at_start in [true, false] {
@@ -2488,7 +2460,6 @@ fn terminal_configuration_version_notices() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_delete_linked_worktree_dialog() {
     let repository = tempfile::tempdir().unwrap();
     let primary = repository.path().join("repo");

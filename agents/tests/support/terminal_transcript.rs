@@ -51,7 +51,6 @@ fn claude_records() -> String {
 }
 
 #[test]
-#[ignore = "requires tmux; real app with isolated provider records"]
 fn terminal_transcript_modes() {
     let report = std::env::var_os("AGENTS_TRANSCRIPT_PROBE_DIR")
         .map(std::path::PathBuf::from)

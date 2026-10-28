@@ -6,7 +6,6 @@ fn window_key(tmux: &Tmux, direction: &str) {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_vim_window_navigation_uses_rendered_panels() {
     let mut captures = Vec::new();
     for width in [200, 100] {
@@ -133,7 +132,6 @@ fn paging_transcript() -> String {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_active_panel_paging_stays_in_focused_panel() {
     let mut evidence = Vec::new();
     for width in [200, 100] {

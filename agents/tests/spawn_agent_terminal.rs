@@ -45,7 +45,6 @@ impl Tmux {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_spawn_agent_claude_receipt_and_model() {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("claude");

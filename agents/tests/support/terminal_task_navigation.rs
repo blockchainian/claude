@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_navigation_and_opening_keys() {
     let directory = tempfile::tempdir().unwrap();
     let codex = directory.path().join("codex");
@@ -98,7 +97,6 @@ fn terminal_task_navigation_and_opening_keys() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_task_border_double_clicks() {
     let (directory, tmux, transcript) = start_probe("task-borders");
     let project = transcript.parent().unwrap();

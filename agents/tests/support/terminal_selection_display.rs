@@ -22,7 +22,6 @@ fn position(capture: &str, needle: &str, after: usize) -> (usize, usize) {
 }
 
 #[test]
-#[ignore = "requires tmux; real app with isolated provider records"]
 fn terminal_drag_copies_display_lines_and_joins_markdown_wraps() {
     use std::io::Write;
     let report = std::env::var_os("AGENTS_SELECTION_PROBE_DIR")

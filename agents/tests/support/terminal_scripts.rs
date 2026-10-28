@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_write_file_colors() {
     use std::io::Write;
 
@@ -40,7 +39,6 @@ fn terminal_write_file_colors() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_shell_file_read_colors() {
     for provider in ["claude", "codex"] {
         for (case, command, highlighted) in [
@@ -184,7 +182,6 @@ fn start_shell_output_probe(
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_shell_sed_grep_head_colors() {
     let input: serde_json::Value =
         serde_json::from_str(include_str!("../fixtures/sed-grep-head/input.json")).unwrap();
@@ -234,7 +231,6 @@ fn terminal_shell_sed_grep_head_colors() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_git_global_diff_colors() {
     let call = include_str!("../fixtures/shell-output-corpus.jsonl")
         .lines()

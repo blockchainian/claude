@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_codex_memory_citation_body() {
     let directory = tempfile::tempdir().unwrap();
     let codex = directory.path().join("codex");

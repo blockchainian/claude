@@ -1,7 +1,6 @@
 use super::*;
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_question_footer_styles_and_clicks() {
     let mut cases = Vec::new();
     for action in ["Enter", "Esc"] {
@@ -82,7 +81,6 @@ fn click_hint(tmux: &Tmux, capture: &str, key: &str) {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_shared_footer_clicks_and_help_keys() {
     let (_directory, tmux, _) = start_probe("shared-footer");
     let capture = tmux.capture_when(|capture| capture.lines().last().unwrap().trim() == "? help");
@@ -150,7 +148,6 @@ fn terminal_shared_footer_clicks_and_help_keys() {
 }
 
 #[test]
-#[ignore = "requires tmux; run with --ignored --nocapture"]
 fn terminal_pending_questions_wrap_in_full() {
     let (directory, tmux, transcript) = start_probe("pending-question-wrap");
     let parent = transcript.file_stem().unwrap().to_str().unwrap();
