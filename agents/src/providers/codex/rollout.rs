@@ -4180,6 +4180,12 @@ mod tests {
                     "appium session calls title their action and table the rest: {:?}",
                     call.input
                 );
+            } else if record["payload"]["item"]["server"] == "cua_repl" {
+                let code = record["payload"]["item"]["arguments"]["code"]
+                    .as_str()
+                    .unwrap();
+                assert!(matches!(&call.input[0], Section::Code { lang, text, .. }
+                    if lang == "js" && text.contains(code)));
             } else {
                 assert!(matches!(&call.input[0], Section::Structured { label, text }
                     if label == "input" && serde_json::from_str::<Value>(text).unwrap() == record["payload"]["item"]["arguments"]));

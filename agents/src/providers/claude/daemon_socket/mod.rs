@@ -175,12 +175,6 @@ fn validate_ping(frame: &[u8]) -> io::Result<()> {
             "Invalid Claude daemon ping handshake",
         ));
     }
-    if value["version"] != "2.1.309" {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Unsupported Claude daemon version; expected 2.1.309",
-        ));
-    }
     Ok(())
 }
 

@@ -275,7 +275,7 @@ fn captured_ping_reports_protocol_even_for_different_probe_protocol() {
 
 #[test]
 fn ping_requires_each_handshake_field() {
-    for field in ["ok", "op", "proto", "version"] {
+    for field in ["ok", "op", "proto"] {
         let mut value = ping();
         value.as_object_mut().unwrap().remove(field);
         assert!(validate_ping(&encoded(&value)).is_err(), "missing {field}");
@@ -283,7 +283,7 @@ fn ping_requires_each_handshake_field() {
 }
 
 #[test]
-fn ping_requires_exact_protocol_and_verified_version() {
+fn ping_requires_exact_protocol() {
     for (field, invalid) in [
         ("ok", json!(false)),
         ("ok", json!("true")),
@@ -292,14 +292,19 @@ fn ping_requires_exact_protocol_and_verified_version() {
         ("proto", json!(2)),
         ("proto", json!("1")),
         ("proto", Value::Null),
-        ("version", json!("2.1.308")),
-        ("version", json!("2.1.310")),
-        ("version", json!("2.1.309-dev")),
-        ("version", Value::Null),
     ] {
         let mut value = ping();
         value[field] = invalid;
         assert!(validate_ping(&encoded(&value)).is_err(), "{value}");
+    }
+}
+
+#[test]
+fn ping_accepts_any_daemon_version_speaking_the_protocol() {
+    for version in [json!("2.1.312"), Value::Null] {
+        let mut value = ping();
+        value["version"] = version;
+        validate_ping(&encoded(&value)).unwrap();
     }
 }
 
