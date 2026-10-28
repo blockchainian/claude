@@ -155,33 +155,40 @@ fn active_panel_detail_bottom_forward_keys_do_not_navigate_lists_event_detail() 
     detail_bottom_forward_keys_do_not_navigate_lists(Panel::EventDetail);
 }
 
-#[test]
-fn active_panel_detail_top_backward_keys_do_not_navigate_lists() {
+fn detail_top_backward_keys_do_not_navigate_lists(panel: Panel) {
     for width in [100, 200] {
-        for panel in [Panel::TaskDetails, Panel::EventDetail] {
-            let (mut view, now) = panel_fixture(width);
-            view.set_active_panel(panel);
-            let selected = view.selected;
-            let event = view.event_list.cursor;
-            let scroll = view.event_list.scroll.get();
-            key(&mut view, KeyCode::End);
-            event_screen(&view, width, 45, now);
-            let bottom = task_details_position(&view, panel);
-            assert!(bottom > 0);
-            key(&mut view, KeyCode::Home);
-            event_screen(&view, width, 45, now);
-            assert_eq!(task_details_position(&view, panel), 0);
-            for (forward, backward) in navigation_pairs() {
-                if panel == Panel::EventDetail && forward.code != KeyCode::End {
-                    continue;
-                }
-                key(&mut view, KeyCode::Home);
-                view.handle_key(backward);
-                assert_eq!(task_details_position(&view, panel), 0);
-                assert_lists_unchanged(&view, selected, event, scroll);
+        let (mut view, now) = panel_fixture(width);
+        view.set_active_panel(panel);
+        let selected = view.selected;
+        let event = view.event_list.cursor;
+        let scroll = view.event_list.scroll.get();
+        key(&mut view, KeyCode::End);
+        event_screen(&view, width, 45, now);
+        let bottom = task_details_position(&view, panel);
+        assert!(bottom > 0);
+        key(&mut view, KeyCode::Home);
+        event_screen(&view, width, 45, now);
+        assert_eq!(task_details_position(&view, panel), 0);
+        for (forward, backward) in navigation_pairs() {
+            if panel == Panel::EventDetail && forward.code != KeyCode::End {
+                continue;
             }
+            key(&mut view, KeyCode::Home);
+            view.handle_key(backward);
+            assert_eq!(task_details_position(&view, panel), 0);
+            assert_lists_unchanged(&view, selected, event, scroll);
         }
     }
+}
+
+#[test]
+fn active_panel_detail_top_backward_keys_do_not_navigate_lists_task_details() {
+    detail_top_backward_keys_do_not_navigate_lists(Panel::TaskDetails);
+}
+
+#[test]
+fn active_panel_detail_top_backward_keys_do_not_navigate_lists_event_detail() {
+    detail_top_backward_keys_do_not_navigate_lists(Panel::EventDetail);
 }
 
 #[test]
