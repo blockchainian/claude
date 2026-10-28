@@ -132,14 +132,10 @@ impl Tmux {
 fn wait_for_size(tmux: &Tmux, width: u16, height: u16) -> String {
     tmux.capture_when(|capture| {
         capture.lines().count() == usize::from(height)
-            && capture
-                .lines()
-                .nth(1)
-                .is_some_and(|line| line.width() == usize::from(width))
-            && capture
-                .lines()
-                .nth(2)
-                .is_some_and(|line| line.matches('│').count() == if width >= 150 { 2 } else { 1 })
+            && capture.lines().nth(1).is_some_and(|line| line.width() == usize::from(width))
+            && capture.lines().nth(2).is_some_and(|line| {
+                line.matches('│').count() == if width >= 150 { 2 } else { 1 }
+            })
     })
 }
 
@@ -208,35 +204,36 @@ fn assert_title_caret(tmux: &Tmux, title: &str, offset: usize) -> String {
     })
 }
 
-fn background_event_has_no_marker_and_keeps_its_time(count: usize, time: &str) {
-    let contents = include_str!("fixtures/background/two-awaits.jsonl")
-        .lines()
-        .take(count)
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n";
-    let (_directory, tmux, _transcript) =
-        start_probe_with_transcript("background-log-marker", &contents);
-    let capture = tmux.capture_when(|capture| {
-        capture
+#[test]
+fn terminal_background_event_has_no_marker_and_keeps_its_time() {
+    let records = include_str!("fixtures/background/two-awaits.jsonl");
+    let contents = |count| {
+        format!(
+            "{}{}\n",
+            include_str!("fixtures/transcript.jsonl"),
+            records.lines().take(count).collect::<Vec<_>>().join("\n")
+        )
+    };
+    let (_directory, tmux, transcript) =
+        start_probe_with_transcript("background-log-marker", &contents(3));
+    for (count, time) in [(3, "3m 13s"), (4, "3m 15s")] {
+        if count == 4 {
+            std::fs::write(&transcript, contents(count)).unwrap();
+        }
+        let capture = tmux.capture_when(|capture| {
+            capture
+                .lines()
+                .any(|row| row.contains("等用量图颜色线程") && row.trim_end().ends_with(time))
+        });
+        let row = capture
             .lines()
-            .any(|row| row.contains("等用量图颜色线程") && row.trim_end().ends_with(time))
-    });
-    let row = capture
-        .lines()
-        .find(|row| row.contains("等用量图颜色线程") && row.trim_end().ends_with(time))
-        .unwrap();
-    assert!(!row.contains(" *"), "{row}");
-}
-
-#[test]
-fn terminal_background_event_pending_has_no_marker_and_keeps_its_time() {
-    background_event_has_no_marker_and_keeps_its_time(3, "3m 13s");
-}
-
-#[test]
-fn terminal_background_event_completed_has_no_marker_and_keeps_its_time() {
-    background_event_has_no_marker_and_keeps_its_time(4, "3m 15s");
+            .find(|row| row.contains("等用量图颜色线程") && row.trim_end().ends_with(time))
+            .unwrap();
+        assert!(!row.contains(" *"), "{row}");
+    }
+    println!(
+        "{{\"verdict\":\"pass\",\"background_marker\":false,\"pending_time\":\"3m 13s\",\"completed_time\":\"3m 15s\"}}"
+    );
 }
 
 #[test]
@@ -322,16 +319,6 @@ fn start_probe_with_command(
     setup: impl FnOnce(&Path),
     command_prefix: &[&str],
 ) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
-    launch_probe(name, contents, setup, command_prefix, true)
-}
-
-fn launch_probe(
-    name: &str,
-    contents: &str,
-    setup: impl FnOnce(&Path),
-    command_prefix: &[&str],
-    select_task: bool,
-) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("claude");
     let project = config.join("projects/project");
@@ -382,10 +369,8 @@ fn launch_probe(
             .next()
             .is_some_and(|tabs| tabs.contains("Inactive 1"))
     });
-    if select_task {
-        tmux.run(&["send-keys", "-t", "probe", "Tab"]);
-        tmux.wait_for(|capture| capture.contains("Update") || capture.contains("Last activity"));
-    }
+    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+    tmux.wait_for(|capture| capture.contains("Update") || capture.contains("Last activity"));
     (directory, tmux, transcript)
 }
 
@@ -667,8 +652,7 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
     delete_named_draft(&tmux);
     tmux.wait_for(|capture| {
         // Confirmed deletion returns to the task chooser.
-        capture.lines().any(|line| line.trim() == "No task ❮")
-            && !capture.contains("Prompt probe ❯")
+        capture.lines().any(|line| line.trim() == "No task ❮") && !capture.contains("Prompt probe ❯")
     });
     begin_named_draft(&tmux, "Prompt probe");
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
@@ -960,81 +944,73 @@ fn terminal_dashboard_tabs_and_footer() {
     }
 }
 
-fn task_cursor_keeps_cell_colors(width: u16) {
+#[test]
+fn terminal_task_cursor_keeps_cell_colors() {
     let (_directory, tmux, _transcript) = start_probe("task-cursor");
-
-    tmux.run(&[
-        "resize-window",
-        "-t",
-        "probe",
-        "-x",
-        &width.to_string(),
-        "-y",
-        "50",
-    ]);
-    wait_for_size(&tmux, width, 50);
-    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
-    let parser = captured_screen(&capture, width, 50);
-    let screen = parser.screen();
-    let tabs = screen.rows(0, width).next().unwrap();
-    assert_eq!(
-        tabs.split_whitespace().collect::<Vec<_>>(),
-        ["Active", "0", "Inactive", "1"]
-    );
-    assert_eq!(tabs.find("Active"), Some(2));
-    assert_eq!(
-        tabs[..tabs.find("Inactive").unwrap()].width(),
-        usize::from(width) - 12
-    );
-    for column in [2, width - 12] {
-        let tab = screen.cell(0, column).unwrap();
-        assert!(tab.bold(), "{capture}");
-        assert!(!tab.dim(), "{capture}");
-        assert_ne!(tab.fgcolor(), vt100::Color::Default, "{capture}");
-    }
-    assert_eq!(screen.cell(0, 2).unwrap().bgcolor(), vt100::Color::Default);
-    assert_ne!(
-        screen.cell(0, width - 12).unwrap().bgcolor(),
-        vt100::Color::Default
-    );
-    let (x, y) = (0..50)
-        .find_map(|y| {
-            (0..width / 3).find_map(|x| {
-                (screen.cell(y, x).unwrap().contents() == "○"
-                    && x > 0
-                    && screen.cell(y, x - 1).unwrap().bold())
-                .then_some((x, y))
+    for width in [120, 200] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        std::thread::sleep(Duration::from_millis(300));
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+        let parser = captured_screen(&capture, width, 50);
+        let screen = parser.screen();
+        let tabs = screen.rows(0, width).next().unwrap();
+        assert_eq!(
+            tabs.split_whitespace().collect::<Vec<_>>(),
+            ["Active", "0", "Inactive", "1"]
+        );
+        assert_eq!(tabs.find("Active"), Some(2));
+        assert_eq!(
+            tabs[..tabs.find("Inactive").unwrap()].width(),
+            usize::from(width) - 12
+        );
+        for column in [2, width - 12] {
+            let tab = screen.cell(0, column).unwrap();
+            assert!(tab.bold(), "{capture}");
+            assert!(!tab.dim(), "{capture}");
+            assert_ne!(tab.fgcolor(), vt100::Color::Default, "{capture}");
+        }
+        assert_eq!(screen.cell(0, 2).unwrap().bgcolor(), vt100::Color::Default);
+        assert_ne!(
+            screen.cell(0, width - 12).unwrap().bgcolor(),
+            vt100::Color::Default
+        );
+        let (x, y) = (0..50)
+            .find_map(|y| {
+                (0..width / 3).find_map(|x| {
+                    (screen.cell(y, x).unwrap().contents() == "○"
+                        && x > 0
+                        && screen.cell(y, x - 1).unwrap().bold())
+                    .then_some((x, y))
+                })
             })
-        })
-        .expect("selected task marker");
-    assert!(
-        !(0..width / 3).any(|column| screen.cell(y, column).unwrap().contents() == "❯"),
-        "{capture}"
-    );
-    let marker = screen.cell(y, x).unwrap();
-    let status = screen.cell(y, x).unwrap();
-    let title = screen.cell(y, x + 2).unwrap();
-    assert!(screen.cell(y, x - 1).unwrap().bold());
-    // vt100 models bold and dim as mutually exclusive intensity levels.
-    assert!(status.dim());
-    assert!(title.bold(), "title at ({}, {y}): {capture}", x + 2);
-    assert_eq!(marker.fgcolor(), vt100::Color::Default);
-    assert_ne!(title.fgcolor(), marker.fgcolor());
-    assert_eq!(status.fgcolor(), vt100::Color::Default);
-    assert_eq!(title.bgcolor(), marker.bgcolor());
-    assert_eq!(status.bgcolor(), marker.bgcolor());
-    assert_ne!(marker.bgcolor(), vt100::Color::Default);
+            .expect("selected task marker");
+        assert!(
+            !(0..width / 3).any(|column| screen.cell(y, column).unwrap().contents() == "❯"),
+            "{capture}"
+        );
+        let marker = screen.cell(y, x).unwrap();
+        let status = screen.cell(y, x).unwrap();
+        let title = screen.cell(y, x + 2).unwrap();
+        assert!(screen.cell(y, x - 1).unwrap().bold());
+        // vt100 models bold and dim as mutually exclusive intensity levels.
+        assert!(status.dim());
+        assert!(title.bold(), "title at ({}, {y}): {capture}", x + 2);
+        assert_eq!(marker.fgcolor(), vt100::Color::Default);
+        assert_ne!(title.fgcolor(), marker.fgcolor());
+        assert_eq!(status.fgcolor(), vt100::Color::Default);
+        assert_eq!(title.bgcolor(), marker.bgcolor());
+        assert_eq!(status.bgcolor(), marker.bgcolor());
+        assert_ne!(marker.bgcolor(), vt100::Color::Default);
+    }
     println!("{{\"task_cursor\":\"pass\",\"widths\":[120,200]}}");
-}
-
-#[test]
-fn terminal_task_cursor_keeps_cell_colors_120() {
-    task_cursor_keeps_cell_colors(120);
-}
-
-#[test]
-fn terminal_task_cursor_keeps_cell_colors_200() {
-    task_cursor_keeps_cell_colors(200);
 }
 
 fn assert_task_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
@@ -1166,270 +1142,239 @@ fn terminal_task_details_borders_keep_status_and_elapsed_separate() {
 
 // Runs the executable's terminal loop, provider discovery and event loading, rather
 // than constructing a View. AGENTS_PROBE_BIN also checks the installed artifact.
-fn layout_tracks_width(width: u16, height: u16) {
+#[test]
+fn terminal_layout_tracks_width() {
     let (_directory, tmux, _transcript) = start_probe("layout");
-    tmux.run(&[
-        "resize-window",
-        "-t",
-        "probe",
-        "-x",
-        &width.to_string(),
-        "-y",
-        &height.to_string(),
-    ]);
-    let capture = wait_for_size(&tmux, width, height);
-    println!("{width} columns:\n{capture}");
-    let lines: Vec<_> = capture.lines().collect();
-    assert!(
-        capture.contains("Update"),
-        "update header missing: {capture}"
-    );
-    assert!(
-        !capture.contains("Latest update"),
-        "stale update header: {capture}"
-    );
-    assert!(
-        !capture.contains("Last activity"),
-        "stale activity header: {capture}"
-    );
-    assert!(
-        !capture.contains("Latest message"),
-        "stale message header: {capture}"
-    );
-    assert!(
-        capture.contains("4165651d") || capture.contains("Stop hook"),
-        "fixture not selected: {capture}"
-    );
-    assert!(
-        lines[1].contains(" Inactive ⏸\u{fe0e} "),
-        "status must stay on the top rule: {capture}"
-    );
-    let top = lines[2];
-    assert_eq!(
-        top.matches('│').count(),
-        if width >= 150 { 2 } else { 1 },
-        "{capture}"
-    );
-    let separators: Vec<_> = top
-        .match_indices('│')
-        .map(|(index, _)| top[..index].width())
-        .collect();
-    let top_end = 2 + lines[2..]
-        .iter()
-        .take_while(|line| {
-            separators.iter().all(|column| {
-                line.match_indices('│')
-                    .any(|(index, _)| line[..index].width() == *column)
-            })
-        })
-        .count();
-    let prompt = top_end + 1;
-    assert!(lines[prompt].contains('❯'), "prompt missing: {capture}");
-    let event_rule = if width >= 150 {
-        top_end + 2
-    } else {
-        (prompt + 2..lines.len() - 1)
-            .find(|&row| lines[row].matches('─').count() > width as usize / 2)
-            .expect("separate list/detail border")
-    };
-    let top_height = top_end - 2;
-    let bottom_height = lines.len() - event_rule - 2;
-    if width >= 150 {
-        let content = height as usize - 6;
-        assert_eq!(top_height, content * 618 / 1000, "{capture}");
-        assert_eq!(top_height + bottom_height, content, "{capture}");
-    } else {
-        let list_height = event_rule - prompt - 2;
-        let content = height as usize - 7;
-        let expected = [content.div_ceil(3), (content + 1) / 3, content / 3];
+    for (width, height) in [
+        (200, 50),
+        (120, 60),
+        (100, 45),
+        (149, 50),
+        (150, 50),
+        (151, 50),
+        (200, 50),
+    ] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            &height.to_string(),
+        ]);
+        std::thread::sleep(Duration::from_secs(1));
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        println!("{width} columns:\n{capture}");
+        let lines: Vec<_> = capture.lines().collect();
+        assert!(
+            capture.contains("Update"),
+            "update header missing: {capture}"
+        );
+        assert!(
+            !capture.contains("Latest update"),
+            "stale update header: {capture}"
+        );
+        assert!(
+            !capture.contains("Last activity"),
+            "stale activity header: {capture}"
+        );
+        assert!(
+            !capture.contains("Latest message"),
+            "stale message header: {capture}"
+        );
+        assert!(
+            capture.contains("4165651d") || capture.contains("Stop hook"),
+            "fixture not selected: {capture}"
+        );
+        assert!(
+            lines[1].contains(" Inactive ⏸\u{fe0e} "),
+            "status must stay on the top rule: {capture}"
+        );
+        let top = lines[2];
         assert_eq!(
-            [top_height, list_height, bottom_height],
-            expected,
+            top.matches('│').count(),
+            if width >= 150 { 2 } else { 1 },
             "{capture}"
         );
-        println!(
-            "{width}x{height} content heights: top={top_height}, list={list_height}, detail={bottom_height}"
-        );
-    }
-    assert!(
-        !lines[event_rule + 1].trim().is_empty(),
-        "blank row below log rule: {capture}"
-    );
-    let model = lines
-        .iter()
-        .find(|line| line.contains("claude-opus-5-5"))
-        .expect("model row");
-    assert!(
-        model.contains("claude-opus-5-5") && model.contains("medium"),
-        "model group missing: {capture}"
-    );
-    assert_task_details_borders(&tmux, width, height, &capture);
-    if width >= 150 {
-        let column_width = (width as usize - 8) / 4;
-        assert_eq!(separators, [column_width + 2, 2 * column_width + 5]);
-        for line in &lines[2..top_end] {
-            let event_panel = line.splitn(3, '│').nth(2).unwrap();
-            if !event_panel.trim().is_empty() {
-                assert_eq!(
-                    event_panel.len() - event_panel.trim_start().len(),
-                    1,
-                    "log left: {line}"
-                );
-                assert_eq!(
-                    line.trim_end_matches([' ', '┐', '│', '┘']).width(),
-                    width as usize - 2,
-                    "log time right: {line}"
-                );
-            }
-        }
-        assert!(
-            lines[top_end + 1].contains('❯'),
-            "prompt missing: {capture}"
-        );
-        let middle: Vec<_> = lines[top_end].chars().collect();
-        let task_details: String = middle[separators[0] + 2..separators[1] - 1]
-            .iter()
+        let separators: Vec<_> = top
+            .match_indices('│')
+            .map(|(index, _)| top[..index].width())
             .collect();
-        assert!(
-            task_details.contains(match width {
-                150 | 151 => " Codex manager 停止时… ",
-                _ => " Codex manager 停止时线程处理 ",
-            }),
-            "task name missing from middle rule: {capture}"
-        );
-        for line in &lines[2..top_end] {
-            let event_panel = line.splitn(3, '│').nth(2).unwrap();
-            assert!(!event_panel.contains("────"), "extra log rule: {capture}");
-            assert!(!line.contains(" · Inactive"), "extra status row: {capture}");
+        let top_end = 2 + lines[2..]
+            .iter()
+            .take_while(|line| {
+                separators.iter().all(|column| {
+                    line.match_indices('│')
+                        .any(|(index, _)| line[..index].width() == *column)
+                })
+            })
+            .count();
+        let prompt = top_end + 1;
+        assert!(lines[prompt].contains('❯'), "prompt missing: {capture}");
+        let event_rule = if width >= 150 {
+            top_end + 2
+        } else {
+            (prompt + 2..lines.len() - 1)
+                .find(|&row| lines[row].matches('─').count() > width as usize / 2)
+                .expect("separate list/detail border")
+        };
+        let top_height = top_end - 2;
+        let bottom_height = lines.len() - event_rule - 2;
+        if width >= 150 {
+            let content = height as usize - 6;
+            assert_eq!(top_height, content * 618 / 1000, "{capture}");
+            assert_eq!(top_height + bottom_height, content, "{capture}");
+        } else {
+            let list_height = event_rule - prompt - 2;
+            let content = height as usize - 7;
+            let expected = [content.div_ceil(3), (content + 1) / 3, content / 3];
+            assert_eq!(
+                [top_height, list_height, bottom_height],
+                expected,
+                "{capture}"
+            );
+            println!(
+                "{width}x{height} content heights: top={top_height}, list={list_height}, detail={bottom_height}"
+            );
         }
-        assert!(lines[event_rule].trim().chars().all(|c| c == '─'));
         assert!(
-            lines[event_rule + 4..lines.len() - 1]
+            !lines[event_rule + 1].trim().is_empty(),
+            "blank row below log rule: {capture}"
+        );
+        let model = lines
+            .iter()
+            .find(|line| line.contains("claude-opus-5-5"))
+            .expect("model row");
+        assert!(
+            model.contains("claude-opus-5-5") && model.contains("medium"),
+            "model group missing: {capture}"
+        );
+        assert_task_details_borders(&tmux, width, height, &capture);
+        if width >= 150 {
+            let column_width = (width as usize - 8) / 4;
+            assert_eq!(separators, [column_width + 2, 2 * column_width + 5]);
+            for line in &lines[2..top_end] {
+                let event_panel = line.splitn(3, '│').nth(2).unwrap();
+                if !event_panel.trim().is_empty() {
+                    assert_eq!(
+                        event_panel.len() - event_panel.trim_start().len(),
+                        1,
+                        "log left: {line}"
+                    );
+                    assert_eq!(
+                        line.trim_end_matches([' ', '┐', '│', '┘']).width(),
+                        width as usize - 2,
+                        "log time right: {line}"
+                    );
+                }
+            }
+            assert!(
+                lines[top_end + 1].contains('❯'),
+                "prompt missing: {capture}"
+            );
+            let middle: Vec<_> = lines[top_end].chars().collect();
+            let task_details: String = middle[separators[0] + 2..separators[1] - 1]
                 .iter()
-                .any(|line| line.width() > width as usize * 2 / 3),
-            "detail does not span the terminal: {capture}"
-        );
-        assert!(
-            lines[2..top_end].iter().any(|line| {
-                line.splitn(3, '│')
-                    .nth(2)
-                    .is_some_and(|event_panel| event_panel.contains("Stop hook"))
-            }),
-            "event list missing from top row: {capture}"
-        );
-    } else {
-        let list = lines[prompt + 2..event_rule].join("\n");
-        assert!(
-            list.contains("Stop hook"),
-            "event list missing below prompt: {capture}"
-        );
-        assert!(
-            lines[event_rule + 1..lines.len() - 1]
-                .join("\n")
-                .contains("decision"),
-            "newest event detail missing below list: {capture}"
-        );
-        let user_row = (prompt + 1..event_rule)
-            .find(|&row| lines[row].contains("⏺"))
-            .expect("real user event row");
-        // Feed the same SGR mouse press/release received by the terminal loop.
-        tmux.run(&[
-            "send-keys",
-            "-t",
-            "probe",
-            "-l",
-            &format!("\x1b[<0;2;{}M\x1b[<0;2;{}m", user_row + 1, user_row + 1),
-        ]);
-        let opened = tmux.capture_when(|capture| {
-            capture
-                .lines()
-                .skip(event_rule + 1)
-                .any(|line| line.contains("codex thread 01a11210-f266-7182-b202-269b6b4fe157"))
-        });
-        let opened_lines: Vec<_> = opened.lines().collect();
-        assert_eq!(
-            opened_lines[prompt + 2..event_rule].join("\n"),
-            list,
-            "event list hidden after click: {opened}"
-        );
-        assert!(!opened_lines[event_rule].contains("↓ Latest"), "{opened}");
-        assert!(
-            opened_lines[event_rule + 1..opened_lines.len() - 1]
-                .join("\n")
-                .contains("codex thread 01a11210-f266-7182-b202-269b6b4fe157"),
-            "clicked user event missing from detail: {opened}"
-        );
-        // Search follows the last mouse panel, independently of the selected event.
-        tmux.mouse(0, 1, event_rule + 1, true);
-        tmux.run(&["send-keys", "-t", "probe", "/"]);
-        tmux.run(&["send-keys", "-t", "probe", "-l", "await"]);
-        let searched = tmux.capture_when(|capture| {
-            capture
-                .lines()
-                .skip(event_rule + 1)
-                .any(|line| line.contains("Search ❯ await"))
-        });
-        assert!(
-            searched
-                .lines()
-                .skip(event_rule + 1)
-                .any(|line| line.contains("Search ❯ await")),
-            "detail search missing: {searched}"
-        );
-        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-        // Select the real newest event so each resize starts with the same detail.
-        tmux.wait_for(|capture| !capture.contains("Search ❯"));
-        let assistant_row = (prompt + 2..event_rule)
-            .find(|&row| opened_lines[row].contains("对，必须"))
-            .expect("newest assistant row");
-        tmux.run(&[
-            "send-keys",
-            "-t",
-            "probe",
-            "-l",
-            &format!(
-                "\x1b[<0;2;{}M\x1b[<0;2;{}m",
-                assistant_row + 1,
-                assistant_row + 1
-            ),
-        ]);
-        tmux.wait_for(|capture| {
-            capture
-                .lines()
-                .skip(event_rule + 1)
-                .any(|line| line.contains("decision"))
-        });
+                .collect();
+            assert!(
+                task_details.contains(match width {
+                    150 | 151 => " Codex manager 停止时… ",
+                    _ => " Codex manager 停止时线程处理 ",
+                }),
+                "task name missing from middle rule: {capture}"
+            );
+            for line in &lines[2..top_end] {
+                let event_panel = line.splitn(3, '│').nth(2).unwrap();
+                assert!(!event_panel.contains("────"), "extra log rule: {capture}");
+                assert!(!line.contains(" · Inactive"), "extra status row: {capture}");
+            }
+            assert!(lines[event_rule].trim().chars().all(|c| c == '─'));
+            assert!(
+                lines[event_rule + 4..lines.len() - 1]
+                    .iter()
+                    .any(|line| line.width() > width as usize * 2 / 3),
+                "detail does not span the terminal: {capture}"
+            );
+            assert!(
+                lines[2..top_end].iter().any(|line| {
+                    line.splitn(3, '│')
+                        .nth(2)
+                        .is_some_and(|event_panel| event_panel.contains("Stop hook"))
+                }),
+                "event list missing from top row: {capture}"
+            );
+        } else {
+            let list = lines[prompt + 2..event_rule].join("\n");
+            assert!(
+                list.contains("Stop hook"),
+                "event list missing below prompt: {capture}"
+            );
+            assert!(
+                lines[event_rule + 1..lines.len() - 1]
+                    .join("\n")
+                    .contains("decision"),
+                "newest event detail missing below list: {capture}"
+            );
+            let user_row = (prompt + 1..event_rule)
+                .find(|&row| lines[row].contains("⏺"))
+                .expect("real user event row");
+            // Feed the same SGR mouse press/release received by the terminal loop.
+            tmux.run(&[
+                "send-keys",
+                "-t",
+                "probe",
+                "-l",
+                &format!("\x1b[<0;2;{}M\x1b[<0;2;{}m", user_row + 1, user_row + 1),
+            ]);
+            std::thread::sleep(Duration::from_secs(1));
+            let opened = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            let opened_lines: Vec<_> = opened.lines().collect();
+            assert_eq!(
+                opened_lines[prompt + 2..event_rule].join("\n"),
+                list,
+                "event list hidden after click: {opened}"
+            );
+            assert!(!opened_lines[event_rule].contains("↓ Latest"), "{opened}");
+            assert!(
+                opened_lines[event_rule + 1..opened_lines.len() - 1]
+                    .join("\n")
+                    .contains("codex thread 01a11210-f266-7182-b202-269b6b4fe157"),
+                "clicked user event missing from detail: {opened}"
+            );
+            // Search follows the last mouse panel, independently of the selected event.
+            tmux.mouse(0, 1, event_rule + 1, true);
+            tmux.run(&["send-keys", "-t", "probe", "/"]);
+            tmux.run(&["send-keys", "-t", "probe", "-l", "await"]);
+            std::thread::sleep(Duration::from_millis(200));
+            let searched = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            assert!(
+                searched
+                    .lines()
+                    .skip(event_rule + 1)
+                    .any(|line| line.contains("Search ❯ await")),
+                "detail search missing: {searched}"
+            );
+            tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+            // Select the real newest event so each resize starts with the same detail.
+            std::thread::sleep(Duration::from_millis(200));
+            let assistant_row = (prompt + 2..event_rule)
+                .find(|&row| opened_lines[row].contains("对，必须"))
+                .expect("newest assistant row");
+            tmux.run(&[
+                "send-keys",
+                "-t",
+                "probe",
+                "-l",
+                &format!(
+                    "\x1b[<0;2;{}M\x1b[<0;2;{}m",
+                    assistant_row + 1,
+                    assistant_row + 1
+                ),
+            ]);
+            std::thread::sleep(Duration::from_secs(1));
+        }
     }
-}
-
-#[test]
-fn terminal_layout_tracks_width_200() {
-    layout_tracks_width(200, 50);
-}
-
-#[test]
-fn terminal_layout_tracks_width_120() {
-    layout_tracks_width(120, 60);
-}
-
-#[test]
-fn terminal_layout_tracks_width_100() {
-    layout_tracks_width(100, 45);
-}
-
-#[test]
-fn terminal_layout_tracks_width_149() {
-    layout_tracks_width(149, 50);
-}
-
-#[test]
-fn terminal_layout_tracks_width_150() {
-    layout_tracks_width(150, 50);
-}
-
-#[test]
-fn terminal_layout_tracks_width_151() {
-    layout_tracks_width(151, 50);
 }
 
 #[test]
@@ -2838,11 +2783,20 @@ fn terminal_detail_reading_column_preserves_original_copy() {
 #[path = "support/terminal_chronological.rs"]
 mod terminal_chronological;
 
-fn manager_detach_title(width: u16) {
-    let (_directory, tmux, _transcript) = start_probe_with_transcript(
-        "manager-detach-title",
-        include_str!("fixtures/claude-manager-detach.jsonl"),
-    );
+#[test]
+fn terminal_manager_detach_title() {
+    use std::io::Write;
+    let (_directory, tmux, transcript) = start_probe("manager-detach-title");
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(transcript)
+        .unwrap();
+    write!(
+        file,
+        "{}",
+        include_str!("fixtures/claude-manager-detach.jsonl")
+    )
+    .unwrap();
     tmux.run(&["send-keys", "-t", "probe", "End"]);
     tmux.wait_for(|capture| {
         capture.contains("codex-manager detach")
@@ -2850,107 +2804,88 @@ fn manager_detach_title(width: u16) {
                 line.trim().trim_end_matches('│').trim() == "01a1489e-5020-7f40-90e8-c9413012630b"
             })
     });
-
-    tmux.run(&[
-        "resize-window",
-        "-t",
-        "probe",
-        "-x",
-        &width.to_string(),
-        "-y",
-        "50",
-    ]);
-    tmux.wait_for(|capture| {
-        capture.lines().count() == 50
-            && capture
+    for width in [200_u16, 120, 150, 149] {
+        tmux.run(&[
+            "resize-window",
+            "-t",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "50",
+        ]);
+        tmux.wait_for(|capture| {
+            capture.lines().count() == 50
+                && capture.lines().nth(1).is_some_and(|line| {
+                    line.matches('┬').count() == if width >= 150 { 2 } else { 1 }
+                })
+                && capture.lines().any(|line| {
+                    line.width() == usize::from(width)
+                        && line.matches('─').count() > usize::from(width / 2)
+                })
+                && capture.contains("codex-manager detach")
+                && capture.lines().any(|line| {
+                    line.trim().trim_end_matches('│').trim()
+                        == "01a1489e-5020-7f40-90e8-c9413012630b"
+                })
+        });
+        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+        let rows: Vec<_> = capture.lines().collect();
+        let rule = rows
+            .windows(2)
+            .rposition(|pair| {
+                pair[0].matches('─').count() > usize::from(width / 2)
+                    && pair[1].trim_start().starts_with("codex-manager detach")
+            })
+            .unwrap_or_else(|| panic!("detach detail header not found: {capture}"));
+        let title = rows[rule + 1];
+        assert!(
+            rows[rule + 2].trim_end_matches('│').trim().is_empty(),
+            "{capture}"
+        );
+        assert!(
+            title.trim_start().starts_with("codex-manager detach"),
+            "{capture}"
+        );
+        let record: serde_json::Value = serde_json::from_str(
+            include_str!("fixtures/claude-manager-detach.jsonl")
                 .lines()
-                .nth(1)
-                .is_some_and(|line| line.matches('┬').count() == if width >= 150 { 2 } else { 1 })
-            && capture.lines().any(|line| {
-                line.width() == usize::from(width)
-                    && line.matches('─').count() > usize::from(width / 2)
-            })
-            && capture.contains("codex-manager detach")
-            && capture.lines().any(|line| {
-                line.trim().trim_end_matches('│').trim() == "01a1489e-5020-7f40-90e8-c9413012630b"
-            })
-    });
-    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-    let rows: Vec<_> = capture.lines().collect();
-    let rule = rows
-        .windows(2)
-        .rposition(|pair| {
-            pair[0].matches('─').count() > usize::from(width / 2)
-                && pair[1].trim_start().starts_with("codex-manager detach")
-        })
-        .unwrap_or_else(|| panic!("detach detail header not found: {capture}"));
-    let title = rows[rule + 1];
-    assert!(
-        rows[rule + 2].trim_end_matches('│').trim().is_empty(),
-        "{capture}"
-    );
-    assert!(
-        title.trim_start().starts_with("codex-manager detach"),
-        "{capture}"
-    );
-    let record: serde_json::Value = serde_json::from_str(
-        include_str!("fixtures/claude-manager-detach.jsonl")
-            .lines()
-            .next()
-            .unwrap(),
-    )
-    .unwrap();
-    let subject = record["message"]["content"][0]["input"]["threadId"]
-        .as_str()
+                .next()
+                .unwrap(),
+        )
         .unwrap();
-    assert!(title.contains(subject), "{capture}");
-    assert_eq!(
-        title[..title.find(subject).unwrap()].width(),
-        terminal_event_detail_width::event_detail_center(usize::from(width), subject.width()),
-        "thread title stays on the panel midline: {capture}"
-    );
-    assert_eq!(rows[rule + 3].trim(), "↓", "{capture}");
-    assert_eq!(
-        rows[rule + 3][..rows[rule + 3].find('↓').unwrap()].width(),
-        terminal_event_detail_width::event_detail_center(usize::from(width), 1),
-        "empty input arrow stays on the panel midline: {capture}"
-    );
-    assert!(
-        capture
-            .lines()
-            .any(|line| line.trim().trim_end_matches('│').trim() == subject),
-        "{capture}"
-    );
-    assert!(
-        !capture.contains("\"archived\"") && !capture.contains("\"detached\""),
-        "{capture}"
-    );
-    let path = std::env::temp_dir().join(format!("agents-manager-detach-title-{width}.txt"));
-    std::fs::write(&path, &capture).unwrap();
-    println!(
-        "{{\"verdict\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
-        path.display()
-    );
-}
-
-#[test]
-fn terminal_manager_detach_title_200() {
-    manager_detach_title(200);
-}
-
-#[test]
-fn terminal_manager_detach_title_120() {
-    manager_detach_title(120);
-}
-
-#[test]
-fn terminal_manager_detach_title_150() {
-    manager_detach_title(150);
-}
-
-#[test]
-fn terminal_manager_detach_title_149() {
-    manager_detach_title(149);
+        let subject = record["message"]["content"][0]["input"]["threadId"]
+            .as_str()
+            .unwrap();
+        assert!(title.contains(subject), "{capture}");
+        assert_eq!(
+            title[..title.find(subject).unwrap()].width(),
+            terminal_event_detail_width::event_detail_center(usize::from(width), subject.width()),
+            "thread title stays on the panel midline: {capture}"
+        );
+        assert_eq!(rows[rule + 3].trim(), "↓", "{capture}");
+        assert_eq!(
+            rows[rule + 3][..rows[rule + 3].find('↓').unwrap()].width(),
+            terminal_event_detail_width::event_detail_center(usize::from(width), 1),
+            "empty input arrow stays on the panel midline: {capture}"
+        );
+        assert!(
+            capture
+                .lines()
+                .any(|line| line.trim().trim_end_matches('│').trim() == subject),
+            "{capture}"
+        );
+        assert!(
+            !capture.contains("\"archived\"") && !capture.contains("\"detached\""),
+            "{capture}"
+        );
+        let path = std::env::temp_dir().join(format!("agents-manager-detach-title-{width}.txt"));
+        std::fs::write(&path, &capture).unwrap();
+        println!(
+            "{{\"verdict\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
+            path.display()
+        );
+    }
 }
 
 #[path = "support/terminal_event_detail_width.rs"]
@@ -3246,62 +3181,52 @@ fn terminal_weekly_usage_on_task_header() {
 }
 
 #[test]
-fn terminal_context_usage_on_task_details_border_claude() {
-    let (_directory, tmux, _transcript) = start_probe("claude-context-border");
-    let capture = tmux.capture_when(|capture| capture.contains("Update"));
-    let border = capture.lines().nth(1).unwrap().to_owned();
-    assert!(border.contains("╴5% "), "{capture}");
-    assert!(border.contains("Inactive"), "{capture}");
-}
+fn terminal_context_usage_on_task_details_border() {
+    let (_claude_directory, claude, _transcript) = start_probe("claude-context-border");
+    let capture = claude.capture_when(|capture| capture.contains("Update"));
+    let claude_border = capture.lines().nth(1).unwrap().to_owned();
+    assert!(claude_border.contains("╴5% "), "{capture}");
+    assert!(claude_border.contains("Inactive"), "{capture}");
 
-fn context_usage_on_task_details_border(name: &str, fixture: &str, percent: Option<u64>) {
-    let (_directory, tmux, _) = start_probe_with_transcript(name, fixture);
-    let capture = tmux.capture_when(|capture| {
-        capture.lines().nth(1).is_some_and(|border| match percent {
-            Some(percent) => border.contains(&format!("╴{percent}% ")),
-            None => !border.contains('%'),
-        })
-    });
-    let border = capture.lines().nth(1).unwrap();
-    assert!(border.contains("Inactive"), "{capture}");
-    if let Some(percent) = percent {
-        assert!(percent <= 100);
-        assert!(
-            border.find('%').unwrap() < border.find("Inactive").unwrap(),
-            "{capture}"
-        );
+    let mut claude_cases = Vec::new();
+    for (name, fixture, percent) in [
+        (
+            "native",
+            include_str!("fixtures/claude-context/opus.jsonl"),
+            Some(24),
+        ),
+        (
+            "200k",
+            include_str!("fixtures/claude-context/old.jsonl"),
+            Some(12),
+        ),
+        (
+            "unknown",
+            include_str!("fixtures/claude-context/unknown.jsonl"),
+            None,
+        ),
+    ] {
+        let contents = format!("{}{fixture}", include_str!("fixtures/transcript.jsonl"));
+        let (_directory, tmux, _) =
+            start_probe_with_transcript(&format!("claude-context-{name}"), &contents);
+        let capture = tmux.capture_when(|capture| {
+            capture.lines().nth(1).is_some_and(|border| match percent {
+                Some(percent) => border.contains(&format!("╴{percent}% ")),
+                None => !border.contains('%'),
+            })
+        });
+        let border = capture.lines().nth(1).unwrap();
+        assert!(border.contains("Inactive"), "{capture}");
+        if let Some(percent) = percent {
+            assert!(percent <= 100);
+            assert!(
+                border.find('%').unwrap() < border.find("Inactive").unwrap(),
+                "{capture}"
+            );
+        }
+        claude_cases.push(serde_json::json!({"case":name,"percent":percent,"border":border}));
     }
-}
 
-#[test]
-fn terminal_context_usage_on_task_details_border_native() {
-    context_usage_on_task_details_border(
-        "claude-context-native",
-        include_str!("fixtures/claude-context/opus.jsonl"),
-        Some(24),
-    );
-}
-
-#[test]
-fn terminal_context_usage_on_task_details_border_200k() {
-    context_usage_on_task_details_border(
-        "claude-context-200k",
-        include_str!("fixtures/claude-context/old.jsonl"),
-        Some(12),
-    );
-}
-
-#[test]
-fn terminal_context_usage_on_task_details_border_unknown() {
-    context_usage_on_task_details_border(
-        "claude-context-unknown",
-        include_str!("fixtures/claude-context/unknown.jsonl"),
-        None,
-    );
-}
-
-#[test]
-fn terminal_context_usage_on_task_details_border_codex() {
     let (_codex_directory, codex) = terminal_codex_exit::start_codex_probe(
         "codex-context-border",
         include_str!("fixtures/codex-latest-activity.jsonl"),
@@ -3318,6 +3243,11 @@ fn terminal_context_usage_on_task_details_border_codex() {
         codex_border.find("9%").unwrap() < codex_border.find("Inactive").unwrap(),
         "{capture}"
     );
+    let result = serde_json::json!({"verdict":"passed", "claude":claude_border, "claude_cases":claude_cases, "codex":codex_border});
+    if let Some(path) = std::env::var_os("AGENTS_CONTEXT_TERMINAL_RESULT") {
+        std::fs::write(path, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+    }
+    println!("{result}");
 }
 
 #[path = "support/terminal_summary.rs"]
@@ -3650,51 +3580,41 @@ mod terminal_output_follow;
 #[path = "support/terminal_selection_display.rs"]
 mod terminal_selection_display;
 
-fn configuration_version_notices(upgraded_at_start: bool) {
+#[test]
+fn terminal_configuration_version_notices() {
     let message = "Version 2 configuration unsupported, using defaults";
-
-    let bytes = b"{\n  \"version\":2, \"config\":{}, \"state\":{}\n}\n";
-    let (directory, tmux, _) = launch_probe(
-        if upgraded_at_start {
-            "version-start"
-        } else {
-            "version-upgrade"
-        },
-        include_str!("fixtures/transcript.jsonl"),
-        |root| {
+    for upgraded_at_start in [true, false] {
+        let bytes = b"{\n  \"version\":2, \"config\":{}, \"state\":{}\n}\n";
+        let (directory, tmux, _) = start_probe_with_setup(
             if upgraded_at_start {
-                std::fs::write(root.join("claude/agents.json"), bytes).unwrap();
-            }
-        },
-        &[],
-        !upgraded_at_start,
-    );
-    let path = directory.path().join("claude/agents.json");
-    if upgraded_at_start {
+                "version-start"
+            } else {
+                "version-upgrade"
+            },
+            include_str!("fixtures/transcript.jsonl"),
+            |root| {
+                if upgraded_at_start {
+                    std::fs::write(root.join("claude/agents.json"), bytes).unwrap();
+                }
+            },
+        );
+        let path = directory.path().join("claude/agents.json");
+        if upgraded_at_start {
+            let capture = tmux.capture_when(|screen| screen.contains(message));
+            assert!(!capture.contains("Cannot save preferences:"), "{capture}");
+            tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+            tmux.wait_for(|screen| !screen.contains(message));
+        } else {
+            std::fs::write(&path, bytes).unwrap();
+        }
+        tmux.run(&["send-keys", "-t", "probe", "g"]);
         let capture = tmux.capture_when(|screen| screen.contains(message));
         assert!(!capture.contains("Cannot save preferences:"), "{capture}");
-        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-        tmux.wait_for(|screen| !screen.contains(message));
-    } else {
-        std::fs::write(&path, bytes).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
     }
-    tmux.run(&["send-keys", "-t", "probe", "g"]);
-    let capture = tmux.capture_when(|screen| screen.contains(message));
-    assert!(!capture.contains("Cannot save preferences:"), "{capture}");
-    assert_eq!(std::fs::read(&path).unwrap(), bytes);
     println!(
         "{{\"configuration_version_notices\":\"pass\",\"startup\":true,\"save\":true,\"runtime_upgrade\":true,\"bytes_preserved\":true}}"
     );
-}
-
-#[test]
-fn terminal_configuration_version_notices_startup() {
-    configuration_version_notices(true);
-}
-
-#[test]
-fn terminal_configuration_version_notices_runtime() {
-    configuration_version_notices(false);
 }
 
 #[test]
