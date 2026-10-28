@@ -1650,7 +1650,8 @@ fn diff_backgrounds_preserve_text_positions() {
             view.set_event(vec![event.clone()]);
             view.select_fixture_event(Some(event.clone()));
             for width in [41, 120, 200] {
-                let area = Rect::new(0, 0, width, 250);
+                // 120 rows keep all 16 lines of the tallest diff case visible at width 41.
+                let area = Rect::new(0, 0, width, 120);
                 let mut buffer = Buffer::empty(area);
                 view.render_at(area, &mut buffer, now);
                 let viewport = view.viewport.borrow();
