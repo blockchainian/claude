@@ -2353,7 +2353,7 @@ fn terminal_session_search_overlays_chart_bottom() {
         std::thread::sleep(Duration::from_millis(200));
         // Compare within one fixed pair of five-second usage bins so the time axis
         // cannot advance between the baseline and search captures.
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
         let (before, after) = loop {
             let pair = chrono::Utc::now().timestamp().div_euclid(10);
             let before = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
