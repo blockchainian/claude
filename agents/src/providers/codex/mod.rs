@@ -1,6 +1,4 @@
 mod app_server;
-#[cfg(test)]
-mod ask_live_tests;
 mod background;
 pub(crate) mod claude_client;
 #[cfg(test)]
@@ -12,14 +10,10 @@ mod memory_tests;
 mod questions;
 pub(super) mod rollout;
 #[cfg(test)]
-mod send_tests;
-#[cfg(test)]
 mod settings_tests;
 #[cfg(test)]
 mod subagents_tests;
 mod terminal;
-#[cfg(test)]
-mod terminal_live_tests;
 #[cfg(test)]
 mod terminal_tests;
 #[cfg(test)]

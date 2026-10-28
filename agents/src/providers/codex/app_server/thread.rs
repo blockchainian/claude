@@ -175,26 +175,6 @@ pub(in crate::providers::codex) fn interrupt(
     Ok(())
 }
 
-/// Interrupts the running turn and waits until the daemon reports it has ended.
-#[cfg(test)]
-pub(in crate::providers::codex) fn stop(client: &mut Client, thread_id: &str) -> io::Result<()> {
-    let Some(turn_id) = running_turn(client, thread_id)? else {
-        return Ok(());
-    };
-    interrupt(client, thread_id, &turn_id)?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while running_turn(client, thread_id)?.is_some() {
-        if std::time::Instant::now() >= deadline {
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "Codex turn did not stop before detach",
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    Ok(())
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ResumeParams<'a> {

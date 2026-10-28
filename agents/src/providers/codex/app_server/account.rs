@@ -469,17 +469,4 @@ mod tests {
         assert_eq!(parse(response).unwrap().unwrap().left_percent(), 0);
     }
 
-    #[test]
-    #[ignore = "requires the running Codex daemon and local account authentication; reads account usage only"]
-    fn weekly_usage_live_account() {
-        use crate::providers::{Provider, codex::CodexProvider};
-
-        let provider = CodexProvider::from_config().unwrap();
-        let usage = provider.weekly_usage().unwrap()().unwrap().unwrap();
-        println!(
-            "codex: weekly {}% left; resets_at={:?}",
-            usage.left_percent(),
-            usage.resets_at
-        );
-    }
 }

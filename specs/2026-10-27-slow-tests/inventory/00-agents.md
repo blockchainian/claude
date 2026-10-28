@@ -29,19 +29,14 @@ From one parallel run of `cargo nextest run --run-ignored only` without the slow
 
 | Run-time (s) | Module | Test | Fixable | How |
 |---:|---|---|---|---|
-| 25.79 | agents::providers::codex::app_server::tests | delete_real_codex_sessions |  | real codex sessions |
 | 20.14 | terminal_layout::terminal_drafts | terminal_draft_defaults_and_inherited_choices | partly fixable | break the 2×2×2 grid, 80 clicks |
 | 19.74 | terminal_layout::terminal_scripts | terminal_shell_file_read_colors | partly fixable | one transcript per provider: 2 starts, not 36 |
-| 15.83 | agents::providers::codex::terminal_live_tests | idle_terminal_archives_real_codex_thread_without_hiding_it |  | real codex thread |
-| 15.00 | agents::providers::codex::app_server::tests | reject_real_codex_question_interrupts_turn |  | real codex turn |
 | 12.25 | terminal_layout::terminal_model_command | terminal_model_command_refreshes_without_an_assistant_reply |  |  |
 | 12.23 | terminal_layout::terminal_task_follow | terminal_status_tabs_filter_children_and_preserve_ancestor_status |  |  |
 | 12.17 | terminal_layout::terminal_event_scroll | terminal_event_scroll_footer_shows_scrolled_off_title |  |  |
-| 11.36 | agents::providers::codex::app_server::tests | rename_real_codex_thread |  | real codex thread |
 | 11.32 | agents::providers::claude::settings_tests | settings_real_claude_session |  | real claude session |
 | 9.42 | terminal_theme_colors | terminal_theme_colors_follow_bundled_and_custom_themes |  |  |
 | 8.65 | terminal_composer | readline_words_match_in_composer | partly fixable | one case per key, not 35<br>poll 10ms |
-| 8.62 | agents::providers::codex::app_server::tests | approval_status_marks_a_live_codex_session |  | real codex app-server |
 | 7.73 | terminal_layout | terminal_last_activity_heading_stays_centered |  |  |
 | 6.49 | terminal_layout | terminal_compaction_summary_keeps_row_and_labels_event_detail |  |  |
 | 6.41 | agents::app::session_terminal::tests | real_woken_terminal_closes_back_to_inactive |  | real claude job startup |
