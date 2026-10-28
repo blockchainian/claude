@@ -1,16 +1,6 @@
 use super::*;
 use std::io::Write;
 
-pub(super) fn message_width(capture: &str, width: usize) -> usize {
-    if width < 150 {
-        return width - 2 - 10;
-    }
-    let row = capture.lines().nth(2).unwrap();
-    let separator = row.rfind('│').expect("actual log-list separator");
-    let list_left = row[..separator].width() + 2;
-    width - 1 - list_left - 10
-}
-
 // Detail panels occupy the terminal interior. Their clock, two-cell gap and
 // right margin reserve eleven cells; reading width is independent of that.
 pub(super) fn content_width(width: usize) -> usize {
