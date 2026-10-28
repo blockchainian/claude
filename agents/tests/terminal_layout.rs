@@ -132,10 +132,14 @@ impl Tmux {
 fn wait_for_size(tmux: &Tmux, width: u16, height: u16) -> String {
     tmux.capture_when(|capture| {
         capture.lines().count() == usize::from(height)
-            && capture.lines().nth(1).is_some_and(|line| line.width() == usize::from(width))
-            && capture.lines().nth(2).is_some_and(|line| {
-                line.matches('│').count() == if width >= 150 { 2 } else { 1 }
-            })
+            && capture
+                .lines()
+                .nth(1)
+                .is_some_and(|line| line.width() == usize::from(width))
+            && capture
+                .lines()
+                .nth(2)
+                .is_some_and(|line| line.matches('│').count() == if width >= 150 { 2 } else { 1 })
     })
 }
 
@@ -652,7 +656,8 @@ fn terminal_prompt_marker_caret_and_mouse_alignment() {
     delete_named_draft(&tmux);
     tmux.wait_for(|capture| {
         // Confirmed deletion returns to the task chooser.
-        capture.lines().any(|line| line.trim() == "No task ❮") && !capture.contains("Prompt probe ❯")
+        capture.lines().any(|line| line.trim() == "No task ❮")
+            && !capture.contains("Prompt probe ❯")
     });
     begin_named_draft(&tmux, "Prompt probe");
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
@@ -944,73 +949,81 @@ fn terminal_dashboard_tabs_and_footer() {
     }
 }
 
-#[test]
-fn terminal_task_cursor_keeps_cell_colors() {
+fn task_cursor_keeps_cell_colors(width: u16) {
     let (_directory, tmux, _transcript) = start_probe("task-cursor");
-    for width in [120, 200] {
-        tmux.run(&[
-            "resize-window",
-            "-t",
-            "probe",
-            "-x",
-            &width.to_string(),
-            "-y",
-            "50",
-        ]);
-        std::thread::sleep(Duration::from_millis(300));
-        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
-        let parser = captured_screen(&capture, width, 50);
-        let screen = parser.screen();
-        let tabs = screen.rows(0, width).next().unwrap();
-        assert_eq!(
-            tabs.split_whitespace().collect::<Vec<_>>(),
-            ["Active", "0", "Inactive", "1"]
-        );
-        assert_eq!(tabs.find("Active"), Some(2));
-        assert_eq!(
-            tabs[..tabs.find("Inactive").unwrap()].width(),
-            usize::from(width) - 12
-        );
-        for column in [2, width - 12] {
-            let tab = screen.cell(0, column).unwrap();
-            assert!(tab.bold(), "{capture}");
-            assert!(!tab.dim(), "{capture}");
-            assert_ne!(tab.fgcolor(), vt100::Color::Default, "{capture}");
-        }
-        assert_eq!(screen.cell(0, 2).unwrap().bgcolor(), vt100::Color::Default);
-        assert_ne!(
-            screen.cell(0, width - 12).unwrap().bgcolor(),
-            vt100::Color::Default
-        );
-        let (x, y) = (0..50)
-            .find_map(|y| {
-                (0..width / 3).find_map(|x| {
-                    (screen.cell(y, x).unwrap().contents() == "○"
-                        && x > 0
-                        && screen.cell(y, x - 1).unwrap().bold())
-                    .then_some((x, y))
-                })
-            })
-            .expect("selected task marker");
-        assert!(
-            !(0..width / 3).any(|column| screen.cell(y, column).unwrap().contents() == "❯"),
-            "{capture}"
-        );
-        let marker = screen.cell(y, x).unwrap();
-        let status = screen.cell(y, x).unwrap();
-        let title = screen.cell(y, x + 2).unwrap();
-        assert!(screen.cell(y, x - 1).unwrap().bold());
-        // vt100 models bold and dim as mutually exclusive intensity levels.
-        assert!(status.dim());
-        assert!(title.bold(), "title at ({}, {y}): {capture}", x + 2);
-        assert_eq!(marker.fgcolor(), vt100::Color::Default);
-        assert_ne!(title.fgcolor(), marker.fgcolor());
-        assert_eq!(status.fgcolor(), vt100::Color::Default);
-        assert_eq!(title.bgcolor(), marker.bgcolor());
-        assert_eq!(status.bgcolor(), marker.bgcolor());
-        assert_ne!(marker.bgcolor(), vt100::Color::Default);
+
+    tmux.run(&[
+        "resize-window",
+        "-t",
+        "probe",
+        "-x",
+        &width.to_string(),
+        "-y",
+        "50",
+    ]);
+    wait_for_size(&tmux, width, 50);
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    let parser = captured_screen(&capture, width, 50);
+    let screen = parser.screen();
+    let tabs = screen.rows(0, width).next().unwrap();
+    assert_eq!(
+        tabs.split_whitespace().collect::<Vec<_>>(),
+        ["Active", "0", "Inactive", "1"]
+    );
+    assert_eq!(tabs.find("Active"), Some(2));
+    assert_eq!(
+        tabs[..tabs.find("Inactive").unwrap()].width(),
+        usize::from(width) - 12
+    );
+    for column in [2, width - 12] {
+        let tab = screen.cell(0, column).unwrap();
+        assert!(tab.bold(), "{capture}");
+        assert!(!tab.dim(), "{capture}");
+        assert_ne!(tab.fgcolor(), vt100::Color::Default, "{capture}");
     }
+    assert_eq!(screen.cell(0, 2).unwrap().bgcolor(), vt100::Color::Default);
+    assert_ne!(
+        screen.cell(0, width - 12).unwrap().bgcolor(),
+        vt100::Color::Default
+    );
+    let (x, y) = (0..50)
+        .find_map(|y| {
+            (0..width / 3).find_map(|x| {
+                (screen.cell(y, x).unwrap().contents() == "○"
+                    && x > 0
+                    && screen.cell(y, x - 1).unwrap().bold())
+                .then_some((x, y))
+            })
+        })
+        .expect("selected task marker");
+    assert!(
+        !(0..width / 3).any(|column| screen.cell(y, column).unwrap().contents() == "❯"),
+        "{capture}"
+    );
+    let marker = screen.cell(y, x).unwrap();
+    let status = screen.cell(y, x).unwrap();
+    let title = screen.cell(y, x + 2).unwrap();
+    assert!(screen.cell(y, x - 1).unwrap().bold());
+    // vt100 models bold and dim as mutually exclusive intensity levels.
+    assert!(status.dim());
+    assert!(title.bold(), "title at ({}, {y}): {capture}", x + 2);
+    assert_eq!(marker.fgcolor(), vt100::Color::Default);
+    assert_ne!(title.fgcolor(), marker.fgcolor());
+    assert_eq!(status.fgcolor(), vt100::Color::Default);
+    assert_eq!(title.bgcolor(), marker.bgcolor());
+    assert_eq!(status.bgcolor(), marker.bgcolor());
+    assert_ne!(marker.bgcolor(), vt100::Color::Default);
     println!("{{\"task_cursor\":\"pass\",\"widths\":[120,200]}}");
+}
+
+#[test]
+fn terminal_task_cursor_keeps_cell_colors_120() {
+    task_cursor_keeps_cell_colors(120);
+}
+
+#[test]
+fn terminal_task_cursor_keeps_cell_colors_200() {
+    task_cursor_keeps_cell_colors(200);
 }
 
 fn assert_task_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &str) {
