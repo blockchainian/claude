@@ -3,6 +3,7 @@ mod app_server;
 mod ask_live_tests;
 mod background;
 pub(crate) mod claude_client;
+pub(crate) mod cua_repl;
 #[cfg(test)]
 mod inner_tests;
 #[cfg(test)]
@@ -937,5 +938,5 @@ impl Provider for CodexProvider {
 
 pub(crate) const TOOL_RULES: super::tool::ToolRules = super::tool::ToolRules {
     native: tools::RULES,
-    servers: &[claude_client::SERVER],
+    servers: &[claude_client::SERVER, cua_repl::SERVER],
 };
