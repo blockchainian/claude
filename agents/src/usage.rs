@@ -661,8 +661,9 @@ mod tests {
         ] {
             let mut file = tempfile::NamedTempFile::new().unwrap();
             let end = at(timestamp);
-            for index in 0..1_000 {
-                let time = end - chrono::Duration::seconds((1_000 - index) * 20);
+            // Keep more history than the read limit so a full scan still fails the assertion.
+            for index in 0..100 {
+                let time = end - chrono::Duration::seconds((100 - index) * 20);
                 let mut record: serde_json::Value = serde_json::from_str(usage).unwrap();
                 record["timestamp"] = time.to_rfc3339().into();
                 if provider == ProviderId::Claude {
