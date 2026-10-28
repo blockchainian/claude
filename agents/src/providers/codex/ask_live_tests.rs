@@ -4,23 +4,23 @@ use crate::app::live_tests as dashboard;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
-struct Archive {
+struct Cleanup {
     home: PathBuf,
     id: String,
 }
-impl Drop for Archive {
+impl Drop for Cleanup {
     fn drop(&mut self) {
         let result = app_server::Client::connect(&self.home).and_then(|mut client| {
             app_server::thread::stop(&mut client, &self.id)?;
-            app_server::thread::archive(&mut client, &self.id)
+            app_server::thread::delete(&mut client, &self.id)
         });
-        eprintln!("archive {}: {result:?}", self.id);
+        eprintln!("delete {}: {result:?}", self.id);
         assert!(result.is_ok(), "throwaway thread cleanup failed");
     }
 }
 
 #[test]
-#[ignore = "uses local auth and shared Codex daemon; asks and answers on a real gpt-6-luna low thread, then archives it"]
+#[ignore = "uses local auth and shared Codex daemon; asks and answers on a real gpt-6-luna low thread, then deletes it"]
 fn answer_real_codex_question_in_dashboard() {
     let configured = CodexProvider::from_config().unwrap();
     let workspace = tempfile::tempdir().unwrap();
@@ -36,7 +36,7 @@ fn answer_real_codex_question_in_dashboard() {
         )
         .unwrap();
     let id = started["thread"]["id"].as_str().unwrap().to_owned();
-    let _archive = Archive {
+    let cleanup = Cleanup {
         home: configured.home.clone(),
         id: id.clone(),
     };
@@ -148,19 +148,21 @@ fn answer_real_codex_question_in_dashboard() {
     eprintln!(
         "dashboard keyboard answer accepted; matching function_call_output; final GOT Blue; ended turn has no replay"
     );
-    drop(_archive);
+    drop(cleanup);
     let db = Connection::open_with_flags(
         configured.home.join("state_5.sqlite"),
         OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .unwrap();
-    let archived: bool = db
-        .query_row("SELECT archived FROM threads WHERE id=?1", [&id], |row| {
-            row.get(0)
-        })
+    let exists: bool = db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1)",
+            [&id],
+            |row| row.get(0),
+        )
         .unwrap();
-    assert!(archived);
+    assert!(!exists, "throwaway thread remains after cleanup");
     if let Some(path) = std::env::var_os("AGENTS_ASK_VERDICT") {
-        std::fs::write(path, serde_json::to_vec_pretty(&json!({"passed":true,"thread":id,"call":call,"model":"gpt-6-luna","effort":"low","restart":true,"dashboard_keyboard":true,"rollout_output":true,"final":"GOT Blue","ended_no_replay":true,"draft_cleared":true,"archived":true})).unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_vec_pretty(&json!({"passed":true,"thread":id,"call":call,"model":"gpt-6-luna","effort":"low","restart":true,"dashboard_keyboard":true,"rollout_output":true,"final":"GOT Blue","ended_no_replay":true,"draft_cleared":true,"deleted":true})).unwrap()).unwrap();
     }
 }
