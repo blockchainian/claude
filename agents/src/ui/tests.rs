@@ -6059,6 +6059,7 @@ fn selected_event_row_preserves_foreground_and_adds_bold() {
         let cursor = super::style::selection_style_for(false, true, light);
         super::style::with_selection_style(cursor, || {
             for width in [100, 149, 150, 200] {
+                let (mut view, now) = event_fixture();
                 for kind in [
                     Kind::User,
                     Kind::Assistant,
@@ -6071,7 +6072,6 @@ fn selected_event_row_preserves_foreground_and_adds_bold() {
                     Kind::QueuedSystem,
                 ] {
                     for search in [false, true] {
-                        let (mut view, now) = event_fixture();
                         let mut event = event.clone();
                         event.kind = kind.clone();
                         // Include a visible link and a search match alongside plain body text.
@@ -6081,6 +6081,7 @@ fn selected_event_row_preserves_foreground_and_adds_bold() {
                         event.paths.clear();
                         let mut older = event.clone();
                         older.started_at -= Duration::seconds(1);
+                        view.event_list.search.input.close();
                         view.set_event(vec![older, event]);
                         if search {
                             view.event_list.search.input.set_text("Read");
