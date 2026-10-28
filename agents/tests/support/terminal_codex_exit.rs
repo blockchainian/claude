@@ -191,9 +191,8 @@ fn terminal_codex_completed_subagent_calls() {
     println!("{}", serde_json::json!({"verdict":"pass","capture":path}));
 }
 
-#[test]
-fn terminal_failed_plain_output_uses_default_foreground() {
-    for (name, fixture, (title_marker, title), message) in [
+fn terminal_failed_plain_output_uses_default_foreground(index: usize) {
+    let (name, fixture, (title_marker, title), message) = [
         (
             "mcp-failed-output",
             include_str!("../fixtures/codex-mcp-errors.jsonl"),
@@ -209,40 +208,49 @@ fn terminal_failed_plain_output_uses_default_foreground() {
             ("Exec command · 1", "Exec command"),
             "[scrubbed]",
         ),
-    ] {
-        let (_directory, tmux) = start_codex_probe(name, fixture);
-        tmux.wait_for(|capture| capture.contains(message));
-        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
-        let parser = captured_screen(&capture, 160, 45);
-        let screen = parser.screen();
-        let (title_row, title_text) = screen
-            .rows(0, 160)
-            .enumerate()
-            .filter(|(_, row)| row.contains(title_marker))
-            .last()
-            .unwrap();
-        let title_column = title_text[..title_text.find(title).unwrap()].width();
-        assert!(screen.cell(title_row as u16, title_column as u16).is_some());
-        assert_eq!(
-            title_column, 1,
-            "tool name stays in the left column: {capture}"
-        );
-        let row = screen
-            .rows(0, 160)
-            .position(|row| row.contains(message))
-            .unwrap();
-        let text = screen.rows(0, 160).nth(row).unwrap();
-        let column = text.find(message).unwrap();
-        for offset in 0..message.len() {
-            let cell = screen.cell(row as u16, (column + offset) as u16).unwrap();
-            assert_eq!(cell.fgcolor(), vt100::Color::Default, "{name}: {capture}");
-            assert!(!cell.bold(), "error body keeps ordinary weight");
-        }
-        let path = std::env::temp_dir().join(format!("agents-{name}.ansi"));
-        std::fs::write(&path, capture).unwrap();
-        println!(
-            "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
-            path.display()
-        );
+    ][index];
+    let (_directory, tmux) = start_codex_probe(name, fixture);
+    tmux.wait_for(|capture| capture.contains(message));
+    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    let parser = captured_screen(&capture, 160, 45);
+    let screen = parser.screen();
+    let (title_row, title_text) = screen
+        .rows(0, 160)
+        .enumerate()
+        .filter(|(_, row)| row.contains(title_marker))
+        .last()
+        .unwrap();
+    let title_column = title_text[..title_text.find(title).unwrap()].width();
+    assert!(screen.cell(title_row as u16, title_column as u16).is_some());
+    assert_eq!(
+        title_column, 1,
+        "tool name stays in the left column: {capture}"
+    );
+    let row = screen
+        .rows(0, 160)
+        .position(|row| row.contains(message))
+        .unwrap();
+    let text = screen.rows(0, 160).nth(row).unwrap();
+    let column = text.find(message).unwrap();
+    for offset in 0..message.len() {
+        let cell = screen.cell(row as u16, (column + offset) as u16).unwrap();
+        assert_eq!(cell.fgcolor(), vt100::Color::Default, "{name}: {capture}");
+        assert!(!cell.bold(), "error body keeps ordinary weight");
     }
+    let path = std::env::temp_dir().join(format!("agents-{name}.ansi"));
+    std::fs::write(&path, capture).unwrap();
+    println!(
+        "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
+        path.display()
+    );
+}
+
+#[test]
+fn terminal_failed_plain_output_uses_default_foreground_mcp() {
+    terminal_failed_plain_output_uses_default_foreground(0);
+}
+
+#[test]
+fn terminal_failed_plain_output_uses_default_foreground_command() {
+    terminal_failed_plain_output_uses_default_foreground(1);
 }
