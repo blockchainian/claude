@@ -747,7 +747,7 @@ fn terminal_last_activity_heading_stays_centered() {
         );
         assert!(!capture.contains("Latest activity"), "{capture}");
         if width >= 150 {
-            let summary = "Bash mkdir, cd, ls, wc, head";
+            let summary = "mkdir, cd, ls, wc, head";
             assert!(
                 capture.matches(summary).count() >= 2,
                 "activity and log must share the summary: {capture}"
@@ -1405,12 +1405,9 @@ fn terminal_compaction_summary_keeps_row_and_labels_event_detail() {
         capture.contains("This session is being continued") && capture.contains("Compaction")
     });
     let rows: Vec<_> = capture.lines().collect();
-    let rule = rows
-        .iter()
-        .rposition(|line| line.matches('─').count() > 100)
-        .expect("log detail rule");
-    let list = rows[2..rule].join("\n");
-    let detail = rows[rule + 1..rows.len() - 1].join("\n");
+    let detail_rows = event_detail_rows(&capture, 200).expect("log detail rules");
+    let list = rows[2..detail_rows.start - 1].join("\n");
+    let detail = rows[detail_rows].join("\n");
     assert!(
         list.contains("This session is being continued"),
         "{capture}"
