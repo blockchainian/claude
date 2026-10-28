@@ -22,30 +22,3 @@ Verdicts:
 | fixable | The allowed fixes bring the test, and every test split from it, under 1s. |
 | partly fixable | The allowed fixes make it faster, but at least one test stays over 1s. |
 | blank | None of the allowed fixes helps. |
-
-## Slow probes
-
-Passing probes over 1s, timed without the slow-timeout: untouched probes from one parallel run, fixed probes from individual runs.
-
-| Run-time (s) | Module | Test | Fixable | How |
-|---:|---|---|---|---|
-| 3.87 | terminal_layout | terminal_branch_name_edits_in_task_details_and_preserves_input | partly fixable | wait for the branch row, not 200ms sleep<br>poll 10ms |
-| 3.84 | terminal_layout | terminal_layout_tracks_width | partly fixable | wait for search focus, not 200ms sleep<br>drop repeated last pass |
-| 3.83 | terminal_layout::terminal_weekly_usage | terminal_weekly_usage_cache_toggle_and_restart |  |  |
-| 3.63 | terminal_layout | terminal_running_tool_animates_without_input | partly fixable | stop after 3 frames<br>sleep 1 and kill, not wait on sleep 2 |
-| 3.22 | terminal_layout::terminal_model_families | terminal_model_families_keep_headers_out_of_selection | partly fixable | split per provider<br>wait for the picker, not 200ms sleeps |
-| 3.10 | terminal_layout | terminal_task_details_section_positions | partly fixable | break the PR state × width grid |
-| 2.87 | terminal_layout::terminal_event_scroll | terminal_event_scroll_reaches_top_before_handoff | partly fixable | wait for the wheel, not 4 × 200ms |
-| 2.57 | terminal_layout::terminal_codex_exit | terminal_codex_shell_titles | partly fixable | both threads in one start |
-| 2.54 | terminal_layout::terminal_codex_exit | terminal_failed_plain_output_uses_default_foreground | partly fixable | both threads in one start |
-| 2.45 | terminal_layout | terminal_inactive_elapsed_stays_at_last_record | partly fixable | 1.1s sleep, not 2s |
-| 2.37 | terminal_composer | xterm_tmux_keeps_fallbacks_and_dashboard_keys | partly fixable | poll 10ms, not 50ms |
-| 2.36 | terminal_composer | enhanced_keys_newlines_and_vertical_caret_in_tmux | partly fixable | poll 10ms, not 50ms |
-| 2.27 | terminal_layout::paths | terminal_cwd_relative_paths | partly fixable | Read and Edit in one transcript |
-| 1.87 | terminal_layout::terminal_drafts | terminal_new_task_status_is_capitalized_in_list_and_task_details |  |  |
-| 1.59 | terminal_composer | failed_send_shows_its_reason_in_red_in_tmux |  |  |
-| 1.46 | terminal_layout | terminal_task_cursor_keeps_cell_colors | partly fixable | check 200 before resizing |
-| 1.43 | terminal_layout::terminal_drafts | terminal_repository_browser_applies_single_clicks | partly fixable | drop 5 picker 200ms sleeps |
-| 1.34 | worktree_dialog_terminal | worktree_delete_option_ellipsis_at_120_columns | partly fixable | trim codex-state.sql |
-| 1.24 | terminal_layout::terminal_heredoc_format | terminal_shell_heredoc_formatting | fixable | split per provider |
-| 1.06 | terminal_layout::terminal_path_display | terminal_task_details_directory_precedes_title_and_branch | fixable | wait for the dialog, not 2 × 200ms |
