@@ -21,7 +21,7 @@ fn screen(raw: &str) -> vt100::Parser {
     parser
 }
 fn wait(tmux: &Tmux, predicate: impl Fn(&vt100::Screen) -> bool) -> String {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let raw = capture(tmux);
         if predicate(screen(&raw).screen()) {
@@ -166,27 +166,26 @@ fn terminal_theme_colors_follow_bundled_and_custom_themes() {
                 } else {
                     vt100::Color::Rgb(74, 139, 79)
                 };
-                let red = if light {
-                    vt100::Color::Rgb(130, 7, 30)
-                } else {
-                    vt100::Color::Rgb(160, 99, 93)
-                };
                 let expected: Vec<(&str, vt100::Color)> = if patch {
                     vec![
                         (
                             "-DeletedProbe",
                             if custom {
                                 vt100::Color::Rgb(69, 103, 137)
+                            } else if light {
+                                vt100::Color::Rgb(208, 185, 185)
                             } else {
-                                red
+                                vt100::Color::Rgb(34, 10, 10)
                             },
                         ),
                         (
                             "+InsertedProbe",
                             if custom {
                                 vt100::Color::Rgb(86, 120, 154)
+                            } else if light {
+                                vt100::Color::Rgb(125, 212, 183)
                             } else {
-                                green
+                                vt100::Color::Rgb(0, 20, 8)
                             },
                         ),
                     ]
@@ -211,9 +210,21 @@ fn terminal_theme_colors_follow_bundled_and_custom_themes() {
                     ]
                 };
                 let raw = wait(&tmux, |s| {
-                    expected
-                        .iter()
-                        .all(|(m, c)| cell(s, m).is_some_and(|cell| cell.fgcolor() == *c))
+                    expected.iter().all(|(m, c)| {
+                        cell(s, m).is_some_and(|cell| {
+                            if patch && !custom {
+                                cell.bgcolor() == *c
+                                    && cell.fgcolor()
+                                        == if light {
+                                            vt100::Color::Rgb(0, 0, 0)
+                                        } else {
+                                            vt100::Color::Rgb(63, 143, 127)
+                                        }
+                            } else {
+                                cell.fgcolor() == *c
+                            }
+                        })
+                    })
                 });
                 evidence(
                     &format!("{name}-{}", if light { "light" } else { "dark" }),
