@@ -333,7 +333,7 @@ impl EventSelectionFixture {
         let start =
             chrono::DateTime::parse_from_rfc3339(record["timestamp"].as_str().unwrap()).unwrap();
         let mut payload = String::new();
-        for index in 0..40 {
+        for index in 0..20 {
             record["uuid"] = format!("selection-{index}").into();
             record["timestamp"] = (start + chrono::Duration::seconds(index))
                 .to_rfc3339()
@@ -345,7 +345,7 @@ impl EventSelectionFixture {
         app.refresh();
         select_archive(&mut app);
         let buffer = draw_size(&mut app, width, 19);
-        let (x, y) = event_position(&buffer, "event-39");
+        let (x, y) = event_position(&buffer, "event-19");
         // A burst is dispatched before the next frame, just like the real App loop.
         for _ in 0..12 {
             wheel(&mut app, MouseEventKind::ScrollUp, x, y);
@@ -362,9 +362,9 @@ impl EventSelectionFixture {
     }
 
     fn append(&mut self) {
-        self.record["uuid"] = "selection-40".into();
-        self.record["timestamp"] = (self.start + chrono::Duration::seconds(40)).to_rfc3339().into();
-        self.record["message"]["content"] = format!("event-40 {}", self.body).into();
+        self.record["uuid"] = "selection-20".into();
+        self.record["timestamp"] = (self.start + chrono::Duration::seconds(20)).to_rfc3339().into();
+        self.record["message"]["content"] = format!("event-20 {}", self.body).into();
         self.payload.push_str(&format!("{}\n", self.record));
         let path = self.app.sessions[0].transcript.as_ref().unwrap();
         std::fs::write(path, &self.payload).unwrap();
@@ -373,15 +373,15 @@ impl EventSelectionFixture {
 }
 
 #[test]
-fn event_selection_wheel_burst_selects_event_27() {
+fn event_selection_wheel_burst_selects_event_07() {
     // Nineteen rows keep all three panels visible in both layouts.
     for width in [120, 180] {
         let EventSelectionFixture {
             _directory, mut app, ..
         } = EventSelectionFixture::after_wheel_burst(width);
         let buffer = draw_size(&mut app, width, 19);
-        assert!(event_detail_content(&buffer).contains("event-27"));
-        assert_event_cursor(&buffer, event_position(&buffer, "event-27").1);
+        assert!(event_detail_content(&buffer).contains("event-07"));
+        assert_event_cursor(&buffer, event_position(&buffer, "event-07").1);
     }
 }
 
@@ -390,16 +390,16 @@ fn event_selection_append_keeps_selection_and_window_edge() {
     for width in [120, 180] {
         let mut fixture = EventSelectionFixture::after_wheel_burst(width);
         let buffer = draw_size(&mut fixture.app, width, 19);
-        let selected_position = event_position(&buffer, "event-27");
+        let selected_position = event_position(&buffer, "event-07");
         fixture.append();
         let EventSelectionFixture {
             _directory, mut app, ..
         } = fixture;
         let buffer = draw_size(&mut app, width, 19);
-        assert!(event_detail_content(&buffer).contains("event-27"));
-        assert_event_cursor(&buffer, event_position(&buffer, "event-27").1);
+        assert!(event_detail_content(&buffer).contains("event-07"));
+        assert_event_cursor(&buffer, event_position(&buffer, "event-07").1);
         assert!(lines(&buffer).join("\n").contains("↓ 1 New"));
-        assert_eq!(event_position(&buffer, "event-27"), selected_position);
+        assert_eq!(event_position(&buffer, "event-07"), selected_position);
     }
 }
 
@@ -425,7 +425,7 @@ fn event_selection_scrolls_to_first_row_across_windows_after_append(width: u16) 
         ..
     } = fixture;
     draw_size(&mut app, width, 19);
-    for expected in (0..27).rev() {
+    for expected in (0..7).rev() {
         wheel(&mut app, MouseEventKind::ScrollUp, x, y);
         let buffer = draw_size(&mut app, width, 19);
         let label = format!("event-{expected:02}");

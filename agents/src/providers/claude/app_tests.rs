@@ -316,12 +316,15 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
     let payload = std::fs::read_to_string(&path).unwrap();
     let area = ratatui::layout::Rect::new(0, 0, 150, 19);
     let visible = app.view.event_read_count(area);
-    let copies = visible * 2 + 1;
+    // One window of older copies behind the notification, and one window plus
+    // two events after it, so the walk reloads the window exactly once.
+    let first = visible;
+    let copies = visible / 2 + 1;
     let transcript = format!(
         "{}{}{}",
-        transcript_copies(&payload, 20, 0),
+        transcript_copies(&payload, first, 0),
         include_str!("../../../tests/fixtures/claude-task-notifications.jsonl"),
-        transcript_copies(&payload, copies, 20)
+        transcript_copies(&payload, copies, first)
     );
     std::fs::write(&path, transcript).unwrap();
     let column = area.x + area.width * 2 / 3 + 1;
@@ -340,7 +343,7 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
     app.refresh_event_for_list_rows(visible);
     app.view
         .render(area, &mut ratatui::buffer::Buffer::empty(area));
-    // Each complete copy contributes two events; stop six events before copy 20.
+    // Each complete copy contributes two events; stop five events before copy `first`.
     let loaded = app.view.event_panel.len();
     for _ in 0..(copies * 2 + 5) {
         wheel(&mut app, MouseEventKind::ScrollUp);
@@ -378,7 +381,7 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
     }
     let after = event_detail_at(&app, area);
     assert!(
-        after.contains("Transcript copy 20"),
+        after.contains(&format!("Transcript copy {first}")),
         "newer navigation must pass the notification: {after}"
     );
     for _ in 0..6 {
