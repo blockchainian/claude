@@ -404,28 +404,36 @@ fn event_selection_append_keeps_selection_and_window_edge() {
 }
 
 #[test]
-fn event_selection_scrolls_to_first_row_across_windows_after_append() {
-    for width in [120, 180] {
-        let mut fixture = EventSelectionFixture::after_wheel_burst(width);
-        draw_size(&mut fixture.app, width, 19);
-        fixture.append();
-        let EventSelectionFixture {
-            _directory,
-            mut app,
-            wheel_position: (x, y),
-            ..
-        } = fixture;
-        draw_size(&mut app, width, 19);
-        for expected in (0..27).rev() {
-            wheel(&mut app, MouseEventKind::ScrollUp, x, y);
-            let buffer = draw_size(&mut app, width, 19);
-            let label = format!("event-{expected:02}");
-            assert!(event_detail_content(&buffer).contains(&label));
-            assert_event_cursor(&buffer, event_position(&buffer, &label).1);
-        }
+fn event_selection_scrolls_to_first_row_across_windows_after_append_at_width_120() {
+    event_selection_scrolls_to_first_row_across_windows_after_append(120);
+}
+
+#[test]
+fn event_selection_scrolls_to_first_row_across_windows_after_append_at_width_180() {
+    event_selection_scrolls_to_first_row_across_windows_after_append(180);
+}
+
+fn event_selection_scrolls_to_first_row_across_windows_after_append(width: u16) {
+    // Below nineteen rows, the layout hides the event panels.
+    let mut fixture = EventSelectionFixture::after_wheel_burst(width);
+    draw_size(&mut fixture.app, width, 19);
+    fixture.append();
+    let EventSelectionFixture {
+        _directory,
+        mut app,
+        wheel_position: (x, y),
+        ..
+    } = fixture;
+    draw_size(&mut app, width, 19);
+    for expected in (0..27).rev() {
         wheel(&mut app, MouseEventKind::ScrollUp, x, y);
-        assert!(event_detail_content(&draw_size(&mut app, width, 19)).contains("event-00"));
+        let buffer = draw_size(&mut app, width, 19);
+        let label = format!("event-{expected:02}");
+        assert!(event_detail_content(&buffer).contains(&label));
+        assert_event_cursor(&buffer, event_position(&buffer, &label).1);
     }
+    wheel(&mut app, MouseEventKind::ScrollUp, x, y);
+    assert!(event_detail_content(&draw_size(&mut app, width, 19)).contains("event-00"));
 }
 
 #[test]
