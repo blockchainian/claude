@@ -40,7 +40,6 @@ impl Tmux {
             "-l",
             &format!("{press}{release}"),
         ]);
-        std::thread::sleep(Duration::from_millis(200));
     }
 }
 
@@ -72,11 +71,7 @@ fn terminal_spawn_agent_claude_receipt_and_model() {
     let transcript = project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl");
     std::fs::write(
         &transcript,
-        format!(
-            "{}\n{}",
-            include_str!("fixtures/transcript.jsonl"),
-            include_str!("fixtures/claude-agent-launch.jsonl")
-        ),
+        include_str!("fixtures/claude-agent-launch.jsonl"),
     )
     .unwrap();
     let codex = directory.path().join("codex");
