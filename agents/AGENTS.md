@@ -25,11 +25,21 @@ This directory is `agents`, the terminal command center for Claude Code and Code
 
 ### Writing tests
 
-One test should complete in under 1s, test one product behavior only, and use only minimal test data or fixtures. Do not:
+> Do not write UI tests. Write unit tests instead.
 
+One test should complete in under 1s, test one product behavior only, and use minimal test data or fixtures only. Do not:
 - test multiple unrelated product behaviors in one test
 - use unnecessarily large test data or fixtures
-- use combinatorial tests, i.e. combinations of scenarios that can be tested separately
+- use combinatorial tests, i.e. all possible combinations of N behaviors that can be tested in O(n) if done separately.
+
+### Fixing slow tests
+
+- Change test code only. Preserve every assertion's behavior and coverage; do not fake the flow.
+- Split unrelated behaviors, reduce redundant records and rounds, and cover each dimension instead of every combination.
+- Remove unnecessary waits and sleeps. Keep each test below 1s, preferably below 0.7s. Do not split if the parts remain slow or total runtime increases.
+- From `agents/`, run each assigned test alone before editing and record its time: `cargo nextest run --bin agents -E 'test(=<full test path>)'`.
+- After editing, run the assigned tests three times; all must pass. Report each test's before time and slowest after time.
+- Run `cargo clippy --tests`; introduce no warnings. Do not relax the nextest timeout.
 
 ## Tools
 
@@ -41,8 +51,8 @@ One test should complete in under 1s, test one product behavior only, and use on
 
 The gate every change passes:
 
-- **tests**: `cargo nextest run`
 - **lint**: `cargo clippy --all-targets`
+- **tests**: `cargo nextest run`
 - **build**: `cargo build --release`
 
 ## Tests

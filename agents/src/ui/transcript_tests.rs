@@ -425,8 +425,8 @@ fn transcript_records_scroll_as_one_complete_document_without_fold_markers() {
         .unwrap()
         .clone();
     let mut seen = std::collections::BTreeSet::new();
+    let mut rendered = first;
     loop {
-        let rendered = event_screen(&view, 200, 50, now);
         assert!(!body(&rendered).contains('…'), "{rendered}");
         let viewport = view.viewport.borrow();
         for row in &viewport.event_text.rows {
@@ -436,8 +436,8 @@ fn transcript_records_scroll_as_one_complete_document_without_fold_markers() {
         }
         drop(viewport);
         let before = view.event_detail.scroll.borrow().offset;
-        view.handle_key(KeyCode::Down.into());
-        event_screen(&view, 200, 50, now);
+        view.handle_key(KeyCode::PageDown.into());
+        rendered = event_screen(&view, 200, 50, now);
         if view.event_detail.scroll.borrow().offset == before {
             break;
         }
@@ -550,9 +550,9 @@ fn transcript_claude_titles_show_content_types_in_order_else_the_role() {
         let mut event = view.event_panel[0].clone();
         event.source_records = vec![crate::event::SourceRecord { path, offset: 0 }];
         view.set_event(vec![event]);
-        event_screen(&view, 240, 90, now);
+        event_screen(&view, 120, 30, now);
         transcript(&mut view);
-        let rendered = event_screen(&view, 240, 90, now);
+        let rendered = event_screen(&view, 120, 30, now);
         assert!(
             rendered.contains(expected),
             "missing {expected}: {rendered}"
