@@ -545,7 +545,7 @@ fn terminal_inactive_child_pin_lasts_until_root_finishes() {
     let preferences = || -> serde_json::Value {
         serde_json::from_slice(&std::fs::read(config.join("agents.json")).unwrap()).unwrap()
     };
-    let pin = preferences()["state"]["pinned"].clone();
+    let pin = preferences()["state"]["pinned"]["inactive"].clone();
     assert_eq!(pin.as_array().unwrap().len(), 1);
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
     let active =
@@ -554,16 +554,22 @@ fn terminal_inactive_child_pin_lasts_until_root_finishes() {
     select_child();
     tmux.run(&["send-keys", "-t", "probe", "p"]);
     tmux.wait_for(|capture| !capture.contains("Pinned"));
-    assert_eq!(preferences()["state"]["pinned"], serde_json::json!([]));
+    assert_eq!(
+        preferences()["state"]["pinned"]["inactive"],
+        serde_json::json!([])
+    );
     tmux.run(&["send-keys", "-t", "probe", "Tab"]);
     select_child();
     tmux.run(&["send-keys", "-t", "probe", "p"]);
     tmux.wait_for(|capture| capture.contains("Pinned"));
-    assert_eq!(preferences()["state"]["pinned"], pin);
+    assert_eq!(preferences()["state"]["pinned"]["inactive"], pin);
     std::fs::remove_file(&registry).unwrap();
     let finished =
         tmux.capture_when(|capture| capture.contains("Inactive 2") && !capture.contains("Pinned"));
-    assert_eq!(preferences()["state"]["pinned"], serde_json::json!([]));
+    assert_eq!(
+        preferences()["state"]["pinned"]["inactive"],
+        serde_json::json!([])
+    );
     let verdict = serde_json::json!({
         "verdict": "pass",
         "inactive_child_pin": true,

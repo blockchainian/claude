@@ -33,8 +33,8 @@ fn terminal_bash_interpreter_script_colors() {
             .unwrap_or_else(|| panic!("missing {needle:?}: {capture}"));
         screen.cell(row as u16, column as u16).unwrap()
     };
-    let keyword = cell("for i,l").fgcolor();
-    let variable = cell("lines=open").fgcolor();
+    let keyword = cell("for i, l").fgcolor();
+    let variable = cell("lines = open").fgcolor();
     let string = cell("tests/ui_snapshots").fgcolor();
     let builtin = cell("enumerate(lines)");
     let shell_command = cell("cd ").fgcolor();

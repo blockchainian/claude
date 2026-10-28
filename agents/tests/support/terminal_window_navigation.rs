@@ -32,13 +32,13 @@ fn terminal_vim_window_navigation_uses_rendered_panels() {
         // Details ignores slash, so the following question mark opens help.
         // In the task list it would be inserted into the search editor instead.
         tmux.run(&["send-keys", "-t", "probe", "?"]);
-        let task_details = tmux.capture_when(|capture| capture.contains("Task shortcuts"));
+        let task_details = tmux.capture_when(|capture| capture.contains("Shortcuts"));
         assert!(
             !task_details.contains("Search ❯"),
             "task details focus: {task_details}"
         );
         tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-        tmux.wait_for(|capture| !capture.contains("Task shortcuts"));
+        tmux.wait_for(|capture| !capture.contains("Shortcuts"));
 
         window_key(&tmux, "j");
         tmux.run(&["send-keys", "-t", "probe", "/"]);
