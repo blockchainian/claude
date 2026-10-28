@@ -470,31 +470,31 @@ fn terminal_draft_defaults_and_inherited_choices() {
             "xhigh",
         ),
     ] {
+        let (_directory, tmux, _) =
+            start_probe_with_setup("draft-defaults", &transcript_at(&source), |directory| {
+                let config = directory.join("claude");
+                std::fs::write(
+                    config.join(".claude.json"),
+                    r#"{"oauthAccount":{"organizationUuid":"org-1","accountUuid":"ACCOUNT-1"}}"#,
+                )
+                .unwrap();
+                let hash = Sha256::digest(b"account-1")
+                    .iter()
+                    .take(6)
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>();
+                let cache = config.join("cache/model-catalog");
+                std::fs::create_dir_all(&cache).unwrap();
+                std::fs::write(
+                    cache.join(format!("org-1-{hash}-cc.json")),
+                    include_str!("../fixtures/claude-model-catalog.json"),
+                )
+                .unwrap();
+                if let Some(settings) = settings {
+                    std::fs::write(config.join("settings.json"), settings).unwrap();
+                }
+            });
         for width in [120, 200] {
-            let (_directory, tmux, _) = start_probe_with_setup(
-                "draft-defaults",
-                &transcript_at(&source),
-                |directory| {
-                    let config = directory.join("claude");
-                    std::fs::write(config.join(".claude.json"),
-                        r#"{"oauthAccount":{"organizationUuid":"org-1","accountUuid":"ACCOUNT-1"}}"#).unwrap();
-                    let hash = Sha256::digest(b"account-1")
-                        .iter()
-                        .take(6)
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect::<String>();
-                    let cache = config.join("cache/model-catalog");
-                    std::fs::create_dir_all(&cache).unwrap();
-                    std::fs::write(
-                        cache.join(format!("org-1-{hash}-cc.json")),
-                        include_str!("../fixtures/claude-model-catalog.json"),
-                    )
-                    .unwrap();
-                    if let Some(settings) = settings {
-                        std::fs::write(config.join("settings.json"), settings).unwrap();
-                    }
-                },
-            );
             tmux.run(&[
                 "resize-window",
                 "-t",
@@ -578,6 +578,13 @@ fn terminal_draft_defaults_and_inherited_choices() {
                     });
                 }
                 checks.push(serde_json::json!({"width":width,"model":model,"effort":effort,"named":named,"clickable":true,"inherit":true,"same_field_cancel":true}));
+            }
+            if width == 120 {
+                delete_named_draft(&tmux);
+                tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+                tmux.wait_for(|capture| {
+                    capture.contains("Update") || capture.contains("Last activity")
+                });
             }
         }
     }
