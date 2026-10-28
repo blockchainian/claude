@@ -9,31 +9,38 @@ fn picker_has_row(capture: &str, label: &str) -> bool {
 }
 
 #[test]
-fn terminal_draft_delete_focus_allows_repeated_new_task() {
+fn terminal_draft_delete_focus_allows_repeated_new_task_narrow() {
+    draft_delete_focus(120);
+}
+
+#[test]
+fn terminal_draft_delete_focus_allows_repeated_new_task_wide() {
+    draft_delete_focus(200);
+}
+
+fn draft_delete_focus(width: usize) {
     let mut checks = Vec::new();
-    for width in [120, 200] {
-        let root = tempfile::tempdir().unwrap();
-        let source = root.path().join("source");
-        repository(&source, "main");
-        let (_directory, tmux, _) =
-            start_probe_with_transcript("draft-delete-focus", &transcript_at(&source));
-        tmux.run(&[
-            "resize-window",
-            "-t",
-            "probe",
-            "-x",
-            &width.to_string(),
-            "-y",
-            "50",
-        ]);
-        tmux.run(&["send-keys", "-t", "probe", "n"]);
-        assert_title_caret(&tmux, "New task", 0);
-        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-        tmux.wait_for(|capture| title_rule_position(capture, "New task").is_none());
-        tmux.run(&["send-keys", "-t", "probe", "n"]);
-        assert_title_caret(&tmux, "New task", 0);
-        checks.push(serde_json::json!({"width": width, "new_escape_new": "pass"}));
-    }
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    repository(&source, "main");
+    let (_directory, tmux, _) =
+        start_probe_with_transcript("draft-delete-focus", &transcript_at(&source));
+    tmux.run(&[
+        "resize-window",
+        "-t",
+        "probe",
+        "-x",
+        &width.to_string(),
+        "-y",
+        "50",
+    ]);
+    tmux.run(&["send-keys", "-t", "probe", "n"]);
+    assert_title_caret(&tmux, "New task", 0);
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    tmux.wait_for(|capture| title_rule_position(capture, "New task").is_none());
+    tmux.run(&["send-keys", "-t", "probe", "n"]);
+    assert_title_caret(&tmux, "New task", 0);
+    checks.push(serde_json::json!({"width": width, "new_escape_new": "pass"}));
     let verdict = serde_json::json!({"verdict": "pass", "checks": checks});
     if let Some(directory) = std::env::var_os("AGENTS_PROBE_CAPTURE_DIR") {
         std::fs::create_dir_all(&directory).unwrap();
