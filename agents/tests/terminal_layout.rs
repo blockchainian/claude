@@ -207,13 +207,7 @@ fn assert_title_caret(tmux: &Tmux, title: &str, offset: usize) -> String {
 #[test]
 fn terminal_background_event_has_no_marker_and_keeps_its_time() {
     let records = include_str!("fixtures/background/two-awaits.jsonl");
-    let contents = |count| {
-        format!(
-            "{}{}\n",
-            include_str!("fixtures/transcript.jsonl"),
-            records.lines().take(count).collect::<Vec<_>>().join("\n")
-        )
-    };
+    let contents = |count| records.lines().take(count).collect::<Vec<_>>().join("\n") + "\n";
     let (_directory, tmux, transcript) =
         start_probe_with_transcript("background-log-marker", &contents(3));
     for (count, time) in [(3, "3m 13s"), (4, "3m 15s")] {
