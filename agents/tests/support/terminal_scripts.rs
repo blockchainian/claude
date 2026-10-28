@@ -92,108 +92,286 @@ fn terminal_write_file_colors() {
     );
 }
 
-#[test]
-fn terminal_shell_file_read_colors() {
-    for provider in ["claude", "codex"] {
-        for (case, command, highlighted) in [
-            ("range", "sed -n '10,80p' src/foo.rs", true),
-            ("unquoted", "sed -n 1,140p src/sessions/mod.rs", true),
-            (
-                "ranges",
-                "cd /x/agents/src/ui && sed -n '690,730p;790,815p;885,905p' render.rs",
-                true,
-            ),
-            (
-                "pipeline-ranges",
-                "cat a.rs | sed -n '15,25p;125,140p;555,575p'",
-                true,
-            ),
-            (
-                "regex-quit",
-                r"sed -n '/#\[cfg(test)\]/q;p' src/rename/walker.rs",
-                true,
-            ),
-            (
-                "arithmetic",
-                r#"sed -n "$((n-12)),$((n+12))p" claude.strings"#,
-                false,
-            ),
-            ("variable", r#"sed -n "${n}p" claude.strings"#, false),
-            (
-                "arithmetic-rust",
-                r#"sed -n "$((n-12)),$((n+12))p" a.rs"#,
-                true,
-            ),
-            ("variable-rust", r#"sed -n "${n}p" a.rs"#, true),
-            ("expressions", "sed -e '1,3p' -e '9p' -n a.rs", true),
-            ("count", "sed -n '1,3p;60,90p' a.rs", true),
-            ("grep", "sed -n 1,5p a.rs | grep x", false),
-            ("substitute", "sed 's/ *$//' lr.out", false),
-            ("number", "sed -n '1,5p;=' f.rs", false),
-            ("script-file", "sed -f script.sed f.rs", false),
-            ("append", r"sed '1a\foo' f.rs", false),
-        ] {
-            let body = "let answer = \"file-read-highlight\";";
-            let name = format!("file-read-{provider}-{case}");
-            let (_directory, tmux) = start_shell_output_probe(&name, command, body, provider);
-            tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "50"]);
-            tmux.run(&["send-keys", "-t", "probe", "End"]);
-            let capture = tmux.capture_when(|capture| capture.contains(body));
-            let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
-            let parser = captured_screen(&colored, 200, 50);
-            let (row, line) = capture
-                .lines()
-                .enumerate()
-                .find(|(_, line)| line.contains(body))
-                .unwrap();
-            let color = |needle| {
-                parser
-                    .screen()
-                    .cell(
-                        row as u16,
-                        line[..line.find(needle).unwrap()].width() as u16,
-                    )
-                    .unwrap()
-                    .fgcolor()
-            };
-            assert_eq!(
-                color("answer") != color("file-read-highlight"),
-                highlighted,
-                "{provider} {case} ({command}): {capture}"
-            );
-            let path = std::env::temp_dir().join(format!("agents-{name}.ansi"));
-            std::fs::write(&path, colored).unwrap();
-            let verdict = serde_json::json!({"verdict": "pass", "provider": provider, "highlighted": highlighted, "capture": path});
-            std::fs::write(path.with_extension("json"), verdict.to_string()).unwrap();
-            println!("{verdict}");
-        }
-        for (case, command) in [
-            (
-                "regex-range",
-                "sed -n '/## Install/,/^## /p' memory/agents.md",
-            ),
-            ("delete", "sed '/^$/d' notes.md"),
-        ] {
-            let name = format!("file-read-{provider}-{case}");
-            let (_directory, tmux) =
-                start_shell_output_probe(&name, command, "**markdown-probe**", provider);
-            tmux.run(&["send-keys", "-t", "probe", "End"]);
-            let capture = tmux.capture_when(|capture| capture.contains("markdown-probe"));
-            assert!(
-                !capture.contains("**markdown-probe**"),
-                "{provider} {case}: Markdown markup stayed literal: {capture}"
-            );
-            let path = std::env::temp_dir().join(format!("agents-{name}.ansi"));
-            std::fs::write(
-                &path,
-                tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]),
+fn shell_file_read_colors(provider: &str, index: usize) {
+    let (case, command, highlighted) = [
+        ("range", "sed -n '10,80p' src/foo.rs", true),
+        ("unquoted", "sed -n 1,140p src/sessions/mod.rs", true),
+        (
+            "ranges",
+            "cd /x/agents/src/ui && sed -n '690,730p;790,815p;885,905p' render.rs",
+            true,
+        ),
+        (
+            "pipeline-ranges",
+            "cat a.rs | sed -n '15,25p;125,140p;555,575p'",
+            true,
+        ),
+        (
+            "regex-quit",
+            r"sed -n '/#\[cfg(test)\]/q;p' src/rename/walker.rs",
+            true,
+        ),
+        (
+            "arithmetic",
+            r#"sed -n "$((n-12)),$((n+12))p" claude.strings"#,
+            false,
+        ),
+        ("variable", r#"sed -n "${n}p" claude.strings"#, false),
+        (
+            "arithmetic-rust",
+            r#"sed -n "$((n-12)),$((n+12))p" a.rs"#,
+            true,
+        ),
+        ("variable-rust", r#"sed -n "${n}p" a.rs"#, true),
+        ("expressions", "sed -e '1,3p' -e '9p' -n a.rs", true),
+        ("count", "sed -n '1,3p;60,90p' a.rs", true),
+        ("grep", "sed -n 1,5p a.rs | grep x", false),
+        ("substitute", "sed 's/ *$//' lr.out", false),
+        ("number", "sed -n '1,5p;=' f.rs", false),
+        ("script-file", "sed -f script.sed f.rs", false),
+        ("append", r"sed '1a\foo' f.rs", false),
+    ][index];
+    let body = "let answer = \"file-read-highlight\";";
+    let name = format!("file-read-{provider}-{case}");
+    let (_directory, tmux) = start_shell_output_probe(&name, command, body, provider);
+    tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "50"]);
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
+    let capture = tmux.capture_when(|capture| capture.contains(body));
+    let colored = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
+    let parser = captured_screen(&colored, 200, 50);
+    let (row, line) = capture
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains(body))
+        .unwrap();
+    let color = |needle| {
+        parser
+            .screen()
+            .cell(
+                row as u16,
+                line[..line.find(needle).unwrap()].width() as u16,
             )
-            .unwrap();
-            let verdict = serde_json::json!({"verdict": "pass", "provider": provider, "markdown": true, "capture": path});
-            std::fs::write(path.with_extension("json"), verdict.to_string()).unwrap();
-            println!("{verdict}");
-        }
-    }
+            .unwrap()
+            .fgcolor()
+    };
+    assert_eq!(
+        color("answer") != color("file-read-highlight"),
+        highlighted,
+        "{provider} {case} ({command}): {capture}"
+    );
+    let path = std::env::temp_dir().join(format!("agents-{name}.ansi"));
+    std::fs::write(&path, colored).unwrap();
+    let verdict = serde_json::json!({"verdict": "pass", "provider": provider, "highlighted": highlighted, "capture": path});
+    std::fs::write(path.with_extension("json"), verdict.to_string()).unwrap();
+    println!("{verdict}");
+}
+
+fn shell_file_read_markdown(provider: &str, index: usize) {
+    let (case, command) = [
+        (
+            "regex-range",
+            "sed -n '/## Install/,/^## /p' memory/agents.md",
+        ),
+        ("delete", "sed '/^$/d' notes.md"),
+    ][index];
+    let name = format!("file-read-{provider}-{case}");
+    let (_directory, tmux) =
+        start_shell_output_probe(&name, command, "**markdown-probe**", provider);
+    tmux.run(&["send-keys", "-t", "probe", "End"]);
+    let capture = tmux.capture_when(|capture| capture.contains("markdown-probe"));
+    assert!(
+        !capture.contains("**markdown-probe**"),
+        "{provider} {case}: Markdown markup stayed literal: {capture}"
+    );
+    let path = std::env::temp_dir().join(format!("agents-{name}.ansi"));
+    std::fs::write(
+        &path,
+        tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]),
+    )
+    .unwrap();
+    let verdict = serde_json::json!({"verdict": "pass", "provider": provider, "markdown": true, "capture": path});
+    std::fs::write(path.with_extension("json"), verdict.to_string()).unwrap();
+    println!("{verdict}");
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_range() {
+    shell_file_read_colors("claude", 0);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_unquoted() {
+    shell_file_read_colors("claude", 1);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_ranges() {
+    shell_file_read_colors("claude", 2);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_pipeline_ranges() {
+    shell_file_read_colors("claude", 3);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_regex_quit() {
+    shell_file_read_colors("claude", 4);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_arithmetic() {
+    shell_file_read_colors("claude", 5);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_variable() {
+    shell_file_read_colors("claude", 6);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_arithmetic_rust() {
+    shell_file_read_colors("claude", 7);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_variable_rust() {
+    shell_file_read_colors("claude", 8);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_expressions() {
+    shell_file_read_colors("claude", 9);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_count() {
+    shell_file_read_colors("claude", 10);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_grep() {
+    shell_file_read_colors("claude", 11);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_substitute() {
+    shell_file_read_colors("claude", 12);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_number() {
+    shell_file_read_colors("claude", 13);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_script_file() {
+    shell_file_read_colors("claude", 14);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_append() {
+    shell_file_read_colors("claude", 15);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_regex_range() {
+    shell_file_read_markdown("claude", 0);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_claude_delete() {
+    shell_file_read_markdown("claude", 1);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_range() {
+    shell_file_read_colors("codex", 0);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_unquoted() {
+    shell_file_read_colors("codex", 1);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_ranges() {
+    shell_file_read_colors("codex", 2);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_pipeline_ranges() {
+    shell_file_read_colors("codex", 3);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_regex_quit() {
+    shell_file_read_colors("codex", 4);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_arithmetic() {
+    shell_file_read_colors("codex", 5);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_variable() {
+    shell_file_read_colors("codex", 6);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_arithmetic_rust() {
+    shell_file_read_colors("codex", 7);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_variable_rust() {
+    shell_file_read_colors("codex", 8);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_expressions() {
+    shell_file_read_colors("codex", 9);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_count() {
+    shell_file_read_colors("codex", 10);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_grep() {
+    shell_file_read_colors("codex", 11);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_substitute() {
+    shell_file_read_colors("codex", 12);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_number() {
+    shell_file_read_colors("codex", 13);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_script_file() {
+    shell_file_read_colors("codex", 14);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_append() {
+    shell_file_read_colors("codex", 15);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_regex_range() {
+    shell_file_read_markdown("codex", 0);
+}
+
+#[test]
+fn terminal_shell_file_read_colors_codex_delete() {
+    shell_file_read_markdown("codex", 1);
 }
 
 fn start_shell_output_probe(
