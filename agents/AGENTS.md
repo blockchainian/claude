@@ -23,6 +23,14 @@ This directory is `agents`, the terminal command center for Claude Code and Code
 
 ## Development
 
+### Writing tests
+
+One test should complete in under 1s, test one product behavior only, and use only minimal test data or fixtures. Do not:
+
+- test multiple unrelated product behaviors in one test
+- use unnecessarily large test data or fixtures
+- use combinatorial tests, i.e. combinations of scenarios that can be tested separately
+
 ## Tools
 
 ### Install
