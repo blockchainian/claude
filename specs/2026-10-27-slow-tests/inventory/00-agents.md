@@ -12,8 +12,6 @@
 | 2.06 (iso 1.14) | ui::tests::active_panel_tests | mouse_activation_drag_keeps_the_pressed_panel | partly | fewer events in panel_fixture<br>split per width |
 | 2.05 (iso 1.51) | app::tests | task_event_wheel_then_arrow_keys_reverse_across_reloaded_windows | partly | smaller area height |
 | 1.56 (iso 1.27) | app::tests | new_indicator_loads_latest_event_after_top_border | partly | smaller area, fewer transcript copies |
-| 1.44 (iso 0.71) | ui::tests | selected_event_row_preserves_foreground_and_adds_bold | partly | one fixture per width and theme |
-| 1.28 (iso 0.83) | ui::tests::window_navigation_tests | panel_zoom_collapsed_panels_keep_frame_labels | partly | height 45, not 110<br>one fixture per width |
 | 1.21 (iso 0.75) | ui::tests::active_panel_tests | active_panel_question_keys_require_prompt_focus | partly | split per width<br>fewer events in panel_fixture |
 | 1.19 (iso 0.98) | app::tests | bottom_border_loads_latest_event_after_top_border | partly | smaller area<br>drop duplicated top-border asserts |
 | 1.15 (iso 0.74) | ui::tests::active_panel_tests | active_panel_unsupported_task_keys_do_not_fall_through | partly | split per panel<br>fewer events in panel_fixture |
@@ -33,9 +31,6 @@
 | 1.95 (iso 1.16) | ui::tests::active_panel_tests | mouse_activation_double_click_keeps_the_pressed_panel | yes | fewer events in panel_fixture |
 | 1.70 (iso 1.06) | ui::tests::active_panel_tests | active_panel_event_detail_bottom_steps_to_next_event | yes | fewer events in panel_fixture |
 | 1.48 (iso 0.92) | ui::tests::active_panel_tests | active_panel_detail_top_backward_keys_do_not_navigate_lists | yes | split per panel<br>fewer events in panel_fixture |
-| 1.08 (iso 0.61) | ui::inline_images::tests | inline_images_evicts_least_recently_drawn_image_at_byte_limit | yes | opt-level 2 for image crates in dev profile |
-| 1.03 (iso 0.49) | ui::draft_flow_tests | branch_and_repository_selection_orders_create_in_selected_repository | yes | split per order<br>one git repo per test |
-| 1.01 (iso 0.57) | ui::tests::window_navigation_tests | hidden_focus_resize_recovers_and_does_not_return_on_growth | yes | split per width and source |
 
 ## Not fixable
 
