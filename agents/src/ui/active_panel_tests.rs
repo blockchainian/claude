@@ -191,27 +191,34 @@ fn active_panel_detail_top_backward_keys_do_not_navigate_lists_event_detail() {
     detail_top_backward_keys_do_not_navigate_lists(Panel::EventDetail);
 }
 
-#[test]
-fn active_panel_event_detail_bottom_steps_to_next_event() {
-    for width in [100, 200] {
-        let (mut view, now) = panel_fixture(width);
-        let panel = Panel::EventDetail;
-        view.set_active_panel(panel);
-        let event = view.event_list.cursor;
-        for (forward, _) in navigation_pairs() {
-            if forward.code == KeyCode::End {
-                continue;
-            }
-            view.select_event(Some(20));
-            key(&mut view, KeyCode::End);
-            event_screen(&view, width, 45, now);
-            let bottom = task_details_position(&view, panel);
-            assert!(bottom > 0);
-            // Like the wheel, the event detail's step keys leave for the next event.
-            view.handle_key(forward);
-            assert_eq!(view.event_list.cursor, event.map(|e| e + 1));
+fn event_detail_bottom_steps_to_next_event(width: u16) {
+    let (mut view, now) = panel_fixture(width);
+    let panel = Panel::EventDetail;
+    view.set_active_panel(panel);
+    let event = view.event_list.cursor;
+    for (forward, _) in navigation_pairs() {
+        if forward.code == KeyCode::End {
+            continue;
         }
+        view.select_event(Some(20));
+        key(&mut view, KeyCode::End);
+        event_screen(&view, width, 45, now);
+        let bottom = task_details_position(&view, panel);
+        assert!(bottom > 0);
+        // Like the wheel, the event detail's step keys leave for the next event.
+        view.handle_key(forward);
+        assert_eq!(view.event_list.cursor, event.map(|e| e + 1));
     }
+}
+
+#[test]
+fn active_panel_event_detail_bottom_steps_to_next_event_narrow() {
+    event_detail_bottom_steps_to_next_event(100);
+}
+
+#[test]
+fn active_panel_event_detail_bottom_steps_to_next_event_wide() {
+    event_detail_bottom_steps_to_next_event(200);
 }
 
 fn short_event_detail_steps_between_events(width: u16) {
