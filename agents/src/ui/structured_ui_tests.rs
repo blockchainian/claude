@@ -21,6 +21,8 @@ fn assert_pretty_xml(text: &str) {
 
 #[test]
 fn structured_xml_body_is_pretty_and_highlighted_for_every_kind() {
+    let (mut view, now) = event_fixture();
+    let template = view.event_panel[7].clone();
     for kind in [
         crate::event::Kind::Error,
         crate::event::Kind::Denied,
@@ -31,30 +33,34 @@ fn structured_xml_body_is_pretty_and_highlighted_for_every_kind() {
         crate::event::Kind::QueuedUser,
         crate::event::Kind::QueuedSystem,
     ] {
-        let (mut view, now) = event_fixture();
-        let mut event = view.event_panel[7].clone();
+        let mut event = template.clone();
         event.kind = kind;
         event.body = xml_body();
         event.calls.clear();
         assert_pretty_xml(&super::super::event_list::open_text(&event));
         view.select_fixture_event(Some(event));
-        let rendered = event_screen(&view, 120, 64, now);
-        let event_detail_y = view.viewport.borrow().event_detail.y;
-        let detail = rendered
-            .lines()
-            .skip(usize::from(event_detail_y))
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(detail.contains("<key>settings</key>"), "{rendered}");
         let mut buf = Buffer::empty(Rect::new(0, 0, 120, 64));
         view.render_at(buf.area, &mut buf, now);
+        let event_detail_y = view.viewport.borrow().event_detail.y;
+        let detail = buf
+            .content
+            .chunks(120)
+            .skip(usize::from(event_detail_y))
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell_text(cell.symbol()))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(detail.contains("<key>settings</key>"), "{detail}");
         let (x, y) = rendered_cell(&detail, "<plist version");
         assert!(
             (x..x + 6).any(|column| matches!(
                 buf[(column, y + event_detail_y)].fg,
                 Color::Rgb(..) | Color::Indexed(..)
             )),
-            "XML needs syntax colors: {rendered}"
+            "XML needs syntax colors: {detail}"
         );
     }
 }

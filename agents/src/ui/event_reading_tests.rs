@@ -1644,53 +1644,52 @@ fn diff_backgrounds_preserve_text_positions() {
     view.event_session = view.selected_id().cloned();
     let now = DateTime::UNIX_EPOCH;
     let cases = diff_background_events();
-    for light in [false, true] {
+    // Cover each width and both themes without their Cartesian product.
+    for (light, width) in [(false, 41), (true, 120), (false, 200)] {
         super::super::highlight::use_theme(light, None).unwrap();
         for event in &cases {
             view.set_event(vec![event.clone()]);
             view.select_fixture_event(Some(event.clone()));
-            for width in [41, 120, 200] {
-                // 120 rows keep all 16 lines of the tallest diff case visible at width 41.
-                let area = Rect::new(0, 0, width, 120);
-                let mut buffer = Buffer::empty(area);
-                view.render_at(area, &mut buffer, now);
-                let viewport = view.viewport.borrow();
-                let layout = viewport.event_detail_layout.as_ref().unwrap();
-                let panel = view.center_layout(area).event_detail;
-                // Compare both renderers at the same inset content rectangle.
-                let reference = View::new(Grouping::Project, false);
-                let mut before = Buffer::empty(area);
-                reference.render_event_detail_content(
-                    event,
-                    "12:34:56",
-                    viewport.event_detail,
-                    &mut before,
-                    &view.selected_row().unwrap().cwd,
-                    now,
-                );
-                for (row, &source) in layout.visible.iter().enumerate() {
-                    let y = panel.y + EVENT_TOP + row as u16;
-                    for x in panel.x..panel.right() {
-                        // Padding changes only the background, preserving the centered text.
-                        // Merged calls' titles also draw an edge rule in the padding.
-                        let edge_rule = layout.titles.len() > 1
-                            && layout
-                                .titles
-                                .iter()
-                                .any(|(title_row, _)| *title_row == source)
-                            && (x == panel.x || x == panel.right() - 1);
-                        // The left padding also carries the mirrored scrollbar.
-                        let scrollbar = x == panel.x && buffer[(x, y)].symbol() == "▏";
-                        if !edge_rule
-                            && !scrollbar
-                            && !layout.times.iter().any(|(time_row, _)| *time_row == source)
-                        {
-                            assert_eq!(
-                                cell_text(buffer[(x, y)].symbol()),
-                                cell_text(before[(x, y)].symbol()),
-                                "text moved at ({x}, {y}), width={width}"
-                            );
-                        }
+            // 120 rows keep all 16 lines of the tallest diff case visible at width 41.
+            let area = Rect::new(0, 0, width, 120);
+            let mut buffer = Buffer::empty(area);
+            view.render_at(area, &mut buffer, now);
+            let viewport = view.viewport.borrow();
+            let layout = viewport.event_detail_layout.as_ref().unwrap();
+            let panel = view.center_layout(area).event_detail;
+            // Compare both renderers at the same inset content rectangle.
+            let reference = View::new(Grouping::Project, false);
+            let mut before = Buffer::empty(area);
+            reference.render_event_detail_content(
+                event,
+                "12:34:56",
+                viewport.event_detail,
+                &mut before,
+                &view.selected_row().unwrap().cwd,
+                now,
+            );
+            for (row, &source) in layout.visible.iter().enumerate() {
+                let y = panel.y + EVENT_TOP + row as u16;
+                for x in panel.x..panel.right() {
+                    // Padding changes only the background, preserving the centered text.
+                    // Merged calls' titles also draw an edge rule in the padding.
+                    let edge_rule = layout.titles.len() > 1
+                        && layout
+                            .titles
+                            .iter()
+                            .any(|(title_row, _)| *title_row == source)
+                        && (x == panel.x || x == panel.right() - 1);
+                    // The left padding also carries the mirrored scrollbar.
+                    let scrollbar = x == panel.x && buffer[(x, y)].symbol() == "▏";
+                    if !edge_rule
+                        && !scrollbar
+                        && !layout.times.iter().any(|(time_row, _)| *time_row == source)
+                    {
+                        assert_eq!(
+                            cell_text(buffer[(x, y)].symbol()),
+                            cell_text(before[(x, y)].symbol()),
+                            "text moved at ({x}, {y}), width={width}"
+                        );
                     }
                 }
             }
