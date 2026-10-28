@@ -757,7 +757,18 @@ fn subagent_activity_blocks_are_centered() {
 }
 
 #[test]
-fn provider_detail_blocks_are_centered() {
+fn claude_detail_blocks_are_centered() {
+    let (entries, _) = provider_detail_events();
+    assert_provider_detail_blocks_centered(entries);
+}
+
+#[test]
+fn codex_detail_blocks_are_centered() {
+    let (_, entries) = provider_detail_events();
+    assert_provider_detail_blocks_centered(entries);
+}
+
+fn provider_detail_events() -> (Vec<Event>, Vec<Event>) {
     let mut entries = Vec::new();
     for fixture in [
         include_str!("../../tests/fixtures/transcript.jsonl"),
@@ -774,6 +785,7 @@ fn provider_detail_blocks_are_centered() {
     ] {
         entries.extend(events(fixture));
     }
+    let claude_count = entries.len();
     let (_dir, provider, session) = codex_fixture();
     for fixture in [
         "codex-rollout.jsonl",
@@ -795,6 +807,11 @@ fn provider_detail_blocks_are_centered() {
         entries.extend(codex_fixture_events(&provider, &session, fixture));
     }
     assert!(entries.len() > 30);
+    let codex = entries.split_off(claude_count);
+    (entries, codex)
+}
+
+fn assert_provider_detail_blocks_centered(entries: Vec<Event>) {
     for event in entries {
         let detail = super::super::tool_detail::event_detail_content(
             &event,
