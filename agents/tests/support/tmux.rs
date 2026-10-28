@@ -20,7 +20,7 @@ impl Tmux {
         // Run under the daemon so this survives even a kill of the test process group.
         writeln!(
             config,
-            "run-shell -b \"while kill -0 {} 2>/dev/null; do sleep 2; done; tmux -L {} kill-server\"",
+            "run-shell -b \"while kill -0 {} 2>/dev/null; do sleep 0.1; done; tmux -L {} kill-server\"",
             std::process::id(),
             name
         )

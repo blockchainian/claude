@@ -170,10 +170,12 @@ fn rule_3_click_unvisited_row_only_selects() {
 fn rule_3_draft_open_keys_enter_prompt() {
     for code in [KeyCode::Enter, KeyCode::Char('o')] {
         let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().join("cwd");
+        std::fs::create_dir(&cwd).unwrap();
         let mut view = tasks();
         let id = view.add_draft(DraftSetup {
             provider: ProviderId::Claude,
-            cwd: directory.path().into(),
+            cwd,
             model: None,
             effort: None,
             branch: String::new(),

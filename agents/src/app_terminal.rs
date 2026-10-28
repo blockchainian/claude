@@ -650,7 +650,33 @@ mod tests {
             let (directory, mut app, id) = fixture();
             draw(&mut app);
             super::super::event_search_tests::finish_search(&mut app);
-            let pid = attach(&mut app, id.clone(), &directory.path().join("pid"));
+            let pid_file = directory.path().join("pid");
+            let mut command = Command::new("sh");
+            command.args(["-c", r#"stty raw -echo; printf '%s' "$$" > "$1"; printf READY; dd bs=1 count=1 >/dev/null 2>&1; printf DETACHED"#, "sh"])
+                .arg(&pid_file);
+            let sender = app.sender.clone();
+            let terminal =
+                SessionTerminal::spawn(id.clone(), command, Some(b"\x1a"), (20, 80), move || {
+                    let _ = sender.send(Input::TerminalOutput);
+                })
+                .unwrap()
+                .with_detach_timeout(DETACH_TIMEOUT);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !terminal
+                .screen
+                .lock()
+                .unwrap()
+                .screen()
+                .contents()
+                .contains("READY")
+            {
+                app.receiver
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .unwrap();
+            }
+            let pid = std::fs::read_to_string(pid_file).unwrap().parse().unwrap();
+            app.view.show_terminal(id.clone(), terminal.screen.clone());
+            app.terminal = Some(terminal);
             let area = ratatui::layout::Rect::new(0, 0, 120, 23);
             app.view
                 .render(area, &mut ratatui::buffer::Buffer::empty(area));

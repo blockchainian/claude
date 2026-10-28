@@ -94,5 +94,5 @@ Common patterns point to these causes:
 ## Tests
 
 ```bash
-npm run test:web
+node --test plugins/web/skills/heap-snapshot-leaks/tests/*.mjs plugins/web/skills/browse/tests/*.mjs && uv run plugins/web/skills/check-web-design/tests/test_check_design.py
 ```

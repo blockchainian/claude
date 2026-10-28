@@ -59,5 +59,5 @@ How to use them is in the skill's `SKILL.md`; how to write an adapter is in
 
 ## Tests
 
-Run `npm run test:secrets` from the marketplace root. The offline suite exercises every hook with
+Run `node --test plugins/secrets/skills/secrets-manager/tests/*.mjs` from the marketplace root. The offline suite exercises every hook with
 fixture adapters; live browser selectors need headed checks.

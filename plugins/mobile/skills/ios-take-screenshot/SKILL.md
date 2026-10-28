@@ -286,5 +286,5 @@ State the target, the full output path, the number of slices, which axis was cap
 ## Tests
 
 ```bash
-npm run test:mobile
+node --test plugins/mobile/tests/*.mjs && uv run plugins/mobile/hooks/tests/test_phone_session_gate.py && node --test plugins/mobile/skills/ios-take-screenshot/tests/*.mjs && uv run plugins/mobile/skills/ios-take-screenshot/tests/test_frame_diff.py && uv run plugins/mobile/skills/ios-take-screenshot/tests/test_stitch_screens.py && uv run plugins/mobile/skills/check-mobile-design/tests/test_check_design.py
 ```

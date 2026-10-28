@@ -239,7 +239,7 @@ in step with codex's).
 ## Tests
 
 ```
-npm run test:codex
+node --test plugins/codex/tests/*.mjs
 ```
 
 `tests/codex-manager.test.mjs` drives the MCP server and the `await`/`pending`

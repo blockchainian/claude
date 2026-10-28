@@ -5322,9 +5322,8 @@ mod summary_cache_tests {
         result
     }
 
-    #[test]
-    fn summaries_parse_real_fixture_once_across_appends_and_unchanged_refreshes() {
-        for text in [
+    fn summary_fixtures() -> [&'static str; 7] {
+        [
             include_str!("../../../tests/fixtures/codex-rollout.jsonl"),
             include_str!("../../../tests/fixtures/codex-todos.jsonl"),
             include_str!("../../../tests/fixtures/codex-latest-activity.jsonl"),
@@ -5332,19 +5331,49 @@ mod summary_cache_tests {
             include_str!("../../../tests/fixtures/codex-input/default-answered.jsonl"),
             include_str!("../../../tests/fixtures/codex-subagents/rollout.jsonl"),
             include_str!("../../../tests/fixtures/prompt-cache/codex-requests.jsonl"),
-        ] {
+        ]
+    }
+
+    #[test]
+    fn summaries_match_full_parse_after_each_append() {
+        for text in summary_fixtures() {
             let mut file = tempfile::NamedTempFile::new().unwrap();
             let mut tasks = Tasks::default();
             for line in text.split_inclusive('\n') {
                 file.write_all(line.as_bytes()).unwrap();
                 let want = expected(file.path());
                 assert_eq!(tasks.summary(file.path()).unwrap(), want);
+            }
+        }
+    }
+
+    #[test]
+    fn summaries_do_not_reparse_unchanged_files() {
+        for text in summary_fixtures() {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            let mut tasks = Tasks::default();
+            for line in text.split_inclusive('\n') {
+                file.write_all(line.as_bytes()).unwrap();
+                let want = tasks.summary(file.path()).unwrap();
                 let parsed = tasks.parsed_bytes;
                 assert_eq!(tasks.summary(file.path()).unwrap(), want);
                 assert_eq!(
                     tasks.parsed_bytes, parsed,
                     "unchanged file was parsed again"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn summaries_parse_each_byte_once_across_appends() {
+        for text in summary_fixtures() {
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            let mut tasks = Tasks::default();
+            for line in text.split_inclusive('\n') {
+                file.write_all(line.as_bytes()).unwrap();
+                tasks.summary(file.path()).unwrap();
+                tasks.summary(file.path()).unwrap();
             }
             assert_eq!(tasks.parsed_bytes, text.len() as u64);
         }

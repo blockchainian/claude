@@ -6,7 +6,8 @@ coverage/
 __pycache__/
 *.pyc
 
-specs/
 .env
 
 /.privacyignore
+
+scratchpad/

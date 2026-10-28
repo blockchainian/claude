@@ -73,9 +73,10 @@ fn assert_lists_unchanged(view: &View, selected: usize, event: Option<usize>, sc
 fn active_panel_task_details_navigation_scrolls_only_its_content() {
     for width in [100, 200] {
         for panel in [Panel::TaskDetails, Panel::EventDetail] {
+            let (mut view, now) = panel_fixture(width);
+            view.set_active_panel(panel);
             for (forward, backward) in navigation_pairs() {
-                let (mut view, now) = panel_fixture(width);
-                view.set_active_panel(panel);
+                key(&mut view, KeyCode::Home);
                 let selected = view.selected;
                 let event = view.event_list.cursor;
                 let scroll = view.event_list.scroll.get();
@@ -105,30 +106,52 @@ fn active_panel_task_details_navigation_scrolls_only_its_content() {
 }
 
 #[test]
-fn active_panel_detail_boundaries_do_not_navigate_lists() {
+fn active_panel_detail_bottom_forward_keys_do_not_navigate_lists() {
     for width in [100, 200] {
         for panel in [Panel::TaskDetails, Panel::EventDetail] {
-            for (forward, backward) in navigation_pairs() {
-                let (mut view, now) = panel_fixture(width);
-                view.set_active_panel(panel);
-                let selected = view.selected;
-                let event = view.event_list.cursor;
-                let scroll = view.event_list.scroll.get();
-                key(&mut view, KeyCode::End);
-                event_screen(&view, width, 45, now);
-                let bottom = task_details_position(&view, panel);
-                assert!(bottom > 0);
-                view.handle_key(forward);
-                // Like the wheel, the event detail's step keys leave for the next event.
+            let (mut view, now) = panel_fixture(width);
+            view.set_active_panel(panel);
+            let selected = view.selected;
+            let event = view.event_list.cursor;
+            let scroll = view.event_list.scroll.get();
+            key(&mut view, KeyCode::End);
+            event_screen(&view, width, 45, now);
+            let bottom = task_details_position(&view, panel);
+            assert!(bottom > 0);
+            for (forward, _) in navigation_pairs() {
                 if panel == Panel::EventDetail && forward.code != KeyCode::End {
-                    assert_eq!(view.event_list.cursor, event.map(|e| e + 1));
                     continue;
                 }
+                key(&mut view, KeyCode::End);
+                view.handle_key(forward);
                 assert_eq!(task_details_position(&view, panel), bottom);
                 assert_lists_unchanged(&view, selected, event, scroll);
+            }
+        }
+    }
+}
+
+#[test]
+fn active_panel_detail_top_backward_keys_do_not_navigate_lists() {
+    for width in [100, 200] {
+        for panel in [Panel::TaskDetails, Panel::EventDetail] {
+            let (mut view, now) = panel_fixture(width);
+            view.set_active_panel(panel);
+            let selected = view.selected;
+            let event = view.event_list.cursor;
+            let scroll = view.event_list.scroll.get();
+            key(&mut view, KeyCode::End);
+            event_screen(&view, width, 45, now);
+            let bottom = task_details_position(&view, panel);
+            assert!(bottom > 0);
+            key(&mut view, KeyCode::Home);
+            event_screen(&view, width, 45, now);
+            assert_eq!(task_details_position(&view, panel), 0);
+            for (forward, backward) in navigation_pairs() {
+                if panel == Panel::EventDetail && forward.code != KeyCode::End {
+                    continue;
+                }
                 key(&mut view, KeyCode::Home);
-                event_screen(&view, width, 45, now);
-                assert_eq!(task_details_position(&view, panel), 0);
                 view.handle_key(backward);
                 assert_eq!(task_details_position(&view, panel), 0);
                 assert_lists_unchanged(&view, selected, event, scroll);
@@ -138,17 +161,40 @@ fn active_panel_detail_boundaries_do_not_navigate_lists() {
 }
 
 #[test]
+fn active_panel_event_detail_bottom_steps_to_next_event() {
+    for width in [100, 200] {
+        let (mut view, now) = panel_fixture(width);
+        let panel = Panel::EventDetail;
+        view.set_active_panel(panel);
+        let event = view.event_list.cursor;
+        for (forward, _) in navigation_pairs() {
+            if forward.code == KeyCode::End {
+                continue;
+            }
+            view.select_event(Some(20));
+            key(&mut view, KeyCode::End);
+            event_screen(&view, width, 45, now);
+            let bottom = task_details_position(&view, panel);
+            assert!(bottom > 0);
+            // Like the wheel, the event detail's step keys leave for the next event.
+            view.handle_key(forward);
+            assert_eq!(view.event_list.cursor, event.map(|e| e + 1));
+        }
+    }
+}
+
+#[test]
 fn active_panel_short_event_detail_steps_between_events() {
     for width in [100, 200] {
+        let (mut view, now) = panel_fixture(width);
+        let mut events = view.event_panel.clone();
+        for event in &mut events {
+            event.body = "short".into();
+        }
+        view.set_event(events);
+        view.set_active_panel(Panel::EventDetail);
         for (forward, backward) in navigation_pairs() {
-            let (mut view, now) = panel_fixture(width);
-            let mut events = view.event_panel.clone();
-            for event in &mut events {
-                event.body = "short".into();
-            }
-            view.set_event(events);
             view.select_event(Some(20));
-            view.set_active_panel(Panel::EventDetail);
             event_screen(&view, width, 45, now);
             let selected = view.selected;
             let event = view.event_list.cursor;
@@ -168,8 +214,11 @@ fn active_panel_short_event_detail_steps_between_events() {
 fn active_panel_lists_keep_their_navigation_bindings() {
     for width in [100, 200] {
         for panel in [Panel::TaskList, Panel::EventList] {
+            let (mut view, _) = panel_fixture(width);
+            let initial_selected = view.selected;
             for (forward, backward) in navigation_pairs() {
-                let (mut view, _) = panel_fixture(width);
+                view.set_selected(initial_selected);
+                view.select_event(Some(20));
                 view.set_active_panel(panel);
                 if panel == Panel::TaskList {
                     let selected = view.selected;
@@ -202,21 +251,21 @@ fn active_panel_lists_keep_their_navigation_bindings() {
 #[test]
 fn active_panel_disabled_prompt_consumes_navigation_without_fallback() {
     for width in [100, 200] {
+        let (mut view, now) = panel_fixture(width);
+        view.rows[view.selected].process = Some(crate::model::Process {
+            pid: 1,
+            label: None,
+            started_at: None,
+        });
+        view.set_active_panel(Panel::Prompt);
+        assert!(view.input_disabled().is_some());
+        event_screen(&view, width, 45, now);
+        let selected = view.selected;
+        let event = view.event_list.cursor;
+        let scroll = view.event_list.scroll.get();
+        let task_details = task_details_position(&view, Panel::TaskDetails);
+        let event_detail_position = task_details_position(&view, Panel::EventDetail);
         for (forward, backward) in navigation_pairs() {
-            let (mut view, now) = panel_fixture(width);
-            view.rows[view.selected].process = Some(crate::model::Process {
-                pid: 1,
-                label: None,
-                started_at: None,
-            });
-            view.set_active_panel(Panel::Prompt);
-            assert!(view.input_disabled().is_some());
-            event_screen(&view, width, 45, now);
-            let selected = view.selected;
-            let event = view.event_list.cursor;
-            let scroll = view.event_list.scroll.get();
-            let task_details = task_details_position(&view, Panel::TaskDetails);
-            let event_detail_position = task_details_position(&view, Panel::EventDetail);
             assert_eq!(view.handle_key(forward), None);
             assert_eq!(view.handle_key(backward), None);
             assert_lists_unchanged(&view, selected, event, scroll);
@@ -256,6 +305,37 @@ fn active_panel_question_keys_require_prompt_focus() {
         .unwrap();
     let question = &input["input"]["questions"][0];
     for width in [100, 200] {
+        let (mut view, now) = panel_fixture(width);
+        let row = &mut view.rows[view.selected];
+        row.status = SessionStatus::NeedsInput;
+        row.background_job = Some(crate::model::BackgroundJob {
+            id: "active-panel-question".into(),
+            needs: None,
+            awaits_prompt: false,
+        });
+        row.process = Some(crate::model::Process {
+            pid: 1,
+            label: Some("bg".into()),
+            started_at: None,
+        });
+        row.ask = Some(crate::ask::Ask {
+            id: input["id"].as_str().unwrap().into(),
+            session: row.id.clone(),
+            since: row.updated_at,
+            kind: crate::ask::AskKind::Questions {
+                blocking: true,
+                questions: vec![crate::ask::Question {
+                    id: question["question"].as_str().unwrap().into(),
+                    text: question["question"].as_str().unwrap().into(),
+                    header: question["header"].as_str().unwrap().into(),
+                    multi: false,
+                    other: true,
+                    secret: false,
+                    options: serde_json::from_value(question["options"].clone()).unwrap(),
+                }],
+            },
+        });
+        view.show_questions();
         for panel in [
             Panel::TaskList,
             Panel::TaskDetails,
@@ -263,37 +343,6 @@ fn active_panel_question_keys_require_prompt_focus() {
             Panel::EventDetail,
             Panel::Prompt,
         ] {
-            let (mut view, now) = panel_fixture(width);
-            let row = &mut view.rows[view.selected];
-            row.status = SessionStatus::NeedsInput;
-            row.background_job = Some(crate::model::BackgroundJob {
-                id: "active-panel-question".into(),
-                needs: None,
-                awaits_prompt: false,
-            });
-            row.process = Some(crate::model::Process {
-                pid: 1,
-                label: Some("bg".into()),
-                started_at: None,
-            });
-            row.ask = Some(crate::ask::Ask {
-                id: input["id"].as_str().unwrap().into(),
-                session: row.id.clone(),
-                since: row.updated_at,
-                kind: crate::ask::AskKind::Questions {
-                    blocking: true,
-                    questions: vec![crate::ask::Question {
-                        id: question["question"].as_str().unwrap().into(),
-                        text: question["question"].as_str().unwrap().into(),
-                        header: question["header"].as_str().unwrap().into(),
-                        multi: false,
-                        other: true,
-                        secret: false,
-                        options: serde_json::from_value(question["options"].clone()).unwrap(),
-                    }],
-                },
-            });
-            view.show_questions();
             view.set_active_panel(panel);
             event_screen(&view, width, 45, now);
             assert!(view.active_question().is_some());
@@ -463,110 +512,170 @@ fn assert_mouse_panel_paging(view: &mut View, panel: Panel) {
     }
 }
 
+const MOUSE_ACTIVATION_PANELS: [Panel; 5] = [
+    Panel::TaskList,
+    Panel::TaskDetails,
+    Panel::EventList,
+    Panel::EventDetail,
+    Panel::Prompt,
+];
+
+const MOUSE_ACTIVATION_EVENTS: [MouseEventKind; 13] = [
+    MouseEventKind::ScrollUp,
+    MouseEventKind::ScrollDown,
+    MouseEventKind::ScrollLeft,
+    MouseEventKind::ScrollRight,
+    MouseEventKind::Down(MouseButton::Left),
+    MouseEventKind::Up(MouseButton::Left),
+    MouseEventKind::Down(MouseButton::Right),
+    MouseEventKind::Up(MouseButton::Right),
+    MouseEventKind::Down(MouseButton::Middle),
+    MouseEventKind::Up(MouseButton::Middle),
+    MouseEventKind::Drag(MouseButton::Left),
+    MouseEventKind::Drag(MouseButton::Right),
+    MouseEventKind::Drag(MouseButton::Middle),
+];
+
+fn activate_mouse_panel(view: &mut View, width: u16, panel: Panel, kind: MouseEventKind) {
+    let area = mouse_panel_area(view, panel);
+    assert!(!area.is_empty());
+    view.set_active_panel(if panel == Panel::TaskList {
+        Panel::EventDetail
+    } else {
+        Panel::TaskList
+    });
+    view.handle_mouse(mouse(kind, area.x, area.y + (area.height - 1).min(1)));
+    assert_eq!(view.active_panel, panel, "width={width} kind={kind:?}");
+}
+
 #[test]
-fn mouse_activation_every_event_routes_subsequent_paging() {
+fn mouse_activation_every_event_activates_its_panel() {
     for width in [100, 200] {
-        for panel in [
-            Panel::TaskList,
-            Panel::TaskDetails,
-            Panel::EventList,
-            Panel::EventDetail,
-            Panel::Prompt,
-        ] {
-            for kind in [
-                MouseEventKind::ScrollUp,
-                MouseEventKind::ScrollDown,
-                MouseEventKind::ScrollLeft,
-                MouseEventKind::ScrollRight,
-                MouseEventKind::Down(MouseButton::Left),
-                MouseEventKind::Up(MouseButton::Left),
-                MouseEventKind::Down(MouseButton::Right),
-                MouseEventKind::Up(MouseButton::Right),
-                MouseEventKind::Down(MouseButton::Middle),
-                MouseEventKind::Up(MouseButton::Middle),
-                MouseEventKind::Drag(MouseButton::Left),
-                MouseEventKind::Drag(MouseButton::Right),
-                MouseEventKind::Drag(MouseButton::Middle),
-            ] {
-                let (mut view, _) = panel_fixture(width);
-                let area = mouse_panel_area(&view, panel);
-                assert!(!area.is_empty());
-                view.set_active_panel(if panel == Panel::TaskList {
-                    Panel::EventDetail
-                } else {
-                    Panel::TaskList
-                });
-                view.handle_mouse(mouse(kind, area.x, area.y + (area.height - 1).min(1)));
-                assert_eq!(view.active_panel, panel, "width={width} kind={kind:?}");
-                assert_mouse_panel_paging(&mut view, panel);
+        let (mut view, _) = panel_fixture(width);
+        for panel in MOUSE_ACTIVATION_PANELS {
+            for kind in MOUSE_ACTIVATION_EVENTS {
+                activate_mouse_panel(&mut view, width, panel, kind);
             }
         }
     }
 }
 
 #[test]
-fn mouse_activation_double_click_and_drag_keep_the_pressed_panel() {
-    for width in [100, 200] {
-        for panel in [
+fn mouse_activation_every_event_routes_subsequent_paging() {
+    const CASES: [(u16, Panel, MouseEventKind); 12] = [
+        (
+            200,
             Panel::TaskList,
+            MouseEventKind::Down(MouseButton::Left),
+        ),
+        (200, Panel::TaskList, MouseEventKind::ScrollDown),
+        (
+            200,
             Panel::TaskDetails,
+            MouseEventKind::Down(MouseButton::Left),
+        ),
+        (200, Panel::TaskDetails, MouseEventKind::ScrollDown),
+        (
+            200,
             Panel::EventList,
+            MouseEventKind::Down(MouseButton::Left),
+        ),
+        (200, Panel::EventList, MouseEventKind::ScrollDown),
+        (
+            200,
             Panel::EventDetail,
+            MouseEventKind::Down(MouseButton::Left),
+        ),
+        (200, Panel::EventDetail, MouseEventKind::ScrollDown),
+        (200, Panel::EventDetail, MouseEventKind::ScrollUp),
+        (200, Panel::Prompt, MouseEventKind::Down(MouseButton::Left)),
+        (
+            200,
             Panel::Prompt,
-        ] {
-            for double in [false, true] {
-                let (mut view, _) = panel_fixture(width);
-                let area = mouse_panel_area(&view, panel);
-                view.set_active_panel(if panel == Panel::TaskList {
-                    Panel::EventDetail
+            MouseEventKind::Down(MouseButton::Middle),
+        ),
+        (
+            100,
+            Panel::EventList,
+            MouseEventKind::Down(MouseButton::Left),
+        ),
+    ];
+
+    for (width, panel, kind) in CASES {
+        let (mut view, _) = panel_fixture(width);
+        activate_mouse_panel(&mut view, width, panel, kind);
+        assert_mouse_panel_paging(&mut view, panel);
+    }
+}
+
+fn press_mouse_panel(view: &mut View, panel: Panel) -> Rect {
+    let area = mouse_panel_area(view, panel);
+    view.set_active_panel(if panel == Panel::TaskList {
+        Panel::EventDetail
+    } else {
+        Panel::TaskList
+    });
+    view.handle_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        area.x,
+        area.y + (area.height - 1).min(1),
+    ));
+    assert_eq!(view.active_panel, panel);
+    area
+}
+
+#[test]
+fn mouse_activation_double_click_keeps_the_pressed_panel() {
+    for width in [100, 200] {
+        for panel in MOUSE_ACTIVATION_PANELS {
+            let (mut view, _) = panel_fixture(width);
+            let area = press_mouse_panel(&mut view, panel);
+            view.handle_mouse(mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                area.x,
+                area.y + (area.height - 1).min(1),
+            ));
+            view.handle_mouse(mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                area.x,
+                area.y + (area.height - 1).min(1),
+            ));
+            view.handle_mouse(mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                area.x,
+                area.y + (area.height - 1).min(1),
+            ));
+            assert_mouse_panel_paging(&mut view, panel);
+        }
+    }
+}
+
+#[test]
+fn mouse_activation_drag_keeps_the_pressed_panel() {
+    for width in [100, 200] {
+        for panel in MOUSE_ACTIVATION_PANELS {
+            let (mut view, _) = panel_fixture(width);
+            press_mouse_panel(&mut view, panel);
+            let other = mouse_panel_area(
+                &view,
+                if panel == Panel::TaskList {
+                    Panel::TaskDetails
                 } else {
                     Panel::TaskList
-                });
-                view.handle_mouse(mouse(
-                    MouseEventKind::Down(MouseButton::Left),
-                    area.x,
-                    area.y + (area.height - 1).min(1),
-                ));
-                assert_eq!(view.active_panel, panel);
-                if double {
-                    view.handle_mouse(mouse(
-                        MouseEventKind::Up(MouseButton::Left),
-                        area.x,
-                        area.y + (area.height - 1).min(1),
-                    ));
-                    view.handle_mouse(mouse(
-                        MouseEventKind::Down(MouseButton::Left),
-                        area.x,
-                        area.y + (area.height - 1).min(1),
-                    ));
-                    view.handle_mouse(mouse(
-                        MouseEventKind::Up(MouseButton::Left),
-                        area.x,
-                        area.y + (area.height - 1).min(1),
-                    ));
-                } else {
-                    let other = mouse_panel_area(
-                        &view,
-                        if panel == Panel::TaskList {
-                            Panel::TaskDetails
-                        } else {
-                            Panel::TaskList
-                        },
-                    );
-                    view.handle_mouse(mouse(
-                        MouseEventKind::Drag(MouseButton::Left),
-                        other.x,
-                        other.y + 1,
-                    ));
-                    assert_eq!(view.active_panel, panel);
-                    view.handle_mouse(mouse(
-                        MouseEventKind::Up(MouseButton::Left),
-                        other.x,
-                        other.y + 1,
-                    ));
-                }
-                assert_mouse_panel_paging(&mut view, panel);
-            }
+                },
+            );
+            view.handle_mouse(mouse(
+                MouseEventKind::Drag(MouseButton::Left),
+                other.x,
+                other.y + 1,
+            ));
+            assert_eq!(view.active_panel, panel);
+            view.handle_mouse(mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                other.x,
+                other.y + 1,
+            ));
+            assert_mouse_panel_paging(&mut view, panel);
         }
     }
 }
@@ -607,6 +716,14 @@ fn mouse_activation_outside_and_hover_preserve_focus() {
 #[test]
 fn mouse_activation_terminal_events_activate_before_forwarding() {
     for width in [100, 200] {
+        let (mut view, now) = panel_fixture(width);
+        let mut screen = crate::session_terminal::TerminalScreen::new(10, 80);
+        screen.process(b"\x1b[?1002h\x1b[?1006h");
+        view.show_terminal(
+            view.selected_id().unwrap().clone(),
+            std::sync::Arc::new(std::sync::Mutex::new(screen)),
+        );
+        event_screen(&view, width, 45, now);
         for kind in [
             MouseEventKind::ScrollUp,
             MouseEventKind::ScrollDown,
@@ -615,14 +732,6 @@ fn mouse_activation_terminal_events_activate_before_forwarding() {
             MouseEventKind::Drag(MouseButton::Left),
             MouseEventKind::Down(MouseButton::Middle),
         ] {
-            let (mut view, now) = panel_fixture(width);
-            let mut screen = crate::session_terminal::TerminalScreen::new(10, 80);
-            screen.process(b"\x1b[?1002h\x1b[?1006h");
-            view.show_terminal(
-                view.selected_id().unwrap().clone(),
-                std::sync::Arc::new(std::sync::Mutex::new(screen)),
-            );
-            event_screen(&view, width, 45, now);
             view.set_active_panel(Panel::TaskDetails);
             let area = view.viewport.borrow().terminal;
             assert!(!area.is_empty());

@@ -59,7 +59,7 @@ Run these from this skill's directory.
 - `./scripts/check-patches.sh` — checks the patches against the new baseline; a conflict leaves `.worktrees/check-patches` for inspection
 - `git -C gstack rev-parse HEAD > GSTACK_COMMIT` — records the new pointer for installs
 - `git add gstack GSTACK_COMMIT patches` — stages the pointer and the repaired patches for one commit
-- bump the plugin version, then `npm run test:web` from the repository root
+- bump the plugin version, then `node --test plugins/web/skills/heap-snapshot-leaks/tests/*.mjs plugins/web/skills/browse/tests/*.mjs && uv run plugins/web/skills/check-web-design/tests/test_check_design.py` from the repository root
 
 > **Warning**
 >
@@ -98,4 +98,4 @@ A new build id means a new binary, and each running daemon restarts on its next 
 ## Checks
 
 - **patches**: `./scripts/check-patches.sh`
-- **browse**: `npm run test:web` from the repository root, with `BROWSE_HEADED_TESTS` unset
+- **browse**: `node --test plugins/web/skills/heap-snapshot-leaks/tests/*.mjs plugins/web/skills/browse/tests/*.mjs && uv run plugins/web/skills/check-web-design/tests/test_check_design.py` from the repository root, with `BROWSE_HEADED_TESTS` unset

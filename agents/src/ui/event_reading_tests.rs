@@ -1515,7 +1515,7 @@ fn diff_changed_rows_fill_every_panel_column_in_both_themes() {
 }
 
 #[test]
-fn diff_backgrounds_reach_terminal_edges_without_moving_text() {
+fn diff_backgrounds_reach_terminal_edges() {
     use crate::providers::Provider;
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("projects/project");
@@ -1546,17 +1546,6 @@ fn diff_backgrounds_reach_terminal_edges_without_moving_text() {
                 let viewport = view.viewport.borrow();
                 let layout = viewport.event_detail_layout.as_ref().unwrap();
                 let panel = view.center_layout(area).event_detail;
-                // Compare both renderers at the same inset content rectangle.
-                let reference = View::new(Grouping::Project, false);
-                let mut before = Buffer::empty(area);
-                reference.render_event_detail_content(
-                    event,
-                    "12:34:56",
-                    viewport.event_detail,
-                    &mut before,
-                    &view.selected_row().unwrap().cwd,
-                    now,
-                );
                 for (row, &source) in layout.visible.iter().enumerate() {
                     let line = &layout.lines[source];
                     let marker = line.to_string().trim_start().chars().next();
@@ -1577,6 +1566,59 @@ fn diff_backgrounds_reach_terminal_edges_without_moving_text() {
                                 "light={light}, width={width}, x={x}, row={row}, marker={marker:?}"
                             );
                         }
+                    }
+                }
+            }
+        }
+    }
+    assert!(markers.contains(&'+') && markers.contains(&'-'));
+}
+
+#[test]
+fn diff_backgrounds_preserve_text_positions() {
+    use crate::providers::Provider;
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("projects/project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl"),
+        include_str!("../../tests/fixtures/transcript.jsonl"),
+    )
+    .unwrap();
+    let mut provider = crate::providers::claude::ClaudeProvider::new(dir.path().into());
+    let mut view = View::new(Grouping::Project, false);
+    view.set_sessions(provider.refresh(1).sessions, false);
+    view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    view.event_session = view.selected_id().cloned();
+    let now = DateTime::UNIX_EPOCH;
+    let mut cases = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
+    cases.extend(codex_events("codex-file-changes.jsonl"));
+    for light in [false, true] {
+        super::super::highlight::use_theme(light, None).unwrap();
+        for event in &cases {
+            view.set_event(vec![event.clone()]);
+            view.select_fixture_event(Some(event.clone()));
+            for width in [41, 120, 200] {
+                let area = Rect::new(0, 0, width, 250);
+                let mut buffer = Buffer::empty(area);
+                view.render_at(area, &mut buffer, now);
+                let viewport = view.viewport.borrow();
+                let layout = viewport.event_detail_layout.as_ref().unwrap();
+                let panel = view.center_layout(area).event_detail;
+                // Compare both renderers at the same inset content rectangle.
+                let reference = View::new(Grouping::Project, false);
+                let mut before = Buffer::empty(area);
+                reference.render_event_detail_content(
+                    event,
+                    "12:34:56",
+                    viewport.event_detail,
+                    &mut before,
+                    &view.selected_row().unwrap().cwd,
+                    now,
+                );
+                for (row, &source) in layout.visible.iter().enumerate() {
+                    let y = panel.y + EVENT_TOP + row as u16;
+                    for x in panel.x..panel.right() {
                         // Padding changes only the background, preserving the centered text.
                         // Merged calls' titles also draw an edge rule in the padding.
                         let edge_rule = layout.titles.len() > 1
@@ -1602,5 +1644,4 @@ fn diff_backgrounds_reach_terminal_edges_without_moving_text() {
             }
         }
     }
-    assert!(markers.contains(&'+') && markers.contains(&'-'));
 }

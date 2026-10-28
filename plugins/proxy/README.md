@@ -56,7 +56,7 @@ In Claude Code:
 node --test skills/inspect-app-traffic/tests/*.mjs
 ```
 
-Or from the marketplace root: `npm run test:proxy`.
+Or from the marketplace root: `node --test plugins/proxy/skills/inspect-app-traffic/tests/*.mjs`.
 
 `capture.test.mjs` covers the pure logic and the hub orchestration without launching mitmdump:
 the host regex matches an app's domains and subdomains but not lookalikes; the port check

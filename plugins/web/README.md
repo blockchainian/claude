@@ -42,5 +42,5 @@ platform nouns; no test covers that prose, so change both together.
 
 ## Tests
 
-Run `npm run test:web` from the marketplace root. Tests that open a visible Chromium window are
+Run `node --test plugins/web/skills/heap-snapshot-leaks/tests/*.mjs plugins/web/skills/browse/tests/*.mjs && uv run plugins/web/skills/check-web-design/tests/test_check_design.py` from the marketplace root. Tests that open a visible Chromium window are
 skipped unless `BROWSE_HEADED_TESTS=1`.

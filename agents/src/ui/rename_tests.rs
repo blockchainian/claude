@@ -247,23 +247,24 @@ fn title_requires_double_click_to_rename() {
     assert_eq!(view.selected_row().unwrap().display_title(), original);
 }
 
-#[test]
-fn draft_title_edit_supports_line_keys_repository_return_and_cancel() {
+fn draft_title_view() -> (tempfile::TempDir, View, crate::model::DraftKey) {
     let directory = tempfile::tempdir().unwrap();
+    let cwd = directory.path().join("project");
+    std::fs::create_dir(&cwd).unwrap();
     let mut view = View::default();
     let id = view.add_draft(DraftSetup {
         provider: ProviderId::Claude,
-        cwd: directory.path().into(),
+        cwd,
         model: None,
         effort: None,
         branch: String::new(),
     });
     view.set_active_panel(Panel::TaskDetails);
-    assert_eq!(view.name_target, Some(id));
-    assert!(view.selector.is_none());
-    assert!(view.rename.is_empty());
+    (directory, view, id)
+}
+
+fn edit_draft_title(view: &mut View) {
     view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert_eq!(view.name_target, Some(id));
     view.handle_paste("甲乙");
     for code in [
         KeyCode::Home,
@@ -274,24 +275,67 @@ fn draft_title_edit_supports_line_keys_repository_return_and_cancel() {
     ] {
         view.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
     }
+}
+
+fn return_to_draft_title(view: &mut View) {
+    edit_draft_title(view);
+    view.set_active_panel(Panel::TaskDetails);
+    view.open_field(draft_controls::Field::Directory);
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+}
+
+#[test]
+fn draft_title_empty_enter_does_not_submit() {
+    let (_directory, mut view, id) = draft_title_view();
+    assert_eq!(view.name_target, Some(id));
+    assert!(view.selector.is_none());
+    assert!(view.rename.is_empty());
+    view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(view.name_target, Some(id));
+}
+
+#[test]
+fn draft_title_edit_supports_line_keys() {
+    let (_directory, mut view, _id) = draft_title_view();
+    edit_draft_title(&mut view);
     assert_eq!(view.rename.text(), "甲丙");
+}
+
+#[test]
+fn draft_title_edit_returns_from_repository_selector() {
+    let (_directory, mut view, _id) = draft_title_view();
+    edit_draft_title(&mut view);
     view.set_active_panel(Panel::TaskDetails);
     view.open_field(draft_controls::Field::Directory);
     assert!(view.title_editor().is_none());
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert_eq!(view.title_editor().unwrap().text(), "甲丙");
+}
+
+#[test]
+fn draft_title_enter_submits_name_and_opens_repository_selector() {
+    let (_directory, mut view, _id) = draft_title_view();
+    return_to_draft_title(&mut view);
     view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(view.drafts[0].name.as_deref(), Some("甲丙"));
     assert!(view.name_target.is_none());
     assert!(view.selector.is_some());
     view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(!view.prompt_focused());
+}
+
+#[test]
+fn draft_title_cancel_preserves_previous_draft_prompt() {
+    let (directory, mut view, _id) = draft_title_view();
+    return_to_draft_title(&mut view);
+    view.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    view.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     view.set_active_panel(Panel::Prompt);
     view.handle_paste("prompt body");
     assert_eq!(view.input_box.editor.text(), "prompt body");
     view.add_draft(DraftSetup {
         provider: ProviderId::Claude,
-        cwd: directory.path().into(),
+        cwd: directory.path().join("project"),
         model: None,
         effort: None,
         branch: String::new(),
