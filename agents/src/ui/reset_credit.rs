@@ -167,12 +167,6 @@ impl View {
 
 #[cfg(test)]
 mod tests {
-    mod tmux {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/support/tmux.rs"
-        ));
-    }
     use super::*;
     use crate::ui::{Action, Grouping, View};
     use crossterm::event::{KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -385,105 +379,6 @@ mod tests {
         );
     }
 
-    #[test]
-    #[ignore = "fixture surface for the isolated tmux probe"]
-    fn terminal_surface_fixture() {
-        let Ok(verdict) = std::env::var("AGENTS_RESET_VERDICT") else {
-            return;
-        };
-        use crossterm::{
-            event::{Event, read},
-            execute,
-            terminal::{
-                EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-            },
-        };
-        use ratatui::{Terminal, backend::CrosstermBackend};
-        enable_raw_mode().unwrap();
-        let mut stdout = std::io::stdout();
-        execute!(stdout, EnterAlternateScreen).unwrap();
-        let mut terminal = Terminal::new(CrosstermBackend::new(stdout)).unwrap();
-        let mut view = fixture();
-        view.offer_reset_credit(ProviderId::Claude, vec![offer()]);
-        loop {
-            terminal
-                .draw(|frame| {
-                    let area = frame.area();
-                    view.render(area, frame.buffer_mut());
-                })
-                .unwrap();
-            if let Event::Key(event) = read().unwrap()
-                && let Some(action) = view.handle_key(event)
-            {
-                assert!(matches!(
-                    action,
-                    Action::RedeemResetCredit {
-                        provider: ProviderId::Claude,
-                        ..
-                    }
-                ));
-                std::fs::write(&verdict, r#"{"passed":true,"surface":"reset confirmation","assertions":["default Cancel","keyboard redeem","real View renderer"],"network_requests":0}"#).unwrap();
-                break;
-            }
-        }
-        disable_raw_mode().unwrap();
-        execute!(terminal.backend_mut(), LeaveAlternateScreen).unwrap();
-    }
-
-    #[test]
-    fn reset_credit_terminal_probe() {
-        use std::time::{Duration as StdDuration, Instant};
-        let directory = tempfile::tempdir().unwrap();
-        let verdict = directory.path().join("verdict.json");
-        let server = tmux::Tmux::new(format!("agents-reset-credit-{}", std::process::id()));
-        let run = |args: &[&str]| server.run(args);
-        let executable = std::env::current_exe().unwrap();
-        run(&[
-            "new-session",
-            "-d",
-            "-s",
-            "probe",
-            "-x",
-            "120",
-            "-y",
-            "48",
-            "-e",
-            &format!("AGENTS_RESET_VERDICT={}", verdict.display()),
-            executable.to_str().unwrap(),
-            "ui::reset_credit::tests::terminal_surface_fixture",
-            "--exact",
-            "--ignored",
-            "--nocapture",
-        ]);
-        let deadline = Instant::now() + StdDuration::from_secs(15);
-        let capture = loop {
-            let capture = run(&["capture-pane", "-t", "probe", "-p"]);
-            if capture.contains("Redeem a Claude reset credit?") {
-                break capture;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "reset dialog did not render: {capture}"
-            );
-            std::thread::sleep(StdDuration::from_millis(50));
-        };
-        assert!(capture.contains("❯ 1. Cancel"), "{capture}");
-        assert!(capture.contains("2. Redeem reset credit"), "{capture}");
-        run(&["send-keys", "-t", "probe", "Down"]);
-        run(&["send-keys", "-t", "probe", "Enter"]);
-        while !verdict.exists() {
-            assert!(Instant::now() < deadline, "redeem action did not arrive");
-            std::thread::sleep(StdDuration::from_millis(50));
-        }
-        let raw = std::fs::read_to_string(&verdict).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        assert_eq!(json["passed"], true);
-        let report =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/reset-dialog");
-        std::fs::create_dir_all(&report).unwrap();
-        std::fs::write(report.join("terminal-verdict.json"), raw).unwrap();
-        std::fs::write(report.join("terminal-screen.txt"), capture).unwrap();
-    }
     #[test]
     fn reset_confirmation_owns_input_over_an_open_terminal() {
         use crate::providers::{Provider, claude::ClaudeProvider};

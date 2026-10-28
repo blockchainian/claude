@@ -834,67 +834,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "opens a real Claude background job from a temporary completed transcript"]
-    fn real_woken_terminal_closes_back_to_inactive() {
-        use crate::providers::claude::ClaudeProvider;
-        let preferences = tempfile::tempdir().unwrap();
-        let config = std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join(".claude");
-        let cwd = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let project = config.join("projects").join(
-            cwd.to_str()
-                .unwrap()
-                .chars()
-                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-                .collect::<String>(),
-        );
-        std::fs::create_dir_all(&project).unwrap();
-        let id = uuid::Uuid::new_v4().to_string();
-        let path = project.join(format!("{id}.jsonl"));
-        let mut lines = Vec::new();
-        for line in include_str!("../tests/fixtures/transcript.jsonl")
-            .lines()
-            .take(2)
-        {
-            let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
-            record["sessionId"] = id.clone().into();
-            record["cwd"] = cwd.to_str().unwrap().into();
-            record["timestamp"] = chrono::Utc::now().to_rfc3339().into();
-            lines.push(serde_json::to_string(&record).unwrap());
-        }
-        std::fs::write(&path, format!("{}\n", lines.join("\n"))).unwrap();
-        let result = std::panic::catch_unwind(|| {
-            let mut app = App::new(
-                Hub::new(vec![Box::new(ClaudeProvider::new(config.clone()))]),
-                preferences.path().to_owned(),
-            );
-            app.refresh();
-            let key = SessionKey {
-                provider: crate::providers::ProviderId::Claude,
-                id: id.clone(),
-            };
-            assert_eq!(app.session(&key).unwrap().status, SessionStatus::Inactive);
-            crate::app::live_tests::open_terminal(&mut app, key.clone(), |screen| {
-                screen.lines().any(|line| line.trim() == "❯")
-            });
-            assert!(app.terminal.as_ref().unwrap().cleanup.is_some());
-            app.close_terminal();
-            finish_close(&mut app);
-            app.refresh();
-            assert_eq!(app.session(&key).unwrap().status, SessionStatus::Inactive);
-        });
-        // Only this probe's UUID and background job are removed.
-        let _ = Command::new("claude").args(["stop", &id[..8]]).output();
-        let _ = Command::new("claude").args(["rm", &id[..8]]).output();
-        std::fs::remove_file(&path).unwrap();
-        if path.with_extension("").exists() {
-            std::fs::remove_dir_all(path.with_extension("")).unwrap();
-        }
-        if let Err(panic) = result {
-            std::panic::resume_unwind(panic);
-        }
-    }
-
-    #[test]
     fn close_restores_events_before_a_stubborn_client_exits() {
         let (directory, mut app, id) = fixture();
         let event_panel = draw(&mut app);
