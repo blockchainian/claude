@@ -719,30 +719,37 @@ fn press_mouse_panel(view: &mut View, panel: Panel) -> Rect {
     area
 }
 
-#[test]
-fn mouse_activation_double_click_keeps_the_pressed_panel() {
-    for width in [100, 200] {
-        for panel in MOUSE_ACTIVATION_PANELS {
-            let (mut view, _) = panel_fixture(width);
-            let area = press_mouse_panel(&mut view, panel);
-            view.handle_mouse(mouse(
-                MouseEventKind::Up(MouseButton::Left),
-                area.x,
-                area.y + (area.height - 1).min(1),
-            ));
-            view.handle_mouse(mouse(
-                MouseEventKind::Down(MouseButton::Left),
-                area.x,
-                area.y + (area.height - 1).min(1),
-            ));
-            view.handle_mouse(mouse(
-                MouseEventKind::Up(MouseButton::Left),
-                area.x,
-                area.y + (area.height - 1).min(1),
-            ));
-            assert_mouse_panel_paging(&mut view, panel);
-        }
+fn double_click_keeps_the_pressed_panel(width: u16) {
+    for panel in MOUSE_ACTIVATION_PANELS {
+        let (mut view, _) = panel_fixture(width);
+        let area = press_mouse_panel(&mut view, panel);
+        view.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            area.x,
+            area.y + (area.height - 1).min(1),
+        ));
+        view.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            area.x,
+            area.y + (area.height - 1).min(1),
+        ));
+        view.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            area.x,
+            area.y + (area.height - 1).min(1),
+        ));
+        assert_mouse_panel_paging(&mut view, panel);
     }
+}
+
+#[test]
+fn mouse_activation_double_click_keeps_the_pressed_panel_narrow() {
+    double_click_keeps_the_pressed_panel(100);
+}
+
+#[test]
+fn mouse_activation_double_click_keeps_the_pressed_panel_wide() {
+    double_click_keeps_the_pressed_panel(200);
 }
 
 fn drag_keeps_the_pressed_panel(width: u16) {
