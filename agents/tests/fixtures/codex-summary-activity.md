@@ -1,12 +1,13 @@
 # Summary append fixture
 
 `codex-summary-activity.jsonl` is derived from `codex-latest-activity.jsonl`.
-All 156 records, timestamps, types, IDs and ordering are retained. Strings are
-limited to 512 characters; tool arguments and inputs remain intact. Repeated
-permission entries and raw-response token attribution items retain their first
-real entry. Summary parsing ignores these collections; the full source remains
-covered by `summary_cache_keeps_only_observed_fields_of_context_and_raw_responses`.
-The copy exceeds the 64 KiB summary page size to exercise tail expansion.
+It keeps the first record of each record type and payload type, in source
+order, with strings intact. Repeated permission entries and raw-response token
+attribution items retain their first real entry. Summary parsing ignores these
+collections; the full source remains covered by
+`summary_cache_keeps_only_observed_fields_of_context_and_raw_responses`.
+The copy exceeds the 64 KiB summary page size to exercise tail expansion, and
+keeps few lines because the append tests re-parse the file once per line.
 
 Regenerate from the repository root:
 
@@ -18,16 +19,11 @@ from pathlib import Path
 fixtures = Path('agents/tests/fixtures')
 source = fixtures / 'codex-latest-activity.jsonl'
 
-def shorten(value, key=''):
-    if isinstance(value, dict):
-        return {k: shorten(v, k) for k, v in value.items()}
-    if isinstance(value, list):
-        return [shorten(v, key) for v in value]
-    if isinstance(value, str) and key not in ('arguments', 'input'):
-        return value[:512]
-    return value
-
-records = [shorten(json.loads(line)) for line in source.read_text().splitlines()]
+kinds = {}
+for line in source.read_text().splitlines():
+    record = json.loads(line)
+    kinds.setdefault((record['type'], record['payload'].get('type')), record)
+records = list(kinds.values())
 for record in records:
     payload = record['payload']
     if record['type'] == 'turn_context':
