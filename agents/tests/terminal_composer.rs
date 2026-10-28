@@ -245,8 +245,7 @@ fn probe(format: &str) {
     );
 }
 
-#[test]
-fn readline_words_match_in_composer() {
+fn readline_word_case(index: usize) {
     let directory = tempfile::tempdir().unwrap();
     let (codex, claude) = composer_session(directory.path());
     let binary =
@@ -280,34 +279,80 @@ fn readline_words_match_in_composer() {
     tmux.literal(&format!("\x1b[<0;15;{}M\x1b[<0;15;{}m", row + 1, row + 1));
     let cases: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/readline-words.json")).unwrap();
-    for case in cases.as_array().unwrap() {
-        let input = case["input"].as_str().unwrap();
-        let key = case["key"].as_str().unwrap();
-        tmux.literal(input);
-        tmux.wait(|s| s.contains(&format!("❯ {input}")));
-        if matches!(key, "Alt+F" | "Alt+D") {
-            tmux.key("Home");
-        }
-        match key {
-            "Alt+B" => tmux.literal("\x1bb"),
-            "Alt+F" => tmux.literal("\x1bf"),
-            "Alt+D" => tmux.literal("\x1bd"),
-            "Alt+Backspace" => tmux.literal("\x1b\x7f"),
-            "Ctrl+W" => tmux.key("C-w"),
-            _ => panic!("unknown readline key: {key}"),
-        }
-        // Insert a visible caret marker to verify the actual terminal input path.
-        tmux.literal("|");
-        let mut expected = case["result"].as_str().unwrap().to_owned();
-        let point = case["point"].as_u64().unwrap() as usize;
-        let byte = expected.chars().take(point).map(char::len_utf8).sum();
-        expected.insert(byte, '|');
-        tmux.wait(|s| {
-            s.lines()
-                .any(|line| line.trim().ends_with(&format!("❯ {expected}")))
-        });
-        tmux.key("End");
-        tmux.key("C-u");
-        tmux.wait(|s| s.lines().any(|line| line.trim().ends_with("❯")));
+    let case = &cases.as_array().unwrap()[index];
+    let input = case["input"].as_str().unwrap();
+    let key = case["key"].as_str().unwrap();
+    tmux.literal(input);
+    tmux.wait(|s| s.contains(&format!("❯ {input}")));
+    if matches!(key, "Alt+F" | "Alt+D") {
+        tmux.key("Home");
     }
+    match key {
+        "Alt+B" => tmux.literal("\x1bb"),
+        "Alt+F" => tmux.literal("\x1bf"),
+        "Alt+D" => tmux.literal("\x1bd"),
+        "Alt+Backspace" => tmux.literal("\x1b\x7f"),
+        "Ctrl+W" => tmux.key("C-w"),
+        _ => panic!("unknown readline key: {key}"),
+    }
+    // Insert a visible caret marker to verify the actual terminal input path.
+    tmux.literal("|");
+    let mut expected = case["result"].as_str().unwrap().to_owned();
+    let point = case["point"].as_u64().unwrap() as usize;
+    let byte = expected.chars().take(point).map(char::len_utf8).sum();
+    expected.insert(byte, '|');
+    tmux.wait(|s| {
+        s.lines()
+            .any(|line| line.trim().ends_with(&format!("❯ {expected}")))
+    });
+    tmux.key("End");
+    tmux.key("C-u");
+    tmux.wait(|s| s.lines().any(|line| line.trim().ends_with("❯")));
+}
+
+macro_rules! readline_tests {
+    ($($name:ident: $index:expr),* $(,)?) => {
+        $(#[test]
+        fn $name() {
+            readline_word_case($index);
+        })*
+    };
+}
+
+readline_tests! {
+    readline_punctuated_backward: 0,
+    readline_punctuated_forward: 1,
+    readline_punctuated_delete_forward: 2,
+    readline_punctuated_backspace: 3,
+    readline_punctuated_kill_word: 4,
+    readline_path_backward: 5,
+    readline_path_forward: 6,
+    readline_path_delete_forward: 7,
+    readline_path_backspace: 8,
+    readline_path_kill_word: 9,
+    readline_flag_backward: 10,
+    readline_flag_forward: 11,
+    readline_flag_delete_forward: 12,
+    readline_flag_backspace: 13,
+    readline_flag_kill_word: 14,
+    readline_separators_backward: 15,
+    readline_separators_forward: 16,
+    readline_separators_delete_forward: 17,
+    readline_separators_backspace: 18,
+    readline_separators_kill_word: 19,
+    readline_chinese_backward: 20,
+    readline_chinese_forward: 21,
+    readline_chinese_delete_forward: 22,
+    readline_chinese_backspace: 23,
+    readline_chinese_kill_word: 24,
+    readline_mixed_backward: 25,
+    readline_mixed_forward: 26,
+    readline_mixed_delete_forward: 27,
+    readline_mixed_backspace: 28,
+    readline_mixed_kill_word: 29,
+    readline_emoji_backward: 30,
+    readline_emoji_forward: 31,
+    readline_emoji_delete_forward: 32,
+    readline_emoji_backspace: 33,
+    readline_emoji_kill_word: 34,
 }
