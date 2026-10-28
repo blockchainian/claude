@@ -28,17 +28,46 @@ fn capture_when(
             return capture;
         }
         assert!(Instant::now() < deadline, "terminal timed out: {capture}");
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
 #[test]
-fn worktree_confirmation_options_show_directory_and_ellipsis() {
+fn worktree_delete_option_ellipsis_at_80_columns() {
+    worktree_confirmation_option(80, "delete");
+}
+
+#[test]
+fn worktree_delete_option_ellipsis_at_120_columns() {
+    worktree_confirmation_option(120, "delete");
+}
+
+#[test]
+fn worktree_archive_option_directory_at_80_columns() {
+    worktree_confirmation_option(80, "archive");
+}
+
+#[test]
+fn worktree_archive_option_directory_at_120_columns() {
+    worktree_confirmation_option(120, "archive");
+}
+
+#[test]
+fn worktree_trunk_delete_options_at_80_columns() {
+    worktree_confirmation_option(80, "delete-trunk");
+}
+
+#[test]
+fn worktree_trunk_delete_options_at_120_columns() {
+    worktree_confirmation_option(120, "delete-trunk");
+}
+
+fn worktree_confirmation_option(width: u16, action: &str) {
     let deadline = Instant::now() + Duration::from_secs(150);
-    let evidence = Path::new("/tmp")
-        .canonicalize()
-        .unwrap()
-        .join(format!("agents-worktree-dialog-{}", std::process::id()));
+    let evidence = Path::new("/tmp").canonicalize().unwrap().join(format!(
+        "agents-worktree-dialog-{action}-{width}-{}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&evidence).unwrap();
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
@@ -91,41 +120,40 @@ fn worktree_confirmation_options_show_directory_and_ellipsis() {
         drop(db);
 
         let mut checks = Vec::new();
-        for width in [80, 120] {
-            let tmux = Tmux::new(format!(
-                "agents-worktree-dialog-{width}-{}",
-                std::process::id()
-            ));
-            tmux.run(&[
-                "new-session",
-                "-d",
-                "-s",
-                "probe",
-                "-x",
-                &width.to_string(),
-                "-y",
-                "40",
-                "-e",
-                &format!("CLAUDE_CONFIG_DIR={}", claude.display()),
-                "-e",
-                &format!("CODEX_HOME={}", codex.display()),
-                "-e",
-                &format!("CLAUDE_CODE_TMPDIR={}", directory.path().display()),
-                "-e",
-                &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
-                binary.to_str().unwrap(),
-            ]);
-            let progress = evidence.join(format!("progress-{width}.txt"));
-            capture_when(&tmux, deadline, &progress, |text| {
-                text.contains("Inactive 1")
-            });
-            tmux.run(&["send-keys", "-t", "probe", "Tab"]);
-            capture_when(&tmux, deadline, &progress, |text| {
-                text.contains("Worktree dialog probe")
-            });
-            for (action, key, moves, expected) in [
-                (
-                    "delete",
+        let tmux = Tmux::new(format!(
+            "agents-worktree-dialog-{action}-{width}-{}",
+            std::process::id()
+        ));
+        tmux.run(&[
+            "new-session",
+            "-d",
+            "-s",
+            "probe",
+            "-x",
+            &width.to_string(),
+            "-y",
+            "40",
+            "-e",
+            &format!("CLAUDE_CONFIG_DIR={}", claude.display()),
+            "-e",
+            &format!("CODEX_HOME={}", codex.display()),
+            "-e",
+            &format!("CLAUDE_CODE_TMPDIR={}", directory.path().display()),
+            "-e",
+            &format!("CODEX_MANAGER_STATE_DIR={}", directory.path().display()),
+            binary.to_str().unwrap(),
+        ]);
+        let progress = evidence.join(format!("progress-{width}.txt"));
+        capture_when(&tmux, deadline, &progress, |text| {
+            text.contains("Inactive 1")
+        });
+        tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+        capture_when(&tmux, deadline, &progress, |text| {
+            text.contains("Worktree dialog probe")
+        });
+        if action != "delete-trunk" {
+            let (key, moves, expected) = match action {
+                "delete" => (
                     "BSpace",
                     2,
                     if width == 80 {
@@ -134,47 +162,46 @@ fn worktree_confirmation_options_show_directory_and_ellipsis() {
                         "❯ 3. Permanently delete task, child agents and worktree (fix-claude-session…"
                     },
                 ),
-                (
-                    "archive",
+                "archive" => (
                     "a",
                     1,
                     "❯ 2. Archive and delete worktree (fix-claude-session-input)",
                 ),
-            ] {
-                tmux.run(&["send-keys", "-t", "probe", key]);
-                capture_when(&tmux, deadline, &progress, |text| {
-                    text.contains("and delete worktree")
-                        || text.contains("child agents and worktree")
-                });
-                for _ in 0..moves {
-                    tmux.run(&["send-keys", "-t", "probe", "Down"]);
-                }
-                let path = evidence.join(format!("{action}-{width}.txt"));
-                let capture = capture_when(&tmux, deadline, &path, |text| {
-                    text.contains(&format!("❯ {}.", moves + 1))
-                });
-                let option = capture
-                    .lines()
-                    .find(|line| line.contains(&format!("❯ {}.", moves + 1)))
-                    .unwrap();
-                checks.push(serde_json::json!({
-                    "action": action,
-                    "terminal_width": width,
-                    "capture": path,
-                    "option": option,
-                    "expected": expected,
-                    "passed": option.contains(expected),
-                }));
-                tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-                capture_when(&tmux, deadline, &progress, |text| {
-                    !text.contains("child agents and worktree")
-                        && !text.contains("Archive and delete worktree")
-                });
-                assert!(
-                    worktree.exists(),
-                    "opening a dialog must preserve the worktree"
-                );
+                _ => panic!("unknown dialog action: {action}"),
+            };
+            tmux.run(&["send-keys", "-t", "probe", key]);
+            capture_when(&tmux, deadline, &progress, |text| {
+                text.contains("and delete worktree") || text.contains("child agents and worktree")
+            });
+            for _ in 0..moves {
+                tmux.run(&["send-keys", "-t", "probe", "Down"]);
             }
+            let path = evidence.join(format!("{action}-{width}.txt"));
+            let capture = capture_when(&tmux, deadline, &path, |text| {
+                text.contains(&format!("❯ {}.", moves + 1))
+            });
+            let option = capture
+                .lines()
+                .find(|line| line.contains(&format!("❯ {}.", moves + 1)))
+                .unwrap();
+            checks.push(serde_json::json!({
+                "action": action,
+                "terminal_width": width,
+                "capture": path,
+                "option": option,
+                "expected": expected,
+                "passed": option.contains(expected),
+            }));
+            tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+            capture_when(&tmux, deadline, &progress, |text| {
+                !text.contains("child agents and worktree")
+                    && !text.contains("Archive and delete worktree")
+            });
+            assert!(
+                worktree.exists(),
+                "opening a dialog must preserve the worktree"
+            );
+        } else {
             git(&primary, &["checkout", "-B", "feature"]);
             git(&worktree, &["checkout", "main"]);
             tmux.run(&["send-keys", "-t", "probe", "BSpace"]);
