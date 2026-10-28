@@ -90,18 +90,21 @@ fn terminal_summary_styles_match_across_all_three_surfaces() {
     let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
     let parsed = captured_screen(&capture, 240, 70);
     let screen = parsed.screen();
+    let theme = syntect::highlighting::ThemeSet::load_from_reader(&mut std::io::Cursor::new(
+        include_bytes!("../../themes/dark.tmTheme"),
+    ))
+    .unwrap();
+    // error_style() uses this scope in the probe's default dark theme.
+    let error = syntect::highlighting::Highlighter::new(&theme)
+        .style_for_stack(&[syntect::parsing::Scope::new("message.error").unwrap()])
+        .foreground;
+    let error_color = vt100::Color::Rgb(error.r, error.g, error.b);
     let mut statuses = 0;
     for (y, row) in screen.rows(0, 240).enumerate() {
         for (byte, _) in row.match_indices(&summary) {
             let x = (row[..byte].width() + summary.width() - 3) as u16;
-            assert_eq!(
-                screen.cell(y as u16, x + 2).unwrap().fgcolor(),
-                vt100::Color::Idx(1)
-            );
-            assert_ne!(
-                screen.cell(y as u16, x).unwrap().fgcolor(),
-                vt100::Color::Idx(1)
-            );
+            assert_eq!(screen.cell(y as u16, x + 2).unwrap().fgcolor(), error_color);
+            assert_ne!(screen.cell(y as u16, x).unwrap().fgcolor(), error_color);
             statuses += 1;
         }
     }
