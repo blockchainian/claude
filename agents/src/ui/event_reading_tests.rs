@@ -1435,19 +1435,7 @@ fn background_notification_titles_show_only_exit_numbers_on_the_left() {
 
 #[test]
 fn diff_changed_rows_fill_every_panel_column_in_both_themes() {
-    let mut cases = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
-    cases.extend(codex_events("codex-file-changes.jsonl"));
-    let cases: Vec<_> = cases
-        .into_iter()
-        .filter(|event| {
-            event.calls.iter().any(|call| {
-                call.input
-                    .iter()
-                    .chain(call.output.iter().flatten())
-                    .any(|section| matches!(section, crate::event::Section::Diff { .. }))
-            })
-        })
-        .collect();
+    let cases = diff_background_events();
     let mut markers = std::collections::HashSet::new();
     for light in [false, true] {
         super::super::highlight::use_theme(light, None).unwrap();
@@ -1514,6 +1502,22 @@ fn diff_changed_rows_fill_every_panel_column_in_both_themes() {
     assert!(markers.contains(&'+') && markers.contains(&'-') && markers.contains(&'@'));
 }
 
+fn diff_background_events() -> Vec<Event> {
+    let mut cases = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
+    cases.extend(codex_events("codex-file-changes.jsonl"));
+    cases
+        .into_iter()
+        .filter(|event| {
+            event.calls.iter().any(|call| {
+                call.input
+                    .iter()
+                    .chain(call.output.iter().flatten())
+                    .any(|section| matches!(section, crate::event::Section::Diff { .. }))
+            })
+        })
+        .collect()
+}
+
 #[test]
 fn diff_backgrounds_reach_terminal_edges() {
     use crate::providers::Provider;
@@ -1531,8 +1535,7 @@ fn diff_backgrounds_reach_terminal_edges() {
     view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     view.event_session = view.selected_id().cloned();
     let now = DateTime::UNIX_EPOCH;
-    let mut cases = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
-    cases.extend(codex_events("codex-file-changes.jsonl"));
+    let cases = diff_background_events();
     let mut markers = std::collections::HashSet::new();
     for light in [false, true] {
         super::super::highlight::use_theme(light, None).unwrap();
