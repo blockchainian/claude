@@ -540,13 +540,13 @@ fn new_indicator_loads_latest_event_after_top_border() {
 #[test]
 fn bottom_border_loads_latest_event_after_top_border() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-    let area = ratatui::layout::Rect::new(0, 0, 200, 45);
+    let area = ratatui::layout::Rect::new(0, 0, 200, 19);
     let (_dir, mut app) = top_border_first_event_fixture(area, Some(200));
     let visible = app.view.event_read_count(area);
     app.refresh_event_for_list_rows(visible);
     let mut buffer = ratatui::buffer::Buffer::empty(area);
     app.view.render(area, &mut buffer);
-    let bottom = (2..45)
+    let bottom = (2..area.height)
         .find(|&y| (100..200).any(|x| buffer[(x, y)].symbol() == "┴"))
         .expect("event list bottom rule joins its visible column separator");
     for _ in 0..2 {
