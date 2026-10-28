@@ -273,9 +273,35 @@ impl Live {
     fn cleanup(&mut self) -> io::Result<()> {
         let mut errors = Vec::new();
         for job in self.jobs.drain(..) {
+            // The job state is removed by `claude rm`, so retain its session ID first.
+            let session_id = (|| -> io::Result<String> {
+                let state: Value = serde_json::from_slice(&fs::read(
+                    self.home.join("jobs").join(&job).join("state.json"),
+                )?)?;
+                state["sessionId"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| io::Error::other("job state lacks sessionId"))
+            })();
             let _ = command(self.repo.path(), "claude", &["stop", &job]);
             if let Err(error) = command(self.repo.path(), "claude", &["rm", &job]) {
                 errors.push(error.to_string());
+            }
+            let deletion = (|| -> io::Result<()> {
+                let id = session_id?;
+                for project in fs::read_dir(self.home.join("projects"))? {
+                    let transcript = project?.path().join(format!("{id}.jsonl"));
+                    match super::delete(&transcript) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error),
+                    }
+                }
+                Ok(())
+            })();
+            if let Err(error) = deletion {
+                errors.push(format!("job {job} transcript cleanup: {error}"));
             }
         }
         for (path, bytes) in &self.backups {
