@@ -142,16 +142,7 @@ fn terminal_codex_agent_message_bodies() {
 }
 
 #[test]
-fn terminal_codex_collaboration_spawn_navigation() {
-    collaboration_navigation(false);
-}
-
-#[test]
-fn terminal_codex_collaboration_wait_result() {
-    collaboration_navigation(true);
-}
-
-fn collaboration_navigation(wait: bool) {
+fn terminal_codex_collaboration_navigation() {
     let directory = tempfile::tempdir().unwrap();
     let codex = directory.path().join("codex");
     let claude = directory.path().join("claude");
@@ -240,53 +231,46 @@ fn collaboration_navigation(wait: bool) {
     let (column, row) = find(&capture, "Collaboration parent");
     tmux.mouse(0, column, row, true);
     let capture = tmux.capture_when(|capture| capture.contains("demo_sub → 演示完成"));
-    let captures = if wait {
-        let capture = tmux.capture_when(|capture| capture.contains("Wait agent"));
-        let (column, row) = find(&capture, "Wait agent");
-        tmux.mouse(0, column, row, true);
-        let waited = tmux.capture_when(|capture| {
-            capture.contains("70000") && capture.contains("Wait completed.")
-        });
-        assert!(waited.contains("GPT-6.1-Sol"), "{waited}");
-        waited
-    } else {
-        let (column, row) = find(&capture, "Spawn agent demo_sub");
-        tmux.mouse(0, column, row, true);
-        let spawn = tmux.capture_when(|capture| {
-            capture.contains("Spawn agent demo_sub")
-                && capture.lines().any(|line| {
-                    line.contains("demo_sub · GPT-6.1-Sol · low") && !line.contains("Spawn agent")
-                })
-        });
-        let event_surface = spawn
+    let (column, row) = find(&capture, "Spawn agent demo_sub");
+    tmux.mouse(0, column, row, true);
+    let spawn = tmux.capture_when(|capture| {
+        capture.contains("Spawn agent demo_sub")
+            && capture.lines().any(|line| {
+                line.contains("demo_sub · GPT-6.1-Sol · low") && !line.contains("Spawn agent")
+            })
+    });
+    let event_surface = spawn
+        .lines()
+        .map(|line| line.chars().skip(90).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!event_surface.contains("SubAgentActivity"), "{spawn}");
+    assert!(!event_surface.contains("CollabAgentToolCall"), "{spawn}");
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    let jumped = tmux.capture_when(|capture| {
+        capture.contains("root → new task") && !capture.contains("demo_sub → 演示完成")
+    });
+    let (column, row) = find(&jumped, "root → new task");
+    tmux.mouse(0, column, row, true);
+    let jumped = tmux.capture_when(|capture| {
+        capture
             .lines()
-            .map(|line| line.chars().skip(90).collect::<String>())
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(!event_surface.contains("SubAgentActivity"), "{spawn}");
-        assert!(!event_surface.contains("CollabAgentToolCall"), "{spawn}");
-        tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-        let jumped = tmux.capture_when(|capture| {
-            capture.contains("root → new task") && !capture.contains("demo_sub → 演示完成")
-        });
-        let (column, row) = find(&jumped, "root → new task");
-        tmux.mouse(0, column, row, true);
-        let jumped = tmux.capture_when(|capture| {
-            capture
-                .lines()
-                .any(|line| line.contains("root → demo_sub") && !line.contains("New task"))
-        });
-        assert!(jumped.contains("root → demo_sub"), "{jumped}");
-        let (column, row) = find(&jumped, "Collaboration parent");
-        tmux.mouse(0, column, row, true);
-        let returned = tmux.capture_when(|capture| capture.contains("Wait agent"));
-        format!("{spawn}\n\n{jumped}\n\n{returned}")
-    };
-    let output = std::env::temp_dir().join(format!("agents-collaboration-{wait}-tmux.txt"));
-    std::fs::write(&output, captures).unwrap();
-    let verdict = serde_json::json!({"verdict":"pass", "binary":binary, "capture":output, "checks": if wait { vec!["wait result", "model label"] } else { vec!["spawn metadata", "model label", "child selection"] }});
+            .any(|line| line.contains("root → demo_sub") && !line.contains("New task"))
+    });
+    assert!(jumped.contains("root → demo_sub"), "{jumped}");
+    let (column, row) = find(&jumped, "Collaboration parent");
+    tmux.mouse(0, column, row, true);
+    let capture = tmux.capture_when(|capture| capture.contains("Wait agent"));
+    let (column, row) = find(&capture, "Wait agent");
+    tmux.mouse(0, column, row, true);
+    let waited = tmux
+        .capture_when(|capture| capture.contains("70000") && capture.contains("Wait completed."));
+    assert!(waited.contains("GPT-6.1-Sol"), "{waited}");
+    let output = std::env::temp_dir().join("agents-collaboration-tmux.txt");
+    std::fs::write(&output, format!("{spawn}\n\n{jumped}\n\n{waited}")).unwrap();
+    let verdict = serde_json::json!({"verdict":"pass", "binary":binary, "capture":output, "checks":["spawn metadata", "model label", "child selection", "wait result"]});
     std::fs::write(
-        std::env::temp_dir().join(format!("agents-collaboration-{wait}-probe.json")),
+        std::env::temp_dir().join("agents-collaboration-probe.json"),
         serde_json::to_vec_pretty(&verdict).unwrap(),
     )
     .unwrap();
