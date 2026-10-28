@@ -387,55 +387,66 @@ fn active_panel_question_keys_require_prompt_focus() {
     }
 }
 
-#[test]
-fn active_panel_unsupported_task_keys_do_not_fall_through() {
+fn unsupported_task_keys_do_not_fall_through(panel: Panel) {
     for width in [100, 200] {
-        for panel in [Panel::EventList, Panel::EventDetail, Panel::Prompt] {
-            let (mut view, _) = panel_fixture(width);
-            view.set_active_panel(panel);
-            // A disabled prompt and an absent terminal must not fall back to tasks.
-            if panel == Panel::Prompt {
-                view.rows[view.selected].process = Some(crate::model::Process {
-                    pid: 1,
-                    label: None,
-                    started_at: None,
-                });
+        let (mut view, _) = panel_fixture(width);
+        view.set_active_panel(panel);
+        // A disabled prompt and an absent terminal must not fall back to tasks.
+        if panel == Panel::Prompt {
+            view.rows[view.selected].process = Some(crate::model::Process {
+                pid: 1,
+                label: None,
+                started_at: None,
+            });
+        }
+        let selected = view.selected;
+        let event = view.selected_event_row();
+        for code in [
+            KeyCode::Right,
+            KeyCode::Char('f'),
+            KeyCode::Char('r'),
+            KeyCode::Char('a'),
+            KeyCode::Char('x'),
+            KeyCode::Char('h'),
+            KeyCode::Char('p'),
+            KeyCode::Backspace,
+        ] {
+            let action = key(&mut view, code);
+            if matches!(panel, Panel::EventList | Panel::EventDetail) && code == KeyCode::Char('p')
+            {
+                let selected = view.visible_event().unwrap();
+                assert!(matches!(
+                    action,
+                    Some(Action::ToggleEventPin { task, pinned })
+                        if Some(&task) == view.selected_id()
+                            && pinned.len() == 1
+                            && Some(&pinned[0].source) == selected.source.as_ref()
+                            && pinned[0].records == selected.source_records
+                ));
+            } else {
+                assert_eq!(action, None, "panel={panel:?} code={code:?}");
             }
-            let selected = view.selected;
-            let event = view.selected_event_row();
-            for code in [
-                KeyCode::Right,
-                KeyCode::Char('f'),
-                KeyCode::Char('r'),
-                KeyCode::Char('a'),
-                KeyCode::Char('x'),
-                KeyCode::Char('h'),
-                KeyCode::Char('p'),
-                KeyCode::Backspace,
-            ] {
-                let action = key(&mut view, code);
-                if matches!(panel, Panel::EventList | Panel::EventDetail)
-                    && code == KeyCode::Char('p')
-                {
-                    let selected = view.visible_event().unwrap();
-                    assert!(matches!(
-                        action,
-                        Some(Action::ToggleEventPin { task, pinned })
-                            if Some(&task) == view.selected_id()
-                                && pinned.len() == 1
-                                && Some(&pinned[0].source) == selected.source.as_ref()
-                                && pinned[0].records == selected.source_records
-                    ));
-                } else {
-                    assert_eq!(action, None, "panel={panel:?} code={code:?}");
-                }
-                assert_eq!(view.selected, selected);
-                assert_eq!(view.selected_event_row(), event);
-                assert!(view.confirm_dialog.is_none());
-                assert!(view.rename_target.is_none());
-            }
+            assert_eq!(view.selected, selected);
+            assert_eq!(view.selected_event_row(), event);
+            assert!(view.confirm_dialog.is_none());
+            assert!(view.rename_target.is_none());
         }
     }
+}
+
+#[test]
+fn active_panel_unsupported_task_keys_do_not_fall_through_event_list() {
+    unsupported_task_keys_do_not_fall_through(Panel::EventList);
+}
+
+#[test]
+fn active_panel_unsupported_task_keys_do_not_fall_through_event_detail() {
+    unsupported_task_keys_do_not_fall_through(Panel::EventDetail);
+}
+
+#[test]
+fn active_panel_unsupported_task_keys_do_not_fall_through_prompt() {
+    unsupported_task_keys_do_not_fall_through(Panel::Prompt);
 }
 
 #[test]
