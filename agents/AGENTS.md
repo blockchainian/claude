@@ -34,12 +34,14 @@ One test should complete in under 1s, test one product behavior only, and use mi
 
 ### Fixing slow tests
 
-- Change test code only. Preserve every assertion's behavior and coverage; do not fake the flow.
-- Split unrelated behaviors, reduce redundant records and rounds, and cover each dimension instead of every combination.
-- Remove unnecessary waits and sleeps. Keep each test below 1s, preferably below 0.7s. Do not split if the parts remain slow or total runtime increases.
-- From `agents/`, run each assigned test alone before editing and record its time: `cargo nextest run --bin agents -E 'test(=<full test path>)'`.
-- After editing, run the assigned tests three times; all must pass. Report each test's before time and slowest after time.
-- Run `cargo clippy --tests`; introduce no warnings. Do not relax the nextest timeout.
+Change test code only, and keep every assertion's coverage without faking the flow. Make a slow test faster by:
+
+- splitting unrelated behaviors, unless the parts stay slow or the total time grows
+- cutting redundant records and rounds
+- covering each dimension once instead of every combination
+- removing unneeded waits and sleeps
+
+Time the test alone with `cargo nextest run --bin agents -E 'test(=<path>)'` before and after the change. It must then pass three runs in a row under 0.7s. Never relax the nextest timeout.
 
 ## Tools
 
