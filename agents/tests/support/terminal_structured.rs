@@ -26,11 +26,10 @@ fn terminal_structured_json_xml_and_literal_text() {
             && capture.contains("Assistant")
     });
     let lines: Vec<_> = capture.lines().collect();
-    let divider = lines
-        .iter()
-        .rposition(|line| line.matches('─').count() > 100)
-        .expect("open log details have a panel divider");
-    let rows = &lines[divider + 1..];
+    let detail_rows =
+        event_detail_rows(&capture, 200).expect("open log details have panel dividers");
+    let divider = detail_rows.start - 1;
+    let rows = &lines[detail_rows];
     let row = |needle: &str| {
         rows.iter()
             .enumerate()
