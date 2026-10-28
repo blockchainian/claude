@@ -1594,8 +1594,7 @@ fn diff_backgrounds_preserve_text_positions() {
     view.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     view.event_session = view.selected_id().cloned();
     let now = DateTime::UNIX_EPOCH;
-    let mut cases = events(include_str!("../../tests/fixtures/claude-tool-calls.jsonl"));
-    cases.extend(codex_events("codex-file-changes.jsonl"));
+    let cases = diff_background_events();
     for light in [false, true] {
         super::super::highlight::use_theme(light, None).unwrap();
         for event in &cases {
