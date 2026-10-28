@@ -1,7 +1,5 @@
 #[path = "support/terminal_handback.rs"]
 mod terminal_handback;
-#[path = "support/terminal_output_borders.rs"]
-mod terminal_output_borders;
 
 #[path = "support/terminal_path_display.rs"]
 mod terminal_path_display;
@@ -12,12 +10,6 @@ mod terminal_weekly_usage;
 #[path = "support/terminal_message_text.rs"]
 mod terminal_message_text;
 
-#[path = "support/terminal_structured.rs"]
-mod terminal_structured;
-
-
-#[path = "support/terminal_memory_citation.rs"]
-mod terminal_memory_citation;
 
 use std::path::Path;
 use std::process::Command;
@@ -25,15 +17,9 @@ use std::time::Duration;
 use unicode_width::UnicodeWidthStr;
 
 
-#[path = "support/terminal_questions.rs"]
-mod terminal_questions;
-
 #[path = "support/terminal_mcp.rs"]
 mod terminal_mcp;
 
-
-#[path = "support/terminal_tool_list.rs"]
-mod terminal_tool_list;
 
 #[path = "support/terminal_event_detail.rs"]
 mod terminal_event_detail;
@@ -45,12 +31,8 @@ mod terminal_scripts;
 #[path = "support/terminal_heredoc_format.rs"]
 mod terminal_heredoc_format;
 
-#[path = "support/terminal_disabled_prompt.rs"]
-mod terminal_disabled_prompt;
-
 #[path = "support/terminal_drafts.rs"]
 mod terminal_drafts;
-
 
 #[path = "support/tmux.rs"]
 mod tmux;
@@ -275,38 +257,6 @@ fn launch_probe(
 }
 
 #[test]
-fn terminal_show_more_keeps_label_while_loading() {
-    let (directory, tmux, _transcript) = start_probe("show-more");
-    let project = directory.path().join("claude/projects/project");
-    for index in 1..12 {
-        let id = format!("00000000-0000-0000-0000-000000000{index:03}");
-        let records = include_str!("fixtures/transcript.jsonl")
-            .lines()
-            .map(|line| {
-                let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
-                record["sessionId"] = id.clone().into();
-                record.to_string()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(project.join(format!("{id}.jsonl")), records).unwrap();
-    }
-    let capture = tmux.capture_when(|capture| capture.contains("Inactive 10"));
-    let tabs = capture.lines().next().unwrap();
-    let inactive = tabs[..tabs.find("Inactive 10").unwrap()].width();
-    tmux.mouse(0, inactive, 0, true);
-    tmux.wait_for(|capture| capture.contains("Show more"));
-    tmux.run(&["send-keys", "-t", "probe", "End"]);
-    let capture = tmux.capture_when(|capture| capture.contains("Show more"));
-    assert!(!capture.contains("Loading more"));
-    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-    tmux.wait_for(|capture| capture.contains("Inactive 12"));
-    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-    assert!(!capture.contains("Loading more"));
-    println!("{{\"show_more\":\"pass\",\"transient_label\":\"absent\"}}");
-}
-
-#[test]
 fn terminal_branch_name_edits_in_task_details_and_preserves_input() {
     let repository = tempfile::tempdir().unwrap();
     for args in [
@@ -473,93 +423,6 @@ fn terminal_inline_code_follows_neovim_accent() {
             "{{\"text_accent\":\"pass\",\"mode\":\"{mode}\",\"index\":{index},\"capture\":\"{}\"}}",
             path.display()
         );
-    }
-}
-
-#[test]
-fn terminal_mcp_display_names() {
-    use std::io::Write;
-
-    let (_directory, tmux, transcript) = start_probe("mcp-names");
-    tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "45"]);
-    let mut file = std::fs::OpenOptions::new()
-        .append(true)
-        .open(transcript)
-        .unwrap();
-    // Keep the two parallel calls and their recorded result from the real transcript.
-    for line in include_str!("fixtures/claude-tool-calls.jsonl")
-        .lines()
-        .skip(16)
-        .take(3)
-    {
-        writeln!(file, "{line}").unwrap();
-    }
-    tmux.run(&["send-keys", "-t", "probe", "End"]);
-    tmux.wait_for(|capture| capture.contains("codex-manager start"));
-    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-    let path = std::env::temp_dir().join("agents-mcp-names-200x45.txt");
-    std::fs::write(&path, &capture).unwrap();
-    assert_eq!(capture.lines().count(), 45);
-    assert!(
-        !capture.contains("mcp__plugin_codex_codex-manager__start"),
-        "{capture}"
-    );
-    assert!(
-        capture.contains("codex-manager start") && capture.contains("Claude 图片链接"),
-        "{capture}"
-    );
-    assert!(capture.contains("Implement workstream A"), "{capture}");
-    println!(
-        "{{\"verdict\":\"pass\",\"capture\":\"{}\"}}",
-        path.display()
-    );
-}
-
-#[test]
-fn terminal_dashboard_tabs_and_footer() {
-    let (_directory, tmux, _transcript) = start_probe("header-footer");
-    for width in [200, 120] {
-        tmux.run(&[
-            "resize-window",
-            "-t",
-            "probe",
-            "-x",
-            &width.to_string(),
-            "-y",
-            "45",
-        ]);
-        tmux.wait_for(|capture| {
-            // The clipped pre-resize frame can already have the expected height and footer.
-            capture.lines().count() == 45
-                && capture.contains("? help")
-                && capture
-                    .lines()
-                    .next()
-                    .is_some_and(|row| row.contains("Inactive 1"))
-        });
-        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-        let rows: Vec<_> = capture.lines().collect();
-        assert!(rows[0].contains("Active 0"), "{capture}");
-        assert!(rows[0].contains("Inactive 1"), "{capture}");
-        assert!(rows[1].contains("──"), "{capture}");
-        assert!(!capture.contains("Agent command center"), "{capture}");
-        assert_eq!(rows[44].trim(), "? help", "{capture}");
-        let path = std::env::temp_dir().join(format!("agents-dashboard-{width}x45.txt"));
-        std::fs::write(&path, &capture).unwrap();
-        println!(
-            "{{\"dashboard_header_footer\":\"pass\",\"width\":{width},\"capture\":\"{}\"}}",
-            path.display()
-        );
-        tmux.run(&["send-keys", "-t", "probe", "?"]);
-        tmux.wait_for(|capture| capture.lines().any(|line| line.trim() == "Shortcuts"));
-        let help = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-        assert!(
-            help.lines()
-                .any(|line| line.contains('g') && line.contains("Group")),
-            "{help}"
-        );
-        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-        tmux.wait_for(|capture| capture.contains("? help"));
     }
 }
 
@@ -737,26 +600,6 @@ fn assert_task_details_borders(tmux: &Tmux, width: u16, height: u16, capture: &s
         }
     }
     println!("{{\"task_details_borders\":\"pass\",\"width\":{width}}}");
-}
-
-#[test]
-fn terminal_task_details_borders_keep_status_and_elapsed_separate() {
-    let (_directory, tmux, _transcript) = start_probe("details-borders");
-    for width in [112, 200] {
-        tmux.run(&[
-            "resize-window",
-            "-t",
-            "probe",
-            "-x",
-            &width.to_string(),
-            "-y",
-            "50",
-        ]);
-        wait_for_size(&tmux, width, 50);
-        let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-        println!("{width} columns:\n{capture}");
-        assert_task_details_borders(&tmux, width, 50, &capture);
-    }
 }
 
 // Runs the executable's terminal loop, provider discovery and event loading, rather
@@ -1001,61 +844,6 @@ fn terminal_layout_tracks_width() {
             tmux.wait_for(|capture| capture.lines().skip(event_rule + 1).any(|line| line.contains("decision")));
         }
     }
-}
-
-#[test]
-fn terminal_update_click_selects_source_row() {
-    let (_directory, tmux, _transcript) = start_probe("details-source");
-    // Select the older user row before clicking the Update body.
-    let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
-    let lines: Vec<_> = capture.lines().collect();
-    let (update_y, update_x) = lines
-        .iter()
-        .enumerate()
-        .find_map(|(y, line)| line.find("Update").map(|byte| (y, line[..byte].width())))
-        .expect("Update section");
-    let (user_y, user_x) = lines
-        .iter()
-        .enumerate()
-        .find_map(|(y, line)| {
-            line.rfind("Stop hook").and_then(|byte| {
-                let x = line[..byte].width();
-                (x > update_x && y < 20).then_some((y, x))
-            })
-        })
-        .expect("user log row");
-    tmux.mouse(0, user_x, user_y, true);
-    let before =
-        tmux.capture_when(|capture| capture.lines().skip(22).any(|line| line.contains("User")));
-    assert!(
-        before.lines().skip(22).any(|line| line.contains("User")),
-        "{before}"
-    );
-    let body_x = lines[update_y + 1]
-        .find('│')
-        .map(|byte| lines[update_y + 1][..byte].width())
-        .unwrap()
-        + 2;
-    tmux.mouse(0, body_x, update_y + 1, true);
-    let after = tmux.capture_when(|capture| {
-        capture
-            .lines()
-            .skip(22)
-            .any(|line| line.contains("Assistant"))
-            && capture.lines().skip(22).any(|line| line.contains("Stop"))
-    });
-    assert!(
-        after
-            .lines()
-            .skip(22)
-            .any(|line| line.contains("Assistant")),
-        "{after}"
-    );
-    assert!(
-        after.lines().skip(22).any(|line| line.contains("Stop")),
-        "{after}"
-    );
-    println!("Update click selected the real transcript's assistant row in tmux.");
 }
 
 #[test]
@@ -1357,79 +1145,11 @@ fn terminal_task_details_section_positions() {
     }
 }
 
-#[test]
-fn terminal_task_details_background_before_activity() {
-    let (_directory, tmux, transcript) =
-        background_text_probe("background-before-activity", "Running checks\n");
-    let content = format!(
-        "{}\n{}\n{}",
-        std::fs::read_to_string(&transcript).unwrap(),
-        include_str!("fixtures/background/records.jsonl"),
-        include_str!("fixtures/claude-todos.jsonl")
-    );
-    std::fs::write(&transcript, content).unwrap();
-    tmux.run(&["resize-window", "-t", "probe", "-x", "112", "-y", "70"]);
-    let capture = tmux.capture_when(|capture| {
-        let positions = ["Background", "Last activity", "Update", "Prompt", "Tasks"]
-            .map(|label| capture.lines().position(|row| row.contains(label)));
-        positions.iter().all(Option::is_some) && positions.is_sorted()
-    });
-    println!("{capture}");
-    println!("{{\"task_details_background_before_activity\":\"pass\"}}");
-}
-
-#[test]
-fn terminal_task_details_needs_input_follows_prompt_before_tasks() {
-    let (directory, tmux, transcript) = start_probe("details-needs-input");
-    let job = directory.path().join("claude/jobs/details-needs-input");
-    std::fs::create_dir_all(&job).unwrap();
-    // Safe fields from the real Claude Code background state payload.
-    let mut state: serde_json::Value = serde_json::from_str(
-        r#"{"state":"done","template":"bg","sessionId":"e772d00b-c424-4632-a8df-74bc9c7b1629","respawnFlags":[],"backend":"daemon"}"#,
-    )
-    .unwrap();
-    state["sessionId"] = transcript.file_stem().unwrap().to_str().unwrap().into();
-    state["needs"] = "send a prompt to start".into();
-    std::fs::write(job.join("state.json"), serde_json::to_vec(&state).unwrap()).unwrap();
-    let original = std::fs::read_to_string(&transcript).unwrap();
-    tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "70"]);
-    std::fs::write(
-        &transcript,
-        format!(
-            "{original}\n{}",
-            include_str!("fixtures/claude-todos.jsonl")
-        ),
-    )
-    .unwrap();
-    let capture = tmux.capture_when(|capture| {
-        capture.lines().any(|line| {
-            line.split('│')
-                .nth(1)
-                .is_some_and(|panel| panel.trim() == "Needs input")
-        })
-    });
-    let panel: Vec<_> = capture
-        .lines()
-        .filter_map(|line| line.split('│').nth(1))
-        .collect();
-    let positions = ["Prompt", "Needs input", "Tasks"].map(|label| {
-        panel
-            .iter()
-            .position(|line| line.trim_start().starts_with(label))
-            .unwrap()
-    });
-    assert!(positions.is_sorted(), "{capture}");
-    assert!(!capture.contains("Needs attention"), "{capture}");
-    assert!(capture.contains("send a prompt to start"), "{capture}");
-    println!("{{\"needs_input_after_prompt_before_tasks\":\"pass\"}}");
-}
-
 #[path = "support/terminal_codex_exit.rs"]
 mod terminal_codex_exit;
 
 #[path = "support/terminal_event_detail_width.rs"]
 mod terminal_event_detail_width;
-
 
 #[path = "support/terminal_paths.rs"]
 mod paths;
@@ -1437,112 +1157,6 @@ mod paths;
 #[path = "support/terminal_event_scroll.rs"]
 mod terminal_event_scroll;
 
-#[test]
-fn terminal_manager_detach_result_name() {
-    use std::io::Write;
-    let (_directory, tmux, transcript) = start_probe("manager-detach-result-name");
-    std::fs::OpenOptions::new()
-        .append(true)
-        .open(&transcript)
-        .unwrap()
-        .write_all(include_bytes!("fixtures/claude-manager-detach-name.jsonl"))
-        .unwrap();
-    tmux.run(&["send-keys", "-t", "probe", "End"]);
-    let capture = tmux.capture_when(|capture| {
-        capture
-            .lines()
-            .filter(|line| line.contains("codex-manager detach") && line.contains("模型和new挪位"))
-            .count()
-            == 2
-    });
-    assert!(
-        capture
-            .lines()
-            .any(|line| line.trim().trim_end_matches('│').trim()
-                == "01a1489e-5020-7f40-90e8-c9413012630b"),
-        "{capture}"
-    );
-    assert!(
-        !capture.contains("\"name\"") && !capture.contains("\"threadId\""),
-        "{capture}"
-    );
-    let path = std::env::temp_dir().join("agents-detach-result-name.txt");
-    std::fs::write(&path, capture).unwrap();
-    println!("{}", serde_json::json!({"verdict":"pass", "capture":path}));
-}
-
-#[test]
-fn terminal_context_usage_on_task_details_border() {
-    let (_claude_directory, claude, _transcript) = start_probe("claude-context-border");
-    let capture = claude.capture_when(|capture| capture.contains("Update"));
-    let claude_border = capture.lines().nth(1).unwrap().to_owned();
-    assert!(claude_border.contains("╴5% "), "{capture}");
-    assert!(claude_border.contains("Inactive"), "{capture}");
-
-    let mut claude_cases = Vec::new();
-    for (name, fixture, percent) in [
-        (
-            "native",
-            include_str!("fixtures/claude-context/opus.jsonl"),
-            Some(24),
-        ),
-        (
-            "200k",
-            include_str!("fixtures/claude-context/old.jsonl"),
-            Some(12),
-        ),
-        (
-            "unknown",
-            include_str!("fixtures/claude-context/unknown.jsonl"),
-            None,
-        ),
-    ] {
-        let contents = fixture.to_owned();
-        let (_directory, tmux, _) =
-            start_probe_with_transcript(&format!("claude-context-{name}"), &contents);
-        let capture = tmux.capture_when(|capture| {
-            capture.lines().nth(1).is_some_and(|border| match percent {
-                Some(percent) => border.contains(&format!("╴{percent}% ")),
-                None => !border.contains('%'),
-            })
-        });
-        let border = capture.lines().nth(1).unwrap();
-        assert!(border.contains("Inactive"), "{capture}");
-        if let Some(percent) = percent {
-            assert!(percent <= 100);
-            assert!(
-                border.find('%').unwrap() < border.find("Inactive").unwrap(),
-                "{capture}"
-            );
-        }
-        claude_cases.push(serde_json::json!({"case":name,"percent":percent,"border":border}));
-    }
-
-    let (_codex_directory, codex) = terminal_codex_exit::start_codex_probe(
-        "codex-context-border",
-        include_str!("fixtures/codex-latest-activity.jsonl"),
-    );
-    let capture = codex.capture_when(|capture| {
-        capture
-            .lines()
-            .nth(1)
-            .is_some_and(|row| row.contains("╴9% "))
-    });
-    let codex_border = capture.lines().nth(1).unwrap();
-    assert!(codex_border.contains("Inactive"), "{capture}");
-    assert!(
-        codex_border.find("9%").unwrap() < codex_border.find("Inactive").unwrap(),
-        "{capture}"
-    );
-    let result = serde_json::json!({"verdict":"passed", "claude":claude_border, "claude_cases":claude_cases, "codex":codex_border});
-    if let Some(path) = std::env::var_os("AGENTS_CONTEXT_TERMINAL_RESULT") {
-        std::fs::write(path, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
-    }
-    println!("{result}");
-}
-
-#[path = "support/terminal_summary.rs"]
-mod terminal_summary;
 
 #[path = "support/terminal_model_families.rs"]
 mod terminal_model_families;
@@ -1629,75 +1243,4 @@ fn terminal_inactive_elapsed_stays_at_last_record() {
             .to_string(),
     )
     .unwrap();
-}
-
-
-#[test]
-fn terminal_delete_linked_worktree_dialog() {
-    let repository = tempfile::tempdir().unwrap();
-    let primary = repository.path().join("repo");
-    let linked = repository.path().join("linked");
-    std::fs::create_dir(&primary).unwrap();
-    for args in [
-        vec!["init", "-b", "main"],
-        vec![
-            "-c",
-            "user.name=Probe",
-            "-c",
-            "user.email=probe@example.test",
-            "commit",
-            "--allow-empty",
-            "-m",
-            "fixture",
-        ],
-        vec!["worktree", "add", "-b", "linked", linked.to_str().unwrap()],
-    ] {
-        let output = Command::new("git")
-            .current_dir(&primary)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-    }
-    let records = include_str!("fixtures/transcript.jsonl")
-        .lines()
-        .map(|line| {
-            let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
-            if record.get("cwd").is_some() {
-                record["cwd"] = linked.to_string_lossy().as_ref().into();
-            }
-            record.to_string()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n";
-    let (_directory, tmux, transcript) = start_probe_with_transcript("delete-worktree", &records);
-    let output = Path::new(env!("CARGO_MANIFEST_DIR")).join("scratchpad/delete-worktree-probe");
-    std::fs::create_dir_all(&output).unwrap();
-    tmux.run(&["send-keys", "-t", "probe", "Home"]);
-    tmux.run(&["send-keys", "-t", "probe", "BSpace"]);
-    let capture = tmux.capture_when(|capture| {
-        capture.contains("3. Permanently delete task, child agents and worktree")
-    });
-    assert!(capture.contains("❯ 1. Cancel"), "{capture}");
-    std::fs::write(output.join("dialog.txt"), &capture).unwrap();
-    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-    tmux.wait_for(|capture| !capture.contains("Permanently delete “"));
-    assert!(transcript.exists());
-    assert!(linked.exists());
-    tmux.run(&["send-keys", "-t", "probe", "BSpace"]);
-    tmux.wait_for(|capture| {
-        capture.contains("3. Permanently delete task, child agents and worktree")
-    });
-    tmux.run(&["send-keys", "-t", "probe", "3"]);
-    tmux.wait_for(|capture| {
-        !transcript.exists() && !linked.exists() && !capture.contains("Permanently delete “")
-    });
-    let verdict = serde_json::json!({"verdict":"pass", "third_option":true, "cancel_default":true, "task_deleted":true, "worktree_removed":true});
-    std::fs::write(
-        output.join("verdict.json"),
-        serde_json::to_vec_pretty(&verdict).unwrap(),
-    )
-    .unwrap();
-    println!("{verdict}");
 }

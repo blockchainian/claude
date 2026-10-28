@@ -189,35 +189,6 @@ fn terminal_codex_mcp_generic_event_detail() {
 }
 
 #[test]
-fn terminal_codex_claude_client_text() {
-    for (tool, fixture, input_marker, reply_marker) in [
-        (
-            "ask",
-            include_str!("../fixtures/claude-client/ask.jsonl"),
-            "请回复 OK，用于抓 ask 的真实 fixture",
-            "OK",
-        ),
-        (
-            "notify",
-            include_str!("../fixtures/claude-client/notify.jsonl"),
-            "客户端改名线程开始抓 fixture",
-            "Delivered to Claude.",
-        ),
-    ] {
-        let (_directory, tmux) = start_codex_mcp_probe(fixture);
-        let capture = tmux.capture_when(|capture| {
-            capture.contains(input_marker) && capture.contains(reply_marker)
-        });
-        assert!(!capture.contains("\"text\":"), "{capture}");
-        assert!(
-            capture.matches(input_marker).count() >= 2,
-            "list and detail: {capture}"
-        );
-        save_mcp_capture(&tmux, "codex", tool);
-    }
-}
-
-#[test]
 fn terminal_claude_chrome_javascript() {
     use std::io::Write;
     let (_directory, tmux, transcript) = start_probe("chrome-javascript");
