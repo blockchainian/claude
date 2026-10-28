@@ -2,7 +2,10 @@
 use super::Client;
 use crate::{
     app::live_tests as dashboard,
-    providers::{SessionInput, claude::ClaudeProvider},
+    providers::{
+        SessionInput,
+        claude::{self, ClaudeProvider},
+    },
 };
 use serde_json::{Value, json};
 use std::{
@@ -19,6 +22,7 @@ struct Live {
     config: PathBuf,
     evidence: PathBuf,
     jobs: Vec<String>,
+    sessions: Vec<String>,
 }
 
 fn command(cwd: &Path, args: &[&str]) -> io::Result<String> {
@@ -82,6 +86,7 @@ impl Live {
             config,
             evidence,
             jobs: Vec::new(),
+            sessions: Vec::new(),
         })
     }
 
@@ -222,7 +227,20 @@ impl Live {
 
     fn cleanup(&mut self) -> io::Result<()> {
         let mut errors = Vec::new();
-        for job in self.jobs.drain(..) {
+        for job in std::mem::take(&mut self.jobs) {
+            // Capture the session before stop/rm can remove its registry entry.
+            match self.registry(&job) {
+                Ok(Some(entry)) => match entry["sessionId"].as_str() {
+                    Some(id) => {
+                        if !self.sessions.iter().any(|session| session == id) {
+                            self.sessions.push(id.to_owned());
+                        }
+                    }
+                    None => errors.push(format!("job {job}: registry missing sessionId")),
+                },
+                Ok(None) => {}
+                Err(error) => errors.push(error.to_string()),
+            }
             // Only IDs returned by this test's own launch can reach these commands.
             let stop = command(&self.cwd, &["stop", &job]);
             let remove = command(&self.cwd, &["rm", &job]);
@@ -231,6 +249,22 @@ impl Live {
             }
             if let Err(error) = remove {
                 errors.push(error.to_string());
+            }
+        }
+        for id in self.sessions.drain(..) {
+            let result = (|| -> io::Result<()> {
+                for project in fs::read_dir(self.config.join("projects"))? {
+                    let path = project?.path().join(format!("{id}.jsonl"));
+                    match claude::delete(&path) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error),
+                    }
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                errors.push(format!("session {id}: {error}"));
             }
         }
         if errors.is_empty() {
@@ -298,6 +332,7 @@ fn run(live: &mut Live, cases: &mut Vec<Value>) -> io::Result<()> {
         .as_str()
         .ok_or_else(|| io::Error::other("registry missing sessionId"))?
         .to_owned();
+    live.sessions.push(id.clone());
     live.wait_events(&id, "ready.json", |events| replied(events, "INPUT_READY"))?;
     let client = Client::new(&live.config);
     let mut app = dashboard::app(

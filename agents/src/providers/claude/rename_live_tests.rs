@@ -199,15 +199,35 @@ impl Drop for Live {
             eprintln!("Claude rename cleanup: {error}");
         }
         match files(&self.config) {
-            Ok(after) => println!(
-                "{}",
-                serde_json::json!({
-                    "claude_files_created_during_probe": after.difference(&self.before).collect::<Vec<_>>()
-                })
-            ),
+            Ok(after) => {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "claude_files_created_during_probe": after.difference(&self.before).collect::<Vec<_>>()
+                    })
+                );
+                for path in after.difference(&self.before).filter(|path| {
+                    path.parent().and_then(Path::parent)
+                        == Some(self.config.join("projects").as_path())
+                        && path
+                            .extension()
+                            .is_some_and(|extension| extension == "jsonl")
+                }) {
+                    let cleanup = || -> io::Result<()> {
+                        let summary = transcript::read(path, fs::metadata(path)?.len())?;
+                        if summary.cwd.as_deref() == Some(self.directory.path()) {
+                            delete(path)?;
+                        }
+                        Ok(())
+                    };
+                    if let Err(error) = cleanup() {
+                        eprintln!("Claude transcript cleanup {}: {error}", path.display());
+                    }
+                }
+            }
             Err(error) => eprintln!("Claude files inventory: {error}"),
         }
-        // TempDir removes only the probe directory; Claude's files are left alone.
+        // Remove this probe's transcripts before TempDir removes its working directory.
     }
 }
 
