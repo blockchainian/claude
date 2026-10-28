@@ -122,30 +122,37 @@ fn active_panel_event_detail_navigation_scrolls_only_its_content_wide() {
     detail_navigation_scrolls_only_its_content(Panel::EventDetail, 200);
 }
 
-#[test]
-fn active_panel_detail_bottom_forward_keys_do_not_navigate_lists() {
+fn detail_bottom_forward_keys_do_not_navigate_lists(panel: Panel) {
     for width in [100, 200] {
-        for panel in [Panel::TaskDetails, Panel::EventDetail] {
-            let (mut view, now) = panel_fixture(width);
-            view.set_active_panel(panel);
-            let selected = view.selected;
-            let event = view.event_list.cursor;
-            let scroll = view.event_list.scroll.get();
-            key(&mut view, KeyCode::End);
-            event_screen(&view, width, 45, now);
-            let bottom = task_details_position(&view, panel);
-            assert!(bottom > 0);
-            for (forward, _) in navigation_pairs() {
-                if panel == Panel::EventDetail && forward.code != KeyCode::End {
-                    continue;
-                }
-                key(&mut view, KeyCode::End);
-                view.handle_key(forward);
-                assert_eq!(task_details_position(&view, panel), bottom);
-                assert_lists_unchanged(&view, selected, event, scroll);
+        let (mut view, now) = panel_fixture(width);
+        view.set_active_panel(panel);
+        let selected = view.selected;
+        let event = view.event_list.cursor;
+        let scroll = view.event_list.scroll.get();
+        key(&mut view, KeyCode::End);
+        event_screen(&view, width, 45, now);
+        let bottom = task_details_position(&view, panel);
+        assert!(bottom > 0);
+        for (forward, _) in navigation_pairs() {
+            if panel == Panel::EventDetail && forward.code != KeyCode::End {
+                continue;
             }
+            key(&mut view, KeyCode::End);
+            view.handle_key(forward);
+            assert_eq!(task_details_position(&view, panel), bottom);
+            assert_lists_unchanged(&view, selected, event, scroll);
         }
     }
+}
+
+#[test]
+fn active_panel_detail_bottom_forward_keys_do_not_navigate_lists_task_details() {
+    detail_bottom_forward_keys_do_not_navigate_lists(Panel::TaskDetails);
+}
+
+#[test]
+fn active_panel_detail_bottom_forward_keys_do_not_navigate_lists_event_detail() {
+    detail_bottom_forward_keys_do_not_navigate_lists(Panel::EventDetail);
 }
 
 #[test]
