@@ -217,11 +217,16 @@ fn terminal_task_follow_only_returns_to_active() {
 #[test]
 fn terminal_status_tabs_filter_children_and_preserve_ancestor_status() {
     let listed = |capture: &str, title: &str| {
-        capture
-            .lines()
+        let header = capture.lines().nth(1).unwrap();
+        let border = header.find('┬').unwrap();
+        let task_width = header[..border].width() as u16;
+        let parser = captured_screen(capture, WIDTH, HEIGHT);
+        parser
+            .screen()
+            .rows(0, task_width)
             .skip(2)
             .take(26)
-            .any(|line| line.split('│').next().unwrap().contains(title))
+            .any(|line| line.contains(title))
     };
     let (directory, tmux, transcript) = start_probe("status-tabs");
     let children = transcript.with_extension("").join("subagents");
