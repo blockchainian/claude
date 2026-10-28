@@ -47,10 +47,40 @@ fn settings_real_codex_thread() {
     use std::time::{Duration, Instant};
 
     struct Cleanup(PathBuf, String);
+    impl Cleanup {
+        fn delete(&self) -> std::io::Result<()> {
+            let mut client = app_server::Client::connect(&self.0)?;
+            app_server::thread::delete(&mut client, &self.1)?;
+            let db = Connection::open_with_flags(
+                self.0.join("state_5.sqlite"),
+                OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .map_err(std::io::Error::other)?;
+            let exists: bool = db
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1)",
+                    [&self.1],
+                    |row| row.get(0),
+                )
+                .map_err(std::io::Error::other)?;
+            if exists {
+                return Err(std::io::Error::other(format!(
+                    "settings thread {} remains after thread/delete",
+                    self.1
+                )));
+            }
+            Ok(())
+        }
+    }
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            let mut client = app_server::Client::connect(&self.0).unwrap();
-            app_server::thread::delete(&mut client, &self.1).unwrap();
+            if let Err(error) = self.delete() {
+                if std::thread::panicking() {
+                    eprintln!("settings thread {} cleanup failed: {error}", self.1);
+                } else {
+                    panic!("settings thread {} cleanup failed: {error}", self.1);
+                }
+            }
         }
     }
     let directory = tempfile::tempdir().unwrap();
@@ -71,7 +101,8 @@ fn settings_real_codex_thread() {
         )
         .unwrap();
     let id = created["thread"]["id"].as_str().unwrap().to_owned();
-    let _cleanup = Cleanup(provider.home.clone(), id.clone());
+    // Unwinding runs this guard; a runner that kills the process cannot run Drop.
+    let cleanup = Cleanup(provider.home.clone(), id.clone());
     fn archive(owner: &mut app_server::Client, id: &str) {
         app_server::thread::archive(owner, id).unwrap();
         let deadline = Instant::now() + Duration::from_secs(15);
@@ -160,6 +191,8 @@ fn settings_real_codex_thread() {
     app_server::thread::set_name(&mut owner, &id, &format!("settings-{id}")).unwrap();
     archive(&mut owner, &id);
     terminal_settings_walk(&provider.home, &id, &models[0].label, &models[1].label);
+    drop(owner);
+    drop(cleanup);
     println!(
         "{{\"verdict\":\"pass\",\"inactive_wakes\":true,\"active_model\":true,\"active_effort\":true,\"turns\":0}}"
     );
