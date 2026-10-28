@@ -744,10 +744,71 @@ mod tests {
     #[test]
     #[ignore = "starts a real Claude background session and restores global model defaults"]
     fn real_model_command_without_confirmation() {
-        let cwd = std::env::current_dir().unwrap();
+        struct Cleanup {
+            cwd: tempfile::TempDir,
+            session: String,
+            job: Option<String>,
+        }
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let mut errors = Vec::new();
+                if let Some(job) = &self.job {
+                    for command in ["stop", "rm"] {
+                        match Command::new("claude")
+                            .args([command, job])
+                            .current_dir(self.cwd.path())
+                            .output()
+                        {
+                            Ok(output) if output.status.success() => {}
+                            Ok(output) => errors.push(format!(
+                                "cleanup {command}: {}",
+                                String::from_utf8_lossy(&output.stderr)
+                            )),
+                            Err(error) => errors.push(format!("cleanup {command}: {error}")),
+                        }
+                    }
+                }
+                let delete = || -> io::Result<()> {
+                    let projects =
+                        match std::fs::read_dir(super::super::config_dir().join("projects")) {
+                            Ok(projects) => projects,
+                            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+                            Err(error) => return Err(error),
+                        };
+                    for project in projects {
+                        let transcript = project?.path().join(format!("{}.jsonl", self.session));
+                        match super::super::delete(&transcript) {
+                            Ok(()) => {}
+                            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                            Err(error) => return Err(error),
+                        }
+                    }
+                    Ok(())
+                };
+                if let Err(error) = delete() {
+                    errors.push(format!("cleanup transcript: {error}"));
+                }
+                if !errors.is_empty() {
+                    let message = errors.join("\n");
+                    if std::thread::panicking() {
+                        eprintln!("{message}");
+                    } else {
+                        panic!("{message}");
+                    }
+                }
+            }
+        }
+        let mut cleanup = Cleanup {
+            cwd: tempfile::tempdir().unwrap(),
+            session: uuid::Uuid::new_v4().to_string(),
+            job: None,
+        };
+        let cwd = cleanup.cwd.path().to_owned();
         let output = Command::new("claude")
             .args([
                 "--bg",
+                "--session-id",
+                &cleanup.session,
                 "--model",
                 "haiku",
                 "--setting-sources",
@@ -775,6 +836,7 @@ mod tests {
             .next()
             .unwrap()
             .to_owned();
+        cleanup.job = Some(job.clone());
         let result = std::panic::catch_unwind(|| {
             let settings = super::super::config_dir().join("settings.json");
             super::super::settings::with_restored_defaults(&settings, || {
@@ -798,18 +860,6 @@ mod tests {
             })
             .unwrap();
         });
-        for command in ["stop", "rm"] {
-            let output = Command::new("claude")
-                .args([command, &job])
-                .current_dir(&cwd)
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "cleanup {command}: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
         if let Err(panic) = result {
             std::panic::resume_unwind(panic);
         }
