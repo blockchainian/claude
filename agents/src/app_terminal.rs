@@ -339,9 +339,22 @@ mod tests {
     }
 
     fn attach(app: &mut App, id: SessionKey, pid_file: &std::path::Path) -> u32 {
+        attach_script(
+            app,
+            id,
+            pid_file,
+            r#"stty raw -echo; printf '%s' "$$" > "$1"; printf READY; dd bs=1 count=1 >/dev/null 2>&1; printf DETACHED; while :; do read line; done"#,
+        )
+    }
+
+    fn attach_script(
+        app: &mut App,
+        id: SessionKey,
+        pid_file: &std::path::Path,
+        script: &str,
+    ) -> u32 {
         let mut command = Command::new("sh");
-        command.args(["-c", r#"stty raw -echo; printf '%s' "$$" > "$1"; printf READY; dd bs=1 count=1 >/dev/null 2>&1; printf DETACHED; while :; do read line; done"#, "sh"])
-            .arg(pid_file);
+        command.args(["-c", script, "sh"]).arg(pid_file);
         let sender = app.sender.clone();
         let terminal =
             SessionTerminal::spawn(id.clone(), command, Some(b"\x1a"), (20, 80), move || {
@@ -769,43 +782,55 @@ mod tests {
     }
 
     #[test]
-    fn terminal_cleanup_waits_for_detach_off_the_ui_thread_on_close_and_switch() {
-        for switching in [false, true] {
-            let (directory, mut app, id) = fixture();
-            draw(&mut app);
-            let pid = attach(&mut app, id.clone(), &directory.path().join("cleanup-pid"));
-            let ui_thread = std::thread::current().id();
-            let (sender, receiver) = std::sync::mpsc::channel();
-            let (release, wait) = std::sync::mpsc::channel();
-            app.terminal.as_mut().unwrap().cleanup = Some(Box::new(move || {
-                assert_ne!(std::thread::current().id(), ui_thread);
-                assert_reaped(pid);
-                sender.send(()).unwrap();
-                wait.recv_timeout(Duration::from_secs(5)).unwrap();
-                Err(io::Error::other("terminal cleanup failed"))
-            }));
-            if switching {
-                let mut other = app.sessions[0].clone();
-                other.id.id = "cleanup-other".into();
-                other.status = SessionStatus::NeedsInput;
-                app.sessions.push(other);
-                app.view.set_sessions(app.sessions.clone(), false);
-                assert_ne!(app.view.selected_id(), Some(&id));
-            }
-            let start = Instant::now();
-            if switching {
-                app.sync_terminal();
-            } else {
-                app.close_terminal();
-            }
-            assert!(start.elapsed() < Duration::from_millis(100));
-            assert!(app.terminal.is_none());
-            assert!(app.closing_terminals.contains_key(&id));
-            receiver.recv_timeout(Duration::from_secs(5)).unwrap();
-            release.send(()).unwrap();
-            finish_close(&mut app);
-            assert!(draw(&mut app).contains("Cannot close the terminal:"));
+    fn terminal_cleanup_waits_for_detach_off_the_ui_thread_on_close() {
+        assert_terminal_cleanup(false);
+    }
+
+    #[test]
+    fn terminal_cleanup_waits_for_detach_off_the_ui_thread_on_switch() {
+        assert_terminal_cleanup(true);
+    }
+
+    fn assert_terminal_cleanup(switching: bool) {
+        let (directory, mut app, id) = fixture();
+        draw(&mut app);
+        let pid = attach_script(
+            &mut app,
+            id.clone(),
+            &directory.path().join("cleanup-pid"),
+            r#"stty raw -echo; printf '%s' "$$" > "$1"; printf READY; dd bs=1 count=1 >/dev/null 2>&1; printf DETACHED"#,
+        );
+        let ui_thread = std::thread::current().id();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        app.terminal.as_mut().unwrap().cleanup = Some(Box::new(move || {
+            assert_ne!(std::thread::current().id(), ui_thread);
+            assert_reaped(pid);
+            sender.send(()).unwrap();
+            wait.recv_timeout(Duration::from_secs(5)).unwrap();
+            Err(io::Error::other("terminal cleanup failed"))
+        }));
+        if switching {
+            let mut other = app.sessions[0].clone();
+            other.id.id = "cleanup-other".into();
+            other.status = SessionStatus::NeedsInput;
+            app.sessions.push(other);
+            app.view.set_sessions(app.sessions.clone(), false);
+            assert_ne!(app.view.selected_id(), Some(&id));
         }
+        let start = Instant::now();
+        if switching {
+            app.sync_terminal();
+        } else {
+            app.close_terminal();
+        }
+        assert!(start.elapsed() < Duration::from_millis(100));
+        assert!(app.terminal.is_none());
+        assert!(app.closing_terminals.contains_key(&id));
+        receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        release.send(()).unwrap();
+        finish_close(&mut app);
+        assert!(draw(&mut app).contains("Cannot close the terminal:"));
     }
 
     #[test]
