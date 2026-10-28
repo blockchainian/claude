@@ -5,7 +5,8 @@
 | 8.86 (iso 5.73) | providers::codex::rollout::summary_cache_tests | summaries_match_full_parse_after_each_append | partly | split per fixture<br>truncate long strings in the 536 KB fixture, keep it over 64 KB |
 | 3.42 (iso 1.97) | ui::tests::active_panel_tests | active_panel_task_details_navigation_scrolls_only_its_content | partly | split per panel<br>fewer events in panel_fixture |
 | 3.30 (iso 1.92) | ui::event_list::reading_tests | provider_detail_blocks_are_centered | partly | split claude and codex fixtures |
-| 3.11 (iso 2.23) | app::ui_tests | event_selection_scrolls_to_first_row_across_windows_after_append | partly | split per width<br>rest is product search-index cost |
+| 1.639 | app::ui_tests | event_selection_scrolls_to_first_row_across_windows_after_append_at_width_120 | partly | product prepare_event_search cost; minimum height 19 |
+| 1.871 | app::ui_tests | event_selection_scrolls_to_first_row_across_windows_after_append_at_width_180 | partly | product prepare_event_search cost; minimum height 19 |
 | 2.61 (iso 1.46) | ui::tests::active_panel_tests | mouse_activation_every_event_routes_subsequent_paging | partly | fewer events in panel_fixture<br>split per width |
 | 2.08 (iso 1.52) | providers::codex::rollout::summary_cache_tests | summaries_parse_each_byte_once_across_appends | partly | split per fixture<br>truncated copy of the big fixture |
 | 2.06 (iso 1.14) | ui::tests::active_panel_tests | mouse_activation_drag_keeps_the_pressed_panel | partly | fewer events in panel_fixture<br>split per width |
@@ -32,7 +33,6 @@
 | 1.95 (iso 1.16) | ui::tests::active_panel_tests | mouse_activation_double_click_keeps_the_pressed_panel | yes | fewer events in panel_fixture |
 | 1.70 (iso 1.06) | ui::tests::active_panel_tests | active_panel_event_detail_bottom_steps_to_next_event | yes | fewer events in panel_fixture |
 | 1.48 (iso 0.92) | ui::tests::active_panel_tests | active_panel_detail_top_backward_keys_do_not_navigate_lists | yes | split per panel<br>fewer events in panel_fixture |
-| 1.11 (iso 0.84) | app::ui_tests | medium_and_large_event_panels_scroll_and_copy_independently | yes | split per layout |
 | 1.08 (iso 0.61) | ui::inline_images::tests | inline_images_evicts_least_recently_drawn_image_at_byte_limit | yes | opt-level 2 for image crates in dev profile |
 | 1.03 (iso 0.49) | ui::draft_flow_tests | branch_and_repository_selection_orders_create_in_selected_repository | yes | split per order<br>one git repo per test |
 | 1.01 (iso 0.57) | ui::tests::window_navigation_tests | hidden_focus_resize_recovers_and_does_not_return_on_growth | yes | split per width and source |
