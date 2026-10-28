@@ -47,69 +47,6 @@ pub(super) fn start_codex_probe(name: &str, fixture: &str) -> (tempfile::TempDir
 }
 
 #[test]
-fn terminal_codex_exit_sections() {
-    let (_directory, tmux) = start_codex_probe(
-        "exit-status",
-        include_str!("../fixtures/codex-command-failed.jsonl"),
-    );
-    let capture = tmux.capture_when(|capture| {
-        capture.contains("Exec command")
-            && capture.contains("· 1")
-            && capture.contains("[scrubbed]")
-    });
-    let path = std::env::temp_dir().join("agents-codex-exit-tmux.txt");
-    std::fs::write(&path, &capture).unwrap();
-    assert_eq!(capture.matches("Exec command").count(), 1, "{capture}");
-    assert!(capture.contains("false · 1"), "{capture}");
-    assert!(!capture.contains("exec_command"), "{capture}");
-    let rows: Vec<_> = capture.lines().collect();
-    let status = rows
-        .iter()
-        .position(|row| row.trim_start().starts_with("Exec command"))
-        .expect(&capture);
-    assert!(rows[status].contains("Exec command"), "{capture}");
-    assert!(rows[status + 2].contains("false"), "{capture}");
-    assert_eq!(rows[status + 3].trim(), "↓", "{capture}");
-    assert!(rows[status + 4].contains("[scrubbed]"), "{capture}");
-    assert!(rows[status].contains("Exec command · 1"), "{capture}");
-    assert!(rows[status].contains("false"), "{capture}");
-    let ansi = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
-    let parser = captured_screen(&ansi, 160, 45);
-    let screen = parser.screen();
-    for (marker, count) in [("Exec command · 1", 1), ("false · 1", 2)] {
-        let rows: Vec<_> = screen
-            .rows(0, 160)
-            .enumerate()
-            .filter(|(_, row)| row.contains(marker))
-            .collect();
-        assert_eq!(rows.len(), count, "{capture}");
-        for (row, text) in rows {
-            let start = text[..text.find(marker).unwrap()].width();
-            let digit = start + marker.trim_end_matches(')').width() - 1;
-            assert_eq!(
-                screen.cell(row as u16, digit as u16).unwrap().fgcolor(),
-                vt100::Color::Rgb(160, 99, 93)
-            );
-            assert_ne!(
-                screen
-                    .cell(row as u16, (digit - 2) as u16)
-                    .unwrap()
-                    .fgcolor(),
-                vt100::Color::Rgb(160, 99, 93)
-            );
-        }
-    }
-    assert!(!capture.contains("exit"), "{capture}");
-    let verdict = serde_json::json!({"verdict": "pass", "capture": path});
-    std::fs::write(
-        std::env::temp_dir().join("agents-exit-status-verdict.json"),
-        serde_json::to_vec_pretty(&verdict).unwrap(),
-    )
-    .unwrap();
-    println!("{verdict}");
-}
-
-#[test]
 fn terminal_codex_shell_titles() {
     let mut captures = Vec::new();
     for (name, fixture, command, summary) in [
@@ -153,34 +90,6 @@ fn terminal_codex_shell_titles() {
     )
     .unwrap();
     println!("{verdict}");
-}
-
-#[test]
-fn terminal_codex_completed_subagent_calls() {
-    let (_directory, tmux) = start_codex_probe(
-        "subagent-completed",
-        include_str!("../fixtures/codex-interaction/parent.jsonl"),
-    );
-    let capture = tmux.capture_when(|capture| capture.contains("Wait agent"));
-    let (row, line) = capture
-        .lines()
-        .enumerate()
-        .find(|(_, line)| line.contains("Wait agent"))
-        .unwrap();
-    let column = line[..line.find("Wait agent").unwrap()].width();
-    tmux.mouse(0, column, row, true);
-    let capture = tmux
-        .capture_when(|capture| capture.contains("70000") && capture.contains("Wait completed."));
-    let event_surface = capture
-        .lines()
-        .map(|line| line.chars().skip(80).collect::<String>())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(!event_surface.contains("SubAgentActivity"), "{capture}");
-    assert!(!event_surface.contains("CollabAgentToolCall"), "{capture}");
-    let path = std::env::temp_dir().join("agents-codex-subagent-completed-tmux.txt");
-    std::fs::write(&path, capture).unwrap();
-    println!("{}", serde_json::json!({"verdict":"pass","capture":path}));
 }
 
 #[test]

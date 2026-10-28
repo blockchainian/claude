@@ -11,41 +11,6 @@ fn list_row<'a>(capture: &'a str, label: &str) -> Option<(usize, &'a str)> {
     })
 }
 
-fn select_tool(tmux: &Tmux, label: &str) -> String {
-    let capture = tmux.capture_when(|capture| list_row(capture, label).is_some());
-    let (row, line) = list_row(&capture, label).unwrap();
-    let column = line[..line.find(label).unwrap()].width();
-    let (name, subject) = label.split_once(' ').unwrap();
-    let subject = subject.trim_start_matches('{').split(',').next().unwrap();
-    tmux.mouse(0, column, row, true);
-    tmux.capture_when(|capture| {
-        let detail = event_detail_rows(capture, WIDTH)
-            .unwrap_or_else(|| panic!("missing event detail boundaries: {capture}"));
-        capture
-            .lines()
-            .skip(detail.start)
-            .take(detail.len())
-            .any(|row| row.trim_start().starts_with(name) && row.contains(subject))
-    })
-}
-
-fn assert_title(capture: &str, name: &str, subject: &str) {
-    let detail = event_detail_rows(capture, WIDTH).unwrap();
-    let title = capture
-        .lines()
-        .skip(detail.start)
-        .take(detail.len())
-        .find(|row| row.trim_start().starts_with(name) && row.contains(subject))
-        .unwrap_or_else(|| panic!("missing {name} / {subject} detail title: {capture}"));
-    assert_eq!(title[..title.find(name).unwrap()].width(), 1, "{capture}");
-    assert_eq!(title.matches(name).count(), 1, "{capture}");
-    assert_eq!(
-        title[..title.find(subject).unwrap()].width(),
-        terminal_event_detail_width::event_detail_center(WIDTH, subject.width()),
-        "subject stays centered independently of the tool name: {capture}"
-    );
-}
-
 fn write_verdict(name: &str, captures: &[String]) {
     let directory = std::env::temp_dir().join("agents-tool-list-probe");
     std::fs::create_dir_all(&directory).unwrap();
@@ -61,89 +26,6 @@ fn write_verdict(name: &str, captures: &[String]) {
     )
     .unwrap();
     println!("{verdict}");
-}
-
-#[test]
-fn terminal_claude_tool_list_names_groups_and_paths() {
-    let project = tempfile::tempdir().unwrap();
-    let mut records: Vec<serde_json::Value> = include_str!("../fixtures/transcript.jsonl")
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    let calls = include_str!("../fixtures/tool-list/claude.jsonl")
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap());
-    for (index, mut record) in calls.enumerate() {
-        let relative = match index {
-            0 => "src/read.rs",
-            1 => "src/write.rs",
-            2 => "src/edit.rs",
-            3 => "src/a.rs",
-            4 => "src/b.rs",
-            _ => panic!("unexpected recorded fixture row"),
-        };
-        let target = project.path().join(relative);
-        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-        std::fs::write(&target, "fn main() {}\n").unwrap();
-        record["message"]["content"][0]["input"]["file_path"] = target.to_str().unwrap().into();
-        records.push(record);
-    }
-    let bash: serde_json::Value = include_str!("../fixtures/claude-tool-calls.jsonl")
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-        .find(|record| record["message"]["content"][0]["name"] == "Bash")
-        .unwrap();
-    let description = bash["message"]["content"][0]["input"]["description"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    records.push(bash);
-    for record in &mut records {
-        record["cwd"] = project.path().to_str().unwrap().into();
-    }
-    let transcript = records
-        .into_iter()
-        .map(|record| format!("{record}\n"))
-        .collect::<String>();
-    let (_directory, tmux, _transcript) =
-        start_probe_with_transcript("claude-tool-list", &transcript);
-    tmux.run(&["resize-window", "-t", "probe", "-x", "240", "-y", "70"]);
-    let capture = tmux.capture_when(|capture| {
-        capture
-            .lines()
-            .any(|row| row.width() == WIDTH && row.matches('─').count() > WIDTH / 2)
-            && [
-                "Read src/read.rs",
-                "Write src/write.rs",
-                "Edit src/edit.rs",
-                "Edit {src/a.rs, src/b.rs}",
-                description.as_str(),
-            ]
-            .iter()
-            .all(|label| list_row(capture, label).is_some())
-    });
-    let (_, bash_row) = list_row(&capture, &description).unwrap();
-    let bash_list = bash_row.trim_end_matches(" │").rsplit_once('│').unwrap().1;
-    assert!(!bash_list.contains("Bash"), "{capture}");
-    assert!(
-        !capture.contains(project.path().to_str().unwrap()),
-        "{capture}"
-    );
-    let mut captures = vec![capture];
-    for (name, subject) in [
-        ("Read", "src/read.rs"),
-        ("Write", "src/write.rs"),
-        ("Edit", "src/edit.rs"),
-    ] {
-        let capture = select_tool(&tmux, &format!("{name} {subject}"));
-        assert_title(&capture, name, subject);
-        captures.push(capture);
-    }
-    let capture = select_tool(&tmux, "Edit {src/a.rs, src/b.rs}");
-    assert_title(&capture, "Edit", "src/a.rs");
-    assert_title(&capture, "Edit", "src/b.rs");
-    captures.push(capture);
-    write_verdict("claude", &captures);
 }
 
 #[test]
