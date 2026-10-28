@@ -129,8 +129,11 @@ fn terminal_repository_browser_applies_single_clicks() {
     let column = line[..line.find("source").unwrap()].width();
     tmux.mouse(0, column, row, true);
     click_text(&tmux, "group");
+    tmux.wait_for(|capture| picker_has_row(capture, "destination"));
     click_text(&tmux, "..");
+    tmux.wait_for(|capture| picker_has_row(capture, "group"));
     click_text(&tmux, "group");
+    tmux.wait_for(|capture| picker_has_row(capture, "destination"));
     click_text(&tmux, "destination");
     tmux.wait_for(|capture| {
         capture
