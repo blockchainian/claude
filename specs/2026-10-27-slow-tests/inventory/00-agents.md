@@ -30,7 +30,9 @@ From one parallel run of `cargo nextest run --run-ignored only` without the slow
 | 3.87 | terminal_layout | terminal_branch_name_edits_in_task_details_and_preserves_input | fixable | split edit, discard, cancel<br>wait_for click, not 200ms sleep |
 | 3.22 | terminal_layout::terminal_model_families | terminal_model_families_keep_headers_out_of_selection | fixable | split per provider |
 | 3.13 | terminal_layout::terminal_agent_messages | terminal_codex_collaboration_navigation | fixable | split per fixture case |
+| 2.96 | terminal_layout::terminal_agent_messages | terminal_codex_agent_message_bodies | | |
 | 2.87 | terminal_layout | terminal_update_click_selects_source_row | fixable | wait_for, not two 1s sleeps<br>wait_for click, not 200ms sleep |
+| 2.87 | terminal_layout::terminal_event_scroll | terminal_event_scroll_reaches_top_before_handoff | | |
 | 2.73 | terminal_layout | terminal_configuration_version_notices | fixable | split per upgraded_at_start |
 | 2.72 | terminal_composer | xterm_tmux_keeps_fallbacks_and_dashboard_keys | partly fixable | split fallbacks, dashboard keys |
 | 2.66 | terminal_composer | enhanced_keys_newlines_and_vertical_caret_in_tmux | partly fixable | split per edit kind |
@@ -59,15 +61,6 @@ From one parallel run of `cargo nextest run --run-ignored only` without the slow
 | 1.07 | terminal_layout | terminal_manager_detach_title | fixable | one fixture, not 2 |
 | 1.06 | terminal_layout::terminal_path_display | terminal_task_details_directory_precedes_title_and_branch | partly fixable | split directory, branch<br>wait_for, not sleep |
 | 1.04 | web_search_terminal | web_search_details_and_browser_link | fixable | one fixture, not 3<br>split details, link |
-
-## Restored probes
-
-The 33 probes restored in `ab6b87d6`, from one parallel run without the slow-timeout. Their failing ones are under Failing.
-
-| Run-time (s) | Module | Test | Fixable | How |
-|---:|---|---|---|---|
-| 2.96 | terminal_layout::terminal_agent_messages | terminal_codex_agent_message_bodies | | |
-| 2.87 | terminal_layout::terminal_event_scroll | terminal_event_scroll_reaches_top_before_handoff | | |
 
 ## Failing
 
