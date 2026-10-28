@@ -439,6 +439,15 @@ fn terminal_scrollbar_uses_right_edge_blocks_below_rule() {
 
 #[test]
 fn terminal_event_scroll_footer_shows_scrolled_off_title() {
+    fn detail_top_rule(text: &str) -> &str {
+        // The event detail sits between the last two horizontal frame rules.
+        text.lines()
+            .rev()
+            .filter(|line| line.starts_with('─'))
+            .nth(1)
+            .unwrap()
+    }
+
     let mut evidence = Vec::new();
     for width in [200, 120] {
         let (_directory, tmux, _) =
@@ -464,24 +473,21 @@ fn terminal_event_scroll_footer_shows_scrolled_off_title() {
         let column = 90;
         tmux.mouse(64, column, row, false);
         let entered = tmux.capture_when(|text| text.contains("window row 60"));
-        assert!(
-            entered.lines().last().unwrap().contains("Assistant"),
-            "{entered}"
-        );
-        evidence.push(serde_json::json!({"width":width, "direction":"up", "footer":entered.lines().last().unwrap(), "capture":entered}));
+        assert!(detail_top_rule(&entered).contains("Assistant"), "{entered}");
+        evidence.push(serde_json::json!({"width":width, "direction":"up", "top_rule":detail_top_rule(&entered), "capture":entered}));
         let mut top = entered;
         for _ in 0..80 {
-            if !top.lines().last().unwrap().contains("Assistant") {
+            if !detail_top_rule(&top).contains("Assistant") {
                 break;
             }
             tmux.mouse(64, column, row, false);
             top = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
         }
-        assert!(!top.lines().last().unwrap().contains("Assistant"), "{top}");
+        assert!(!detail_top_rule(&top).contains("Assistant"), "{top}");
         assert!(top.contains("window row 01"), "{top}");
         tmux.mouse(65, column, row, false);
-        let down = tmux.capture_when(|text| text.lines().last().unwrap().contains("Assistant"));
-        evidence.push(serde_json::json!({"width":width, "direction":"down", "footer":down.lines().last().unwrap(), "capture":down}));
+        let down = tmux.capture_when(|text| detail_top_rule(text).contains("Assistant"));
+        evidence.push(serde_json::json!({"width":width, "direction":"down", "top_rule":detail_top_rule(&down), "capture":down}));
     }
     let verdict = serde_json::json!({"verdict":"pass", "evidence":evidence});
     if let Some(path) = std::env::var_os("AGENTS_FOOTER_VERDICT") {
