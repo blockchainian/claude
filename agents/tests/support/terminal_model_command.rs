@@ -9,13 +9,18 @@ fn terminal_model_command_refreshes_without_an_assistant_reply() {
         include_str!("../fixtures/transcript.jsonl")
     );
     let (_directory, tmux, transcript) = start_probe_with_transcript("model-command", &before);
-    tmux.wait_for(|screen| screen.contains("claude-fable-5-1 · medium"));
+    let model_rule = |screen: &str, model: &str| {
+        screen
+            .lines()
+            .any(|line| line.starts_with(&format!("─╴{model} ")) && line.contains(" medium╶"))
+    };
+    tmux.wait_for(|screen| model_rule(screen, "claude-fable-5-1"));
     std::fs::write(&transcript, format!("{before}{commands}")).unwrap();
-    let after = tmux.capture_when(|screen| screen.contains("claude-opus-5-5 · medium"));
-    assert!(!after.contains("claude-fable-5-1 · medium"), "{after}");
+    let after = tmux.capture_when(|screen| model_rule(screen, "claude-opus-5-5"));
+    assert!(!after.contains("claude-fable-5-1"), "{after}");
     // Restore the transcript and check the same watched session again.
     std::fs::write(&transcript, &before).unwrap();
-    tmux.wait_for(|screen| screen.contains("claude-fable-5-1 · medium"));
+    tmux.wait_for(|screen| model_rule(screen, "claude-fable-5-1"));
     let verdict = serde_json::json!({
         "verdict": "pass",
         "surface": "model and effort rule",
