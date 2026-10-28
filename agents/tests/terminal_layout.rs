@@ -322,6 +322,16 @@ fn start_probe_with_command(
     setup: impl FnOnce(&Path),
     command_prefix: &[&str],
 ) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
+    launch_probe(name, contents, setup, command_prefix, true)
+}
+
+fn launch_probe(
+    name: &str,
+    contents: &str,
+    setup: impl FnOnce(&Path),
+    command_prefix: &[&str],
+    select_task: bool,
+) -> (tempfile::TempDir, Tmux, std::path::PathBuf) {
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("claude");
     let project = config.join("projects/project");
@@ -372,8 +382,10 @@ fn start_probe_with_command(
             .next()
             .is_some_and(|tabs| tabs.contains("Inactive 1"))
     });
-    tmux.run(&["send-keys", "-t", "probe", "Tab"]);
-    tmux.wait_for(|capture| capture.contains("Update") || capture.contains("Last activity"));
+    if select_task {
+        tmux.run(&["send-keys", "-t", "probe", "Tab"]);
+        tmux.wait_for(|capture| capture.contains("Update") || capture.contains("Last activity"));
+    }
     (directory, tmux, transcript)
 }
 
@@ -3633,41 +3645,51 @@ mod terminal_output_follow;
 #[path = "support/terminal_selection_display.rs"]
 mod terminal_selection_display;
 
-#[test]
-fn terminal_configuration_version_notices() {
+fn configuration_version_notices(upgraded_at_start: bool) {
     let message = "Version 2 configuration unsupported, using defaults";
-    for upgraded_at_start in [true, false] {
-        let bytes = b"{\n  \"version\":2, \"config\":{}, \"state\":{}\n}\n";
-        let (directory, tmux, _) = start_probe_with_setup(
-            if upgraded_at_start {
-                "version-start"
-            } else {
-                "version-upgrade"
-            },
-            include_str!("fixtures/transcript.jsonl"),
-            |root| {
-                if upgraded_at_start {
-                    std::fs::write(root.join("claude/agents.json"), bytes).unwrap();
-                }
-            },
-        );
-        let path = directory.path().join("claude/agents.json");
+
+    let bytes = b"{\n  \"version\":2, \"config\":{}, \"state\":{}\n}\n";
+    let (directory, tmux, _) = launch_probe(
         if upgraded_at_start {
-            let capture = tmux.capture_when(|screen| screen.contains(message));
-            assert!(!capture.contains("Cannot save preferences:"), "{capture}");
-            tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-            tmux.wait_for(|screen| !screen.contains(message));
+            "version-start"
         } else {
-            std::fs::write(&path, bytes).unwrap();
-        }
-        tmux.run(&["send-keys", "-t", "probe", "g"]);
+            "version-upgrade"
+        },
+        include_str!("fixtures/transcript.jsonl"),
+        |root| {
+            if upgraded_at_start {
+                std::fs::write(root.join("claude/agents.json"), bytes).unwrap();
+            }
+        },
+        &[],
+        !upgraded_at_start,
+    );
+    let path = directory.path().join("claude/agents.json");
+    if upgraded_at_start {
         let capture = tmux.capture_when(|screen| screen.contains(message));
         assert!(!capture.contains("Cannot save preferences:"), "{capture}");
-        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+        tmux.wait_for(|screen| !screen.contains(message));
+    } else {
+        std::fs::write(&path, bytes).unwrap();
     }
+    tmux.run(&["send-keys", "-t", "probe", "g"]);
+    let capture = tmux.capture_when(|screen| screen.contains(message));
+    assert!(!capture.contains("Cannot save preferences:"), "{capture}");
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
     println!(
         "{{\"configuration_version_notices\":\"pass\",\"startup\":true,\"save\":true,\"runtime_upgrade\":true,\"bytes_preserved\":true}}"
     );
+}
+
+#[test]
+fn terminal_configuration_version_notices_startup() {
+    configuration_version_notices(true);
+}
+
+#[test]
+fn terminal_configuration_version_notices_runtime() {
+    configuration_version_notices(false);
 }
 
 #[test]
