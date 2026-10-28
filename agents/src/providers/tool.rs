@@ -615,14 +615,51 @@ pub(crate) fn shell_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
     Some(
         shell_command(data.input)
             .filter(|text| !text.trim().is_empty())
-            .map(|text| {
-                vec![Section::Shell {
-                    text: formatted_shell(text),
-                    prefix: 0,
-                }]
-            })
+            .map(shell_source_sections)
             .unwrap_or_default(),
     )
+}
+
+/// Shell source with each literal Markdown file heredoc body rendered as Markdown.
+fn shell_source_sections(text: &str) -> Vec<Section> {
+    let mut sections = Vec::new();
+    let mut cursor = 0;
+    for script in scripts(text) {
+        let ScriptKind::Heredoc {
+            literal: true,
+            strip_tabs,
+        } = script.kind
+        else {
+            continue;
+        };
+        let SyntaxSource::Extension(extension) = script.syntax else {
+            continue;
+        };
+        if !matches!(extension.to_ascii_lowercase().as_str(), "md" | "markdown") {
+            continue;
+        }
+        let body = &text[script.range.clone()];
+        sections.push(Section::Shell {
+            text: formatted_shell(&text[cursor..script.range.start - 1]),
+            prefix: 0,
+        });
+        sections.push(Section::Markdown {
+            label: String::new(),
+            text: if strip_tabs {
+                body.split_inclusive('\n')
+                    .map(|line| line.trim_start_matches('\t'))
+                    .collect()
+            } else {
+                body.to_owned()
+            },
+        });
+        cursor = script.range.end;
+    }
+    sections.push(Section::Shell {
+        text: formatted_shell(&text[cursor..]),
+        prefix: 0,
+    });
+    sections
 }
 
 #[derive(Default)]
@@ -1302,6 +1339,40 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn shell_markdown_heredoc_body_is_a_markdown_section() {
+        let command = recorded_heredoc_command().replacen("render.mjs <<", "notes.md <<", 1);
+        let script = crate::shell_commands::scripts(&command).remove(0);
+        let input = serde_json::json!({"command": command});
+        let sections = super::shell_input(&super::ToolData {
+            input: &input,
+            result: None,
+        })
+        .unwrap();
+        assert_eq!(
+            sections,
+            vec![
+                crate::event::Section::Shell {
+                    text: command[..script.range.start - 1].to_owned(),
+                    prefix: 0,
+                },
+                crate::event::Section::Markdown {
+                    label: String::new(),
+                    text: command[script.range.clone()].to_owned(),
+                },
+                crate::event::Section::Shell {
+                    text: command[script.range.end..].to_owned(),
+                    prefix: 0,
+                },
+            ]
+        );
+        let expanding =
+            command
+                .replacen("<<'EOF'", "<<EOF", 1)
+                .replacen("process.stdout", "$HOME", 1);
+        assert_eq!(shown_shell(&expanding), expanding);
+    }
+
     #[test]
     fn field_titles_accept_numbers_and_numbers_in_arrays() {
         for (value, expected) in [
