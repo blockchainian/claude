@@ -214,31 +214,38 @@ fn active_panel_event_detail_bottom_steps_to_next_event() {
     }
 }
 
-#[test]
-fn active_panel_short_event_detail_steps_between_events() {
-    for width in [100, 200] {
-        let (mut view, now) = panel_fixture(width);
-        let mut events = view.event_panel.clone();
-        for event in &mut events {
-            event.body = "short".into();
-        }
-        view.set_event(events);
-        view.set_active_panel(Panel::EventDetail);
-        for (forward, backward) in navigation_pairs() {
-            view.select_event(Some(20));
-            event_screen(&view, width, 45, now);
-            let selected = view.selected;
-            let event = view.event_list.cursor;
-            let scroll = view.event_list.scroll.get();
-            view.handle_key(forward);
-            if forward.code != KeyCode::End {
-                assert_eq!(view.event_list.cursor, event.map(|e| e + 1));
-                event_screen(&view, width, 45, now);
-            }
-            view.handle_key(backward);
-            assert_lists_unchanged(&view, selected, event, scroll);
-        }
+fn short_event_detail_steps_between_events(width: u16) {
+    let (mut view, now) = panel_fixture(width);
+    let mut events = view.event_panel.clone();
+    for event in &mut events {
+        event.body = "short".into();
     }
+    view.set_event(events);
+    view.set_active_panel(Panel::EventDetail);
+    for (forward, backward) in navigation_pairs() {
+        view.select_event(Some(20));
+        event_screen(&view, width, 45, now);
+        let selected = view.selected;
+        let event = view.event_list.cursor;
+        let scroll = view.event_list.scroll.get();
+        view.handle_key(forward);
+        if forward.code != KeyCode::End {
+            assert_eq!(view.event_list.cursor, event.map(|e| e + 1));
+            event_screen(&view, width, 45, now);
+        }
+        view.handle_key(backward);
+        assert_lists_unchanged(&view, selected, event, scroll);
+    }
+}
+
+#[test]
+fn active_panel_short_event_detail_steps_between_events_narrow() {
+    short_event_detail_steps_between_events(100);
+}
+
+#[test]
+fn active_panel_short_event_detail_steps_between_events_wide() {
+    short_event_detail_steps_between_events(200);
 }
 
 #[test]
