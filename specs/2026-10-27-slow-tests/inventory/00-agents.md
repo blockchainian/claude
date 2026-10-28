@@ -6,7 +6,6 @@
 | 3.42 (iso 1.97) | ui::tests::active_panel_tests | active_panel_task_details_navigation_scrolls_only_its_content | partly | split per panel<br>fewer events in panel_fixture |
 | 3.30 (iso 1.92) | ui::event_list::reading_tests | provider_detail_blocks_are_centered | partly | split claude and codex fixtures |
 | 3.11 (iso 2.23) | app::ui_tests | event_selection_scrolls_to_first_row_across_windows_after_append | partly | split per width<br>rest is product search-index cost |
-| 2.82 (iso 0.45) | ui::tests::focus_rules_tests | rule_8_draft_branch_editor_updates_same_panel_focus | no | contention only; under 1s alone |
 | 2.61 (iso 1.46) | ui::tests::active_panel_tests | mouse_activation_every_event_routes_subsequent_paging | partly | fewer events in panel_fixture<br>split per width |
 | 2.08 (iso 1.52) | providers::codex::rollout::summary_cache_tests | summaries_parse_each_byte_once_across_appends | partly | split per fixture<br>truncated copy of the big fixture |
 | 2.06 (iso 1.14) | ui::tests::active_panel_tests | mouse_activation_drag_keeps_the_pressed_panel | partly | fewer events in panel_fixture<br>split per width |
@@ -43,3 +42,9 @@
 | 1.08 (iso 0.61) | ui::inline_images::tests | inline_images_evicts_least_recently_drawn_image_at_byte_limit | yes | opt-level 2 for image crates in dev profile |
 | 1.03 (iso 0.49) | ui::draft_flow_tests | branch_and_repository_selection_orders_create_in_selected_repository | yes | split per order<br>one git repo per test |
 | 1.01 (iso 0.57) | ui::tests::window_navigation_tests | hidden_focus_resize_recovers_and_does_not_return_on_growth | yes | split per width and source |
+
+## Not fixable
+
+| Run-time (s) | Module | Test | Fixable | How |
+|---|---|---|---|---|
+| 2.82 (iso 0.45) | ui::tests::focus_rules_tests | rule_8_draft_branch_editor_updates_same_panel_focus | no | contention only; under 1s alone |
