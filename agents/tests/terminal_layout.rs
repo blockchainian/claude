@@ -2785,18 +2785,8 @@ mod terminal_chronological;
 
 #[test]
 fn terminal_manager_detach_title() {
-    use std::io::Write;
-    let (_directory, tmux, transcript) = start_probe("manager-detach-title");
-    let mut file = std::fs::OpenOptions::new()
-        .append(true)
-        .open(transcript)
-        .unwrap();
-    write!(
-        file,
-        "{}",
-        include_str!("fixtures/claude-manager-detach.jsonl")
-    )
-    .unwrap();
+    let (_directory, tmux, _transcript) = start_probe_with_transcript(
+        "manager-detach-title", include_str!("fixtures/claude-manager-detach.jsonl"));
     tmux.run(&["send-keys", "-t", "probe", "End"]);
     tmux.wait_for(|capture| {
         capture.contains("codex-manager detach")
