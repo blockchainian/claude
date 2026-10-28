@@ -3208,7 +3208,7 @@ fn terminal_context_usage_on_task_details_border() {
             None,
         ),
     ] {
-        let contents = format!("{}{fixture}", include_str!("fixtures/transcript.jsonl"));
+        let contents = fixture.to_owned();
         let (_directory, tmux, _) =
             start_probe_with_transcript(&format!("claude-context-{name}"), &contents);
         let capture = tmux.capture_when(|capture| {
