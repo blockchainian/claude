@@ -25,7 +25,7 @@ Verdicts:
 
 ## Slow probes
 
-From one parallel run of `cargo nextest run --run-ignored only` without the slow-timeout. Failing probes are not listed.
+Passing probes over 1s, timed without the slow-timeout: untouched probes from one parallel run, fixed probes from individual runs.
 
 | Run-time (s) | Module | Test | Fixable | How |
 |---:|---|---|---|---|
