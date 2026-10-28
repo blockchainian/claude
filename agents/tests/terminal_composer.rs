@@ -25,26 +25,14 @@ impl Tmux {
         self.run(&["send-keys", "-t", "probe", key]);
     }
 }
-macro_rules! composer_tests {
-    ($($name:ident: ($format:literal, $behavior:literal)),* $(,)?) => {
-        $(#[test]
-        fn $name() {
-            probe($format, $behavior);
-        })*
-    };
+#[test]
+fn enhanced_keys_newlines_and_vertical_caret_in_tmux() {
+    probe("csi-u");
 }
 
-composer_tests! {
-    enhanced_keyboard_stack_in_tmux: ("csi-u", "keyboard_stack"),
-    enhanced_dashboard_keys_in_tmux: ("csi-u", "dashboard"),
-    enhanced_newline_and_vertical_caret_in_tmux: ("csi-u", "caret"),
-    enhanced_alt_enter_in_tmux: ("csi-u", "alt_enter"),
-    enhanced_ctrl_j_in_tmux: ("csi-u", "ctrl_j"),
-    xterm_keyboard_stack_in_tmux: ("xterm", "keyboard_stack"),
-    xterm_dashboard_keys_in_tmux: ("xterm", "dashboard"),
-    xterm_newline_and_vertical_caret_in_tmux: ("xterm", "caret"),
-    xterm_alt_enter_in_tmux: ("xterm", "alt_enter"),
-    xterm_ctrl_j_in_tmux: ("xterm", "ctrl_j"),
+#[test]
+fn xterm_tmux_keeps_fallbacks_and_dashboard_keys() {
+    probe("xterm");
 }
 
 #[test]
@@ -148,17 +136,14 @@ fn composer_session(directory: &Path) -> (std::path::PathBuf, std::path::PathBuf
     (codex, claude)
 }
 
-fn probe(format: &str, behavior: &str) {
+fn probe(format: &str) {
     let directory = tempfile::tempdir().unwrap();
     let (codex, claude) = composer_session(directory.path());
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
     let output = directory.path().join("terminal.raw");
-    let tmux = Tmux::new(format!(
-        "agents-composer-{format}-{behavior}-{}",
-        std::process::id()
-    ));
+    let tmux = Tmux::new(format!("agents-composer-{format}-{}", std::process::id()));
     tmux.run(&[
         "new-session",
         "-d",
@@ -196,39 +181,20 @@ fn probe(format: &str, behavior: &str) {
     tmux.wait(|s| s.contains("Inactive 1"));
     tmux.key("Tab");
     tmux.wait(|s| s.contains("Composer ❯"));
-    if behavior == "keyboard_stack" {
-        let raw = std::fs::read_to_string(&output).unwrap();
-        assert_eq!(raw.contains("\x1b[>4;2m"), format == "csi-u");
-        assert!(
-            raw.contains("\x1b[>1u"),
-            "keyboard enhancement was not pushed"
-        );
-        tmux.key("C-c");
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            let raw = std::fs::read_to_string(&output).unwrap();
-            if raw.contains("\x1b[<1u") && raw.contains("\x1b[>4;0m") {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "keyboard enhancement was not popped"
-            );
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        return;
-    }
-    if behavior == "dashboard" {
-        tmux.literal("\x1b[9;2u");
-        tmux.wait(|s| s.contains("No task ❮"));
-        tmux.literal("\x1b[9u");
-        tmux.wait(|s| s.contains("Composer ❯"));
-        tmux.literal("?");
-        tmux.wait(|s| s.contains("Navigate") && s.contains("Tasks"));
-        tmux.key("Escape");
-        tmux.wait(|s| s.contains("Composer ❯"));
-        return;
-    }
+    let raw = std::fs::read_to_string(&output).unwrap();
+    assert_eq!(raw.contains("\x1b[>4;2m"), format == "csi-u");
+    assert!(
+        raw.contains("\x1b[>1u"),
+        "keyboard enhancement was not pushed"
+    );
+    tmux.literal("\x1b[9;2u");
+    tmux.wait(|s| s.contains("No task ❮"));
+    tmux.literal("\x1b[9u");
+    tmux.wait(|s| s.contains("Composer ❯"));
+    tmux.literal("?");
+    tmux.wait(|s| s.contains("Navigate") && s.contains("Tasks"));
+    tmux.key("Escape");
+    tmux.wait(|s| s.contains("Composer ❯"));
     // Focus via a real SGR mouse report on the prompt row.
     let screen = tmux.wait(|s| s.contains("Composer ❯"));
     let row = screen
@@ -238,37 +204,45 @@ fn probe(format: &str, behavior: &str) {
     tmux.literal(&format!("\x1b[<0;15;{}M\x1b[<0;15;{}m", row + 1, row + 1));
     tmux.literal("alpha");
     tmux.wait(|s| s.contains("❯ alpha"));
-    match behavior {
-        "caret" => {
-            if format == "csi-u" {
-                tmux.key("S-Enter"); // tmux encodes the modified key using the negotiated mode.
-            } else {
-                tmux.literal("\x1b\r"); // Legacy tmux uses Alt+Enter as its newline fallback.
-            }
-            tmux.literal("beta");
-            tmux.wait(|s| s.contains("❯ alpha") && s.lines().any(|l| l.trim() == "beta"));
-            tmux.key("Up");
-            tmux.literal("X");
-            tmux.wait(|s| s.contains("❯ alphXa"));
-            tmux.key("Down");
-            tmux.literal("Y");
-            tmux.wait(|s| s.lines().any(|l| l.trim() == "betaY"));
-            tmux.key("C-c"); // tmux reports the control code under modifyOtherKeys.
-            tmux.wait(|s| !s.contains("alphXa"));
-        }
-        "alt_enter" => {
-            tmux.literal("\x1b\r"); // Alt+Enter fallback.
-            tmux.literal("gamma");
-            tmux.wait(|s| s.lines().any(|l| l.trim() == "gamma"));
-        }
-        "ctrl_j" => {
-            tmux.key("C-j"); // Ctrl+J fallback.
-            tmux.literal("delta");
-            tmux.wait(|s| s.lines().any(|l| l.trim() == "delta"));
-        }
-        _ => panic!("unknown composer behavior: {behavior}"),
+    if format == "csi-u" {
+        tmux.key("S-Enter"); // tmux encodes the modified key using the negotiated mode.
+    } else {
+        tmux.literal("\x1b\r"); // Legacy tmux uses Alt+Enter as its newline fallback.
     }
-    println!("{{\"verdict\":\"pass\",\"format\":\"{format}\",\"behavior\":\"{behavior}\"}}");
+    tmux.literal("beta");
+    tmux.wait(|s| s.contains("❯ alpha") && s.lines().any(|l| l.trim() == "beta"));
+    tmux.key("Up");
+    tmux.literal("X");
+    tmux.wait(|s| s.contains("❯ alphXa"));
+    tmux.key("Down");
+    tmux.literal("Y");
+    tmux.wait(|s| s.lines().any(|l| l.trim() == "betaY"));
+    tmux.literal("\x1b\r"); // Alt+Enter fallback.
+    tmux.literal("gamma");
+    tmux.wait(|s| s.lines().any(|l| l.trim() == "gamma"));
+    tmux.key("C-j"); // Ctrl+J fallback.
+    tmux.literal("delta");
+    tmux.wait(|s| s.lines().any(|l| l.trim() == "delta"));
+    tmux.key("C-c"); // tmux reports the control code under modifyOtherKeys.
+    tmux.wait(|s| !s.contains("alphXa"));
+    tmux.key("C-c");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let raw = std::fs::read_to_string(&output).unwrap();
+        if raw.contains("\x1b[<1u") && raw.contains("\x1b[>4;0m") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "keyboard enhancement was not popped"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    println!(
+        "{{\"verdict\":\"pass\",\"format\":\"{}\",\"shift_enter\":{},\"alt_enter\":true,\"ctrl_j\":true,\"vertical_caret\":true,\"keyboard_stack\":true}}",
+        format,
+        format == "csi-u"
+    );
 }
 
 fn readline_word_case(index: usize) {
