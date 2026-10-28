@@ -1808,6 +1808,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn send_message_output_shows_the_result_message() {
+        let records = include_str!("../../../tests/fixtures/claude-send-message-result.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let events = events_from(records);
+        assert_eq!(
+            events[0].calls[0].output,
+            Some(vec![Section::Text {
+                label: "output".to_owned(),
+                text: "Message queued for delivery to abd1cc6ffafb0ca87 at its next tool round. If it finishes first, it is resumed with the message and notifies again, so wait for that notification before resending.".to_owned(),
+            }])
+        );
+    }
+
+    #[test]
     fn detach_subject_falls_back_to_thread_id() {
         let records: Vec<Value> =
             include_str!("../../../tests/fixtures/claude-manager-detach.jsonl")
