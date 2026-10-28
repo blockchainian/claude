@@ -11,8 +11,8 @@ const OFFLINE_COMMAND: &[&str] = &[
 #[test]
 fn terminal_weekly_usage_cache_toggle_and_restart() {
     let initial = serde_json::json!({
-        "config": {"grouping":"project"},
-        "state": {"usage_view":"compact", "usage":{"weekly":{
+        "config": {"grouping":"project", "usage_view":"compact"},
+        "state": {"usage":{"weekly":{
             "claude":{"used_percent":23,"resets_at":"2026-10-23T15:59:59.837Z","reset_credits":1},
             "codex":{"used_percent":16,"resets_at":"2026-10-25T08:32:50Z","reset_credits":2}
         }}}
@@ -48,6 +48,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
     });
     let detailed = capture.lines().next().unwrap().to_owned();
     assert_detailed(&detailed, 200);
+    let (claude_detail, codex_detail) = detailed.split_once("Claude · Codex").unwrap();
     for (name, reset) in [
         ("Claude", "2026-10-23T16:00:00Z"),
         ("Codex", "2026-10-25T08:33:00Z"),
@@ -60,19 +61,25 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
             "2 credits"
         };
         assert!(
-            detailed.contains(&if name == "Claude" {
-                format!("{credits}, resets {time} {name}")
+            if name == "Claude" {
+                claude_detail
+                    .trim_end()
+                    .ends_with(&format!("{credits}, resets {time}"))
             } else {
-                format!("{name} resets {time}, {credits}")
-            }),
+                codex_detail
+                    .trim_start()
+                    .starts_with(&format!("resets {time}, {credits}"))
+            },
             "{detailed}"
         );
     }
 
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&state_path).unwrap()).unwrap();
-    assert_eq!(saved["state"]["usage_view"], "detailed");
-    assert_eq!(saved["config"], initial["config"]);
+    assert_eq!(saved["config"]["usage_view"], "detailed");
+    let mut expected_config = initial["config"].clone();
+    expected_config["usage_view"] = "detailed".into();
+    assert_eq!(saved["config"], expected_config);
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
@@ -97,7 +104,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
     });
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(state_path).unwrap()).unwrap();
-    assert_eq!(saved["state"]["usage_view"], "compact");
+    assert_eq!(saved["config"]["usage_view"], "compact");
     let mut captures = vec![serde_json::json!({"width":200,"compact":compact,"detailed":detailed})];
     tmux.run(&["resize-window", "-t", "probe", "-x", "80", "-y", "50"]);
     let capture = tmux.capture_when(|capture| {
@@ -128,7 +135,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
         &std::fs::read(directory.path().join("claude/agents.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(saved["state"]["usage_view"], "detailed");
+    assert_eq!(saved["config"]["usage_view"], "detailed");
     // Restore through the visible wide target, then confirm the narrow view again.
     tmux.run(&["resize-window", "-t", "probe", "-x", "200", "-y", "50"]);
     tmux.wait_for(|capture| {
@@ -155,7 +162,7 @@ fn terminal_weekly_usage_cache_toggle_and_restart() {
         &std::fs::read(directory.path().join("claude/agents.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(saved["state"]["usage_view"], "compact");
+    assert_eq!(saved["config"]["usage_view"], "compact");
     captures.push(serde_json::json!({"width":80,"compact":compact,"detailed":detailed}));
     let result =
         serde_json::json!({"verdict":"passed","captures":captures,"restart":true,"reverted":true});
@@ -188,8 +195,9 @@ fn assert_compact(line: &str, width: usize) {
 
 fn assert_detailed(line: &str, width: usize) {
     assert_centered(line, width);
+    let (claude, codex) = line.split_once("Claude · Codex").unwrap();
     assert!(
-        line.contains("Claude · Codex resets ") && line.contains("resets "),
+        claude.contains("resets ") && codex.trim_start().starts_with("resets "),
         "{line}"
     );
     assert!(!line.contains('%') && !line.contains('█'), "{line}");
