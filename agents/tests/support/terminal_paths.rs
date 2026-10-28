@@ -57,12 +57,18 @@ fn terminal_cwd_relative_paths() {
             } else {
                 "agents/src/ui/draft_flow_tests.rs"
             };
-            tmux.wait_for(|capture| {
+            let capture = tmux.capture_when(|capture| {
                 capture
                     .lines()
-                    .any(|line| line.contains(name) && line.contains(expected))
+                    .nth(1)
+                    .is_some_and(|row| row.width() == width)
+                    && capture.lines().nth(2).is_some_and(|row| {
+                        row.matches('│').count() == if width >= 150 { 2 } else { 1 }
+                    })
+                    && capture
+                        .lines()
+                        .any(|line| line.contains(name) && line.contains(expected))
             });
-            let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
             let title = capture
                 .lines()
                 .find(|line| line.contains(name) && line.contains(expected))
