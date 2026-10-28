@@ -1,1 +1,0 @@
-Captured from the local codex-manager parent `fba2483f-c8be-4b26-93f5-99586ea1da52/state.json` and its first thread record in `threads/01a156ce-a291-7681-8b90-364fa628caa5.json`. Only `cwd` paths were replaced with `/workspace/project`. The state includes detached completed threads and an attached in-progress thread.
