@@ -154,7 +154,6 @@ fn terminal_output_files_follow_appends_and_preserve_reading_position() {
         append_rows(&mut writer, 81, 90);
         tmux.wait_for(|capture| output_detail(capture).contains("live output row 090"));
         for row in 91..=93 {
-            std::thread::sleep(Duration::from_secs(1));
             append_rows(&mut writer, row, row);
             let started = std::time::Instant::now();
             tmux.wait_for(|capture| {
