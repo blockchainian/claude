@@ -1920,8 +1920,7 @@ fn terminal_task_details_section_positions() {
                 "-y",
                 "70",
             ]);
-            std::thread::sleep(Duration::from_millis(500));
-            let capture = tmux.run(&["capture-pane", "-t", "probe", "-p"]);
+            let capture = wait_for_size(&tmux, width, 70);
             println!("{width} columns, PR {has_pr}:\n{capture}");
             let lines: Vec<_> = capture.lines().collect();
             let separators: Vec<_> = lines[2]
