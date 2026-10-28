@@ -328,6 +328,23 @@ fn launch_probe(
     let project = config.join("projects/project");
     std::fs::create_dir_all(&project).unwrap();
     let transcript = project.join("4165651d-b9e3-458d-8612-f8114e312363.jsonl");
+    // The default fixture's project path must exist when a probe creates a draft.
+    // Keep explicitly supplied transcripts and repository paths intact.
+    let contents = if contents == include_str!("fixtures/transcript.jsonl") {
+        contents
+            .lines()
+            .map(|line| {
+                let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+                if record.get("cwd").is_some() {
+                    record["cwd"] = directory.path().to_str().unwrap().into();
+                }
+                record.to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        contents.to_owned()
+    };
     std::fs::write(&transcript, contents).unwrap();
     std::fs::create_dir(directory.path().join("clipboard")).unwrap();
     let codex = directory.path().join("codex");
@@ -1451,11 +1468,8 @@ fn terminal_event_selection_tracks_wheel_click_and_tail() {
         };
         let detail = |capture: &str| {
             let rows: Vec<_> = capture.lines().collect();
-            let rule = rows
-                .iter()
-                .rposition(|line| line.matches('─').count() > width / 2)
-                .expect("log detail rule");
-            rows[rule + 1..rows.len() - 1].join("\n")
+            let detail_rows = event_detail_rows(capture, width).expect("log detail rules");
+            rows[detail_rows].join("\n")
         };
         assert!(detail(&capture).contains("decision"), "{capture}");
         tmux.mouse(64, column, row, false);
@@ -1529,14 +1543,10 @@ fn terminal_event_selection_tracks_wheel_click_and_tail() {
             .take(if width >= 150 {
                 prompt - row - 1
             } else {
-                pinned
-                    .lines()
-                    .enumerate()
-                    .filter_map(|(index, line)| {
-                        (line.matches('─').count() > width / 2).then_some(index)
-                    })
-                    .last()
-                    .unwrap()
+                event_detail_rows(&pinned, width)
+                    .expect("log detail rules")
+                    .start
+                    - 1
                     - row
             })
             .map(|line| line.split('│').next_back().unwrap())
