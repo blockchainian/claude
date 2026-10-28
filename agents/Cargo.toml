@@ -65,6 +65,26 @@ opt-level = 2
 [profile.dev.package.regex-syntax]
 opt-level = 2
 
+# Inline images decode base64 and PNG, resize the raster and encode PNG on draw.
+# Keep the PNG codec and its checksum/compression dependencies optimized in tests.
+[profile.dev.package.base64]
+opt-level = 2
+
+[profile.dev.package.crc32fast]
+opt-level = 2
+
+[profile.dev.package.fdeflate]
+opt-level = 2
+
+[profile.dev.package.image]
+opt-level = 2
+
+[profile.dev.package.png]
+opt-level = 2
+
+[profile.dev.package.simd-adler32]
+opt-level = 2
+
 [patch.crates-io]
 pulldown-cmark = { path = "vendor/pulldown-cmark" }
 nucleo-matcher = { path = "vendor/nucleo-matcher" }
