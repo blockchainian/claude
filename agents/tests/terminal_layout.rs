@@ -957,7 +957,7 @@ fn terminal_task_cursor_keeps_cell_colors() {
             "-y",
             "50",
         ]);
-        std::thread::sleep(Duration::from_millis(300));
+        wait_for_size(&tmux, width, 50);
         let capture = tmux.run(&["capture-pane", "-t", "probe", "-p", "-e"]);
         let parser = captured_screen(&capture, width, 50);
         let screen = parser.screen();
