@@ -2,7 +2,8 @@ use super::*;
 
 #[test]
 fn terminal_task_details_border_double_clicks() {
-    let prompt = (0..80)
+    let prompt = (0..20)
+        .chain(std::iter::once(79))
         .map(|i| format!("Border prompt row {i:02}  \n"))
         .collect::<String>();
     let records = include_str!("../fixtures/transcript.jsonl")
@@ -30,7 +31,18 @@ fn terminal_task_details_border_double_clicks() {
             "30",
         ]);
         let initial = tmux.capture_when(|capture| {
-            capture.lines().count() == 30 && capture.lines().nth(1).unwrap().width() == width
+            capture.lines().count() == 30
+                && capture.lines().nth(1).unwrap().width() == width
+                && capture.lines().nth(2).unwrap().matches('│').count()
+                    == if width >= 150 { 2 } else { 1 }
+                && capture
+                    .lines()
+                    .nth(28)
+                    .is_some_and(|line| line.width() == width && line.chars().all(|ch| ch == '─'))
+                && capture
+                    .lines()
+                    .nth(29)
+                    .is_some_and(|line| line.contains("? help"))
         });
         let rows = initial.lines().collect::<Vec<_>>();
         let top = 1;
