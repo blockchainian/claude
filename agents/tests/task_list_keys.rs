@@ -12,12 +12,21 @@ fn capture_when(tmux: &Tmux, ready: impl Fn(&str) -> bool) -> String {
             return capture;
         }
         assert!(std::time::Instant::now() < deadline, "{capture}");
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
 #[test]
-fn task_list_unknown_keys_and_help() {
+fn task_list_unknown_h_and_help() {
+    task_list_unknown_key_and_help("h");
+}
+
+#[test]
+fn task_list_unknown_z_and_help() {
+    task_list_unknown_key_and_help("z");
+}
+
+fn task_list_unknown_key_and_help(key: &str) {
     let directory = tempfile::tempdir().unwrap();
     let codex = directory.path().join("codex");
     let claude = directory.path().join("claude");
@@ -37,7 +46,7 @@ fn task_list_unknown_keys_and_help() {
     let binary =
         std::env::var_os("AGENTS_PROBE_BIN").unwrap_or_else(|| env!("CARGO_BIN_EXE_agents").into());
     let binary = Path::new(&binary).canonicalize().unwrap();
-    let tmux = Tmux::new(format!("agents-unknown-keys-{}", std::process::id()));
+    let tmux = Tmux::new(format!("agents-unknown-{key}-{}", std::process::id()));
     tmux.run(&[
         "new-session",
         "-d",
@@ -62,24 +71,22 @@ fn task_list_unknown_keys_and_help() {
     });
     tmux.run(&["send-keys", "-t", "probe", "Home"]);
     let before = capture_when(&tmux, |s| s.contains("Example task 12 ❯"));
-    for key in ["h", "z"] {
-        tmux.run(&["send-keys", "-t", "probe", key, "?"]);
-        let help = capture_when(&tmux, |s| s.contains("Shortcuts"));
-        assert!(!help.contains("Hide"), "{help}");
-        assert!(
-            help.contains("Archive") && help.contains("Delete"),
-            "{help}"
-        );
-        tmux.run(&["send-keys", "-t", "probe", "Escape"]);
-        let after = capture_when(&tmux, |s| s.contains("Example task 12 ❯"));
-        assert!(after.contains("Example task 13"), "{after}");
-        if let Some(output) = std::env::var_os("AGENTS_PROBE_OUTPUT") {
-            std::fs::write(Path::new(&output).join(format!("{key}-help.txt")), help).unwrap();
-            std::fs::write(Path::new(&output).join(format!("{key}-after.txt")), after).unwrap();
-        }
+    tmux.run(&["send-keys", "-t", "probe", key, "?"]);
+    let help = capture_when(&tmux, |s| s.contains("Shortcuts"));
+    assert!(!help.contains("Hide"), "{help}");
+    assert!(
+        help.contains("Archive") && help.contains("Delete"),
+        "{help}"
+    );
+    tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+    let after = capture_when(&tmux, |s| s.contains("Example task 12 ❯"));
+    assert!(after.contains("Example task 13"), "{after}");
+    if let Some(output) = std::env::var_os("AGENTS_PROBE_OUTPUT") {
+        std::fs::write(Path::new(&output).join(format!("{key}-help.txt")), help).unwrap();
+        std::fs::write(Path::new(&output).join(format!("{key}-after.txt")), after).unwrap();
     }
     if let Some(output) = std::env::var_os("AGENTS_PROBE_OUTPUT") {
-        std::fs::write(Path::new(&output).join("before.txt"), before).unwrap();
-        std::fs::write(Path::new(&output).join("verdict.json"), "{\"verdict\":\"pass\",\"unknown_keys\":[\"h\",\"z\"],\"selection_preserved\":true,\"tasks_preserved\":true,\"help_has_no_hide\":true}").unwrap();
+        std::fs::write(Path::new(&output).join(format!("{key}-before.txt")), before).unwrap();
+        std::fs::write(Path::new(&output).join(format!("{key}-verdict.json")), serde_json::to_vec(&serde_json::json!({"verdict":"pass","unknown_keys":[key],"selection_preserved":true,"tasks_preserved":true,"help_has_no_hide":true})).unwrap()).unwrap();
     }
 }
