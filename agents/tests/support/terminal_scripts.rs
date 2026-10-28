@@ -381,7 +381,10 @@ fn start_shell_output_probe(
     provider: &str,
 ) -> (tempfile::TempDir, Tmux) {
     if provider == "claude" {
-        let mut records = Vec::new();
+        let mut records: Vec<serde_json::Value> = include_str!("../fixtures/transcript.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
         let mut calls: Vec<serde_json::Value> = include_str!("../fixtures/claude-tool-calls.jsonl")
             .lines()
             .take(2)
