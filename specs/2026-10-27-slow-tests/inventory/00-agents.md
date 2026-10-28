@@ -16,7 +16,6 @@ Run with `cargo nextest run --run-ignored only`. Probes that hit the 2s timeout 
 | 32.37 (failed) | terminal_layout::terminal_event_scroll | terminal_event_scroll_window_and_boundaries | partly fixable | fails: unclear<br>split window, boundaries<br>wait_for, not sleep |
 | 32.23 (failed) | terminal_layout::terminal_drafts | terminal_title_blur_saves_and_unchanged_enter_closes | fixable | fails: unclear<br>split blur, enter |
 | 32.22 (failed) | terminal_layout | terminal_event_border_double_clicks | fixable | fails: real<br>wait_for, not sleep |
-| 32.19 (failed) | terminal_composer | failed_send_shows_its_reason_in_red_in_tmux | partly fixable | fails: unclear<br>split first fail, retry |
 | 32.14 (failed) | terminal_layout::terminal_drafts | terminal_task_names_edit_on_task_details_rule | partly fixable | fails: unclear<br>split per edit path<br>drop 600ms sleeps |
 | 32.10 (failed) | terminal_layout::terminal_drafts | terminal_new_task_status_is_capitalized_in_list_and_task_details | fixable | fails: unclear<br>near startup floor |
 | 32.10 (failed) | terminal_layout::terminal_drafts | terminal_draft_name_blur_persists_without_enter | partly fixable | fails: unclear<br>wait_for, not sleep |
@@ -51,7 +50,6 @@ Run with `cargo nextest run --run-ignored only`. Probes that hit the 2s timeout 
 | 30.45 (failed) | terminal_layout | terminal_weekly_usage_on_task_header | fixable | fails: unclear<br>near startup floor |
 | 25.88 | agents::providers::codex::app_server::tests | delete_real_codex_sessions |  | real codex sessions |
 | 21.23 | terminal_layout::terminal_drafts | terminal_draft_defaults_and_inherited_choices | partly fixable | split defaults, inherited<br>wait_for, not sleep |
-| 21.01 (failed) | terminal_theme_colors | terminal_theme_colors_follow_bundled_and_custom_themes | partly fixable | fails: unclear<br>split per theme |
 | 17.35 | terminal_layout::terminal_scripts | terminal_shell_file_read_colors | fixable | split per file kind |
 | 15.48 | terminal_layout | terminal_layout_tracks_width | fixable | wait_for, not sleep<br>split per width |
 | 15.34 | agents::providers::codex::app_server::tests | reject_real_codex_question_interrupts_turn |  | real codex turn |
@@ -77,14 +75,12 @@ Run with `cargo nextest run --run-ignored only`. Probes that hit the 2s timeout 
 | 4.04 | agents::providers::claude::attach::tests | real_model_command_without_confirmation |  | real `claude --bg` run |
 | 3.93 | terminal_layout | terminal_context_usage_on_task_details_border | fixable | split per start<br>one fixture each |
 | 3.91 | terminal_layout | terminal_task_details_section_positions | fixable | wait_for, not sleep<br>split per fixture |
-| 3.27 (failed) | terminal_layout::terminal_link_overlays | terminal_confirmation_border_covers_wide_text | partly fixable | fails: real<br>wait_for, not sleep |
 | 3.25 (failed) | agents::ui::tests | task_header_weekly_usage_live_accounts |  | fails: real<br>live account fetch |
 | 3.18 | terminal_layout::terminal_model_families | terminal_model_families_keep_headers_out_of_selection | fixable | one fixture, not 3<br>split headers, selection |
 | 2.93 | agents::ui::event_list::event_markdown | markdown_frame_timing | fixable | 100 frames, not 1000 |
 | 2.87 | terminal_composer | enhanced_keys_newlines_and_vertical_caret_in_tmux | partly fixable | split per edit kind |
 | 2.87 | terminal_layout | terminal_update_click_selects_source_row | fixable | wait_for, not 1s sleeps |
 | 2.45 | terminal_layout | terminal_inactive_elapsed_stays_at_last_record |  | 2s real wall-clock tick |
-| 2.44 (failed) | terminal_layout::terminal_questions | terminal_ask_questions_render_real_rejection_and_answer | partly fixable | fails: real<br>split per start<br>one fixture, drop 2s sleeps |
 | 2.00 | spawn_agent_terminal | terminal_spawn_agent_claude_receipt_and_model | fixable | one fixture, not 3<br>split receipt, model |
 | 1.95 | terminal_layout | terminal_branch_name_edits_in_task_details_and_preserves_input | partly fixable | split edit, preserved input<br>git init stays |
 | 1.95 | finished_subagent_terminal | terminal_finished_wait_updates_from_metadata | fixable | one fixture, not 4 |
