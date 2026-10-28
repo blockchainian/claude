@@ -706,34 +706,41 @@ fn mouse_activation_double_click_keeps_the_pressed_panel() {
     }
 }
 
-#[test]
-fn mouse_activation_drag_keeps_the_pressed_panel() {
-    for width in [100, 200] {
-        for panel in MOUSE_ACTIVATION_PANELS {
-            let (mut view, _) = panel_fixture(width);
-            press_mouse_panel(&mut view, panel);
-            let other = mouse_panel_area(
-                &view,
-                if panel == Panel::TaskList {
-                    Panel::TaskDetails
-                } else {
-                    Panel::TaskList
-                },
-            );
-            view.handle_mouse(mouse(
-                MouseEventKind::Drag(MouseButton::Left),
-                other.x,
-                other.y + 1,
-            ));
-            assert_eq!(view.active_panel, panel);
-            view.handle_mouse(mouse(
-                MouseEventKind::Up(MouseButton::Left),
-                other.x,
-                other.y + 1,
-            ));
-            assert_mouse_panel_paging(&mut view, panel);
-        }
+fn drag_keeps_the_pressed_panel(width: u16) {
+    for panel in MOUSE_ACTIVATION_PANELS {
+        let (mut view, _) = panel_fixture(width);
+        press_mouse_panel(&mut view, panel);
+        let other = mouse_panel_area(
+            &view,
+            if panel == Panel::TaskList {
+                Panel::TaskDetails
+            } else {
+                Panel::TaskList
+            },
+        );
+        view.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            other.x,
+            other.y + 1,
+        ));
+        assert_eq!(view.active_panel, panel);
+        view.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            other.x,
+            other.y + 1,
+        ));
+        assert_mouse_panel_paging(&mut view, panel);
     }
+}
+
+#[test]
+fn mouse_activation_drag_keeps_the_pressed_panel_narrow() {
+    drag_keeps_the_pressed_panel(100);
+}
+
+#[test]
+fn mouse_activation_drag_keeps_the_pressed_panel_wide() {
+    drag_keeps_the_pressed_panel(200);
 }
 
 #[test]
