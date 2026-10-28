@@ -314,6 +314,29 @@ fn task_event_navigation_reverses_across_reloaded_windows(navigation: Option<Key
     let (_dir, mut app) = fixture();
     let path = app.sessions[0].transcript.clone().unwrap();
     let payload = std::fs::read_to_string(&path).unwrap();
+    // Navigation needs distinct events, not the captured messages' full bodies.
+    let payload = payload
+        .lines()
+        .map(|line| {
+            let mut record: serde_json::Value = serde_json::from_str(line).unwrap();
+            if let Some(content) = record.pointer_mut("/message/content") {
+                match content {
+                    serde_json::Value::String(body) => {
+                        *body = body.chars().take(80).collect();
+                    }
+                    serde_json::Value::Array(blocks) => {
+                        for block in blocks {
+                            let text = block["text"].as_str().unwrap();
+                            block["text"] = text.chars().take(80).collect::<String>().into();
+                        }
+                    }
+                    _ => panic!("unexpected captured message content"),
+                }
+            }
+            serde_json::to_string(&record).unwrap()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let area = ratatui::layout::Rect::new(0, 0, 150, 19);
     let visible = app.view.event_read_count(area);
     // One window of older copies behind the notification, and one window plus
