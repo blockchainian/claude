@@ -897,76 +897,88 @@ fn medium_real_transcript_keeps_three_panels_and_click_opens_event_detail() {
 }
 
 #[test]
-fn medium_and_large_event_panels_scroll_and_copy_independently() {
+fn event_panels_scroll_and_copy_independently_at_120x30() {
+    event_panels_scroll_and_copy_independently(120, 30);
+}
+
+#[test]
+fn event_panels_scroll_and_copy_independently_at_100x30() {
+    event_panels_scroll_and_copy_independently(100, 30);
+}
+
+#[test]
+fn event_panels_scroll_and_copy_independently_at_180x23() {
+    event_panels_scroll_and_copy_independently(180, 23);
+}
+
+fn event_panels_scroll_and_copy_independently(width: u16, height: u16) {
     // The large layout detail must stay one row short of its event so that the wheel has room to scroll.
-    for (width, height) in [(120, 30), (100, 30), (180, 23)] {
-        let (_directory, mut app) = border_fixture();
-        app.view.set_double_click_ms(20);
-        let buffer = draw_size(&mut app, width, height);
-        let (x, y) = event_position(&buffer, "⏺");
-        click(&mut app, x, y);
-        wait_for_click(&mut app);
-        let buffer = draw_size(&mut app, width, height);
-        let (text_x, text_y) = position(&buffer, "Stop hook error");
-        for kind in [
-            MouseEventKind::Down(MouseButton::Left),
-            MouseEventKind::Drag(MouseButton::Left),
-        ] {
-            let column = text_x
-                + if matches!(kind, MouseEventKind::Drag(_)) {
-                    9
-                } else {
-                    0
-                };
-            app.view.handle_mouse(MouseEvent {
-                kind,
-                column,
-                row: text_y,
-                modifiers: KeyModifiers::NONE,
-            });
-        }
-        assert_eq!(
-            app.view.handle_mouse(MouseEvent {
-                kind: MouseEventKind::Up(MouseButton::Left),
-                column: text_x + 9,
-                row: text_y,
-                modifiers: KeyModifiers::NONE,
-            }),
-            Some(Action::Copy {
-                text: "Stop hook".into(),
-                label: "Copied message".into()
-            }),
-            "copy the real event body at {width}x{height}"
-        );
-        let before = event_detail_content(&buffer);
-        for (kind, column, row) in [
-            (MouseEventKind::ScrollUp, x, y),
-            (MouseEventKind::ScrollDown, text_x, text_y),
-        ] {
-            app.handle_event(Event::Mouse(MouseEvent {
-                kind,
-                column,
-                row,
-                modifiers: KeyModifiers::NONE,
-            }));
-            draw_size(&mut app, width, height);
-        }
-        let scrolled = draw_size(&mut app, width, height);
-        assert_ne!(event_detail_content(&scrolled), before);
-        assert!(!lines(&scrolled).join("\n").contains("↓ Latest"));
-        assert!(!lines(&scrolled).join("\n").contains("↑ Top"));
-        click(&mut app, x, y);
-        app.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
-        let latest = draw_size(&mut app, width, height);
-        assert!(!lines(&latest).join("\n").contains("↓ Latest"));
-        assert_eq!(
-            event_detail_content(&latest)
-                .lines()
-                .skip(1)
-                .collect::<Vec<_>>(),
-            before.lines().skip(1).collect::<Vec<_>>()
-        );
+    let (_directory, mut app) = border_fixture();
+    app.view.set_double_click_ms(20);
+    let buffer = draw_size(&mut app, width, height);
+    let (x, y) = event_position(&buffer, "⏺");
+    click(&mut app, x, y);
+    wait_for_click(&mut app);
+    let buffer = draw_size(&mut app, width, height);
+    let (text_x, text_y) = position(&buffer, "Stop hook error");
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Drag(MouseButton::Left),
+    ] {
+        let column = text_x
+            + if matches!(kind, MouseEventKind::Drag(_)) {
+                9
+            } else {
+                0
+            };
+        app.view.handle_mouse(MouseEvent {
+            kind,
+            column,
+            row: text_y,
+            modifiers: KeyModifiers::NONE,
+        });
     }
+    assert_eq!(
+        app.view.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: text_x + 9,
+            row: text_y,
+            modifiers: KeyModifiers::NONE,
+        }),
+        Some(Action::Copy {
+            text: "Stop hook".into(),
+            label: "Copied message".into()
+        }),
+        "copy the real event body at {width}x{height}"
+    );
+    let before = event_detail_content(&buffer);
+    for (kind, column, row) in [
+        (MouseEventKind::ScrollUp, x, y),
+        (MouseEventKind::ScrollDown, text_x, text_y),
+    ] {
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }));
+        draw_size(&mut app, width, height);
+    }
+    let scrolled = draw_size(&mut app, width, height);
+    assert_ne!(event_detail_content(&scrolled), before);
+    assert!(!lines(&scrolled).join("\n").contains("↓ Latest"));
+    assert!(!lines(&scrolled).join("\n").contains("↑ Top"));
+    click(&mut app, x, y);
+    app.handle_event(Event::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)));
+    let latest = draw_size(&mut app, width, height);
+    assert!(!lines(&latest).join("\n").contains("↓ Latest"));
+    assert_eq!(
+        event_detail_content(&latest)
+            .lines()
+            .skip(1)
+            .collect::<Vec<_>>(),
+        before.lines().skip(1).collect::<Vec<_>>()
+    );
 }
 
 #[test]
