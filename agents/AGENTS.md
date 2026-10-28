@@ -1,6 +1,7 @@
 # AGENTS.md
 
 > The user runs the installed `agents`, never the source.
+> Re-run a slow test terminated due to timeout separately. Fix it if it still fails.
 
 This directory is `agents`, the terminal command center for Claude Code and Codex sessions.
 
