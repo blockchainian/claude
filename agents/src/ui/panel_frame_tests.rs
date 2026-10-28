@@ -63,6 +63,8 @@ pub(super) fn label(buf: &Buffer, text: &str, y: u16) -> Rect {
 #[test]
 fn frame_labels_restore_after_every_zoom() {
     for width in [90, 120, 160] {
+        let (_dir, mut view, now) = fixture();
+        let area = Rect::new(0, 0, width, 24);
         for panel in [
             Panel::TaskList,
             Panel::TaskDetails,
@@ -70,8 +72,6 @@ fn frame_labels_restore_after_every_zoom() {
             Panel::EventDetail,
         ] {
             for commands in ["_", "|", "_|", "|_"] {
-                let (_dir, mut view, now) = fixture();
-                let area = Rect::new(0, 0, width, 60);
                 view.set_active_panel(panel);
                 let baseline = draw(&view, area, now);
                 for command in commands.chars() {
