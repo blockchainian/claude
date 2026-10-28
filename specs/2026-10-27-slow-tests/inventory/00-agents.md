@@ -59,3 +59,89 @@ From one parallel run of `cargo nextest run --run-ignored only` without the slow
 | 1.07 | terminal_layout | terminal_manager_detach_title | fixable | one fixture, not 2 |
 | 1.06 | terminal_layout::terminal_path_display | terminal_task_details_directory_precedes_title_and_branch | partly fixable | split directory, branch<br>wait_for, not sleep |
 | 1.04 | web_search_terminal | web_search_details_and_browser_link | fixable | one fixture, not 3<br>split details, link |
+
+## Restored tmux probes
+
+The 33 probes restored in `ab6b87d6`, from one parallel run without the slow-timeout. Their failing ones are under Failing.
+
+| Run-time (s) | Module | Test | Fixable | How |
+|---:|---|---|---|---|
+| 2.96 | terminal_layout::terminal_agent_messages | terminal_codex_agent_message_bodies | | |
+| 2.87 | terminal_layout::terminal_event_scroll | terminal_event_scroll_reaches_top_before_handoff | | |
+
+## Failing
+
+Probes that failed in a parallel run without the slow-timeout, with the time they failed at.
+
+| Run-time (s) | Module | Test |
+|---:|---|---|
+| 20.99 | terminal_theme_colors | terminal_theme_colors_follow_bundled_and_custom_themes |
+| 7.55 | terminal_layout::terminal_agent_messages | terminal_claude_agent_exchange |
+| 7.20 | terminal_layout::terminal_event_scroll | terminal_scrollbar_uses_right_edge_blocks_below_rule |
+| 7.10 | terminal_composer | failed_send_shows_its_reason_in_red_in_tmux |
+| 6.83 | terminal_layout | terminal_configuration_version_notices |
+| 6.53 | terminal_layout::terminal_selection_display | terminal_drag_copies_display_lines_and_joins_markdown_wraps |
+| 6.44 | terminal_layout::terminal_task_navigation | terminal_task_navigation_and_opening_keys |
+| 6.43 | terminal_layout::terminal_drafts | terminal_draft_escape_follows_task_details_and_prompt_focus |
+| 6.38 | terminal_layout::terminal_tool_list | terminal_claude_tool_list_names_groups_and_paths |
+| 6.07 | terminal_layout::terminal_task_follow | terminal_task_follow_only_returns_to_active |
+| 5.87 | terminal_layout::terminal_task_navigation | terminal_task_border_double_clicks |
+| 5.82 | terminal_layout::terminal_task_follow | terminal_pinned_separator_is_centered_and_not_selectable |
+| 5.78 | terminal_layout | terminal_duration_sort_jump_position |
+| 5.75 | terminal_layout | terminal_event_metadata_aligns_new_with_clock |
+| 5.72 | terminal_layout | terminal_filtered_event_labels_and_typed_prompts |
+| 5.69 | terminal_layout::terminal_transcript | terminal_transcript_modes |
+| 5.68 | terminal_layout | terminal_prompt_marker_caret_and_mouse_alignment |
+| 5.68 | terminal_layout::terminal_window_navigation | terminal_vim_window_navigation_uses_rendered_panels |
+| 5.65 | terminal_layout::terminal_event_scroll | terminal_event_scroll_window_and_boundaries |
+| 5.61 | terminal_layout::terminal_drafts | terminal_title_blur_saves_and_unchanged_enter_closes |
+| 5.61 | terminal_layout::terminal_window_navigation | terminal_active_panel_paging_stays_in_focused_panel |
+| 5.61 | terminal_layout::terminal_event_search | terminal_event_search_finds_trailing_tool_after_unicode |
+| 5.58 | terminal_layout | terminal_event_border_double_clicks |
+| 5.58 | terminal_layout::terminal_drafts | terminal_new_task_status_is_capitalized_in_list_and_task_details |
+| 5.56 | terminal_layout::terminal_questions | terminal_question_footer_styles_and_clicks |
+| 5.52 | terminal_layout::terminal_mermaid | terminal_mermaid_diagrams_and_fallback |
+| 5.51 | terminal_layout::terminal_notification | terminal_notification_transcripts_show_only_the_report |
+| 5.50 | terminal_layout::terminal_headings | terminal_parallel_tools_have_only_section_titles |
+| 5.50 | terminal_layout::terminal_notification | terminal_background_notifications_shorten_titles_and_color_exit_numbers |
+| 5.50 | terminal_layout::terminal_headings | terminal_event_section_titles_and_scrolling |
+| 5.49 | terminal_layout::terminal_prompt_mouse | terminal_prompt_mouse_click_places_caret |
+| 5.48 | terminal_layout::terminal_images | terminal_image_path_and_clipboard_are_atomic |
+| 5.48 | terminal_layout::terminal_drafts | terminal_task_names_edit_on_task_details_rule |
+| 5.48 | terminal_layout::terminal_drafts | terminal_draft_name_blur_persists_without_enter |
+| 5.48 | terminal_layout::terminal_questions | terminal_shared_footer_clicks_and_help_keys |
+| 5.47 | terminal_layout | terminal_prompt_kill_copies_and_ctrl_y_pastes |
+| 5.46 | terminal_layout::terminal_images | terminal_middle_paste_uses_clicked_input |
+| 5.46 | terminal_layout::terminal_model_command | terminal_model_command_refreshes_without_an_assistant_reply |
+| 5.46 | terminal_layout | terminal_prompt_newline_entry |
+| 5.46 | terminal_layout | terminal_task_notification_shows_summary_without_id_and_missing_file |
+| 5.46 | terminal_layout::terminal_task_follow | terminal_status_tabs_filter_children_and_preserve_ancestor_status |
+| 5.45 | terminal_layout::terminal_prompt_cache | terminal_prompt_cache_countdown_on_task_details_border |
+| 4.85 | terminal_layout::terminal_link_overlays | terminal_confirmation_border_covers_wide_text |
+| 3.28 | terminal_layout | terminal_detail_reading_column_preserves_original_copy |
+| 2.98 | terminal_layout | terminal_json_strings_keep_multiline_alignment_and_colors |
+| 2.70 | terminal_layout::terminal_drafts | terminal_submitted_draft_stays_new_while_git_continues_and_failure_keeps_prompt |
+| 2.68 | terminal_layout::terminal_link_overlays | terminal_link_overlays_cover_underlines_and_blank_clicks |
+| 2.60 | terminal_layout | terminal_leaving_list_search_preserves_event_detail |
+| 2.50 | terminal_layout::terminal_drafts | terminal_picker_bottom_layout |
+| 2.46 | terminal_layout | terminal_last_activity_heading_stays_centered |
+| 2.45 | terminal_layout::terminal_questions | terminal_ask_questions_render_real_rejection_and_answer |
+| 2.32 | terminal_layout::terminal_headings | terminal_group_headings_center_at_wide_and_narrow_widths |
+| 2.22 | terminal_layout::terminal_event_scroll | terminal_event_scroll_footer_shows_scrolled_off_title |
+| 2.22 | terminal_layout | terminal_event_selection_tracks_wheel_click_and_tail |
+| 2.06 | terminal_layout::terminal_golden_layout | terminal_large_golden_layout |
+| 2.05 | terminal_layout | terminal_compaction_summary_keeps_row_and_labels_event_detail |
+| 2.00 | terminal_layout::terminal_event_scroll | terminal_event_scroll_live_appends_keep_short_entries_moving |
+| 1.02 | terminal_layout::terminal_task_follow | terminal_inactive_child_pin_lasts_until_root_finishes |
+| 0.72 | terminal_layout | terminal_session_search_overlays_chart_bottom |
+| 0.66 | terminal_layout::terminal_weekly_usage | terminal_weekly_usage_cache_toggle_and_restart |
+| 0.57 | terminal_layout | terminal_notification_json_preserves_lines_wide_and_narrow |
+| 0.56 | terminal_layout::terminal_scripts | terminal_bash_interpreter_script_colors |
+| 0.56 | terminal_layout::terminal_summary | terminal_summary_styles_match_across_all_three_surfaces |
+| 0.52 | terminal_layout::terminal_scripts | terminal_shell_line_format_filters_colors |
+| 0.52 | terminal_layout | terminal_start_tool_name_header |
+| 0.52 | terminal_layout::terminal_scripts | terminal_shell_reads_before_other_commands_colors |
+| 0.51 | terminal_layout::terminal_scripts | terminal_shell_multi_file_read_colors |
+| 0.51 | terminal_layout::terminal_scripts | terminal_shell_output_boundaries_colors |
+| 0.51 | terminal_layout | terminal_queued_task_details_wrap_and_separate_messages |
+| 0.51 | terminal_layout::terminal_structured | terminal_structured_json_xml_and_literal_text |
