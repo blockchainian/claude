@@ -312,8 +312,7 @@ fn active_panel_disabled_prompt_consumes_navigation_without_fallback() {
     }
 }
 
-#[test]
-fn active_panel_question_keys_require_prompt_focus() {
+fn question_keys_require_prompt_focus(width: u16) {
     let record: serde_json::Value =
         include_str!("../../tests/fixtures/claude-questions/transcript.jsonl")
             .lines()
@@ -335,56 +334,64 @@ fn active_panel_question_keys_require_prompt_focus() {
         .find(|part| part["name"] == "AskUserQuestion")
         .unwrap();
     let question = &input["input"]["questions"][0];
-    for width in [100, 200] {
-        let (mut view, now) = panel_fixture(width);
-        let row = &mut view.rows[view.selected];
-        row.status = SessionStatus::NeedsInput;
-        row.background_job = Some(crate::model::BackgroundJob {
-            id: "active-panel-question".into(),
-            needs: None,
-            awaits_prompt: false,
-        });
-        row.process = Some(crate::model::Process {
-            pid: 1,
-            label: Some("bg".into()),
-            started_at: None,
-        });
-        row.ask = Some(crate::ask::Ask {
-            id: input["id"].as_str().unwrap().into(),
-            session: row.id.clone(),
-            since: row.updated_at,
-            kind: crate::ask::AskKind::Questions {
-                blocking: true,
-                questions: vec![crate::ask::Question {
-                    id: question["question"].as_str().unwrap().into(),
-                    text: question["question"].as_str().unwrap().into(),
-                    header: question["header"].as_str().unwrap().into(),
-                    multi: false,
-                    other: true,
-                    secret: false,
-                    options: serde_json::from_value(question["options"].clone()).unwrap(),
-                }],
-            },
-        });
-        view.show_questions();
-        for panel in [
-            Panel::TaskList,
-            Panel::TaskDetails,
-            Panel::EventList,
-            Panel::EventDetail,
-            Panel::Prompt,
-        ] {
-            view.set_active_panel(panel);
-            event_screen(&view, width, 45, now);
-            assert!(view.active_question().is_some());
-            let action = key(&mut view, KeyCode::Char('2'));
-            assert_eq!(
-                matches!(action, Some(Action::AnswerQuestions { .. })),
-                panel == Panel::Prompt,
-                "width={width}"
-            );
-        }
+    let (mut view, now) = panel_fixture(width);
+    let row = &mut view.rows[view.selected];
+    row.status = SessionStatus::NeedsInput;
+    row.background_job = Some(crate::model::BackgroundJob {
+        id: "active-panel-question".into(),
+        needs: None,
+        awaits_prompt: false,
+    });
+    row.process = Some(crate::model::Process {
+        pid: 1,
+        label: Some("bg".into()),
+        started_at: None,
+    });
+    row.ask = Some(crate::ask::Ask {
+        id: input["id"].as_str().unwrap().into(),
+        session: row.id.clone(),
+        since: row.updated_at,
+        kind: crate::ask::AskKind::Questions {
+            blocking: true,
+            questions: vec![crate::ask::Question {
+                id: question["question"].as_str().unwrap().into(),
+                text: question["question"].as_str().unwrap().into(),
+                header: question["header"].as_str().unwrap().into(),
+                multi: false,
+                other: true,
+                secret: false,
+                options: serde_json::from_value(question["options"].clone()).unwrap(),
+            }],
+        },
+    });
+    view.show_questions();
+    for panel in [
+        Panel::TaskList,
+        Panel::TaskDetails,
+        Panel::EventList,
+        Panel::EventDetail,
+        Panel::Prompt,
+    ] {
+        view.set_active_panel(panel);
+        event_screen(&view, width, 45, now);
+        assert!(view.active_question().is_some());
+        let action = key(&mut view, KeyCode::Char('2'));
+        assert_eq!(
+            matches!(action, Some(Action::AnswerQuestions { .. })),
+            panel == Panel::Prompt,
+            "width={width}"
+        );
     }
+}
+
+#[test]
+fn active_panel_question_keys_require_prompt_focus_narrow() {
+    question_keys_require_prompt_focus(100);
+}
+
+#[test]
+fn active_panel_question_keys_require_prompt_focus_wide() {
+    question_keys_require_prompt_focus(200);
 }
 
 fn unsupported_task_keys_do_not_fall_through(panel: Panel) {
