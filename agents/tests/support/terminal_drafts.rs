@@ -11,12 +11,12 @@ fn picker_has_row(capture: &str, label: &str) -> bool {
 #[test]
 fn terminal_draft_delete_focus_allows_repeated_new_task() {
     let mut checks = Vec::new();
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    repository(&source, "main");
+    let (_directory, tmux, _) =
+        start_probe_with_transcript("draft-delete-focus", &transcript_at(&source));
     for width in [120, 200] {
-        let root = tempfile::tempdir().unwrap();
-        let source = root.path().join("source");
-        repository(&source, "main");
-        let (_directory, tmux, _) =
-            start_probe_with_transcript("draft-delete-focus", &transcript_at(&source));
         tmux.run(&[
             "resize-window",
             "-t",
@@ -33,6 +33,10 @@ fn terminal_draft_delete_focus_allows_repeated_new_task() {
         tmux.run(&["send-keys", "-t", "probe", "n"]);
         assert_title_caret(&tmux, "New task", 0);
         checks.push(serde_json::json!({"width": width, "new_escape_new": "pass"}));
+        if width == 120 {
+            tmux.run(&["send-keys", "-t", "probe", "Escape"]);
+            tmux.wait_for(|capture| title_rule_position(capture, "New task").is_none());
+        }
     }
     let verdict = serde_json::json!({"verdict": "pass", "checks": checks});
     if let Some(directory) = std::env::var_os("AGENTS_PROBE_CAPTURE_DIR") {
