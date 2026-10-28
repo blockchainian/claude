@@ -21,9 +21,6 @@ use unicode_width::UnicodeWidthStr;
 mod terminal_mcp;
 
 
-#[path = "support/terminal_event_detail.rs"]
-mod terminal_event_detail;
-use terminal_event_detail::event_detail_rows;
 
 #[path = "support/terminal_scripts.rs"]
 mod terminal_scripts;
