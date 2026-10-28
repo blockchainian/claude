@@ -51,22 +51,6 @@ fn scroll_transcript() -> String {
 
 #[test]
 fn terminal_send_preserves_reading_position() {
-    reading_position("send");
-}
-#[test]
-fn terminal_session_refresh_preserves_reading_position() {
-    reading_position("refresh");
-}
-#[test]
-fn terminal_append_preserves_reading_position() {
-    reading_position("append");
-}
-#[test]
-fn terminal_replacement_preserves_reading_position() {
-    reading_position("replacement");
-}
-
-fn reading_position(change: &str) {
     use std::io::Write;
     let (directory, tmux, transcript) =
         start_probe_with_transcript("send-preserve", &scroll_transcript());
@@ -91,12 +75,6 @@ fn reading_position(change: &str) {
     let registry_path = config.join(format!("sessions/{pid}.json"));
     std::fs::write(&registry_path, serde_json::to_vec(&registry).unwrap()).unwrap();
     tmux.wait_for(|text| text.lines().next().unwrap().contains("Active 1"));
-    if matches!(change, "append" | "replacement") {
-        registry["status"] = "busy".into();
-        registry["updatedAt"] = chrono::Utc::now().timestamp_millis().into();
-        std::fs::write(&registry_path, serde_json::to_vec(&registry).unwrap()).unwrap();
-        tmux.wait_for(|text| text.contains("Working"));
-    }
     let capture = tmux.capture_when(|text| text.contains("scroll after"));
     let event_detail_row = capture
         .lines()
@@ -107,17 +85,13 @@ fn reading_position(change: &str) {
         .unwrap();
     // Enter the earlier long event from the end, then scroll its full output up.
     tmux.mouse(64, 150, event_detail_row, false);
-    let mut position = tmux.capture_when(|text| {
+    tmux.wait_for(|text| {
         text.lines()
             .skip(32)
             .any(|line| line.contains("window row 60"))
     });
     for _ in 0..3 {
         tmux.mouse(64, 150, 40, false);
-        position = tmux.capture_when(|text| {
-            text.lines().skip(32).take(16).collect::<Vec<_>>()
-                != position.lines().skip(32).take(16).collect::<Vec<_>>()
-        });
     }
     let before = tmux.capture_when(|text| {
         let output = text
@@ -137,66 +111,52 @@ fn reading_position(change: &str) {
             .collect::<Vec<_>>()
             .join("\n")
     };
-    match change {
-        "send" => {
-            let prompt_row = before.lines().position(|line| line.contains('❯')).unwrap();
-            tmux.mouse(0, 100, prompt_row, true);
-            tmux.run(&[
-                "send-keys",
-                "-t",
-                "probe",
-                "-l",
-                "preserve reading position",
-            ]);
-            tmux.run(&["send-keys", "-t", "probe", "Enter"]);
-            // Missing job identity exercises the real send path without launching a model turn.
-            let sent =
-                tmux.capture_when(|text| text.contains("Claude background session has no job id"));
-            assert_eq!(output(&sent), output(&before));
-        }
-        "refresh" => {
-            let mut registry: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(&registry_path).unwrap()).unwrap();
-            registry["status"] = "busy".into();
-            registry["updatedAt"] = chrono::Utc::now().timestamp_millis().into();
-            std::fs::write(&registry_path, serde_json::to_vec(&registry).unwrap()).unwrap();
-            let working = tmux.capture_when(|text| text.contains("Working"));
-            assert_eq!(output(&working), output(&before));
-        }
-        "append" => {
-            let mut file = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&transcript)
-                .unwrap();
-            write!(file, "{}", await_records(20)).unwrap();
-            let appended = tmux.capture_when(|text| text.contains("↓ 1 New"));
-            assert_eq!(output(&appended), output(&before));
-        }
-        "replacement" => {
-            let mut file = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&transcript)
-                .unwrap();
-            write!(file, "{}", await_records(20)).unwrap();
-            tmux.wait_for(|text| text.contains("↓ 1 New"));
-            let replacement = transcript.with_extension("replacement");
-            std::fs::copy(&transcript, &replacement).unwrap();
-            std::fs::rename(replacement, &transcript).unwrap();
-            // A second append acknowledges that the replacement has been processed.
-            let mut file = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&transcript)
-                .unwrap();
-            write!(file, "{}", await_records(21)).unwrap();
-            let reset = tmux.capture_when(|text| text.contains("await item 21"));
-            assert_eq!(output(&reset), output(&before));
-        }
-        _ => unreachable!(),
-    }
-    println!(
-        "{}",
-        serde_json::json!({"verdict":"pass", "change":change,"event_detail_unchanged":true})
-    );
+    let prompt_row = before.lines().position(|line| line.contains('❯')).unwrap();
+    tmux.mouse(0, 100, prompt_row, true);
+    tmux.run(&[
+        "send-keys",
+        "-t",
+        "probe",
+        "-l",
+        "preserve reading position",
+    ]);
+    tmux.run(&["send-keys", "-t", "probe", "Enter"]);
+    // Missing job identity exercises the real send path without launching a model turn.
+    let sent = tmux.capture_when(|text| text.contains("Claude background session has no job id"));
+    assert_eq!(output(&sent), output(&before));
+    registry["status"] = "busy".into();
+    registry["updatedAt"] = chrono::Utc::now().timestamp_millis().into();
+    std::fs::write(&registry_path, serde_json::to_vec(&registry).unwrap()).unwrap();
+    let working = tmux.capture_when(|text| text.contains("Working"));
+    assert_eq!(output(&working), output(&before));
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&transcript)
+        .unwrap();
+    write!(file, "{}", await_records(20)).unwrap();
+    let appended = tmux.capture_when(|text| text.contains("↓ 1 New"));
+    assert_eq!(output(&appended), output(&before));
+    let replacement = transcript.with_extension("replacement");
+    std::fs::copy(&transcript, &replacement).unwrap();
+    std::fs::rename(replacement, &transcript).unwrap();
+    // A second append acknowledges that the replacement has been processed.
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&transcript)
+        .unwrap();
+    write!(file, "{}", await_records(21)).unwrap();
+    let reset = tmux.capture_when(|text| text.contains("await item 21"));
+    assert_eq!(output(&reset), output(&before));
+    let path = std::env::temp_dir().join("agents-send-preserve-verdict.json");
+    let verdict = serde_json::json!({"verdict":"pass", "send":true,"session_refresh":true,"append":true,"reset":true,"event_detail_unchanged":true});
+    std::fs::write(&path, serde_json::to_vec_pretty(&verdict).unwrap()).unwrap();
+    std::fs::write(path.with_extension("before.txt"), &before).unwrap();
+    std::fs::write(path.with_extension("sent.txt"), &sent).unwrap();
+    std::fs::write(path.with_extension("working.txt"), &working).unwrap();
+    std::fs::write(path.with_extension("appended.txt"), &appended).unwrap();
+    std::fs::write(path.with_extension("capture.txt"), reset).unwrap();
+    println!("verdict: {}", path.display());
+    println!("{verdict}");
 }
 
 #[test]
