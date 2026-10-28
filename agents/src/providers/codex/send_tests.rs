@@ -7,30 +7,72 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct Cleanup {
+pub(super) struct Cleanup {
     home: PathBuf,
-    id: String,
+    workspace: tempfile::TempDir,
     active: bool,
 }
 impl Cleanup {
-    fn finish(&mut self) {
-        let mut client = app_server::Client::connect(&self.home).unwrap();
-        app_server::thread::delete(&mut client, &self.id).expect("throwaway cleanup failed");
-        self.active = false;
+    pub(super) fn new(home: &Path) -> Self {
+        Self {
+            home: home.to_owned(),
+            workspace: tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap(),
+            active: true,
+        }
+    }
+
+    pub(super) fn cwd(&self) -> &Path {
+        self.workspace.path()
+    }
+
+    fn threads(&self) -> io::Result<Vec<(String, PathBuf)>> {
         let db = Connection::open_with_flags(
             self.home.join("state_5.sqlite"),
             OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
-        .unwrap();
-        let remaining: i64 = db
-            .query_row(
-                "SELECT COUNT(*) FROM threads WHERE id=?1",
-                [&self.id],
-                |row| row.get(0),
+        .map_err(io::Error::other)?;
+        let mut query = db
+            .prepare("SELECT id, rollout_path FROM threads WHERE cwd=?1")
+            .map_err(io::Error::other)?;
+        query
+            .query_map(
+                [self.cwd().to_str().expect("temporary cwd must be UTF-8")],
+                |row| Ok((row.get(0)?, PathBuf::from(row.get::<_, String>(1)?))),
             )
-            .unwrap();
-        assert_eq!(remaining, 0, "throwaway thread must be deleted");
-        eprintln!("deleted throwaway Codex thread {}", self.id);
+            .map_err(io::Error::other)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(io::Error::other)
+    }
+
+    fn remove(&mut self) -> io::Result<()> {
+        let threads = self.threads()?;
+        if !threads.is_empty() {
+            let mut client = app_server::Client::connect(&self.home)?;
+            for (id, rollout) in threads {
+                app_server::thread::delete(&mut client, &id)?;
+                if rollout.try_exists()? {
+                    return Err(io::Error::other(format!(
+                        "throwaway rollout remains: {}",
+                        rollout.display()
+                    )));
+                }
+            }
+        }
+        self.verify_deleted()
+    }
+
+    pub(super) fn verify_deleted(&mut self) -> io::Result<()> {
+        if !self.threads()?.is_empty() {
+            return Err(io::Error::other(
+                "throwaway threads remain in state database",
+            ));
+        }
+        self.active = false;
+        Ok(())
+    }
+
+    pub(super) fn finish(&mut self) {
+        self.remove().expect("throwaway cleanup failed");
     }
 }
 impl Drop for Cleanup {
@@ -38,10 +80,15 @@ impl Drop for Cleanup {
         if !self.active {
             return;
         }
-        let result = app_server::Client::connect(&self.home)
-            .and_then(|mut client| app_server::thread::delete(&mut client, &self.id));
-        if let Err(error) = result {
-            eprintln!("throwaway cleanup failed for {}: {error}", self.id);
+        if let Err(error) = self.remove() {
+            if std::thread::panicking() {
+                eprintln!(
+                    "throwaway cleanup failed in {}: {error}",
+                    self.cwd().display()
+                );
+            } else {
+                panic!("throwaway cleanup failed: {error}");
+            }
         }
     }
 }
@@ -51,6 +98,7 @@ impl Drop for Cleanup {
 fn send_real_codex_thread() {
     let provider = CodexProvider::from_config().unwrap();
     let mut owner = app_server::Client::connect(&provider.home).unwrap();
+    let mut cleanup = Cleanup::new(&provider.home);
     let output = Command::new("codex")
         .args([
             "exec",
@@ -60,7 +108,7 @@ fn send_real_codex_thread() {
             "Reply OK only. Do not use tools.",
         ])
         .env("CODEX_HOME", &provider.home)
-        .current_dir(std::env::temp_dir())
+        .current_dir(cleanup.cwd())
         .stdin(Stdio::null())
         .output()
         .unwrap();
@@ -70,11 +118,6 @@ fn send_real_codex_thread() {
         .find(|event| event["type"] == "thread.started")
         .expect("thread created");
     let id = event["thread_id"].as_str().unwrap().to_owned();
-    let mut cleanup = Cleanup {
-        home: provider.home.clone(),
-        id: id.clone(),
-        active: true,
-    };
     assert!(output.status.success(), "codex exec failed");
     let preferences = tempfile::tempdir().unwrap();
     let mut app = dashboard::app(Box::new(provider), preferences.path().to_owned());

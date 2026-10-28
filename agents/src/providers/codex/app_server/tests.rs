@@ -234,13 +234,18 @@ impl Drop for Cleanup {
 }
 
 /// Creates a throwaway thread with `codex exec` and deletes it on drop.
-fn throwaway_thread(provider: &CodexProvider) -> (String, Cleanup) {
+fn throwaway_thread(
+    provider: &CodexProvider,
+) -> (String, crate::providers::codex::send_tests::Cleanup) {
     // Check before exec: never let exec start a missing daemon for this test.
     let socket = provider
         .home
         .join("app-server-control/app-server-control.sock");
     std::os::unix::net::UnixStream::connect(socket)
         .expect("Codex app-server daemon must already be running");
+    // Register cleanup before exec or JSON parsing can fail. The unique cwd also
+    // identifies threads when exec fails before returning a thread.started event.
+    let cleanup = crate::providers::codex::send_tests::Cleanup::new(&provider.home);
     let output = Command::new("codex")
         .args([
             "exec",
@@ -250,7 +255,7 @@ fn throwaway_thread(provider: &CodexProvider) -> (String, Cleanup) {
             "Reply OK only. Do not use tools.",
         ])
         .env("CODEX_HOME", &provider.home)
-        .current_dir(std::env::temp_dir())
+        .current_dir(cleanup.cwd())
         .stdin(Stdio::null())
         .output()
         .unwrap();
@@ -260,7 +265,6 @@ fn throwaway_thread(provider: &CodexProvider) -> (String, Cleanup) {
         .find(|v| v["type"] == "thread.started")
         .expect("exec must create a thread");
     let id = event["thread_id"].as_str().unwrap().to_owned();
-    let cleanup = Cleanup(id.clone(), provider.home.clone(), true);
     assert!(output.status.success(), "codex exec failed");
     (id, cleanup)
 }
@@ -496,7 +500,9 @@ fn stop_and_archive_real_codex_thread() {
         .delete(&session)
         .and_then(|delete| delete())
         .unwrap();
-    cleanup.2 = false;
+    cleanup
+        .verify_deleted()
+        .expect("throwaway thread must be deleted");
 }
 
 #[test]
@@ -552,7 +558,9 @@ fn delete_real_codex_sessions() {
             .delete(&session)
             .and_then(|delete| delete())
             .unwrap();
-        cleanup.2 = false;
+        cleanup
+            .verify_deleted()
+            .expect("throwaway thread must be deleted");
         assert!(!rollout.exists());
         assert!(!deleted_rollout.exists());
         assert!(!lock_held(&lock).unwrap());
