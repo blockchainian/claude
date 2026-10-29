@@ -1380,8 +1380,9 @@ impl View {
         let right_padding = usize::from(layout != ScreenLayout::Large);
         let section_header =
             |label, value, width| centered_header(label, value, width, right_padding);
-        // Sections top to bottom: background, activity, update, prompt and queued
-        // messages, needs input, tasks. The title sits on the rule below the panel.
+        // Sections top to bottom: tasks, prompt and queued messages, update, activity,
+        // background, then needs input on the bottom. The title sits on the rule below
+        // the panel.
         let content_top = area.y;
         let mut items: Vec<Item> = Vec::new();
         let mut continuations = std::collections::BTreeMap::new();
@@ -1396,6 +1397,207 @@ impl View {
         // The columns each item draws a link on, parallel to `items`; bodies fill theirs
         // once their rows are mapped to their text.
         let mut item_links: Vec<Vec<(std::ops::Range<u16>, LinkTarget)>> = Vec::new();
+
+        let tasks = [
+            (crate::model::TaskStatus::InProgress, SessionStatus::Working),
+            (crate::model::TaskStatus::Pending, SessionStatus::Ready),
+        ]
+        .into_iter()
+        .flat_map(|(status, indicator)| {
+            session
+                .tasks
+                .iter()
+                .filter(move |task| task.status == status)
+                .map(move |task| (task, indicator))
+        })
+        .collect::<Vec<_>>();
+        let tasks_text = tasks
+            .iter()
+            .map(|(task, status)| {
+                format!(
+                    "{} {}",
+                    Self::status_indicator(*status).content,
+                    task.subject
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !tasks.is_empty() {
+            separate_section(&mut items);
+            let in_progress = tasks
+                .iter()
+                .filter(|(_, status)| *status == SessionStatus::Working)
+                .count();
+            items.push(Item::Decoration(section_header(
+                "Tasks".dim().into(),
+                format!("{in_progress}/{}", tasks.len()).dim().into(),
+                width,
+            )));
+            let start = items.len();
+            for (task, status) in tasks {
+                items.push(
+                    truncate_line_with_ellipsis_if_overflow(
+                        Line::from(vec![
+                            Self::status_indicator(status),
+                            Span::raw(format!(" {}", task.subject)),
+                        ]),
+                        width,
+                    )
+                    .into(),
+                );
+            }
+            bodies.push(start..items.len());
+            keys.push(body_key("Tasks", &tasks_text));
+            copies.push(Some((tasks_text.as_str(), "Copied tasks")));
+            body_links.push(Vec::new());
+            item_links.resize(items.len(), Vec::new());
+        }
+
+        if !session.prompt.trim().is_empty()
+            || session
+                .parent
+                .as_ref()
+                .is_none_or(|parent| parent.provider != ProviderId::Codex)
+        {
+            let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
+                section_header("Prompt".dim().into(), elapsed.dim().into(), width)
+            } else {
+                section_header("Prompt".dim().into(), Line::default(), width)
+            };
+            separate_section(&mut items);
+            items.push(Item::Decoration(prompt_header));
+            let prompt_text = match labelled_prompt.trim() {
+                "" => "No prompt available.",
+                prompt => prompt,
+            };
+            let prompt_start = items.len();
+            let (prompt_body, breaks) = super::text::layout(prompt_text, &session.cwd, width, true);
+            continuations.extend(
+                breaks
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(row, join)| join.map(|space| (prompt_start + row, space))),
+            );
+            items.extend(prompt_body.into_iter().map(Item::from));
+            bodies.push(prompt_start..items.len());
+            keys.push(body_key("Prompt", &labelled_prompt));
+            copies.push(
+                Some((labelled_prompt.as_ref(), "Copied prompt"))
+                    .filter(|(prompt, _)| !prompt.trim().is_empty()),
+            );
+            body_links.push(super::links::text_links(
+                &labelled_prompt,
+                &session.cwd,
+                &session.prompt_images,
+            ));
+            item_links.resize(items.len(), Vec::new());
+        }
+        for queued in &session.queued {
+            separate_section(&mut items);
+            let start = items.len();
+            let (mut lines, breaks) = super::text::layout(queued, &session.cwd, width, true);
+            for span in lines.iter_mut().flat_map(|line| &mut line.spans) {
+                span.style = style::queued_style().patch(span.style);
+            }
+            continuations.extend(
+                breaks
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(row, join)| join.map(|space| (start + row, space))),
+            );
+            items.extend(lines.into_iter().map(Item::from));
+            bodies.push(start..items.len());
+            keys.push(body_key("Prompt", queued));
+            copies.push(Some((queued.as_str(), "Copied prompt")));
+            body_links.push(super::links::text_links(queued, &session.cwd, &[]));
+        }
+
+        item_links.resize(items.len(), Vec::new());
+
+        if let Some(message) = session.last_message.as_ref() {
+            let mut header = Line::default();
+            if let Some(at) = session.last_message_at {
+                header =
+                    Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
+            }
+            separate_section(&mut items);
+            items.push(Item::Decoration(section_header(
+                "Update".dim().into(),
+                header,
+                width,
+            )));
+            let start = items.len();
+            let body_style = style::event_styles(&crate::event::Kind::Assistant).1;
+            let (lines, breaks) = super::text::layout(message, &session.cwd, width, true);
+            continuations.extend(
+                breaks
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(row, join)| join.map(|space| (start + row, space))),
+            );
+            items.extend(
+                lines
+                    .into_iter()
+                    .map(|mut line| {
+                        for span in &mut line.spans {
+                            span.style = body_style.patch(span.style);
+                        }
+                        line
+                    })
+                    .map(Item::from),
+            );
+            bodies.push(start..items.len());
+            keys.push(body_key("Update", message));
+            copies.push(Some((message.as_str(), "Copied update")));
+            body_links.push(super::links::text_links(message, &session.cwd, &[]));
+        }
+
+        item_links.resize(items.len(), Vec::new());
+
+        let activity = session.activity.as_ref();
+        if let Some(activity) = activity {
+            let label = super::event_list::summary_line(
+                &activity.label,
+                &activity.kind,
+                activity.exit_code,
+                &activity.paths,
+                width,
+                &session.cwd,
+            )
+            .line;
+            separate_section(&mut items);
+            let start = items.len() + 1;
+            items.extend([
+                Item::Decoration(section_header(
+                    "Last activity".dim().into(),
+                    Span::styled(
+                        format_relative_time(now, Some(activity.at)),
+                        style::time_style(),
+                    )
+                    .into(),
+                    width,
+                )),
+                truncate_line_with_ellipsis_if_overflow(label, width).into(),
+            ]);
+            bodies.push(start..items.len());
+            keys.push(body_key("Last activity", &activity.label));
+            copies.push(Some((activity.label.as_str(), "Copied last activity")));
+            body_links.push(if super::text::is_prose(&activity.kind) {
+                super::links::text_links(&activity.label, &session.cwd, &[])
+            } else {
+                super::links::path_links(
+                    &activity.label,
+                    &super::event_list::summary_paths(
+                        &activity.label,
+                        &activity.paths,
+                        &session.cwd,
+                    ),
+                    &session.cwd,
+                )
+            });
+        }
+
+        item_links.resize(items.len(), Vec::new());
 
         // The agent appends an exit marker to the output file when the
         // command ends, which lands before the completion notification does.
@@ -1466,180 +1668,43 @@ impl View {
 
         item_links.resize(items.len(), Vec::new());
 
-        let activity = session.activity.as_ref();
-        if let Some(activity) = activity {
-            let label = super::event_list::summary_line(
-                &activity.label,
-                &activity.kind,
-                activity.exit_code,
-                &activity.paths,
-                width,
-                &session.cwd,
-            )
-            .line;
-            separate_section(&mut items);
-            let start = items.len() + 1;
-            items.extend([
-                Item::Decoration(section_header(
-                    "Last activity".dim().into(),
-                    Span::styled(
-                        format_relative_time(now, Some(activity.at)),
-                        style::time_style(),
-                    )
-                    .into(),
-                    width,
-                )),
-                truncate_line_with_ellipsis_if_overflow(label, width).into(),
-            ]);
-            bodies.push(start..items.len());
-            keys.push(body_key("Last activity", &activity.label));
-            copies.push(Some((activity.label.as_str(), "Copied last activity")));
-            body_links.push(if super::text::is_prose(&activity.kind) {
-                super::links::text_links(&activity.label, &session.cwd, &[])
-            } else {
-                super::links::path_links(
-                    &activity.label,
-                    &super::event_list::summary_paths(
-                        &activity.label,
-                        &activity.paths,
-                        &session.cwd,
-                    ),
-                    &session.cwd,
-                )
-            });
-        }
-
-        item_links.resize(items.len(), Vec::new());
-
-        if let Some(message) = session.last_message.as_ref() {
-            let mut header = Line::default();
-            if let Some(at) = session.last_message_at {
-                header =
-                    Span::styled(format_relative_time(now, Some(at)), style::time_style()).into();
-            }
-            separate_section(&mut items);
-            items.push(Item::Decoration(section_header(
-                "Update".dim().into(),
-                header,
-                width,
-            )));
-            let start = items.len();
-            let body_style = style::event_styles(&crate::event::Kind::Assistant).1;
-            let (lines, breaks) = super::text::layout(message, &session.cwd, width, true);
-            continuations.extend(
-                breaks
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(row, join)| join.map(|space| (start + row, space))),
-            );
-            items.extend(
-                lines
-                    .into_iter()
-                    .map(|mut line| {
-                        for span in &mut line.spans {
-                            span.style = body_style.patch(span.style);
-                        }
-                        line
-                    })
-                    .map(Item::from),
-            );
-            bodies.push(start..items.len());
-            keys.push(body_key("Update", message));
-            copies.push(Some((message.as_str(), "Copied update")));
-            body_links.push(super::links::text_links(message, &session.cwd, &[]));
-        }
-
-        if !session.prompt.trim().is_empty()
-            || session
-                .parent
-                .as_ref()
-                .is_none_or(|parent| parent.provider != ProviderId::Codex)
-        {
-            let prompt_header = if let Some(elapsed) = turn_elapsed(session, now) {
-                section_header("Prompt".dim().into(), elapsed.dim().into(), width)
-            } else {
-                section_header("Prompt".dim().into(), Line::default(), width)
-            };
-            separate_section(&mut items);
-            items.push(Item::Decoration(prompt_header));
-            let prompt_text = match labelled_prompt.trim() {
-                "" => "No prompt available.",
-                prompt => prompt,
-            };
-            let prompt_start = items.len();
-            let (prompt_body, breaks) = super::text::layout(prompt_text, &session.cwd, width, true);
-            continuations.extend(
-                breaks
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(row, join)| join.map(|space| (prompt_start + row, space))),
-            );
-            items.extend(prompt_body.into_iter().map(Item::from));
-            bodies.push(prompt_start..items.len());
-            keys.push(body_key("Prompt", &labelled_prompt));
-            copies.push(
-                Some((labelled_prompt.as_ref(), "Copied prompt"))
-                    .filter(|(prompt, _)| !prompt.trim().is_empty()),
-            );
-            body_links.push(super::links::text_links(
-                &labelled_prompt,
-                &session.cwd,
-                &session.prompt_images,
-            ));
-            item_links.resize(items.len(), Vec::new());
-        }
-        for queued in &session.queued {
-            separate_section(&mut items);
-            let start = items.len();
-            let (mut lines, breaks) = super::text::layout(queued, &session.cwd, width, true);
-            for span in lines.iter_mut().flat_map(|line| &mut line.spans) {
-                span.style = style::queued_style().patch(span.style);
-            }
-            continuations.extend(
-                breaks
-                    .into_iter()
-                    .enumerate()
-                    .filter_map(|(row, join)| join.map(|space| (start + row, space))),
-            );
-            items.extend(lines.into_iter().map(Item::from));
-            bodies.push(start..items.len());
-            keys.push(body_key("Prompt", queued));
-            copies.push(Some((queued.as_str(), "Copied prompt")));
-            body_links.push(super::links::text_links(queued, &session.cwd, &[]));
-        }
-
-        item_links.resize(items.len(), Vec::new());
-
         let needs = session
             .background_job
             .as_ref()
             .and_then(|job| job.needs.as_deref());
         if session.status == SessionStatus::NeedsInput || needs.is_some() {
-            separate_section(&mut items);
-            let start = items.len();
-            items.push(Item::Decoration(section_header(
+            let mut section = vec![Item::Decoration(section_header(
                 Span::styled("Needs input", style::attention_title_style()).into(),
                 Line::default(),
                 width,
-            )));
+            ))];
             if let Some(needs) = needs {
-                items.extend(
+                section.extend(
                     super::text::lines(needs, &session.cwd, width, false)
                         .into_iter()
                         .map(Item::from),
                 );
             } else if session.pending_questions.is_empty() {
-                items.extend([
+                section.extend([
                     "Open task to review.".dim().into(),
                     "Waiting for your response.".into(),
                 ]);
             } else {
-                items.extend(session.pending_questions.iter().flat_map(|question| {
+                section.extend(session.pending_questions.iter().flat_map(|question| {
                     super::text::lines(question, &session.cwd, width, false)
                         .into_iter()
                         .map(Item::from)
                 }));
             }
+            // The needs input section sits on the panel's bottom row when everything fits.
+            let above = items.iter().map(Item::height).sum::<usize>();
+            let rows = usize::from(!items.is_empty()) + section.len();
+            let gap = usize::from(area.height).saturating_sub(above + rows);
+            items.extend((0..gap).map(|_| Item::Decoration(Line::default())));
+            item_links.resize(items.len(), Vec::new());
+            separate_section(&mut items);
+            let start = items.len();
+            items.extend(section);
             bodies.push(start..items.len());
             keys.push(body_key(
                 "Needs input",
@@ -1649,67 +1714,6 @@ impl View {
             body_links.push(Vec::new());
         }
         item_links.resize(items.len(), Vec::new());
-
-        let tasks = [
-            (crate::model::TaskStatus::InProgress, SessionStatus::Working),
-            (crate::model::TaskStatus::Pending, SessionStatus::Ready),
-        ]
-        .into_iter()
-        .flat_map(|(status, indicator)| {
-            session
-                .tasks
-                .iter()
-                .filter(move |task| task.status == status)
-                .map(move |task| (task, indicator))
-        })
-        .collect::<Vec<_>>();
-        let tasks_text = tasks
-            .iter()
-            .map(|(task, status)| {
-                format!(
-                    "{} {}",
-                    Self::status_indicator(*status).content,
-                    task.subject
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !tasks.is_empty() {
-            // The tasks section sits on the panel's bottom row when everything fits.
-            let above = items.iter().map(Item::height).sum::<usize>();
-            let section = usize::from(!items.is_empty()) + 1 + tasks.len();
-            let gap = usize::from(area.height).saturating_sub(above + section);
-            items.extend((0..gap).map(|_| Item::Decoration(Line::default())));
-            item_links.resize(items.len(), Vec::new());
-            separate_section(&mut items);
-            let in_progress = tasks
-                .iter()
-                .filter(|(_, status)| *status == SessionStatus::Working)
-                .count();
-            items.push(Item::Decoration(section_header(
-                "Tasks".dim().into(),
-                format!("{in_progress}/{}", tasks.len()).dim().into(),
-                width,
-            )));
-            let start = items.len();
-            for (task, status) in tasks {
-                items.push(
-                    truncate_line_with_ellipsis_if_overflow(
-                        Line::from(vec![
-                            Self::status_indicator(status),
-                            Span::raw(format!(" {}", task.subject)),
-                        ]),
-                        width,
-                    )
-                    .into(),
-                );
-            }
-            bodies.push(start..items.len());
-            keys.push(body_key("Tasks", &tasks_text));
-            copies.push(Some((tasks_text.as_str(), "Copied tasks")));
-            body_links.push(Vec::new());
-            item_links.resize(items.len(), Vec::new());
-        }
 
         let mut item_ids = (0..items.len()).collect::<Vec<_>>();
         let mut text_rows = vec![None; items.len()];

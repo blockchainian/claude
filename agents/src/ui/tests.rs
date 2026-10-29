@@ -777,8 +777,8 @@ fn task_details_body_changed_while_away_opens_folded() {
         task_details_panel(&view);
     }
     let scrolled = task_details_reveal(&view);
-    let prompt = 1;
-    assert!(scrolled[prompt] > 0 && scrolled[0] > 0, "{scrolled:?}");
+    let prompt = 0;
+    assert!(scrolled[prompt] > 0 && scrolled[1] > 0, "{scrolled:?}");
     let index = view.selected;
     view.set_active_panel(Panel::TaskList);
     key(&mut view, KeyCode::Down);
@@ -2582,8 +2582,8 @@ fn task_details_include_attention_and_clip_messages() {
                 .any(|section| section.trim_start().starts_with(label))
         })
     };
-    assert!(position("Update") < position("Prompt"));
-    assert!(position("Prompt") < position("Needs input"));
+    assert!(position("Prompt") < position("Update"));
+    assert!(position("Update") < position("Needs input"));
     let viewport = view.viewport.borrow();
     let folder = viewport
         .task_details_links
@@ -3435,7 +3435,7 @@ fn task_details_activity_and_message_are_independent() {
     let rendered = render(&view);
     assert!(rendered.contains("             Last activity       7s ago"));
     assert!(rendered.contains("                 Update          1h ago"));
-    assert!(rendered.find("Run checks").unwrap() < rendered.find("Update").unwrap());
+    assert!(rendered.find("Update").unwrap() < rendered.find("Run checks").unwrap());
     assert!(rendered.contains("Checking the project"));
     assert_eq!(
         rendered,
@@ -3540,9 +3540,9 @@ fn task_details_activity_and_message_keep_copy_links_and_short_panel_budgets() {
         if height == 16 {
             assert_eq!(viewport.task_details_scroll.fallback_max, None);
             assert_eq!(viewport.task_details_copy.len(), 3);
-            assert_eq!(viewport.task_details_scroll.hidden[0], 0);
+            assert!(viewport.task_details_scroll.hidden[0] > 0);
             assert!(viewport.task_details_scroll.hidden[1] > 0);
-            assert!(viewport.task_details_scroll.hidden[2] > 0);
+            assert_eq!(viewport.task_details_scroll.hidden[2], 0);
         } else {
             assert!(viewport.task_details_scroll.fallback_max.unwrap() > 0);
         }
@@ -4452,7 +4452,7 @@ fn task_details_at(row: Session, height: u16, now: chrono::DateTime<Utc>) -> Str
 }
 
 #[test]
-fn task_details_sections_run_background_activity_update_prompt_tasks() {
+fn task_details_sections_run_tasks_prompt_update_activity_background() {
     let mut row = session("order", "Order task", SessionStatus::Ready, 120);
     row.activity = Some(crate::model::Activity {
         paths: Vec::new(),
@@ -4474,11 +4474,11 @@ fn task_details_sections_run_background_activity_update_prompt_tasks() {
     }];
     let rendered = queued_task_details(row, 40);
     let positions = [
-        "Background\n",
-        "Last activity",
-        "Update",
-        "Prompt\n",
         "Tasks",
+        "Prompt\n",
+        "Update",
+        "Last activity",
+        "Background\n",
     ]
     .map(|label| rendered.find(label).expect(label));
     assert!(positions.is_sorted(), "{rendered}");
@@ -4504,7 +4504,7 @@ fn task_details_background_boxes_tail_and_clip_output() {
         },
     ];
     let rendered = queued_task_details(row.clone(), 22);
-    assert!(rendered.find("Background\n").unwrap() < rendered.find("Prompt\n").unwrap());
+    assert!(rendered.find("Prompt\n").unwrap() < rendered.find("Background\n").unwrap());
     assert_eq!(
         rendered,
         include_str!("../../tests/ui_snapshots/task_details_background.txt")
@@ -4522,7 +4522,7 @@ fn task_details_background_boxes_tail_and_clip_output() {
             .collect::<Vec<_>>()
             .join("\n")
             .starts_with(
-                "Background\n…\n\nUpdate\nChecking the project\n\nPrompt\nBackground task"
+                "Prompt\nBackground task\n\nUpdate\nChecking the project\n\nBackground\n…"
             ),
         "{clipped}"
     );

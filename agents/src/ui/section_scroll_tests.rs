@@ -72,9 +72,13 @@ mod task_details_budget {
             .iter()
             .position(|line| line.trim() == "Background")
             .unwrap();
-        assert!(background < prompt);
+        let attention = rows
+            .iter()
+            .position(|line| line.trim() == "Needs input…")
+            .unwrap();
+        assert!(prompt < background);
         assert_eq!(
-            rows[background + 1..prompt]
+            rows[background + 1..attention]
                 .iter()
                 .filter(|line| *line == "…")
                 .count(),
@@ -88,12 +92,8 @@ mod task_details_budget {
                 format!("{}Queued work", " ".repeat(54))
             ]
         );
-        let attention = rows
-            .iter()
-            .position(|line| line.trim() == "Needs input…")
-            .unwrap();
-        assert!(background < prompt && prompt < attention);
-        assert_eq!(background, 0);
+        assert!(prompt < background && background < attention);
+        assert_eq!(prompt, 0);
     }
 
     #[test]
@@ -168,9 +168,13 @@ mod task_details_budget {
             .iter()
             .position(|line| line.trim() == "Prompt")
             .unwrap();
-        assert!(rest[..prompt].iter().any(|line| line.trim() == "Update"));
+        let update = rest
+            .iter()
+            .position(|line| line.trim() == "Update")
+            .unwrap();
+        assert!(prompt < update && update < attention);
         assert!(
-            rest[prompt + 1..attention]
+            rest[prompt + 1..update]
                 .iter()
                 .rev()
                 .find(|line| !line.is_empty())
@@ -190,10 +194,10 @@ mod task_details_budget {
         let scrolled = panel(&view);
         assert_eq!(scrolled[0], rest[1]);
         assert_eq!(
-            scrolled[attention - 2],
+            scrolled[update - 2],
             format!("{}Prompt row 7…", " ".repeat(53))
         );
-        assert_eq!(scrolled[attention..], rest[attention..]);
+        assert_eq!(scrolled[update..], rest[update..]);
         assert_eq!(scrolled[prompt], format!("{}Prompt row 1", " ".repeat(53)));
         view.scroll_content_row(false, false, prompt as u16);
         assert_eq!(panel(&view), rest);
@@ -273,11 +277,11 @@ mod task_details_curtain {
     }
 
     #[test]
-    fn fully_open_message_hands_off_to_prompt() {
+    fn fully_open_prompt_hands_off_to_update() {
         let mut view = fixture();
         let before = panel(&view);
         let pointer = (0..19)
-            .find(|&y| text(&before, y).trim_start().starts_with("Reply row 1"))
+            .find(|&y| text(&before, y).trim_start().starts_with("Prompt row 1"))
             .unwrap();
         let hidden = view.viewport.borrow().task_details_scroll.hidden[0];
         assert!(hidden > 0);
@@ -286,13 +290,13 @@ mod task_details_curtain {
             panel(&view);
         }
         let opened = panel(&view);
-        let prompt = (0..19)
-            .find(|&y| text(&opened, y).trim() == "Prompt")
+        let update = (0..19)
+            .find(|&y| text(&opened, y).trim() == "Update")
             .unwrap();
-        assert!((1..prompt).all(|y| !text(&opened, y).ends_with('…')));
+        assert!((1..update).all(|y| !text(&opened, y).ends_with('…')));
         assert_eq!(
-            text(&opened, prompt - 2),
-            format!("{}Reply row 7", " ".repeat(54))
+            text(&opened, update - 2),
+            format!("{}Prompt row 12", " ".repeat(53))
         );
         view.scroll_content_row(true, false, pointer);
         let after = panel(&view);
@@ -305,25 +309,23 @@ mod task_details_curtain {
             .unwrap();
         assert_eq!(
             text(&after, attention - 2),
-            format!("{}Prompt row 7…", " ".repeat(53))
+            format!("{}Reply row 7", " ".repeat(54))
         );
-        let prompt_pointer = (0..19)
-            .find(|&y| text(&after, y).trim_start().starts_with("Prompt row"))
+        let update_pointer = (0..19)
+            .find(|&y| text(&after, y).trim_start().starts_with("Reply row"))
             .unwrap();
-        let prompt_hidden = view.viewport.borrow().task_details_scroll.hidden[1];
-        for _ in 1..prompt_hidden {
-            view.scroll_content_row(true, false, prompt_pointer);
+        let update_hidden = view.viewport.borrow().task_details_scroll.hidden[1];
+        for _ in 1..update_hidden {
+            view.scroll_content_row(true, false, update_pointer);
             panel(&view);
         }
         let fully_open = panel(&view);
-        assert!(
-            (1..19).any(|y| text(&fully_open, y) == format!("{}Prompt row 12", " ".repeat(53)))
-        );
+        assert!((1..19).any(|y| text(&fully_open, y) == format!("{}Reply row 7", " ".repeat(54))));
         assert_eq!(
             view.viewport.borrow().task_details_scroll.reveal,
-            vec![hidden, prompt_hidden, 0]
+            vec![hidden, update_hidden, 0]
         );
-        view.scroll_content_row(true, false, prompt_pointer);
+        view.scroll_content_row(true, false, update_pointer);
         assert_eq!(panel(&view), fully_open);
     }
 
@@ -431,7 +433,7 @@ mod task_details_curtain {
         }
         assert_eq!(
             view.viewport.borrow().task_details_scroll.reveal,
-            vec![0, 4, 0]
+            vec![4, 0, 0]
         );
         view.rows[view.selected].prompt = (1..=8)
             .map(|i| format!("Prompt row {i}"))
@@ -440,9 +442,9 @@ mod task_details_curtain {
         panel(&view);
         assert_eq!(
             view.viewport.borrow().task_details_scroll.reveal,
-            vec![0, 2, 0]
+            vec![2, 0, 0]
         );
-        assert_eq!(view.viewport.borrow().task_details_scroll.hidden[1], 2);
+        assert_eq!(view.viewport.borrow().task_details_scroll.hidden[0], 2);
         view.rows[view.selected].last_message = None;
         panel(&view);
         assert_eq!(
@@ -465,7 +467,7 @@ mod task_details_curtain {
             .find(|&y| text(&before, y).trim_start() == "Reply row 3")
             .unwrap();
         let tail = (0..19)
-            .find(|&y| text(&before, y).trim() == "Prompt")
+            .find(|&y| text(&before, y).trim() == "Needs input")
             .unwrap();
         view.scroll_content_row(true, false, pointer);
         let after = panel(&view);
@@ -500,7 +502,7 @@ mod task_details_curtain {
         view.rows[view.selected].queued = vec!["Queued prompt".into()];
         let before = panel(&view);
         let tail = (0..19)
-            .find(|&y| text(&before, y).trim() == "Queued prompt")
+            .find(|&y| text(&before, y).trim() == "Needs input")
             .unwrap();
         view.handle_mouse(mouse(MouseEventKind::ScrollDown, 0, tail));
         assert_eq!(panel(&view), before);
