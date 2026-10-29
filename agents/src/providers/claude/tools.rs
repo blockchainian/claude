@@ -1,3 +1,4 @@
+use super::transcript::notification_field;
 use crate::event::Section;
 use crate::providers::tool::*;
 use serde_json::Value;
@@ -6,6 +7,10 @@ pub(super) const RULES: &[ToolRule] = &[
     ToolRule {
         name: "task-notification",
         label: false,
+        list_subject: true,
+        title: &[Pick::With(notification_title)],
+        input: Some((Pick::With(notification_input), Format::Text)),
+        output: Some((Pick::With(notification_output), Format::Text)),
         ..DEFAULT_RULE
     },
     ToolRule {
@@ -154,6 +159,89 @@ pub(super) const RULES: &[ToolRule] = &[
         ..DEFAULT_RULE
     },
 ];
+
+/// Decodes the entities Claude Code escapes in task notification fields.
+fn unescape_xml(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+fn notification_summary(content: &str) -> String {
+    let notification = notification_field(content, "task-notification").unwrap_or("");
+    unescape_xml(
+        notification_field(notification, "summary").unwrap_or_else(|| {
+            notification
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or("")
+        }),
+    )
+}
+
+/// Extracts a background command's description, status and exit code.
+pub(super) fn background(content: &str) -> Option<(String, String, Option<i64>)> {
+    let summary = notification_summary(content);
+    // Split at the closing description quote, preserving embedded and escaped quotes.
+    let (description, suffix) = summary
+        .strip_prefix("Background command \"")?
+        .rsplit_once("\" ")?;
+    let status = unescape_xml(notification_field(content, "status")?);
+    let exit_code = suffix.split_once("exit code ").and_then(|(_, code)| {
+        let end = code
+            .find(|ch: char| ch != '-' && !ch.is_ascii_digit())
+            .unwrap_or(code.len());
+        code[..end].parse::<i64>().ok()
+    });
+    Some((description.to_owned(), status, exit_code))
+}
+
+// Claude Code names a command run without a description by its full text;
+// a chain of commands then reads like a Bash call: its command names, with the full
+// text as input.
+fn notification_chain(description: &str) -> Option<String> {
+    let names = shell_summary::summarize_shell_commands(description);
+    names.contains(", ").then_some(names)
+}
+
+fn notification_title(data: &ToolData<'_>) -> Option<String> {
+    let content = data.input.as_str()?;
+    Some(match background(content) {
+        Some((description, status, exit_code)) => {
+            let description = notification_chain(&description).unwrap_or(description);
+            match exit_code {
+                Some(0) => format!("{description} ✓"),
+                Some(_) => description,
+                None => format!("{description} {status}"),
+            }
+        }
+        None => notification_summary(content),
+    })
+}
+
+fn notification_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
+    let content = data.input.as_str()?;
+    let mut sections = background(content)
+        .filter(|(description, _, _)| notification_chain(description).is_some())
+        .map(|(description, _, _)| shell_source_sections(&description))
+        .unwrap_or_default();
+    if let Some(reminder) = notification_field(content, "system-reminder") {
+        sections.push(text_section("input", &unescape_xml(reminder)));
+    }
+    Some(sections)
+}
+
+fn notification_output(data: &ToolData<'_>) -> Option<Body> {
+    let content = data.input.as_str()?;
+    let path = unescape_xml(notification_field(content, "output-file")?);
+    Some(Body::Sections(vec![Section::OutputFile {
+        provider: crate::providers::ProviderId::Claude,
+        path: path.into(),
+    }]))
+}
 
 /// A message's named recipient; a peer session's socket address names nobody.
 fn recipient(input: &Value) -> Option<&str> {

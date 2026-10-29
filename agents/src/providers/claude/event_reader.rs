@@ -1046,102 +1046,23 @@ impl EventReader {
     }
 
     fn notification(&mut self, text: &str, at: DateTime<Utc>, source: Option<&str>) -> bool {
-        let Some(notification) = text
-            .trim()
-            .strip_prefix("<task-notification>")
-            .and_then(|text| {
-                text.split_once("</task-notification>")
-                    .map(|(body, _)| body)
-            })
-        else {
+        if !text.trim_start().starts_with("<task-notification>") {
             return false;
-        };
-        let field = |key: &str| {
-            notification
-                .split_once(&format!("<{key}>"))
-                .and_then(|(_, text)| text.split_once(&format!("</{key}>")))
-                .map(|(value, _)| unescape_xml(value.trim()))
-        };
-        let summary = field("summary").unwrap_or_else(|| {
-            notification
-                .lines()
-                .map(str::trim)
-                .find(|line| !line.is_empty())
-                .unwrap_or("")
-                .to_owned()
-        });
-        // Split at the closing description quote, preserving embedded and escaped quotes.
-        let status = field("status");
-        let background = summary
-            .strip_prefix("Background command \"")
-            .and_then(|text| text.rsplit_once("\" "))
-            .zip(status.as_deref());
-        let exit_code = background.and_then(|((_, suffix), _)| {
-            let code = suffix.split_once("exit code ")?.1;
-            let end = code
-                .find(|ch: char| ch != '-' && !ch.is_ascii_digit())
-                .unwrap_or(code.len());
-            code[..end].parse::<i64>().ok()
-        });
-        // Claude Code names a command run without a description by its full text;
-        // a chain of commands then reads like a Bash call: its command names, with the full
-        // text as input.
-        let chain = background.and_then(|((description, _), _)| {
-            let names =
-                crate::providers::tool::shell_summary::summarize_shell_commands(description);
-            names.contains(", ").then_some((names, description))
-        });
-        let input = chain
-            .as_ref()
-            .and_then(|(_, command)| {
-                tool::shell_input(&ToolData {
-                    input: &serde_json::json!({"command": command}),
-                    result: None,
-                })
-            })
-            .unwrap_or_default();
-        let title = match background {
-            Some(((description, _), status)) => {
-                let description = chain.as_ref().map_or(description, |(names, _)| names);
-                match exit_code {
-                    Some(0) => format!("{description} ✓"),
-                    Some(code) => format!("{description} · {code}"),
-                    None => format!("{description} {status}"),
-                }
-            }
-            None => summary.clone(),
-        };
-        let output = field("output-file").map(|path| Section::OutputFile {
-            provider: crate::providers::ProviderId::Claude,
-            path: path.into(),
-        });
-        self.push(Kind::Tool, title.clone(), at);
+        }
+        let content = serde_json::Value::String(text.to_owned());
+        let mut call = tool_call("task-notification", &content, None);
+        call.id = super::transcript::notification_field(text, "task-id")
+            .unwrap_or_default()
+            .to_owned();
+        call.exit_code = super::tools::background(text).and_then(|(_, _, code)| code);
+        call.summary = tool::list_title(&call.name, Some(&call.title), &content, call.exit_code);
+        self.push(Kind::Tool, call.summary.clone(), at);
         // A queued notification record has no uuid; its line's byte offset in the
         // append-only transcript identifies it instead.
         let source = source.map_or_else(|| format!("queue:{}", self.offset), str::to_owned);
         let event = &mut self.entries.last_mut().unwrap().event;
         event.source = Some(source);
-        if field("task-id").is_some() || output.is_some() {
-            event.calls.push(ToolCall {
-                agent_message: None,
-                started_at: None,
-                hide_output: false,
-                model_settings: None,
-                agent_thread_id: None,
-                agent_path: None,
-
-                title: title.clone(),
-                show_event_detail: false,
-                id: field("task-id").unwrap_or_default(),
-                summary: title,
-                name: "task-notification".to_owned(),
-                input,
-                output: Some(output.into_iter().collect()),
-                exit_code,
-                is_error: false,
-                duration: None,
-            });
-        }
+        event.calls.push(call);
         true
     }
 
@@ -1471,15 +1392,6 @@ pub(super) fn is_prompt_text(record: &serde_json::Value, text: &str) -> bool {
 /// Unwrap pasted text without changing its code blocks or whitespace.
 pub(super) fn prompt_body(text: &str) -> String {
     crate::providers::text::printable(&pasted_content(text).unwrap_or_else(|| text.to_owned()))
-}
-
-/// Decodes the entities Claude Code escapes in task notification fields.
-fn unescape_xml(text: &str) -> String {
-    text.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
 }
 
 #[cfg(test)]

@@ -621,7 +621,7 @@ pub(crate) fn shell_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
 }
 
 /// Shell source with each literal Markdown file heredoc body rendered as Markdown.
-fn shell_source_sections(text: &str) -> Vec<Section> {
+pub(crate) fn shell_source_sections(text: &str) -> Vec<Section> {
     let mut sections = Vec::new();
     let mut cursor = 0;
     for script in scripts(text) {

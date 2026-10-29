@@ -223,7 +223,7 @@ impl PullRequestReplay {
     }
 }
 
-fn notification_field<'a>(content: &'a str, name: &str) -> Option<&'a str> {
+pub(super) fn notification_field<'a>(content: &'a str, name: &str) -> Option<&'a str> {
     content
         .split_once(&format!("<{name}>"))?
         .1
