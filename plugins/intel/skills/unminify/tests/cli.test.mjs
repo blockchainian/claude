@@ -62,7 +62,7 @@ async function fixture(t, files, controls = {}) {
   return { root, requests, events, lines, options, controls,
     get peak() { return peak; }, get active() { return active; }, get sessions() { return sessions.size; }, get refreshes() { return refreshes; },
     read: file => readFile(join(root, file), 'utf8'),
-    journal: async file => records(await readFile(join(root, '.unminify', `${file}.jsonl`), 'utf8')),
+    journal: async file => records(await readFile(join(root, '.unminify', 'rename-bindings', 'files', `${file}.jsonl`), 'utf8')),
     run: settings => run({ paths: [root], concurrency: 2, maxInputTokens: 200, ...settings }, {
       ...select, ...rename, ...checks, ...syntax, output: line => lines.push(line),
       createNamer: settings => createNamer({ ...settings, ...options }),
@@ -114,7 +114,7 @@ test('one shared namer, stage ordering, bounded concurrency, completion replay a
     const saved = batches(await target.journal(file));
     assert.equal(saved.length, 3);
     assert.deepEqual(saved.map(record => Object.values(record.names)), [['outerValue'], ['firstValue'], ['secondValue']]);
-    const syntaxJournal = records(await target.read(`.unminify/syntax/${file}.syntax.jsonl`));
+    const syntaxJournal = records(await target.read(`.unminify/restore-syntax/syntax/${file}.syntax.jsonl`));
     assert.equal(syntaxJournal.at(-1).status, 'syntax');
   }
   for (const request of target.requests.filter(request => request.stage === 'functions')) {
@@ -122,7 +122,7 @@ test('one shared namer, stage ordering, bounded concurrency, completion replay a
     assert.deepEqual(request.body.text.format.schema.required, ['v1', 'v2']);
     assert(target.events.findIndex(e => e[0] === 'reply' && e[1].stage === 'top') < target.events.findIndex(e => e[0] === 'request' && e[1] === request));
   }
-  const telemetry = records(await target.read('.unminify/requests.jsonl'));
+  const telemetry = records(await target.read('.unminify/rename-bindings/requests.jsonl'));
   for (const file of ['a.js', 'b.js']) {
     const calls = telemetry.filter(r => r.file === file);
     assert.deepEqual(calls.map(r => r.batch_ids.length), [1, 2]);
@@ -130,7 +130,7 @@ test('one shared namer, stage ordering, bounded concurrency, completion replay a
     assert.deepEqual(calls.flatMap(r => r.batch_ids), batches(await target.journal(file)).map(r => r.id));
   }
   assert.equal(new Set(telemetry.map(r => r.session_id)).size, 1);
-  assert.equal(records(await target.read('.unminify/performance.jsonl')).at(-1).requests, 4);
+  assert.equal(records(await target.read('.unminify/rename-bindings/performance.jsonl')).at(-1).requests, 4);
   assert(target.lines.map(line => { try { return JSON.parse(line); } catch { return {}; } }).some(r => r.type === 'summary' && r.requests === 4));
   assert.equal((await target.run()).requests, 0);
   assert.equal(target.requests.length, 4);
@@ -170,7 +170,7 @@ for (const code of ['AUTH', 'USAGE_LIMIT']) test(`${code} drains in-flight repli
   assert.equal(target.peak, 2);
   assert.equal(target.active, 0);
   assert.equal(target.refreshes, code === 'AUTH' ? 1 : 0);
-  const logs = records(await target.read('.unminify/requests.jsonl'));
+  const logs = records(await target.read('.unminify/rename-bindings/requests.jsonl'));
   const failedFile = logs.find(r => r.status === (code === 'AUTH' ? 401 : 429)).file;
   const doneFile = failedFile === 'a.js' ? 'b.js' : 'a.js';
   await assertOutput(target, doneFile);
@@ -243,12 +243,12 @@ test('completed rejected files remain visible as failures on resume', async t =>
   const target = await fixture(t, { 'a.js': rejected });
   assert.equal((await target.run()).rejected, 1);
   const count = target.requests.length;
-  const journal = await target.read('.unminify/a.js.jsonl');
+  const journal = await target.read('.unminify/rename-bindings/files/a.js.jsonl');
   const result = await target.run();
   assert.equal(target.requests.length, count);
   assert.equal(result.rejected, 1);
   assert.equal(result.exitCode, 1);
   assert.match(target.lines.join('\n'), /PARSE_FAIL/);
   assert.equal(await target.read('a.js'), rejected);
-  assert.equal(await target.read('.unminify/a.js.jsonl'), journal);
+  assert.equal(await target.read('.unminify/rename-bindings/files/a.js.jsonl'), journal);
 });

@@ -79,7 +79,7 @@ test('SIGKILL after a durable chunk syntax write resumes to uninterrupted source
   assert.deepEqual(await interrupted.journals(), await uninterrupted.journals());
 });
 
-test('rename syntax preflight uses the same real transform and chunk merge workers without writing source', async t => {
+test('rename syntax check uses the same real transform and chunk merge workers without writing source', async t => {
   const fixture = await parallelFixture(t), workers = [];
   let failure;
   try {
@@ -87,7 +87,7 @@ test('rename syntax preflight uses the same real transform and chunk merge worke
     if (result.exitCode !== 0) failure = fixture.lines.join('\n');
   } catch (error) { failure = error.message; }
   assert.match(failure ?? '', /restore-syntax/);
-  for (const file of Object.keys(fixture.files)) assert(failure.includes(file), `preflight must include ${file}`);
-  for (const kind of ['transform', 'merge']) assert(new Set(workers.filter(event => event.kind === kind).map(event => event.threadId)).size > 1, `preflight ${kind} must use multiple real workers`);
+  for (const file of Object.keys(fixture.files)) assert(failure.includes(file), `check-syntax must include ${file}`);
+  for (const kind of ['transform', 'merge']) assert(new Set(workers.filter(event => event.kind === kind).map(event => event.threadId)).size > 1, `check-syntax ${kind} must use multiple real workers`);
   for (const [file, bytes] of await fixture.contents()) assert.equal(bytes.toString(), fixture.files[file]);
 });

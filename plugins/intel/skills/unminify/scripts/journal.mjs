@@ -62,9 +62,9 @@ export function responseValues(names) {
   return Object.fromEntries(names);
 }
 
-export function openJournal(root, file, source, options) {
+export function openJournal(root, file, source, options, journalDirectory = 'rename-bindings/files') {
   if (isAbsolute(file) || normalize(file).split(/[\\/]/).includes('..')) throw new Error('journal requires a relative repository path');
-  const path = join(root, '.unminify', `${file}.jsonl`);
+  const path = join(root, '.unminify', journalDirectory, `${file}.jsonl`);
   const records = readRecords(path);
   const fingerprint = hash(source);
   const config = JSON.stringify(options);

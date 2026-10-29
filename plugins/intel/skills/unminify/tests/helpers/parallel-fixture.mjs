@@ -65,7 +65,7 @@ export async function parallelFixture(t, sources = authoredSources()) {
           else result.set(name, await readFile(path));
         }
       }
-      for (const directory of ['syntax', 'merge-imports']) await visit(join(root, '.unminify', directory), directory);
+      for (const directory of ['syntax', 'imports']) await visit(join(root, '.unminify', 'restore-syntax', directory), directory);
       return new Map([...result].sort(([left], [right]) => left.localeCompare(right)));
     },
   };

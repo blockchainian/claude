@@ -1,7 +1,7 @@
 # Syntax rules
 
 The CLI finishes syntax for every selected file before any rename plan or request.
-`stage.mjs` persists independent checkpoints under `.unminify/syntax/`; rename
+`stage.mjs` persists independent checkpoints under `.unminify/restore-syntax/syntax/`; rename
 journals retain their source hashes, batch IDs and offsets. A prepared syntax write
 can resume on either side of its atomic replacement. Files already owned by a rename
 journal resume that journal without running syntax again. Start a separate run after

@@ -93,7 +93,7 @@ test('real CLI merges before naming, checkpoints and resumes chunks and standalo
       const first = execFileSync(process.execPath, args, { env, encoding: 'utf8' });
       assert.equal(JSON.parse(first.trim().split('\n').at(-1)).requests, 0);
       if (!chunked) {
-        const events = readFileSync(join(root, '.unminify/performance.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+        const events = readFileSync(join(root, '.unminify/rename-bindings/performance.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
         const started = new Set();
         for (const event of events) {
           if (event.type === 'file_start') started.add(event.file);

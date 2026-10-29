@@ -133,9 +133,9 @@ export function mergeExternalImports(sources, options = {}) {
   return after;
 }
 export function runMergeFile(root, file, pool) {
-  if (existsSync(join(root, '.unminify', `${file}.jsonl`))) return { file, status: 'merge-imports-skipped' };
+  if (existsSync(join(root, '.unminify', 'rename-bindings', 'files', `${file}.jsonl`))) return { file, status: 'merge-imports-skipped' };
   const path = join(root, file), source = readFileSync(path, 'utf8');
-  const journal = openJournal(root, join('merge-imports', file), source, { version: importMergeVersion });
+  const journal = openJournal(root, file, source, { version: importMergeVersion }, 'restore-syntax/imports');
   if (journal.done) return { file, status: 'merge-imports-skipped' };
   const inputs = new Map([[file, source]]);
   function commit(output) {

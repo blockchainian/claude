@@ -50,7 +50,7 @@ test('a chunk rejection journals and emits the failed member and syntax error', 
   const rejected = events.find(event => event.status === 'rejected');
   assert.equal(rejected.file, file);
   assert.match(rejected.parseError, /Duplicate parameter/);
-  const records = (await readFile(join(root, '.unminify/chunks', `${hash('authored')}.jsonl`), 'utf8')).trim().split('\n').map(JSON.parse);
+  const records = (await readFile(join(root, '.unminify/rename-bindings/chunks', `${hash('authored')}.jsonl`), 'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(records.at(-1).file, file);
   assert.equal(records.at(-1).parseError, rejected.parseError);
   assert.equal(await readFile(join(root, file), 'utf8'), source);

@@ -9,7 +9,7 @@ function fingerprint(root, options) {
   const { files, fragmentContext, syntaxFingerprint, importMergeVersion } = options;
   if (!Array.isArray(files) || !(fragmentContext?.fragments instanceof Set)
     || !(fragmentContext?.topLevelBindings instanceof Set) || typeof syntaxFingerprint !== 'string'
-    || !Number.isSafeInteger(importMergeVersion)) throw new Error('invalid syntax preflight inputs');
+    || !Number.isSafeInteger(importMergeVersion)) throw new Error('invalid syntax check inputs');
   return hash(JSON.stringify({
     version: 1, scope: options.scope ?? 'all',
     sources: sorted(new Set(files)).map(file => [file, hash(readFileSync(join(root, file)))]),
@@ -24,9 +24,9 @@ function fingerprint(root, options) {
 }
 
 /** A successful check authorizes only its exact source bytes and syntax context. */
-export async function runSyntaxPreflight(root, options, check) {
+export async function runCheckSyntax(root, options, check) {
   const key = fingerprint(root, options);
-  const directory = join(root, '.unminify', 'syntax-preflight');
+  const directory = join(root, '.unminify', 'rename-bindings', 'check-syntax');
   const path = join(directory, `${key}.json`);
   let record;
   try { record = JSON.parse(readFileSync(path, 'utf8')); }
@@ -35,7 +35,7 @@ export async function runSyntaxPreflight(root, options, check) {
     return { cached: true, pending: [] };
   }
   const pending = await check();
-  if (!Array.isArray(pending) || pending.some(file => typeof file !== 'string')) throw new Error('invalid syntax preflight result');
+  if (!Array.isArray(pending) || pending.some(file => typeof file !== 'string')) throw new Error('invalid syntax check result');
   // Never bless newly written text using the verdict on the text read earlier.
   if (!pending.length && fingerprint(root, options) === key) {
     mkdirSync(directory, { recursive: true });

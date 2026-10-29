@@ -55,7 +55,7 @@ test('sync-imports uses several real workers and preserves captured 0.71.4 sourc
   finally { observations.active = false; }
   assert(observations.peak <= 1, `simultaneously retained ${observations.peak} real whole-chunk Babel analyses`);
   assert.deepEqual(await importSyncSnapshot(f.root), await baseline());
-  const events = (await readFile(join(f.root, '.unminify/performance.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  const events = (await readFile(join(f.root, '.unminify/sync-imports/performance.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
   const written = events.filter(event => event.type === 'file_end' && event.phase === 'followImports' && event.written_at !== null);
   assert(written.length > 1);
   for (const event of written) for (const step of ['resolveNames', 'applyRenames', 'checkRewrite']) {

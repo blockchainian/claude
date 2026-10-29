@@ -13,12 +13,12 @@ export function runSyntaxFile(root, file, {fragment=false, fragmentContext} = {}
   const path=join(root,file), source=readFileSync(path,'utf8');
   // Once rename owns a file, its offsets and crash recovery remain authoritative.
   // This also preserves resumability of runs started before the syntax stage existed.
-  if (existsSync(join(root,'.unminify',`${file}.jsonl`))) {
+  if (existsSync(join(root,'.unminify','rename-bindings','files',`${file}.jsonl`))) {
     return {status:'syntax-skipped',file};
   }
-  const syntaxFile=join('syntax',`${file}.syntax`);
+  const syntaxFile=`${file}.syntax`;
   const options={pipeline,fragment, ...(fragmentContext === undefined ? {} : {shadowedGlobals:globals.filter(name => fragmentContext.topLevelBindings.has(name))})};
-  const journal=openJournal(root,syntaxFile,source,options);
+  const journal=openJournal(root,syntaxFile,source,options,'restore-syntax/syntax');
   // Journal recovery truncates torn appends before inspecting the durable header.
   const header=JSON.parse(readFileSync(journal.path,'utf8').split('\n')[0]);
   if(header.options!==JSON.stringify(options)) throw new Error(`syntax options changed: ${file}`);

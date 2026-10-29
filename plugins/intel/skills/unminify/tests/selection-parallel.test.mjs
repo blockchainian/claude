@@ -74,7 +74,7 @@ test('whole CLI run resolves Git root exactly once through real git subprocesses
 
 test('ordinary import merging has its own summary phase outside selection_plan', async t => {
   const f = await fixture(t), summary = await f.execute();
-  const events = (await readFile(join(f.root, '.unminify/performance.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  const events = (await readFile(join(f.root, '.unminify/restore-syntax/performance.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(summary.exitCode, 0);
   assert.equal(typeof summary.phase_ms.merge_imports, 'number');
   assert(summary.phase_ms.merge_imports > 0);

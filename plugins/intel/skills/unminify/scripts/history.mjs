@@ -6,24 +6,25 @@ import { openChunkJournal } from './chunk-journal.mjs';
 
 /** Discover rename journals without repairing or resuming unfinished work. */
 export function journalHistory(root) {
-  const directory = join(root, '.unminify'), result = [];
+  const directory = join(root, '.unminify', 'rename-bindings'), result = [];
   function walk(folder) {
     if (!existsSync(folder)) return;
     for (const entry of readdirSync(folder, { withFileTypes: true })) {
       const path = join(folder, entry.name);
       if (entry.isDirectory()) {
-        if (folder !== directory || !['syntax', 'merge-imports', 'imports'].includes(entry.name)) walk(path);
+        walk(path);
       }
       else if (entry.isFile() && (/\.m?js\.jsonl$/.test(entry.name)
         || dirname(path) === join(directory, 'chunks') && entry.name.endsWith('.jsonl'))) {
         const records = readRecords(path, false), header = records[0];
         if (header?.type === 'source') {
-          result.push({ file: relative(directory, path).slice(0, -6), records, header });
+          result.push({ file: relative(join(directory, 'files'), path).slice(0, -6), records, header });
         } else if (header?.type === 'chunk-source') result.push({ records, header });
       }
     }
   }
-  walk(directory);
+  walk(join(directory, 'files'));
+  walk(join(directory, 'chunks'));
   return result;
 }
 

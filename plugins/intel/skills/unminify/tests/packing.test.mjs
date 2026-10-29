@@ -62,8 +62,8 @@ async function fixture(t, source) {
       baseUrl: `http://127.0.0.1:${server.address().port}`, retryDelayMs: 1 }); } };
   return { root, requests, controls,
     run: options => run({ paths: [root], concurrency: 1, ...options }, dependencies),
-    logs: async runId => (await records(join(root, '.unminify', 'requests.jsonl'))).filter(row => row.run_id === runId && row.kind === 'model'),
-    journal: () => records(join(root, '.unminify', 'input.mjs.jsonl')) };
+    logs: async runId => (await records(join(root, '.unminify', 'rename-bindings', 'requests.jsonl'))).filter(row => row.run_id === runId && row.kind === 'model'),
+    journal: () => records(join(root, '.unminify', 'rename-bindings', 'files', 'input.mjs.jsonl')) };
 }
 
 function assertSchema(request, expectedCount) {

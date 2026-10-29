@@ -33,7 +33,7 @@ async function fixture(t) {
   execFileSync('git', ['init', '--initial-branch=main', root], { stdio: 'ignore' });
   const controls = { code: null, snapshot: null, requests: 0, refreshes: 0 };
   const read = file => readFile(join(root, file));
-  const journal = file => read(`.unminify/${file}.jsonl`);
+  const journal = file => read(`.unminify/rename-bindings/files/${file}.jsonl`);
   const { codexHome, baseUrl } = await modelService(t, root, async (req, res) => {
     let raw = ''; for await (const part of req) raw += part;
     if (req.url === '/oauth/token') {

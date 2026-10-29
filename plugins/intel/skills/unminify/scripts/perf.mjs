@@ -5,17 +5,21 @@ import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { intervalMs, namingStats } from './timing.mjs';
 
-const help = 'perf <dir> [--run-id <id>] [--window-seconds 10] [--slow-files 10]';
+const commands = ['rename-files', 'restore-syntax', 'rename-bindings', 'sync-imports'];
+const help = 'perf <dir> [--command <command>] [--run-id <id>] [--window-seconds 10] [--slow-files 10]';
 
 export function parseArgs(args) {
-  const options = { windowSeconds: 10, slowFiles: 10 };
+  const options = { command: 'rename-bindings', windowSeconds: 10, slowFiles: 10 };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--help' || arg === '-h') return { help: true };
     if (arg.startsWith('-')) {
       const value = args[++index];
       if (!value || value.startsWith('--')) throw new Error(`Missing value for ${arg}`);
-      if (arg === '--run-id') options.runId = value;
+      if (arg === '--command') {
+        if (!commands.includes(value)) throw new Error(`Invalid command: ${value}`);
+        options.command = value;
+      } else if (arg === '--run-id') options.runId = value;
       else if (arg === '--window-seconds') {
         options.windowSeconds = Number(value);
         if (!Number.isFinite(options.windowSeconds) || options.windowSeconds < 0.001)
@@ -46,15 +50,16 @@ function readRecords(path, optional = false) {
 }
 
 /** Summarize recorded attempts and lifecycle events; never connects to a model. */
-export function report({ dir, runId, windowSeconds = 10, slowFiles = 10 }) {
+export function report({ dir, command = 'rename-bindings', runId, windowSeconds = 10, slowFiles = 10 }) {
+  if (!commands.includes(command)) throw new Error(`Invalid command: ${command}`);
   const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8' }).trim();
-  const performance = readRecords(join(root, '.unminify', 'performance.jsonl'));
+  const performance = readRecords(join(root, '.unminify', command, 'performance.jsonl'));
   const start = runId === undefined
     ? performance.findLast(record => record.type === 'run_start')
     : performance.find(record => record.type === 'run_start' && record.run_id === runId);
   if (!start) throw new Error(runId === undefined ? 'No recorded run found.' : `Run not found: ${runId}`);
   const events = performance.filter(record => record.run_id === start.run_id);
-  const requests = readRecords(join(root, '.unminify', 'requests.jsonl'), true)
+  const requests = readRecords(join(root, '.unminify', command, 'requests.jsonl'), true)
     .filter(record => record.run_id === start.run_id);
   const summary = events.findLast(record => record.type === 'summary');
   const endedAt = Math.max(start.at, ...events.map(record => record.at), ...requests.map(record => record.ended_at));

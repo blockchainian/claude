@@ -41,11 +41,11 @@ async function localRun(t, multipleBatches = false) {
       let body = '';
       for await (const chunk of req) body += chunk;
       const request = JSON.parse(body);
-      const liveEvents = (await readFile(join(root, '.unminify', 'performance.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+      const liveEvents = (await readFile(join(root, '.unminify', 'rename-bindings', 'performance.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
       assert(liveEvents.some(event => event.type === 'run_start'));
       assert(!liveEvents.some(event => event.type === 'summary'));
       if (attempts > 0) {
-        const liveRequests = (await readFile(join(root, '.unminify', 'requests.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+        const liveRequests = (await readFile(join(root, '.unminify', 'rename-bindings', 'requests.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
         assert.equal(liveRequests.length, attempts);
       }
       attempts++;
@@ -87,8 +87,8 @@ test('perf summarizes recorded local HTTP/2 run without model calls', async t =>
   const { root, summary, codexHome, dependencies } = await localRun(t);
   const result = await execute(process.execPath, [perfScript.pathname, root, '--window-seconds', '0.01', '--slow-files', '10']);
   const report = JSON.parse(result.stdout);
-  const requests = await records(join(root, '.unminify', 'requests.jsonl'));
-  const performance = await records(join(root, '.unminify', 'performance.jsonl'));
+  const requests = await records(join(root, '.unminify', 'rename-bindings', 'requests.jsonl'));
+  const performance = await records(join(root, '.unminify', 'rename-bindings', 'performance.jsonl'));
   assert.deepEqual(requests.map(request => request.status), [429, 200]);
   assert(requests.every(request => request.estimated_input_tokens > 0));
   assert.equal(requests[0].estimated_input_tokens, requests[1].estimated_input_tokens);
@@ -142,8 +142,8 @@ test('perf summarizes recorded local HTTP/2 run without model calls', async t =>
   assert.equal(selected.windows.reduce((sum, window) => sum + window.sent, 0), requests.length);
   await assert.rejects(execute(process.execPath, [perfScript.pathname, root, '--run-id', 'missing-run']),
     error => error.code === 1 && /Run not found/.test(error.stderr));
-  const perfPath = join(root, '.unminify', 'performance.jsonl');
-  const requestsPath = join(root, '.unminify', 'requests.jsonl');
+  const perfPath = join(root, '.unminify', 'rename-bindings', 'performance.jsonl');
+  const requestsPath = join(root, '.unminify', 'rename-bindings', 'requests.jsonl');
   const interrupted = performance.filter(record => record.type !== 'summary' && record.type !== 'run_end').map(record => JSON.stringify(record)).join('\n') + '\n{';
   const partialRequests = (await readFile(requestsPath, 'utf8')) + '{';
   await writeFile(perfPath, interrupted);
@@ -159,8 +159,8 @@ test('perf summarizes recorded local HTTP/2 run without model calls', async t =>
 
 test('file duration ends at its main write while import writes are reported separately', async t => {
   const { root, summary } = await localRun(t, true);
-  const performance = await records(join(root, '.unminify', 'performance.jsonl'));
-  const requests = await records(join(root, '.unminify', 'requests.jsonl'));
+  const performance = await records(join(root, '.unminify', 'rename-bindings', 'performance.jsonl'));
+  const requests = await records(join(root, '.unminify', 'rename-bindings', 'requests.jsonl'));
   assert.equal(requests.filter(row => row.file === 'a-sample.js' && row.status === 200).length, 1);
   assert.equal(requests.filter(row => row.file === 'consumer.js' && row.status === 200).length, 4);
   const ends = performance.filter(row => row.type === 'file_end' && row.file === 'a-sample.js');
@@ -199,8 +199,8 @@ test('perf keeps main durations separate from write cleanup and later import wri
     { type: 'run_end', at: 2000, total_ms: 1000 },
     { type: 'summary', at: 2000, total_ms: 1000, phase_ms: {} },
   ];
-  await mkdir(join(root, '.unminify'));
-  await writeFile(join(root, '.unminify', 'performance.jsonl'),
+  await mkdir(join(root, '.unminify', 'rename-bindings'), { recursive: true });
+  await writeFile(join(root, '.unminify', 'rename-bindings', 'performance.jsonl'),
     events.map(event => JSON.stringify({ ...event, run_id: 'main-duration-fixture' })).join('\n') + '\n');
   const report = JSON.parse((await execute(process.execPath, [perfScript.pathname, root])).stdout);
   assert.equal(report.total_ms, 1000);

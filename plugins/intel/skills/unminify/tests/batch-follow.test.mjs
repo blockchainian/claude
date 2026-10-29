@@ -85,8 +85,8 @@ for (const chunk of [false, true]) for (const condition of ['ignored', 'changed'
     const f = await fixture(t, files, groups);
     assert.equal((await f.run(['app.js', 'ready.js'])).exitCode, 0);
     const journalPath = chunk
-      ? join('.unminify/chunks', (await readdir(join(f.root, '.unminify/chunks')))[0])
-      : '.unminify/app.js.jsonl';
+      ? join('.unminify/rename-bindings/chunks', (await readdir(join(f.root, '.unminify/rename-bindings/chunks')))[0])
+      : '.unminify/rename-bindings/files/app.js.jsonl';
     if (condition === 'ignored') await f.write('.ignore', 'app.js\n');
     if (condition === 'changed') await f.write('app.js', files['app.js'] + '// user edit\n');
     if (condition === 'unfinished') {
@@ -129,7 +129,7 @@ test('an unfinished chunk resumes saved program replies after changing selected 
   const f = await fixture(t, files, groups);
   f.controls.interruptLocal = true;
   assert.equal((await f.run(['b.js'])).exitCode, 1);
-  const journalPath = join('.unminify/chunks', (await readdir(join(f.root, '.unminify/chunks')))[0]);
+  const journalPath = join('.unminify/rename-bindings/chunks', (await readdir(join(f.root, '.unminify/rename-bindings/chunks')))[0]);
   const interrupted = records((await f.read(journalPath)).toString());
   assert(interrupted.some(record => record.type === 'chunk-batch' && record.id === 'program-resolved'), 'program reply was saved before interruption');
   assert(!interrupted.some(record => record.type === 'chunk-done'));
@@ -194,7 +194,7 @@ test('selection changes replay nonempty saved program names without another prog
   const f = await fixture(t, files, groups);
   f.controls.interruptLocal = true;
   assert.equal((await f.run(['a.js'])).exitCode, 1);
-  const journalPath = join('.unminify/chunks', (await readdir(join(f.root, '.unminify/chunks')))[0]);
+  const journalPath = join('.unminify/rename-bindings/chunks', (await readdir(join(f.root, '.unminify/rename-bindings/chunks')))[0]);
   const interrupted = records((await f.read(journalPath)).toString());
   const savedProgram = interrupted.find(record => record.type === 'chunk-batch' && record.id === 'program-resolved');
   assert(savedProgram && Object.keys(savedProgram.names).length > 0, 'a real program name is saved before local interruption');
@@ -266,7 +266,7 @@ test('a model failure in a later chunk selection exits with the selection still 
   assert.equal(JSON.parse(stdout).exitCode, 1);
   assert.equal(failedRequests, 1, 'a failed selection is not scheduled repeatedly');
   assert.equal(await readFile(join(root, 'b.js'), 'utf8'), files['b.js']);
-  const directory = join(root, '.unminify/chunks');
+  const directory = join(root, '.unminify/rename-bindings/chunks');
   const history = records(await readFile(join(directory, (await readdir(directory))[0]), 'utf8'));
   assert(history.findLastIndex(record => record.type === 'chunk-selection') > history.findLastIndex(record => record.type === 'chunk-done'),
     'the failed selection remains pending rather than inheriting a prior completion');

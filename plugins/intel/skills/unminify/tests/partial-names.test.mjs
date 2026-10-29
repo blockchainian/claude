@@ -141,12 +141,12 @@ test('ordinary partial replies write and replay with missing bindings retained',
   assert.equal((await f.run(settings)).exitCode, 0);
   assert.equal(f.bodies.length, sent);
   {
-    const journal = await records(join(f.root, '.unminify/input.js.jsonl'));
+    const journal = await records(join(f.root, '.unminify/rename-bindings/files/input.js.jsonl'));
     const reply = journal.find(row => row.type === 'response');
     assert.equal(Object.keys(reply.names).length, 2);
     assert.equal(reply.request, `proposal:${select.planFile(source).stages[0][0].id}`);
     await writeFile(join(f.root, 'input.js'), source);
-    await writeFile(join(f.root, '.unminify/input.js.jsonl'), journal.slice(0, 2).map(JSON.stringify).join('\n') + '\n');
+    await writeFile(join(f.root, '.unminify/rename-bindings/files/input.js.jsonl'), journal.slice(0, 2).map(JSON.stringify).join('\n') + '\n');
     assert.equal((await f.run(settings)).exitCode, 0);
     assert.equal(f.bodies.length, sent);
   }
@@ -191,7 +191,7 @@ for (const chunk of [false, true]) test(`empty original batches stay pending whi
   assert.equal(f.bodies.length, 5);
   assert.deepEqual(f.bodies[0].text.format.schema.required, ['v1', 'v2', 'v3']);
   assert.equal(await readFile(join(f.root, 'input.js'), 'utf8'), source);
-  const path = chunk ? join(f.root, '.unminify/chunks', `${hash('one')}.jsonl`) : join(f.root, '.unminify/input.js.jsonl');
+  const path = chunk ? join(f.root, '.unminify/rename-bindings/chunks', `${hash('one')}.jsonl`) : join(f.root, '.unminify/rename-bindings/files/input.js.jsonl');
   const history = await records(path);
   const accepted = history.filter(row => chunk ? row.type === 'chunk-batch' : row.type === 'response');
   assert.equal(accepted.length, 2);

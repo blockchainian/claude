@@ -65,6 +65,12 @@ path.
 
 Each skill's `SKILL.md` covers its usage, setup and requirements.
 
+Unminify runs `rename-files`, `restore-syntax`, `rename-bindings` and `sync-imports` in order.
+`rename-files` builds a selection-only dependency graph, recursively groups it with seeded
+Leiden, names directories and files from model summaries, and checkpoints transactional
+moves and relative-import updates. Each command keeps logs in `.unminify/<command>/`;
+legacy layouts require manual migration before any command can run.
+
 Unminify plans and packs batches within each file and stage using `--max-input-tokens`
 (default 100000). The budget counts instructions, prompt and rendered context with
 `js-tiktoken` 1.0.21 (`o200k_base`); planning has no name-count cap. Naming requests
@@ -79,13 +85,13 @@ Every run, including an interrupted run, updates import names in journal-complet
 Unfinished files supply their current export names without being rewritten, preserving resume.
 
 Unminify appends safe HTTP-attempt timing, queue/concurrency, retry and session metadata to
-`.unminify/requests.jsonl`, and run/file/phase timings, local-step totals, 429 pauses and final
-performance summaries to `.unminify/performance.jsonl` in the target Git root. Telemetry
+`.unminify/<command>/requests.jsonl`, and run/file/phase timings, local-step totals, 429 pauses and final
+performance summaries to `.unminify/<command>/performance.jsonl` in the target Git root. Telemetry
 records selected error fields with credentials redacted and messages capped at 2048 characters,
 along with request IDs, SSE event counts, timing, received bytes and output-text character counts.
 It retains no request or output text. Each attempt's `failure` records its own error; HTTP 200
 and token usage alone do not establish success. Analyze the latest run locally with
-`node plugins/intel/skills/unminify/scripts/perf.mjs <target-repo>`; optional `--run-id <id>`,
+`node plugins/intel/skills/unminify/scripts/perf.mjs <target-repo> --command rename-bindings`; optional `--run-id <id>`,
 `--window-seconds 10` and `--slow-files 10` select the run, window size and slow-file count.
 The JSON report and run summary include model HTTP-attempt count and median/mean names per
 request (retries included); attempt logs list batch IDs, name count and `estimated_input_tokens`.

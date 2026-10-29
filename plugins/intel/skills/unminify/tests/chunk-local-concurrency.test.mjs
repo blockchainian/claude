@@ -21,7 +21,7 @@ async function fixture(t, count = 4) {
   const chunks = join(root, 'chunks.json');
   await writeFile(chunks, JSON.stringify({ version: 1, chunks: [{ id: 'authored', files: [...inputs.keys()] }] }));
   const settings = { chunks, concurrency: 2, minSymbolLength: 4, maxInputTokens: 100000, command: 'rename-bindings' };
-  const journalPath = join(root, '.unminify/chunks', `${hash('authored')}.jsonl`);
+  const journalPath = join(root, '.unminify/rename-bindings/chunks', `${hash('authored')}.jsonl`);
   return { root, inputs, settings, journalPath,
     records: async () => (await readFile(journalPath, 'utf8')).trim().split('\n').map(line => JSON.parse(line)),
     outputs: async () => Promise.all([...inputs.keys()].map(file => readFile(join(root, file), 'utf8'))),

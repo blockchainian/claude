@@ -51,120 +51,120 @@
   ],
   "journals": [
     [
-      "imports/chunks/057041eecfb2abcbaaf4119bbe8796a92ff8bfc0c9dfc0f647fca0b3c450a4af.jsonl",
-      "{\"type\":\"chunk-source\",\"version\":1,\"id\":\"shared-import\",\"hashes\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"options\":\"{\\\"chunkSiblings\\\":true,\\\"ignored\\\":[],\\\"manifest\\\":\\\"e59584e974c26001a80b5f37e877de42e464af7b7cdc43b794872d9a5afe7171\\\"}\"}\n{\"type\":\"chunk-selection\",\"files\":[\"first.mjs\",\"last.mjs\",\"middle.mjs\"],\"hashes\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"}}\n{\"type\":\"chunk-done\",\"hashes\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"status\":\"imports\"}\n{\"type\":\"chunk-prepare\",\"before\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"after\":{\"first.mjs\":\"970c1a562b11e10e3cfd438455e1d518723438765c4a629b1775de667cccfb51\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"472d88be2ce55b0bc58a1963385b5c5485d302b64d73e619c08a9112920d709d\"},\"sources\":{\"first.mjs\":\"import { readFile } from \\\"node:fs\\\";\\nimport { helper as h } from \\\"./helper.mjs\\\";\\n\",\"last.mjs\":\"export { b as readInput };\\nconsole.log(b(\\\"sample\\\"));\\n\",\"middle.mjs\":\"function b(input) { return h(readFile(input)); }\\n\"},\"status\":\"imports\"}\n{\"type\":\"chunk-done\",\"hashes\":{\"first.mjs\":\"970c1a562b11e10e3cfd438455e1d518723438765c4a629b1775de667cccfb51\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"472d88be2ce55b0bc58a1963385b5c5485d302b64d73e619c08a9112920d709d\"},\"status\":\"imports\"}\n"
-    ],
-    [
-      "imports/helper.mjs.jsonl",
-      "{\"type\":\"source\",\"hash\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"status\":\"imports\"}\n"
-    ],
-    [
-      "imports/independent-0.mjs.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
-    ],
-    [
-      "imports/independent-1.mjs.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
-    ],
-    [
-      "imports/independent-2.mjs.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
-    ],
-    [
-      "imports/independent-3.mjs.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
-    ],
-    [
-      "imports/independent-4.mjs.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
-    ],
-    [
-      "imports/independent-5.mjs.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
-    ],
-    [
-      "imports/independent-6.mjs.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
-    ],
-    [
-      "imports/independent-7.mjs.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
-    ],
-    [
-      "merge-imports/helper.mjs.jsonl",
+      "restore-syntax/imports/helper.mjs.jsonl",
       "{\"type\":\"source\",\"hash\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"after\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"status\":\"merge-imports\"}\n"
     ],
     [
-      "merge-imports/independent-0.mjs.jsonl",
+      "restore-syntax/imports/independent-0.mjs.jsonl",
       "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n"
     ],
     [
-      "merge-imports/independent-1.mjs.jsonl",
+      "restore-syntax/imports/independent-1.mjs.jsonl",
       "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n"
     ],
     [
-      "merge-imports/independent-2.mjs.jsonl",
+      "restore-syntax/imports/independent-2.mjs.jsonl",
       "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n"
     ],
     [
-      "merge-imports/independent-3.mjs.jsonl",
+      "restore-syntax/imports/independent-3.mjs.jsonl",
       "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n"
     ],
     [
-      "merge-imports/independent-4.mjs.jsonl",
+      "restore-syntax/imports/independent-4.mjs.jsonl",
       "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n"
     ],
     [
-      "merge-imports/independent-5.mjs.jsonl",
+      "restore-syntax/imports/independent-5.mjs.jsonl",
       "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n"
     ],
     [
-      "merge-imports/independent-6.mjs.jsonl",
+      "restore-syntax/imports/independent-6.mjs.jsonl",
       "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n"
     ],
     [
-      "merge-imports/independent-7.mjs.jsonl",
+      "restore-syntax/imports/independent-7.mjs.jsonl",
       "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"version\\\":1}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"merge-imports\"}\n"
     ],
     [
-      "syntax/chunks/057041eecfb2abcbaaf4119bbe8796a92ff8bfc0c9dfc0f647fca0b3c450a4af.jsonl",
-      "{\"type\":\"chunk-source\",\"version\":1,\"id\":\"shared-import\",\"hashes\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"options\":\"{\\\"ignored\\\":[],\\\"manifest\\\":\\\"e59584e974c26001a80b5f37e877de42e464af7b7cdc43b794872d9a5afe7171\\\",\\\"mergeImports\\\":1,\\\"syntax\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\"}\"}\n{\"type\":\"chunk-prepare\",\"before\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"after\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"sources\":{\"first.mjs\":\"import { readFile as a } from \\\"node:fs\\\";\\nimport { helper as h } from \\\"./helper.mjs\\\";\\n\",\"last.mjs\":\"export { b as readInput };\\nconsole.log(b(\\\"sample\\\"));\\n\",\"middle.mjs\":\"function b(input) { return h(a(input)); }\\n\"},\"status\":\"syntax\"}\n{\"type\":\"chunk-done\",\"hashes\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"status\":\"syntax\"}\n"
+      "restore-syntax/syntax/chunks/057041eecfb2abcbaaf4119bbe8796a92ff8bfc0c9dfc0f647fca0b3c450a4af.jsonl",
+      "{\"type\":\"chunk-source\",\"version\":1,\"id\":\"shared-import\",\"hashes\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"options\":\"{\\\"ignored\\\":[],\\\"manifest\\\":\\\"e59584e974c26001a80b5f37e877de42e464af7b7cdc43b794872d9a5afe7171\\\",\\\"mergeImports\\\":1,\\\"syntax\\\":\\\"0ca93f37db0c3f66e1dcbd896b5d7cb9a72b8b79343eab5c6d52a445fb27a349\\\"}\"}\n{\"type\":\"chunk-prepare\",\"before\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"after\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"sources\":{\"first.mjs\":\"import { readFile as a } from \\\"node:fs\\\";\\nimport { helper as h } from \\\"./helper.mjs\\\";\\n\",\"last.mjs\":\"export { b as readInput };\\nconsole.log(b(\\\"sample\\\"));\\n\",\"middle.mjs\":\"function b(input) { return h(a(input)); }\\n\"},\"status\":\"syntax\"}\n{\"type\":\"chunk-done\",\"hashes\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"status\":\"syntax\"}\n"
     ],
     [
-      "syntax/helper.mjs.syntax.jsonl",
-      "{\"type\":\"source\",\"hash\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"after\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"status\":\"syntax\"}\n"
+      "restore-syntax/syntax/helper.mjs.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"options\":\"{\\\"pipeline\\\":\\\"0ca93f37db0c3f66e1dcbd896b5d7cb9a72b8b79343eab5c6d52a445fb27a349\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"after\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"status\":\"syntax\"}\n"
     ],
     [
-      "syntax/independent-0.mjs.syntax.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
+      "restore-syntax/syntax/independent-0.mjs.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"0ca93f37db0c3f66e1dcbd896b5d7cb9a72b8b79343eab5c6d52a445fb27a349\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
     ],
     [
-      "syntax/independent-1.mjs.syntax.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
+      "restore-syntax/syntax/independent-1.mjs.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"0ca93f37db0c3f66e1dcbd896b5d7cb9a72b8b79343eab5c6d52a445fb27a349\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
     ],
     [
-      "syntax/independent-2.mjs.syntax.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
+      "restore-syntax/syntax/independent-2.mjs.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"0ca93f37db0c3f66e1dcbd896b5d7cb9a72b8b79343eab5c6d52a445fb27a349\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
     ],
     [
-      "syntax/independent-3.mjs.syntax.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
+      "restore-syntax/syntax/independent-3.mjs.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"0ca93f37db0c3f66e1dcbd896b5d7cb9a72b8b79343eab5c6d52a445fb27a349\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
     ],
     [
-      "syntax/independent-4.mjs.syntax.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
+      "restore-syntax/syntax/independent-4.mjs.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"0ca93f37db0c3f66e1dcbd896b5d7cb9a72b8b79343eab5c6d52a445fb27a349\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
     ],
     [
-      "syntax/independent-5.mjs.syntax.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
+      "restore-syntax/syntax/independent-5.mjs.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"0ca93f37db0c3f66e1dcbd896b5d7cb9a72b8b79343eab5c6d52a445fb27a349\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
     ],
     [
-      "syntax/independent-6.mjs.syntax.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
+      "restore-syntax/syntax/independent-6.mjs.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"0ca93f37db0c3f66e1dcbd896b5d7cb9a72b8b79343eab5c6d52a445fb27a349\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
     ],
     [
-      "syntax/independent-7.mjs.syntax.jsonl",
-      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"1d7bc7d6598581842b00f0820dd95c814c38b8b3fdfd3fcbec494f8fb7fbbbaf\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
+      "restore-syntax/syntax/independent-7.mjs.syntax.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"pipeline\\\":\\\"0ca93f37db0c3f66e1dcbd896b5d7cb9a72b8b79343eab5c6d52a445fb27a349\\\",\\\"fragment\\\":false,\\\"shadowedGlobals\\\":[]}\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"syntax\"}\n"
+    ],
+    [
+      "sync-imports/chunks/057041eecfb2abcbaaf4119bbe8796a92ff8bfc0c9dfc0f647fca0b3c450a4af.jsonl",
+      "{\"type\":\"chunk-source\",\"version\":1,\"id\":\"shared-import\",\"hashes\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"options\":\"{\\\"chunkSiblings\\\":true,\\\"ignored\\\":[],\\\"manifest\\\":\\\"e59584e974c26001a80b5f37e877de42e464af7b7cdc43b794872d9a5afe7171\\\"}\"}\n{\"type\":\"chunk-selection\",\"files\":[\"first.mjs\",\"last.mjs\",\"middle.mjs\"],\"hashes\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"}}\n{\"type\":\"chunk-done\",\"hashes\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"status\":\"imports\"}\n{\"type\":\"chunk-prepare\",\"before\":{\"first.mjs\":\"f8880a3522affbc318a8fc21b1a6a0ddbc11a1531b04335e5bab7478b31dde39\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"766e54c5d1fc12e3d3a6802355e5f89ccc446c83146c71812791befec39f5dbd\"},\"after\":{\"first.mjs\":\"970c1a562b11e10e3cfd438455e1d518723438765c4a629b1775de667cccfb51\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"472d88be2ce55b0bc58a1963385b5c5485d302b64d73e619c08a9112920d709d\"},\"sources\":{\"first.mjs\":\"import { readFile } from \\\"node:fs\\\";\\nimport { helper as h } from \\\"./helper.mjs\\\";\\n\",\"last.mjs\":\"export { b as readInput };\\nconsole.log(b(\\\"sample\\\"));\\n\",\"middle.mjs\":\"function b(input) { return h(readFile(input)); }\\n\"},\"status\":\"imports\"}\n{\"type\":\"chunk-done\",\"hashes\":{\"first.mjs\":\"970c1a562b11e10e3cfd438455e1d518723438765c4a629b1775de667cccfb51\",\"last.mjs\":\"c5d5acef480c066902a9b9b29521a7dda2f0e608148f5ab055483ae7bd623a3a\",\"middle.mjs\":\"472d88be2ce55b0bc58a1963385b5c5485d302b64d73e619c08a9112920d709d\"},\"status\":\"imports\"}\n"
+    ],
+    [
+      "sync-imports/helper.mjs.jsonl",
+      "{\"type\":\"source\",\"hash\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"72ee50f2cba6952f4ba0c4318abb708308a5718c00076344dd8580bfce794038\",\"status\":\"imports\"}\n"
+    ],
+    [
+      "sync-imports/independent-0.mjs.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
+    ],
+    [
+      "sync-imports/independent-1.mjs.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
+    ],
+    [
+      "sync-imports/independent-2.mjs.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
+    ],
+    [
+      "sync-imports/independent-3.mjs.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
+    ],
+    [
+      "sync-imports/independent-4.mjs.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
+    ],
+    [
+      "sync-imports/independent-5.mjs.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
+    ],
+    [
+      "sync-imports/independent-6.mjs.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
+    ],
+    [
+      "sync-imports/independent-7.mjs.jsonl",
+      "{\"type\":\"source\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"options\":\"{\\\"minSymbolLength\\\":4}\"}\n{\"type\":\"done\",\"hash\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"status\":\"imports\"}\n{\"type\":\"prepare\",\"before\":\"2a9258b95b99dbebe39b555e5879bb1260c7ad779a4a8bde47aa0abda8b3ce8d\",\"after\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n{\"type\":\"done\",\"hash\":\"e58093c722a066be7ca9a8f56cb2ceb33e9640d3edfc03bcb84038b302f3132b\",\"status\":\"imports\"}\n"
     ]
   ]
 }
