@@ -89,10 +89,10 @@ test('real Codex service completes syntax, scope-safe naming and import followin
     assert.deepEqual(exportNames(after), exportNames(source), `${file} retains public export names`);
     const syntax = events.find(record => record.file === file && record.status === 'syntax');
     assert.ok(syntax, `${file} passed through the real syntax stage`);
-    const syntaxJournal = records(await readFile(join(root, '.unminify', 'syntax', `${file}.syntax.jsonl`), 'utf8'));
+    const syntaxJournal = records(await readFile(join(root, '.unminify', 'restore-syntax', 'syntax', `${file}.syntax.jsonl`), 'utf8'));
     assert.equal(syntaxJournal.at(-1).status, 'syntax');
     assert.equal(syntaxJournal.at(-1).hash, hash(baseline));
-    const journal = records(await readFile(join(root, '.unminify', `${file}.jsonl`), 'utf8'));
+    const journal = records(await readFile(join(root, '.unminify', 'rename-bindings', 'files', `${file}.jsonl`), 'utf8'));
     assert.ok(journal.some(record => record.id && Object.keys(record.names).length > 0), `${file} persists resolved model names`);
     assert.equal(journal.at(-1).type, 'done');
     assert.equal(journal.at(-1).hash, hash(after));

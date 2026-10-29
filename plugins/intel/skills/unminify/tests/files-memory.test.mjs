@@ -52,7 +52,7 @@ test('hundreds of files bound planning through writeback while filling request s
   assert.equal(summary.exitCode, 0);
   assert.equal(summary.completed, 200);
   assert.equal(target.peak, 2);
-  const events = (await readFile(join(target.root, '.unminify/performance.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  const events = (await readFile(join(target.root, '.unminify/rename-bindings/performance.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
   const active = new Set(); let peak = 0;
   for (const event of events) {
     if (event.type === 'phase_start' && event.phase === 'selection_plan' && event.file) active.add(event.file);

@@ -49,7 +49,7 @@ test('all refreshes completed worker history when an unfinished selection expand
       } }; },
     });
     assert.equal(result.exitCode, 0);
-    const journal = readFileSync(join(root, '.unminify', 'chunks',
+    const journal = readFileSync(join(root, '.unminify', 'rename-bindings', 'chunks',
       createHash('sha256').update('shared').digest('hex') + '.jsonl'), 'utf8').trim().split('\\n').map(JSON.parse);
     assert.deepEqual(journal.findLast(record => record.type === 'chunk-selection').files, ['left.js', 'right.js']);
     const left = readFileSync(join(root, 'left.js'), 'utf8');

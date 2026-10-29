@@ -149,7 +149,7 @@ test('quota stop journals accepted batches from its own unfinished stage before 
   const first = await run(options, dependencies);
   assert.equal(first.exitCode, 1);
   assert.equal(requests, 3, 'quota stop must prevent queued model calls');
-  const journal = (await readFile(join(root, '.unminify/a.js.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  const journal = (await readFile(join(root, '.unminify/rename-bindings/files/a.js.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
   assert(journal.filter(record => record.id).length > 1, 'acceptance includes drained batches from the interrupted function stage');
   assert.equal(await readFile(join(root, 'a.js'), 'utf8'), source);
   stop = false;

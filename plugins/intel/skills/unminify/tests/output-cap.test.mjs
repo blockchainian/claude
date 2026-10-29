@@ -104,11 +104,11 @@ for (const mode of ['incomplete', 'invalid']) test(`an ${mode} reply leaves no p
   assert.equal(batch.keys.length, 1001);
   f.controls[mode === 'incomplete' ? 'failKey' : 'invalidKey'] = 'v1001';
   assert.equal((await f.run()).exitCode, 1);
-  const path = join(f.root, '.unminify/input.js.jsonl');
+  const path = join(f.root, '.unminify/rename-bindings/files/input.js.jsonl');
   const interrupted = await records(path);
   assert.equal(interrupted.length, 1, 'no child output is durable before all children validate');
   assert.equal(await readFile(join(f.root, 'input.js'), 'utf8'), source);
-  const attempts = await records(join(f.root, '.unminify/requests.jsonl'));
+  const attempts = await records(join(f.root, '.unminify/rename-bindings/requests.jsonl'));
   assert.deepEqual(attempts.map(row => [row.name_count, row.attempt]),
     [[1001, 1], [1001, 2], [1001, 3], [1001, 4]]);
   if (mode === 'incomplete') assert(attempts.every(row => row.failure.incomplete_reason === 'max_output_tokens'));
@@ -145,7 +145,7 @@ test('chunk program naming commits one complete reply after validation', async t
   await writeFile(chunks, JSON.stringify({ version: 1, chunks: [{ id: 'one', files: ['input.js', 'tail.js'] }] }));
   f.controls.failKey = 'v1001';
   assert.equal((await f.run({ chunks, maxInputTokens: 1000000 })).exitCode, 1);
-  const path = join(f.root, '.unminify/chunks', `${hash('one')}.jsonl`);
+  const path = join(f.root, '.unminify/rename-bindings/chunks', `${hash('one')}.jsonl`);
   assert.equal((await records(path)).filter(row => row.type === 'response' || row.type === 'chunk-batch').length, 0);
   assert.equal(await readFile(join(f.root, 'input.js'), 'utf8'), source);
   f.controls.failKey = null;

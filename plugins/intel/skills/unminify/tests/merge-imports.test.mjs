@@ -93,7 +93,7 @@ test('real CLI merges before naming, checkpoints and resumes chunks and standalo
       const first = execFileSync(process.execPath, args, { env, encoding: 'utf8' });
       assert.equal(JSON.parse(first.trim().split('\n').at(-1)).requests, 0);
       if (!chunked) {
-        const events = readFileSync(join(root, '.unminify/performance.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+        const events = readFileSync(join(root, '.unminify/rename-bindings/performance.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
         const started = new Set();
         for (const event of events) {
           if (event.type === 'file_start') started.add(event.file);
@@ -122,7 +122,7 @@ test('merge resumes a durable single-file intent and protects rename offsets', (
     const source = 'import {x as a} from "pkg"; import {x as b} from "pkg"; console.log(b);';
     writeFileSync(join(root, 'one.js'), source);
     const after = mergeExternalImports(new Map([['one.js', source]])).get('one.js');
-    const journal = openJournal(root, 'merge-imports/one.js', source, { version: 1 });
+    const journal = openJournal(root, 'one.js', source, { version: 1 }, 'restore-syntax/imports');
     journal.prepare(source, after, 'merge-imports');
     writeFileSync(join(root, 'one.js'), after);
     assert.equal(runMergeFile(root, 'one.js').status, 'merge-imports-skipped');

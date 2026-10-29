@@ -8,6 +8,8 @@
     "@babel/traverse": "7.28.5",
     "ajv": "8.20.0",
     "ignore": "7.0.13",
-    "js-tiktoken": "1.0.21"
+    "js-tiktoken": "1.0.21",
+    "ngraph.graph": "20.1.2",
+    "ngraph.leiden": "0.3.0"
   }
 }

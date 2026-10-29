@@ -1,6 +1,6 @@
 ---
 name: unminify
-description: Restore JavaScript syntax and rename minified identifiers with scope-safe rewrites.
+description: Organize JavaScript files by dependencies, restore syntax and rename minified identifiers with scope-safe rewrites.
 ---
 
 # Unminify JavaScript
@@ -24,6 +24,8 @@ is selected the same way. Check its Git status
 before rewriting so existing work is visible.
 
 ```bash
+node "$SKILL_DIR/scripts/cli.mjs" rename-files <path>... \
+  --concurrency 20 --max-input-tokens 100000
 node "$SKILL_DIR/scripts/cli.mjs" restore-syntax <path>...
 node "$SKILL_DIR/scripts/cli.mjs" rename-bindings <path>... \
   --concurrency 20 --max-input-tokens 100000 --min-symbol-length 4
@@ -36,11 +38,12 @@ parse time. The same pool reads and indexes repository fragment context in bound
 windows, returning only per-file binding summaries. The main thread merges summaries
 in file order within `selection_plan`. Git root and ignore rules are loaded once per run;
 chunk siblings are selected together with the same rules.
-All commands accept `--ignore <file>` and `--chunks <file>`. Only `rename-bindings` accepts
+All commands accept `--ignore <file>` and `--chunks <file>`. `rename-files` and `rename-bindings` accept
 `--concurrency` and `--max-input-tokens`; `--min-symbol-length` belongs to
 `rename-bindings` and `sync-imports`. Other options fail with `invalid option`. A missing
-or unknown command prints usage and exits nonzero. Run the three commands in order;
-each stage resumes independently. Modules may be processed in batches in either order.
+or unknown command prints usage and exits nonzero. Run the four commands in order. `rename-files` treats the supplied paths after ignores as
+the entire code set; it neither expands chunk siblings nor adds outside dependencies.
+The other three stages resume independently and may process modules in batches in either order.
 
 The model is fixed to `gpt-6-luna` with low reasoning effort. It reads the user's Codex login
 from `$CODEX_HOME/auth.json`, defaulting to `~/.codex/auth.json`. Run `codex login` if required.
@@ -50,7 +53,7 @@ Never print credentials.
 duplicate external imports, in every selected file and all selected chunk members.
 File syntax passes run in a worker pool sized by `os.availableParallelism()`. Chunk
 fragments run independently; import merging analyzes each whole chunk, with separate
-chunks running in parallel. The pre-naming syntax check uses the same pool. Workers
+chunks running in parallel. The `check-syntax` stage uses the same pool. Workers
 return source and edit counts; the main thread retains the existing checkpoints and
 atomic writes, preserving serial output bytes and interruption recovery.
 Only converted source ranges are replaced; surrounding
@@ -123,6 +126,52 @@ names retain their existing allocation order; unused enclosing or nested names d
 Canonically spaced aliases collapse to shorthand when the restored local equals the imported name; other
 spacing and comments are preserved. Public export names stay unchanged.
 
+## Rename files
+
+`rename-files` checkpoints six stages in `.unminify/rename-files/`: dependency graph,
+file summaries, recursive communities, directory names, file names and file moves.
+Only summary requests include source code. Later requests use summaries and directory paths.
+Summary tasks are greedily packed using the complete tokenized input and share
+`--concurrency` slots. Every accepted per-file result is synced immediately. The same Codex
+client, model and reasoning effort serve all naming requests.
+
+Webpack dependencies come from numeric calls through the wrapper factory's third parameter;
+ordinary dependencies come from relative imports and re-exports. Edges include only selected
+files. Seeded Leiden recursively partitions each induced graph. High incoming-degree outliers
+use the IQR rule; they form a separate recursive group only when removing them yields at least
+two communities with higher modularity. A graph with no further structure is one leaf directory.
+Directory counts and depth follow the graph without directory-tree limits.
+
+Directories receive names from the bottom up. Files receive names from their summaries and
+full directory paths. Names are lowercase kebab-case basenames; file extensions are preserved.
+Collisions receive one request containing occupied names, then numeric suffixes if necessary.
+The tree is placed under the selected files' common parent directory. Existing destination
+entries are reserved. After every name is durable, a checked transaction moves selected files,
+rewrites their relative imports and re-exports, and updates selected paths in `--chunks`.
+Relative references outside the selection retain their targets. Ignored files remain untouched.
+The final JSON summary includes `tree`, `files`, `directories`, `max_depth`, requests and tokens.
+
+Resume with the same paths, ignore rules, chunks and input-token budget. Saved stages and
+accepted model replies are reused. Source and manifest changes reject a pending plan;
+a durable move intent recovers interrupted writes without further model calls. The saved
+original paths remain valid resume arguments after files have moved.
+
+`rename-files` refuses to run if any later command directory exists. Later commands refuse
+an unfinished `rename-files` directory. Before writing logs, every command rejects legacy
+`.unminify/` layouts and asks for migration; it never moves old logs automatically.
+
+| Command | Logs and checkpoints under `.unminify/` |
+|---|---|
+| `rename-files` | `rename-files/`: stages, accepted replies, move plan, per-file move status, `requests.jsonl`, `performance.jsonl` |
+| `restore-syntax` | `restore-syntax/syntax/`, `restore-syntax/imports/`, `restore-syntax/performance.jsonl` |
+| `rename-bindings` | `rename-bindings/files/`, `rename-bindings/chunks/`, `rename-bindings/check-syntax/`, `rename-bindings/requests.jsonl`, `rename-bindings/performance.jsonl` |
+| `sync-imports` | `sync-imports/`, including chunk transactions and `performance.jsonl` |
+
+Legacy entries are root-level `syntax/`, `merge-imports/`, `chunks/`, `syntax-preflight/`,
+`imports/`, `requests.jsonl`, `performance.jsonl`, or ordinary file journals. Move these logs
+to the corresponding command directories before running a command. `check-syntax` timings
+use the phase name `check_syntax`.
+
 ## Explicit chunks
 
 Use `--chunks <manifest.json>` when files share one program scope without importing
@@ -151,7 +200,7 @@ node "$SKILL_DIR/scripts/cli.mjs" sync-imports <path>... --chunks <manifest.json
 ```
 
 Selecting one chunk member includes the entire chunk in syntax restoration and the
-pre-naming syntax check. Model naming targets only bindings declared in selected files,
+`check-syntax` stage. Model naming targets only bindings declared in selected files,
 including program and function bindings; sibling declarations receive no model names.
 References to selected program bindings follow their renamed declarations throughout
 nonignored siblings. Import following also updates relative imports when the exporting
@@ -186,8 +235,8 @@ that would capture a redirected reference freezes the entire group. Selection, s
 authorization, ignores and dynamic-scope restrictions still apply. Its dedicated guard
 checks every reference's import identity, first external-module load order and all other
 bindings, and permits only the planned source edits. Naming checks use the merged code
-as their baseline. Ordinary files have independent `.unminify/merge-imports/` checkpoints;
-chunk syntax and merges use independent group checkpoints in `.unminify/syntax/chunks/`.
+as their baseline. Ordinary files have independent `.unminify/restore-syntax/imports/` checkpoints;
+chunk syntax and merges use independent group checkpoints in `.unminify/restore-syntax/syntax/chunks/`.
 
 Each chunk stage writes its own checked group transaction. `restore-syntax` validates
 syntax and merges before committing the group. `rename-bindings` names program and
@@ -196,7 +245,7 @@ checked transaction. Chunk binding, global, export-interface and source-text che
 naming and import writes. A rejected stage leaves that stage's input intact. Each source
 fragment must be independently parseable; slices through a token or function body are rejected.
 
-Chunk journals live in `.unminify/chunks/`. They store accepted replies and durable
+Chunk journals live in `.unminify/rename-bindings/chunks/`. They store accepted replies and durable
 whole-chunk write intents, including rewritten source, to finish a partially written
 transaction without model requests. Recovery validates every member before writing any
 remaining member and runs before selection or syntax. Manifest membership, ignore
@@ -215,15 +264,15 @@ Read the target Git root's `.ignore`, or supply `--ignore <file>`. Rules use `.g
 syntax relative to the ignore file: directories, wildcards, `!` exceptions and whole-line
 `#` comments; do not use trailing comments. The plugin supplies no project-specific ignore list.
 
-Syntax checkpoints live separately in `.unminify/syntax/<relative-path>.syntax.jsonl`.
+Syntax checkpoints live separately in `.unminify/restore-syntax/syntax/<relative-path>.syntax.jsonl`.
 They record pipeline fingerprints and durable write intents, without rename offsets or
 model replies. Rerun `restore-syntax` to complete syntax before invoking `rename-bindings`.
 Existing rename journals retain ownership of their files and are resumed without
 rerunning syntax. An unfinished syntax checkpoint rejects changed source or pipeline options.
 
-Accepted replies are synced immediately to `.unminify/<relative-path>.jsonl` at the target
-Git root. `.unminify/requests.jsonl` appends each model or token-refresh HTTP attempt;
-`.unminify/performance.jsonl` appends run, file, phase and shared 429 pause boundaries.
+Accepted replies are synced immediately to `.unminify/rename-bindings/files/<relative-path>.jsonl` at the target
+Git root. `requests.jsonl` inside each model command directory appends each model or token-refresh HTTP attempt;
+`performance.jsonl` inside each command directory appends run, file, phase and shared 429 pause boundaries.
 Both use a run ID and epoch-millisecond timestamps. Attempts include queue/send/headers/end
 times, retry cause, in-flight and queued counts, file/batch IDs/name count/phase, body bytes and HTTP/2
 session ID (changes on reconnect), plus status, usage, `estimated_input_tokens` and safe rate headers. Credentials,
@@ -258,8 +307,9 @@ inclusive, so do not add them together. `written_at` is null when no write compl
 Analyze recorded logs without calling a model:
 
 ```bash
-node "$SKILL_DIR/scripts/perf.mjs" <target-repo> \
+node "$SKILL_DIR/scripts/perf.mjs" <target-repo> --command rename-bindings \
   --window-seconds 10 --slow-files 10
+# --command selects any of the four commands (default: rename-bindings).
 # Add --run-id <id> to select an earlier run; the default is the latest start.
 ```
 

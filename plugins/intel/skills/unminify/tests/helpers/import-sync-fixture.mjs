@@ -29,7 +29,7 @@ export async function importSyncSnapshot(root) {
     for (const entry of await readdir(path, { withFileTypes: true })) {
       const name = relative ? `${relative}/${entry.name}` : entry.name;
       if (entry.isDirectory()) await visit(join(path, entry.name), name);
-      else if (name !== 'performance.jsonl') journals.push([name, await readFile(join(path, entry.name), 'utf8')]);
+      else if (entry.name !== 'performance.jsonl') journals.push([name, await readFile(join(path, entry.name), 'utf8')]);
     }
   }
   await visit(join(root, '.unminify'));

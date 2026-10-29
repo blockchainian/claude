@@ -1,5 +1,5 @@
 import { timed, captureTimings } from './timing.mjs';
-import { runSyntaxPreflight } from './syntax-preflight.mjs';
+import { runCheckSyntax } from './check-syntax.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadChunks, createChunkIgnore } from './chunk-manifest.mjs';
@@ -33,14 +33,14 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
   const syntaxOptions = { manifest: manifest.fingerprint, ignored: [...ignored].sort(),
     syntax: syntaxFingerprint, mergeImports: importMergeVersion };
   if (settings.chunks && recover) {
-    recoverChunkJournals(root, syntaxOptions, 'syntax/chunks');
+    recoverChunkJournals(root, syntaxOptions, 'restore-syntax/syntax/chunks');
     recoverChunkJournals(root, settings.command === 'rename-bindings' || settings.command === 'all' ? id => {
       if (!manifest.chunks.some(chunk => chunk.id === id)) throw new Error(`chunk missing from manifest: ${id}`);
       return options;
     } : undefined);
-    recoverChunkJournals(root, undefined, 'imports/chunks');
+    recoverChunkJournals(root, undefined, 'sync-imports/chunks');
   }
-  const renamePath = chunk => join(root, '.unminify', 'chunks', `${hash(chunk.id)}.jsonl`);
+  const renamePath = chunk => join(root, '.unminify', 'rename-bindings', 'chunks', `${hash(chunk.id)}.jsonl`);
   const readSources = chunk => new Map(chunk.files.map(file => [file, readFileSync(join(root, file), 'utf8')]));
   async function restoreSources(inputs, fragmentContext, pool) {
     const baseline = new Map(inputs);
@@ -76,7 +76,7 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
     async syntaxPending({ fragmentContext, pool } = {}) {
       const pending = [];
       await settle(driver.jobs.map(async chunk => {
-        const result = await runSyntaxPreflight(root, {scope: chunk.id, files: chunk.files, chunks: [chunk], ignored,
+        const result = await runCheckSyntax(root, {scope: chunk.id, files: chunk.files, chunks: [chunk], ignored,
           fragmentContext, syntaxFingerprint, importMergeVersion}, async () => {
           const inputs = readSources(chunk), after = await restoreSources(inputs, fragmentContext, pool);
           return [...inputs].filter(([file, source]) => source !== after.get(file)).map(([file]) => file);
@@ -94,7 +94,7 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
           emit({ chunk: chunk.id, status: 'syntax-skipped' });
           return;
         }
-        const journal = openChunkJournal(root, chunk.id, inputs, syntaxOptions, 'syntax/chunks');
+        const journal = openChunkJournal(root, chunk.id, inputs, syntaxOptions, 'restore-syntax/syntax/chunks');
         if (journal.done) {
           if (journal.done.status === 'rejected') {
             rejected += chunk.files.filter(file => reporting.has(file)).length;
@@ -139,7 +139,7 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
           }
         } else {
           historyOptions = { manifest: manifest.fingerprint, ignored: [...ignored].sort(), chunkSiblings: true };
-          journal = openChunkJournal(root, chunk.id, inputs, historyOptions, 'imports/chunks');
+          journal = openChunkJournal(root, chunk.id, inputs, historyOptions, 'sync-imports/chunks');
           journal.begin(chunk.files.filter(file => selected.has(file)));
           if (!journal.done) journal.complete(inputs, 'imports');
         }
@@ -158,7 +158,7 @@ export async function createChunkRun(root, settings, ignores, { recover = true }
       completed.delete(chunk.id);
       const inputs = new Map(chunk.files.map(file => [file, readFileSync(join(root, file), 'utf8')]));
       for (const file of chunk.files) {
-        if (existsSync(join(root, '.unminify', `${file}.jsonl`))) throw new Error(`file rename journal already owns chunk member: ${file}`);
+        if (existsSync(join(root, '.unminify', 'rename-bindings', 'files', `${file}.jsonl`))) throw new Error(`file rename journal already owns chunk member: ${file}`);
         sources.set(file, inputs.get(file));
       }
       const journal = openChunkJournal(root, chunk.id, inputs, options);

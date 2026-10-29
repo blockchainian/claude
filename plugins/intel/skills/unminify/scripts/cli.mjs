@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { runChunkWorkers } from './chunk-workers.mjs';
-import { runSyntaxPreflight } from './syntax-preflight.mjs';
+import { runCheckSyntax } from './check-syntax.mjs';
+import { assertLogLayout } from './log-layout.mjs';
 import { syntaxFingerprint } from './syntax/stage.mjs';
 import { importMergeVersion } from './merge-imports.mjs';
 import { loadHistory, loadImportContext } from './history.mjs';
@@ -21,8 +22,9 @@ import { appendRecord, atomicWrite, openJournal } from './journal.mjs';
 
 const defaults = { concurrency: 20, maxInputTokens: 100000, minSymbolLength: 4 };
 const usageKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens'];
-const commands = ['restore-syntax', 'rename-bindings', 'sync-imports'];
+const commands = ['rename-files', 'restore-syntax', 'rename-bindings', 'sync-imports'];
 const help = [
+  'unminify rename-files <path>... [--ignore <file>] [--chunks <file>] [--concurrency 20] [--max-input-tokens 100000]',
   'unminify restore-syntax <path>... [--ignore <file>] [--chunks <file>]',
   'unminify rename-bindings <path>... [--ignore <file>] [--chunks <file>] [--min-symbol-length 4] [--concurrency 20] [--max-input-tokens 100000]',
   'unminify sync-imports <path>... [--ignore <file>] [--chunks <file>] [--min-symbol-length 4]',
@@ -40,7 +42,7 @@ export function parseArgs(args) {
     if (arg === '--help' || arg === '-h') return { help: true };
     if (arg.startsWith('-')) {
       const key = flags[arg], value = args[++index];
-      if (!key || command === 'restore-syntax' && !['chunks', 'ignoreFile'].includes(key)
+      if (!key || command === 'rename-files' && key === 'minSymbolLength' || command === 'restore-syntax' && !['chunks', 'ignoreFile'].includes(key)
         || command === 'sync-imports' && ['concurrency', 'maxInputTokens'].includes(key)
         || !value || value.startsWith('--')) throw new Error(`invalid option: ${arg}\n${help}`);
       if (key === 'ignoreFile' || key === 'chunks') options[key] = resolve(value);
@@ -74,9 +76,14 @@ export async function run(options, dependencies) {
   }
   const startedAt = Date.now(), runId = randomUUID();
   const paths = settings.paths.map(target => resolve(target));
-  const firstDir = statSync(paths[0]).isDirectory() ? paths[0] : dirname(paths[0]);
+  let probe = paths[0];
+  while (!existsSync(probe)) probe = dirname(probe);
+  const firstDir = statSync(probe).isDirectory() ? probe : dirname(probe);
   const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: firstDir, encoding: 'utf8' }).trim();
-  const performancePath = join(root, '.unminify', 'performance.jsonl');
+  assertLogLayout(root, settings.command);
+  if (settings.command === 'rename-files') return (await import('./rename-files.mjs')).runRenameFiles(root, settings, dependencies);
+  const logCommand = settings.command === 'all' ? 'rename-bindings' : settings.command;
+  const performancePath = join(root, '.unminify', logCommand, 'performance.jsonl');
   const event = record => appendRecord(performancePath, { ...record, run_id: runId });
   event({ type: 'run_start', at: startedAt });
   const phases = {}, requests = [], pauses = [], fileMetrics = new Map();
@@ -133,7 +140,7 @@ export async function run(options, dependencies) {
     const log = record => {
       record = { ...record, run_id: runId };
       requests.push(record);
-      appendRecord(join(root, '.unminify', 'requests.jsonl'), record);
+      appendRecord(join(root, '.unminify', logCommand, 'requests.jsonl'), record);
       if (record.kind !== 'model') return;
       summary.requests++;
       for (const key of usageKeys) summary.tokens[key] += record.usage?.[key] ?? 0;
@@ -156,7 +163,7 @@ export async function run(options, dependencies) {
     if (restoring && api.runSyntaxFile) {
       const records = await syntaxFiles(async file => {
         // Merge checkpoints own the text after syntax, including the write/complete window.
-        if (existsSync(join(root, '.unminify', 'merge-imports', `${file}.jsonl`))) {
+        if (existsSync(join(root, '.unminify', 'restore-syntax', 'imports', `${file}.jsonl`))) {
           return { file, status: 'syntax-skipped' };
         }
         const endSyntax = phase('syntax', file);
@@ -178,11 +185,11 @@ export async function run(options, dependencies) {
       }
     }
     if (settings.command === 'rename-bindings') {
-      const endPreflight = phase('syntax_preflight');
+      const endPreflight = phase('check_syntax');
       const [chunkPending, ordinaryPending] = await Promise.all([
         chunkDriver.syntaxPending({ fragmentContext, pool: syntaxPool }),
         syntaxFiles(async file => {
-          const result = await runSyntaxPreflight(root, {scope: file, files: [file], fragmentContext,
+          const result = await runCheckSyntax(root, {scope: file, files: [file], fragmentContext,
             syntaxFingerprint, importMergeVersion}, async () => {
             const source = readFileSync(join(root, file), 'utf8');
             const restored = await syntaxPool.run({ kind: 'transform', source,
@@ -382,8 +389,8 @@ export async function run(options, dependencies) {
           const source = readFileSync(join(root, file), 'utf8');
           sources.set(file, source);
           // Pending naming journals keep ownership of their offsets and source text.
-          if (existsSync(join(root, '.unminify', `${file}.jsonl`))) continue;
-          const journal = openJournal(root, join('imports', file), source, { minSymbolLength: settings.minSymbolLength });
+          if (existsSync(join(root, '.unminify', 'rename-bindings', 'files', `${file}.jsonl`))) continue;
+          const journal = openJournal(root, file, source, { minSymbolLength: settings.minSymbolLength }, 'sync-imports');
           if (!journal.done) journal.complete(source, 'imports');
           journals.set(file, journal);
         }
@@ -459,7 +466,7 @@ export async function run(options, dependencies) {
       summary.tokens.total_tokens = summary.tokens.input_tokens + summary.tokens.output_tokens;
       if (!Object.keys(summary.quota).length) summary.quota = "没测到";
       summary.total_ms = endedAt - startedAt;
-      summary.phase_ms = Object.fromEntries(['selection_plan', ...(phases.syntax ? ['syntax'] : []), ...(phases.syntax_preflight ? ['syntax_preflight'] : []), ...(phases.merge_imports ? ['merge_imports'] : []), 'model', 'followImports', 'check_write']
+      summary.phase_ms = Object.fromEntries(['selection_plan', ...(phases.syntax ? ['syntax'] : []), ...(phases.check_syntax ? ['check_syntax'] : []), ...(phases.merge_imports ? ['merge_imports'] : []), 'model', 'followImports', 'check_write']
         .map(key => [key, intervalMs(phases[key] ?? [])]));
       Object.assign(summary, requestStats(requests, pauses, summary.total_ms));
       event({ type: 'run_end', at: endedAt, total_ms: summary.total_ms });

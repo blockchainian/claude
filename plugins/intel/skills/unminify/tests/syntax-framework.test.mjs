@@ -62,11 +62,11 @@ for (const written of [false,true]) test(`syntax checkpoint recovers after prepa
   const file='source.js',before='const visibleName=!0;',after='const visibleName=true;';
   writeFileSync(join(root,file),before);
   runSyntaxFile(root,file);
-  const checkpoint=join(root,'.unminify','syntax',`${file}.syntax.jsonl`);
+  const checkpoint=join(root,'.unminify', 'restore-syntax', 'syntax',`${file}.syntax.jsonl`);
   const header=JSON.parse(readFileSync(checkpoint,'utf8').split('\n')[0]);
   writeFileSync(checkpoint,JSON.stringify(header)+'\n');
   writeFileSync(join(root,file),before);
-  const journal=openJournal(root,join('syntax',`${file}.syntax`),before,JSON.parse(header.options));
+  const journal=openJournal(root,`${file}.syntax`,before,JSON.parse(header.options),'restore-syntax/syntax');
   journal.prepare(before,after,'syntax');
   if(written) atomicWrite(join(root,file),after);
   runSyntaxFile(root,file);
@@ -89,7 +89,7 @@ test('syntax resume repairs a torn first checkpoint record',t=>{
   writeFileSync(join(root,'source.js'),'const visibleName=!0;');
   runSyntaxFile(root,'source.js');
   writeFileSync(join(root,'source.js'),'const visibleName=!0;');
-  writeFileSync(join(root,'.unminify','syntax','source.js.syntax.jsonl'),'{"type":"source"');
+  writeFileSync(join(root,'.unminify', 'restore-syntax', 'syntax','source.js.syntax.jsonl'),'{"type":"source"');
   assert.equal(runSyntaxFile(root,'source.js').status,'syntax');
   assert.equal(readFileSync(join(root,'source.js'),'utf8'),'const visibleName=true;');
 });

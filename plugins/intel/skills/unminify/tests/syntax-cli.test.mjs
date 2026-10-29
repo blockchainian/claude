@@ -20,8 +20,8 @@ test('real CLI finishes all syntax writes before rename planning and resumes off
   assert(events.findIndex(e=>e.status==='syntax'&&e.file==='two.js') < events.findIndex(e=>e.status==='interrupted'));
   for(const file of ['one.js','two.js']) {
     assert.equal(readFileSync(join(root,file),'utf8'),'export const a = true;');
-    const checkpoint=JSON.parse(readFileSync(join(root,'.unminify',`${file}.jsonl`),'utf8').split('\n')[0]);
-    assert(existsSync(join(root,'.unminify','syntax',`${file}.syntax.jsonl`)));
+    const checkpoint=JSON.parse(readFileSync(join(root,'.unminify', 'rename-bindings', 'files', `${file}.jsonl`),'utf8').split('\n')[0]);
+    assert(existsSync(join(root,'.unminify', 'restore-syntax', 'syntax',`${file}.syntax.jsonl`)));
     assert(!checkpoint.options.includes('pipeline'));
   }
   const second=run();
@@ -39,7 +39,7 @@ test('real CLI completes syntax, strict rename checks, and a completed resume wi
   assert.equal(first.status,0,first.stderr);
   assert.equal(readFileSync(join(root,'module.js'),'utf8'),'export const longFlag = false; export const absentValue = undefined;');
   assert.match(first.stdout,/"requests":0/);
-  assert.match(readFileSync(join(root,'.unminify','module.js.jsonl'),'utf8'),/"status":"renamed"/);
+  assert.match(readFileSync(join(root,'.unminify', 'rename-bindings', 'files', 'module.js.jsonl'),'utf8'),/"status":"renamed"/);
   const resumed=execute();
   assert.equal(resumed.status,0,resumed.stderr);
   assert.match(resumed.stdout,/syntax-skipped/);

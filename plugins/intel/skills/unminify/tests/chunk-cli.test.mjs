@@ -219,7 +219,7 @@ test('CLI completes a real prepared half-write before rebuilding chunk plans', a
   assert.equal((await f.run()).exitCode, 0);
   const expected = new Map(await Promise.all(Object.keys(slices).map(async file => [file, await f.read(file)])));
   const { readdir } = await import('node:fs/promises');
-  const directory = join(f.root, '.unminify/chunks');
+  const directory = join(f.root, '.unminify/rename-bindings/chunks');
   const [name] = await readdir(directory), path = join(directory, name);
   const records = (await readFile(path, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   const prepare = records.findLastIndex(record => record.type === 'chunk-prepare');
