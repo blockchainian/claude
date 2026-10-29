@@ -12670,7 +12670,7 @@ fn archive_dialog_linked_worktree_options_and_controls() {
     view.rows[view.selected].cwd = linked.join("sub");
     assert_eq!(key(&mut view, KeyCode::Char('a')), None);
     let dialog = view.confirm_dialog.as_ref().expect("archive confirmation");
-    assert_eq!(dialog.options(), 2);
+    assert_eq!(dialog.options(), 3);
     assert_eq!(dialog.selected, 0);
     let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 10));
     view.render_confirm_dialog(dialog, buffer.area, &mut buffer);
@@ -12692,21 +12692,18 @@ fn archive_dialog_linked_worktree_options_and_controls() {
         std::fs::write(&path, &snapshot).unwrap();
     }
     assert_eq!(snapshot, std::fs::read_to_string(path).unwrap());
+    for cancel in [KeyCode::Enter, KeyCode::Esc, KeyCode::Char('1')] {
+        assert_eq!(key(&mut view, cancel), None);
+        assert!(view.confirm_dialog.is_none());
+        key(&mut view, KeyCode::Char('a'));
+    }
     assert_eq!(
-        key(&mut view, KeyCode::Enter),
-        Some(Action::Archive(session_key("42")))
-    );
-    key(&mut view, KeyCode::Char('a'));
-    assert_eq!(key(&mut view, KeyCode::Esc), None);
-    assert!(view.confirm_dialog.is_none());
-    key(&mut view, KeyCode::Char('a'));
-    assert_eq!(
-        key(&mut view, KeyCode::Char('1')),
+        key(&mut view, KeyCode::Char('2')),
         Some(Action::Archive(session_key("42")))
     );
     key(&mut view, KeyCode::Char('a'));
     screen(&view, 120, 48);
-    let rect = view.viewport.borrow().confirm_options[0].0;
+    let rect = view.viewport.borrow().confirm_options[1].0;
     assert_eq!(
         click_mouse(
             &mut view,
@@ -12736,14 +12733,14 @@ fn archive_without_worktree_is_immediate() {
 mod repository_group_tests;
 
 #[test]
-fn archive_dialog_second_option_includes_worktree_path() {
+fn archive_dialog_third_option_includes_worktree_path() {
     let (_repo, linked) = crate::tasks::tests::worktree();
     let mut view = lifecycle_fixture();
     view.rows[view.selected].cwd = linked.clone();
-    for code in [KeyCode::Char('2'), KeyCode::Enter] {
+    for code in [KeyCode::Char('3'), KeyCode::Enter] {
         assert_eq!(key(&mut view, KeyCode::Char('a')), None);
         if code == KeyCode::Enter {
-            key(&mut view, KeyCode::Down);
+            key(&mut view, KeyCode::End);
         }
         assert_eq!(
             key(&mut view, code),
@@ -12767,7 +12764,7 @@ fn worktree_dialog_short_directory_names_are_complete() {
             let dialog = ConfirmDialog {
                 action,
                 title: "Current task".into(),
-                selected: if archive { 1 } else { 2 },
+                selected: 2,
                 worktree: Some(PathBuf::from("/repository/worktrees").join(name)),
             };
             let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 10));
@@ -12789,7 +12786,7 @@ fn worktree_dialog_short_directory_names_are_complete() {
                 .collect::<Vec<_>>()
                 .join("\n");
             let label = if archive {
-                "Archive and delete worktree"
+                "Archive task and child agents, delete worktree"
             } else {
                 "Permanently delete task, child agents and worktree"
             };

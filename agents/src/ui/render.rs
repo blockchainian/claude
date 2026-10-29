@@ -843,7 +843,7 @@ impl View {
             ConfirmAction::Archive(_) => (
                 format!("Archive “{}”?", dialog.title),
                 "This stops any running work in this task and its child agents, then archives them.".to_owned(),
-                "Archive",
+                "Archive task and child agents",
             ),
             ConfirmAction::Delete(id) => {
                 let title = format!("Permanently delete “{}”?", dialog.title);
@@ -887,18 +887,15 @@ impl View {
                 .expect("worktree deletion option has a directory name");
             format!("{label} ({})", name.to_string_lossy())
         };
-        let mut options = if matches!(dialog.action, ConfirmAction::Archive(_)) {
-            vec![
-                confirm_label.to_owned(),
-                worktree_option("Archive and delete worktree"),
-            ]
-        } else {
-            vec!["Cancel".to_owned(), confirm_label.to_owned()]
-        };
-        if matches!(dialog.action, ConfirmAction::Delete(_)) && dialog.worktree.is_some() {
-            options.push(worktree_option(
+        let mut options = vec!["Cancel".to_owned(), confirm_label.to_owned()];
+        match dialog.action {
+            ConfirmAction::Archive(_) => options.push(worktree_option(
+                "Archive task and child agents, delete worktree",
+            )),
+            ConfirmAction::Delete(_) if dialog.worktree.is_some() => options.push(worktree_option(
                 "Permanently delete task, child agents and worktree",
-            ));
+            )),
+            _ => {}
         }
         for (index, label) in options.iter().enumerate() {
             let selected = dialog.selected == index;

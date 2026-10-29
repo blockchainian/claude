@@ -1,9 +1,9 @@
-
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ Archive “Current task”?                                                      │
 │ This stops any running work in this task and its child agents, then archives │
 │ them.                                                                        │
 │                                                                              │
-│ ❯ 1. Archive                                                                 │
-│   2. Archive and delete worktree (fix-claude-session-input)                  │
+│ ❯ 1. Cancel                                                                  │
+│   2. Archive task and child agents                                           │
+│   3. Archive task and child agents, delete worktree (fix-claude-session-inp… │
 └──────────────────────────────────────────────────────────────────────────────┘
