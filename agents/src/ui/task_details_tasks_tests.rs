@@ -39,10 +39,9 @@ fn tasks_section_orders_filters_counts_and_reuses_status_styles() {
     let view = tasks_view();
     let (buf, rows) = render(&view, 40, 40);
     let find = |s: &str| rows.iter().position(|line| line.contains(s)).unwrap();
-    assert!(find("Prompt") < find("Tasks"));
-    assert!(find("Update") < find("Tasks"));
-    assert!(find("Update") < find("Prompt"));
-    assert!(find("Needs input") < find("Tasks"));
+    assert!(find("Tasks") < find("Prompt"));
+    assert!(find("Prompt") < find("Update"));
+    assert!(find("Update") < find("Needs input"));
     assert!(!rows.iter().any(|row| row.trim() == "Project"));
     assert_eq!(rows[find("Tasks")].find("Tasks"), Some(17));
     assert!(rows[find("Tasks")].trim_end().ends_with("2/4"));
@@ -65,9 +64,9 @@ fn tasks_section_orders_filters_counts_and_reuses_status_styles() {
         assert_eq!(buf[(12, y as u16)].symbol(), dot.content);
         assert_eq!(buf[(12, y as u16)].fg, dot.style.fg.unwrap());
     }
-    // The tasks section sits on the panel's bottom row.
-    assert_eq!(first + 3, 39);
-    assert!(rows[find("Needs input") + 3].trim().is_empty());
+    // The needs input section sits on the panel's bottom row.
+    assert_eq!(find("Waiting for your response."), 39);
+    assert!(rows[first + 4].trim().is_empty());
 }
 
 #[test]
@@ -160,13 +159,13 @@ fn tasks_long_list_uses_task_details_scroll_and_keeps_other_sections() {
     );
     assert!(after.iter().any(|row| row.contains("Task row 2")));
     assert!(before.iter().any(|row| row.trim() == "Prompt"));
-    assert_eq!(view.viewport.borrow().task_details_scroll.reveal[0], 0);
-    assert_eq!(view.viewport.borrow().task_details_scroll.reveal[3], 1);
-    assert_eq!(before[0].trim(), "Update");
-    assert_eq!(after[0].trim(), "Task update");
-    for label in ["Prompt", "Needs input"] {
+    assert_eq!(view.viewport.borrow().task_details_scroll.reveal[0], 1);
+    assert_eq!(view.viewport.borrow().task_details_scroll.reveal[2], 0);
+    assert!(before[0].trim().starts_with("Tasks"));
+    assert_eq!(after[0], before[1]);
+    for label in ["Prompt", "Update", "Needs input"] {
         let position = |rows: &[String]| rows.iter().position(|row| row.trim() == label).unwrap();
-        assert_eq!(position(&before), position(&after) + 1);
+        assert_eq!(position(&before), position(&after));
     }
     view.scroll_content_row(false, false, y.saturating_sub(1));
     assert_eq!(render(&view, 40, 24).1, before);

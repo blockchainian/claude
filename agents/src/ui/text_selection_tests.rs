@@ -400,7 +400,8 @@ fn drag_between_bodies_copies_displayed_lines_and_joins_soft_wraps() {
         .into_iter()
         .find(|event| event.kind == crate::event::Kind::User)
         .unwrap();
-    view.rows[0].last_message = Some(event.body);
+    let row = &mut view.rows[0];
+    row.last_message = Some(std::mem::replace(&mut row.prompt, event.body));
     let buf = task_details(&view);
     let start = position(&buf, "⏺ Ran");
     let end = position(&buf, "对，");
@@ -410,7 +411,7 @@ fn drag_between_bodies_copies_displayed_lines_and_joins_soft_wraps() {
         start.1,
     ));
     view.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), end.0, end.1));
-    let message = view.rows[0].last_message.as_ref().unwrap();
+    let message = &view.rows[0].prompt;
     let expected = format!(
         "{}\n{}\n",
         [
