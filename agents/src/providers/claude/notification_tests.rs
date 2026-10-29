@@ -264,6 +264,16 @@ fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
 }
 
 #[test]
+fn goal_check_in_hides_output() {
+    let record: Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/claude-goal-check-in.jsonl"
+    ))
+    .unwrap();
+    let events = events_from(vec![record]);
+    assert!(events[0].calls[0].hide_output);
+}
+
+#[test]
 fn goal_check_in_shows_its_reminder_as_input() {
     let record: Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/claude-goal-check-in.jsonl"
