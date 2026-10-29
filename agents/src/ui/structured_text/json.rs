@@ -74,8 +74,7 @@ impl Format for Json {
 
     fn parse(&self, source: &str) -> Option<Box<dyn Document>> {
         let value: Value = serde_json::from_str(source).ok()?;
-        matches!(value, Value::Object(_) | Value::Array(_))
-            .then(|| Box::new(JsonDocument(value)) as Box<dyn Document>)
+        Some(Box::new(JsonDocument(value)))
     }
 }
 

@@ -2077,6 +2077,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn chrome_numeric_result_is_a_structured_document() {
+        let transcript = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            transcript.path(),
+            include_str!("../../tests/fixtures/claude-chrome-number-result.jsonl"),
+        )
+        .unwrap();
+        let events =
+            crate::providers::claude::event_reader::tail(transcript.path(), usize::MAX).unwrap();
+        let [event] = events.as_slice() else {
+            panic!("expected one tool event");
+        };
+        let [section @ Section::Structured { text, .. }] =
+            event.calls[0].output.as_ref().unwrap().as_slice()
+        else {
+            panic!("expected structured numeric output");
+        };
+        assert_eq!(text, "588");
+        let mut parts = Vec::new();
+        push_section(&mut parts, section, Style::default(), true);
+        assert_eq!(parts[0].source, "588");
+        assert!(matches!(parts[0].body, Body::Structured(_)));
+    }
+
     fn manager_reply_event() -> Event {
         let timestamps: Vec<serde_json::Value> =
             include_str!("../../tests/fixtures/claude-chrome-javascript.jsonl")
