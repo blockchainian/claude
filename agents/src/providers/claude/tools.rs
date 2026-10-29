@@ -236,7 +236,10 @@ fn notification_input(data: &ToolData<'_>) -> Option<Vec<Section>> {
 
 fn notification_output(data: &ToolData<'_>) -> Option<Body> {
     let content = data.input.as_str()?;
-    let path = unescape_xml(notification_field(content, "output-file")?);
+    let Some(path) = notification_field(content, "output-file") else {
+        return Some(Body::Hidden);
+    };
+    let path = unescape_xml(path);
     Some(Body::Sections(vec![Section::OutputFile {
         provider: crate::providers::ProviderId::Claude,
         path: path.into(),
