@@ -1,0 +1,2 @@
+{"type": "assistant", "timestamp": "2026-10-29T17:46:03.693Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "tool-fixture", "name": "mcp__claude-in-chrome__javascript_tool", "input": {"action": "javascript_exec"}}]}}
+{"type": "user", "timestamp": "2026-10-29T17:46:05.578Z", "message": {"role": "user", "content": [{"tool_use_id": "tool-fixture", "type": "tool_result", "content": [{"type": "text", "text": "588"}]}]}}
