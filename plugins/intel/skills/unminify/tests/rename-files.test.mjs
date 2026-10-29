@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runRenameFiles } from '../scripts/rename-files.mjs';
-import { readRecords } from '../scripts/journal.mjs';
+import { appendRecord, readRecords } from '../scripts/journal.mjs';
+import { executeMoves } from '../scripts/file-moves.mjs';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'unminify-file-pipeline-')));
@@ -40,6 +41,8 @@ test('selection persists a real bounded graph before an oversized summary fails 
   assert.match(result.reason, /cannot fit.*token budget/i);
   assert.equal(result.files, 2);
   assert.equal(result.requests, 0);
+  assert.equal(result.tokens.total_tokens, 0);
+  assert.equal(result.quota, '没测到');
   const snapshot = stages(root).find(record => record.stage === 'graph').value;
   assert.deepEqual(Object.keys(snapshot.sources).sort(), ['src/120048.js', 'src/718895.js']);
   assert.deepEqual(snapshot.graph.edges, [{ source: 'src/120048.js', target: 'src/718895.js' }]);
@@ -134,5 +137,39 @@ test('resuming rejects changed source before consuming saved summaries', async t
   const { result } = await run(root);
   assert.equal(result.exitCode, 1);
   assert.match(result.reason, /source changed/i);
+  assert.equal(result.requests, 0);
+});
+
+test('a saved completed move checkpoint still rejects a missing destination before continuing', async t => {
+  const root = fixture(t);
+  await run(root);
+  const snapshot = stages(root).find(record => record.stage === 'graph').value;
+  const moves = Object.entries(snapshot.sources).map(([from, source]) => ({
+    from, to: from.replace('src/', 'moved/'), source, imports: [],
+  }));
+  const completed = await executeMoves(root, { moves });
+  appendRecord(join(root, '.unminify', 'rename-files', 'stages.jsonl'), { stage: 'moves', value: completed });
+  rmSync(join(root, moves[0].to));
+  const { result } = await run(root);
+  assert.equal(result.exitCode, 1);
+  assert.match(result.reason, /source changed/i);
+  assert.equal(result.requests, 0);
+  assert(!existsSync(join(root, '.unminify', 'rename-files', 'complete.json')));
+});
+
+test('directory traversal does not follow an ignored symlink into an unselected directory', async t => {
+  const root = fixture(t);
+  mkdirSync(join(root, 'lib'));
+  copyFileSync(join(root, 'src', '718895.js'), join(root, 'lib', '718895.js'));
+  rmSync(join(root, 'src', '718895.js'));
+  rmSync(join(root, 'src', '549213.js'));
+  symlinkSync('../lib/718895.js', join(root, 'src', 'ignored.js'));
+  writeFileSync(join(root, '.ignore'), 'src/ignored.js\n');
+  const { result } = await run(root);
+  assert.match(result.reason, /cannot fit.*token budget/i);
+  assert.equal(result.files, 1);
+  const snapshot = stages(root).find(record => record.stage === 'graph').value;
+  assert.deepEqual(Object.keys(snapshot.sources), ['src/120048.js']);
+  assert.deepEqual(snapshot.graph.edges, []);
   assert.equal(result.requests, 0);
 });

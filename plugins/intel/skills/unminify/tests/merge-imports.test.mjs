@@ -122,7 +122,7 @@ test('merge resumes a durable single-file intent and protects rename offsets', (
     const source = 'import {x as a} from "pkg"; import {x as b} from "pkg"; console.log(b);';
     writeFileSync(join(root, 'one.js'), source);
     const after = mergeExternalImports(new Map([['one.js', source]])).get('one.js');
-    const journal = openJournal(root, 'merge-imports/one.js', source, { version: 1 });
+    const journal = openJournal(root, 'one.js', source, { version: 1 }, 'restore-syntax/imports');
     journal.prepare(source, after, 'merge-imports');
     writeFileSync(join(root, 'one.js'), after);
     assert.equal(runMergeFile(root, 'one.js').status, 'merge-imports-skipped');

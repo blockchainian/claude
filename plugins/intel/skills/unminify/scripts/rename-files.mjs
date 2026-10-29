@@ -97,7 +97,9 @@ export async function runRenameFiles(root, options, dependencies) {
         if (visited.has(file) || ignores(statSync(file).isDirectory() ? file + '/' : file)) return;
         visited.add(file);
         if (statSync(file).isDirectory()) {
-          for (const entry of readdirSync(file).sort()) if (!['.git', '.unminify', 'node_modules'].includes(entry)) walk(join(file, entry));
+          for (const entry of readdirSync(file, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+            if (!['.git', '.unminify', 'node_modules'].includes(entry.name) && (entry.isFile() || entry.isDirectory())) walk(join(file, entry.name));
+          }
         } else if (/\.m?js$/.test(file)) sources.set(local, readFileSync(file, 'utf8'));
       }
       options.paths.forEach(walk);
@@ -114,6 +116,7 @@ export async function runRenameFiles(root, options, dependencies) {
         if (!existsSync(join(root, file)) || hash(readFileSync(join(root, file))) !== hash(source)) throw new Error(`source changed: ${file}`);
       }
     }
+    if (saved.has('moves')) await executeMoves(root, { journalDir: directory });
     summary.files = Object.keys(snapshot.sources).length;
     const summaries = await stage('summaries', () => ask('summaries', Object.entries(snapshot.sources)
       .map(([file, text], index) => ({ id: `summary-${index}`, file, text }))));
@@ -191,6 +194,8 @@ export async function runRenameFiles(root, options, dependencies) {
     emit({ status: 'interrupted', reason: error.message }); return summary;
   } finally {
     await client?.close();
+    summary.tokens.total_tokens = summary.tokens.input_tokens + summary.tokens.output_tokens;
+    if (!Object.keys(summary.quota).length) summary.quota = '没测到';
     summary.total_ms = Date.now() - startedAt; summary.phase_ms = phases;
     Object.assign(summary, requestStats(attempts, pauses, summary.total_ms));
     event({ type: 'run_end', at: Date.now(), total_ms: summary.total_ms }); event({ ...summary, at: Date.now() }); emit(summary);
