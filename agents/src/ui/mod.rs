@@ -246,12 +246,12 @@ struct ConfirmDialog {
 
 impl ConfirmDialog {
     fn cancels(&self, selected: usize) -> bool {
-        selected == 0 && !matches!(self.action, ConfirmAction::Archive(_))
+        selected == 0
     }
 
     fn options(&self) -> usize {
         match self.action {
-            ConfirmAction::Delete(_) if self.worktree.is_some() => 3,
+            ConfirmAction::Archive(_) | ConfirmAction::Delete(_) if self.worktree.is_some() => 3,
             _ => 2,
         }
     }

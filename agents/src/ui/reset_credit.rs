@@ -137,12 +137,12 @@ impl View {
 
     pub(super) fn accept_confirmation(&mut self, dialog: ConfirmDialog) -> Option<Action> {
         match dialog.action {
-            ConfirmAction::Archive(id) => Some(if dialog.selected == 1 {
+            ConfirmAction::Archive(id) => Some(if dialog.selected == 2 {
                 Action::ArchiveWorktree {
                     id,
                     path: dialog
                         .worktree
-                        .expect("archive second option has a linked worktree"),
+                        .expect("archive third option has a linked worktree"),
                 }
             } else {
                 Action::Archive(id)
