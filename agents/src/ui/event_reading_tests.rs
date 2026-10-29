@@ -1446,9 +1446,14 @@ fn codex_perspective_list_snapshot() {
 fn background_notification_titles_show_only_exit_numbers_on_the_left() {
     let fixture = include_str!("../../tests/fixtures/claude-background-notifications.jsonl");
     let events = events(fixture);
-    for (event, code) in events
-        .iter()
-        .zip([None, Some(1), Some(-1), Some(144), None, None])
+    for (event, (title, code)) in events.iter().zip([
+        ("睡12秒再输出 ✓", None),
+        ("给 a16z 视频改名", Some(1)),
+        ("等右键改动", Some(-1)),
+        ("三个配置依次快速启动", Some(144)),
+        ("Sleep 600 seconds in background killed", None),
+        ("mkdir, cd, npm {init, i}, tail ✓", None),
+    ])
     {
         let detail =
             super::super::tool_detail::event_detail_content(event, String::new(), Style::new());
@@ -1457,7 +1462,7 @@ fn background_notification_titles_show_only_exit_numbers_on_the_left() {
             code.map(|code| code.to_string())
         );
         assert_eq!(detail.sections[0].title.exit_code, code);
-        assert_eq!(detail.sections[0].title.title, event.body);
+        assert_eq!(detail.sections[0].title.title, title);
         let line = super::body_line(event, 300, Path::new("/workspace"));
         assert_eq!(line.to_string(), event.body);
         if let Some(code) = code {

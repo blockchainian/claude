@@ -211,7 +211,13 @@ fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
         assert_eq!(event.body, title);
         let call = &event.calls[0];
         assert_eq!(call.summary, title);
-        assert_eq!(call.title, title);
+        assert_eq!(
+            call.title,
+            match code {
+                Some(code) if code != 0 => title.rsplit_once(" · ").unwrap().0,
+                _ => title,
+            }
+        );
         assert_eq!(call.exit_code, code);
         assert_eq!(event.raw_text().unwrap(), line);
     }
@@ -255,4 +261,36 @@ fn background_notifications_shorten_only_the_display_and_keep_raw_records() {
         assert_eq!(event.calls[0].summary, summary);
         assert_eq!(event.calls[0].exit_code, None);
     }
+}
+
+#[test]
+fn goal_check_in_shows_its_reminder_as_input() {
+    let record: Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/claude-goal-check-in.jsonl"
+    ))
+    .unwrap();
+    let content = record["content"].as_str().unwrap();
+    let reminder = content
+        .split_once("<system-reminder>")
+        .unwrap()
+        .1
+        .split_once("</system-reminder>")
+        .unwrap()
+        .0
+        .trim()
+        .replace("&amp;", "&");
+    assert!(reminder.contains("&&"));
+    let events = events_from(vec![record]);
+    let call = &events[0].calls[0];
+    assert_eq!(call.title, "Goal check-in: background work still running");
+    assert_eq!(call.summary, call.title);
+    assert_eq!(
+        call.input,
+        vec![Section::Text {
+            label: "input".into(),
+            text: reminder,
+        }]
+    );
+    assert!(call.output.is_none());
+    assert!(call.show_event_detail);
 }
