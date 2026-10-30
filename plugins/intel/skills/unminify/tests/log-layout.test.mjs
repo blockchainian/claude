@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { assertLogLayout } from '../scripts/log-layout.mjs';
 import { openJournal } from '../scripts/journal.mjs';
 import { journalHistory } from '../scripts/history.mjs';
 import { parseArgs, report } from '../scripts/perf.mjs';
@@ -25,7 +26,7 @@ test('ordinary naming journals live under their command and history excludes oth
 test('performance reports select command directories independently', t => {
   const root = workspace(t);
   execFileSync('git', ['init', '--initial-branch=main', root], { stdio: 'ignore' });
-  for (const command of ['restore-syntax', 'rename-bindings', 'rename-files', 'sync-imports']) {
+  for (const command of ['restore-syntax', 'rename-bindings', 'sync-imports']) {
     const directory = join(root, '.unminify', command);
     mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, 'performance.jsonl'), JSON.stringify({ type: 'run_start', at: 10, run_id: command }) + '\n');
@@ -34,3 +35,14 @@ test('performance reports select command directories independently', t => {
   assert.equal(parseArgs([root, '--command', 'sync-imports']).command, 'sync-imports');
   assert.throws(() => parseArgs([root, '--command', 'unknown']), /command/);
 });
+
+for (const item of ['syntax', 'merge-imports', 'chunks', 'syntax-preflight', 'imports', 'requests.jsonl', 'performance.jsonl', 'src/file.js.jsonl']) {
+  test(`all commands reject legacy ${item} without moving logs`, t => {
+    const root = workspace(t), target = join(root, '.unminify', item);
+    mkdirSync(join(root, '.unminify'));
+    if (item.endsWith('.jsonl')) { mkdirSync(join(target, '..'), { recursive: true }); writeFileSync(target, '{}\n'); }
+    else mkdirSync(target);
+    assert.throws(() => assertLogLayout(root), /migrat/i);
+    assert(existsSync(target));
+  });
+}

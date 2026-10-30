@@ -5,7 +5,7 @@ import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { intervalMs, namingStats } from './timing.mjs';
 
-const commands = ['rename-files', 'restore-syntax', 'rename-bindings', 'sync-imports'];
+const commands = ['restore-syntax', 'rename-bindings', 'sync-imports'];
 const help = 'perf <dir> [--command <command>] [--run-id <id>] [--window-seconds 10] [--slow-files 10]';
 
 export function parseArgs(args) {

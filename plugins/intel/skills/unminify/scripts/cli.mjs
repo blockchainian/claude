@@ -22,9 +22,8 @@ import { appendRecord, atomicWrite, openJournal } from './journal.mjs';
 
 const defaults = { concurrency: 20, maxInputTokens: 100000, minSymbolLength: 4 };
 const usageKeys = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens'];
-const commands = ['rename-files', 'restore-syntax', 'rename-bindings', 'sync-imports'];
+const commands = ['restore-syntax', 'rename-bindings', 'sync-imports'];
 const help = [
-  'unminify rename-files <path>... [--ignore <file>] [--chunks <file>] [--concurrency 20] [--max-input-tokens 100000]',
   'unminify restore-syntax <path>... [--ignore <file>] [--chunks <file>]',
   'unminify rename-bindings <path>... [--ignore <file>] [--chunks <file>] [--min-symbol-length 4] [--concurrency 20] [--max-input-tokens 100000]',
   'unminify sync-imports <path>... [--ignore <file>] [--chunks <file>] [--min-symbol-length 4]',
@@ -42,7 +41,7 @@ export function parseArgs(args) {
     if (arg === '--help' || arg === '-h') return { help: true };
     if (arg.startsWith('-')) {
       const key = flags[arg], value = args[++index];
-      if (!key || command === 'rename-files' && key === 'minSymbolLength' || command === 'restore-syntax' && !['chunks', 'ignoreFile'].includes(key)
+      if (!key || command === 'restore-syntax' && !['chunks', 'ignoreFile'].includes(key)
         || command === 'sync-imports' && ['concurrency', 'maxInputTokens'].includes(key)
         || !value || value.startsWith('--')) throw new Error(`invalid option: ${arg}\n${help}`);
       if (key === 'ignoreFile' || key === 'chunks') options[key] = resolve(value);
@@ -80,8 +79,7 @@ export async function run(options, dependencies) {
   while (!existsSync(probe)) probe = dirname(probe);
   const firstDir = statSync(probe).isDirectory() ? probe : dirname(probe);
   const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: firstDir, encoding: 'utf8' }).trim();
-  assertLogLayout(root, settings.command);
-  if (settings.command === 'rename-files') return (await import('./rename-files.mjs')).runRenameFiles(root, settings, dependencies);
+  assertLogLayout(root);
   const logCommand = settings.command === 'all' ? 'rename-bindings' : settings.command;
   const performancePath = join(root, '.unminify', logCommand, 'performance.jsonl');
   const event = record => appendRecord(performancePath, { ...record, run_id: runId });

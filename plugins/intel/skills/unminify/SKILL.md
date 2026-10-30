@@ -1,6 +1,6 @@
 ---
 name: unminify
-description: Organize JavaScript files by dependencies, restore syntax and rename minified identifiers with scope-safe rewrites.
+description: Restore JavaScript syntax and rename minified identifiers with scope-safe rewrites.
 ---
 
 # Unminify JavaScript
@@ -24,8 +24,6 @@ is selected the same way. Check its Git status
 before rewriting so existing work is visible.
 
 ```bash
-node "$SKILL_DIR/scripts/cli.mjs" rename-files <path>... \
-  --concurrency 20 --max-input-tokens 100000
 node "$SKILL_DIR/scripts/cli.mjs" restore-syntax <path>...
 node "$SKILL_DIR/scripts/cli.mjs" rename-bindings <path>... \
   --concurrency 20 --max-input-tokens 100000 --min-symbol-length 4
@@ -38,12 +36,11 @@ parse time. The same pool reads and indexes repository fragment context in bound
 windows, returning only per-file binding summaries. The main thread merges summaries
 in file order within `selection_plan`. Git root and ignore rules are loaded once per run;
 chunk siblings are selected together with the same rules.
-All commands accept `--ignore <file>` and `--chunks <file>`. `rename-files` and `rename-bindings` accept
+All commands accept `--ignore <file>` and `--chunks <file>`. `rename-bindings` accepts
 `--concurrency` and `--max-input-tokens`; `--min-symbol-length` belongs to
 `rename-bindings` and `sync-imports`. Other options fail with `invalid option`. A missing
-or unknown command prints usage and exits nonzero. Run the four commands in order. `rename-files` treats the supplied paths after ignores as
-the entire code set; it neither expands chunk siblings nor adds outside dependencies.
-The other three stages resume independently and may process modules in batches in either order.
+or unknown command prints usage and exits nonzero. Run the three commands in order.
+The stages resume independently and may process modules in batches in either order.
 
 The model is fixed to `gpt-6-luna` with low reasoning effort. It reads the user's Codex login
 from `$CODEX_HOME/auth.json`, defaulting to `~/.codex/auth.json`. Run `codex login` if required.
@@ -126,43 +123,11 @@ names retain their existing allocation order; unused enclosing or nested names d
 Canonically spaced aliases collapse to shorthand when the restored local equals the imported name; other
 spacing and comments are preserved. Public export names stay unchanged.
 
-## Rename files
-
-`rename-files` checkpoints six stages in `.unminify/rename-files/`: dependency graph,
-file summaries, recursive communities, directory names, file names and file moves.
-Only summary requests include source code. Later requests use summaries and directory paths.
-Summary tasks are greedily packed using the complete tokenized input and share
-`--concurrency` slots. Every accepted per-file result is synced immediately. The same Codex
-client, model and reasoning effort serve all naming requests.
-
-Webpack dependencies come from numeric calls through the wrapper factory's third parameter;
-ordinary dependencies come from relative imports and re-exports. Edges include only selected
-files. Seeded Leiden recursively partitions each induced graph. High incoming-degree outliers
-use the IQR rule; they form a separate recursive group only when removing them yields at least
-two communities with higher modularity. A graph with no further structure is one leaf directory.
-Directory counts and depth follow the graph without directory-tree limits.
-
-Directories receive names from the bottom up. Files receive names from their summaries and
-full directory paths. Names are lowercase kebab-case basenames; file extensions are preserved.
-Collisions receive one request containing occupied names, then numeric suffixes if necessary.
-The tree is placed under the selected files' common parent directory. Existing destination
-entries are reserved. After every name is durable, a checked transaction moves selected files,
-rewrites their relative imports and re-exports, and updates selected paths in `--chunks`.
-Relative references outside the selection retain their targets. Ignored files remain untouched.
-The final JSON summary includes `tree`, `files`, `directories`, `max_depth`, requests and tokens.
-
-Resume with the same paths, ignore rules, chunks and input-token budget. Saved stages and
-accepted model replies are reused. Source and manifest changes reject a pending plan;
-a durable move intent recovers interrupted writes without further model calls. The saved
-original paths remain valid resume arguments after files have moved.
-
-`rename-files` refuses to run if any later command directory exists. Later commands refuse
-an unfinished `rename-files` directory. Before writing logs, every command rejects legacy
-`.unminify/` layouts and asks for migration; it never moves old logs automatically.
+Before writing logs, every command rejects legacy `.unminify/` layouts and asks for
+migration; it never moves old logs automatically.
 
 | Command | Logs and checkpoints under `.unminify/` |
 |---|---|
-| `rename-files` | `rename-files/`: stages, accepted replies, move plan, per-file move status, `requests.jsonl`, `performance.jsonl` |
 | `restore-syntax` | `restore-syntax/syntax/`, `restore-syntax/imports/`, `restore-syntax/performance.jsonl` |
 | `rename-bindings` | `rename-bindings/files/`, `rename-bindings/chunks/`, `rename-bindings/check-syntax/`, `rename-bindings/requests.jsonl`, `rename-bindings/performance.jsonl` |
 | `sync-imports` | `sync-imports/`, including chunk transactions and `performance.jsonl` |
@@ -309,7 +274,7 @@ Analyze recorded logs without calling a model:
 ```bash
 node "$SKILL_DIR/scripts/perf.mjs" <target-repo> --command rename-bindings \
   --window-seconds 10 --slow-files 10
-# --command selects any of the four commands (default: rename-bindings).
+# --command selects any of the three commands (default: rename-bindings).
 # Add --run-id <id> to select an earlier run; the default is the latest start.
 ```
 

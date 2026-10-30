@@ -65,10 +65,8 @@ path.
 
 Each skill's `SKILL.md` covers its usage, setup and requirements.
 
-Unminify runs `rename-files`, `restore-syntax`, `rename-bindings` and `sync-imports` in order.
-`rename-files` builds a selection-only dependency graph, recursively groups it with seeded
-Leiden, names directories and files from model summaries, and checkpoints transactional
-moves and relative-import updates. Each command keeps logs in `.unminify/<command>/`;
+Unminify runs `restore-syntax`, `rename-bindings` and `sync-imports` in order.
+Each command keeps logs in `.unminify/<command>/`;
 legacy layouts require manual migration before any command can run.
 
 Unminify plans and packs batches within each file and stage using `--max-input-tokens`
